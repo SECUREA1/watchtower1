@@ -313,7 +313,7 @@
       letterSpacing: '.3px',
       fontSize: '13px',
       textTransform: 'uppercase',
-      background: 'linear-gradient(135deg, #1a0f2e 0%, #3a1d5d 50%, #f06d9b 100%)',
+      background: 'linear-gradient(135deg, #0a1e3a 0%, #162c58 45%, #531bc7 100%)',
       color: '#fdf2ff',
       transition: 'transform 160ms ease, box-shadow 200ms ease'
     });
@@ -325,10 +325,32 @@
     martini.setAttribute('height', '22');
     martini.setAttribute('viewBox', '0 0 64 64');
 
+    const socialDefs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    const socialGradient = document.createElementNS('http://www.w3.org/2000/svg', 'linearGradient');
+    socialGradient.id = 'social-glow';
+    socialGradient.setAttribute('x1', '0%');
+    socialGradient.setAttribute('y1', '0%');
+    socialGradient.setAttribute('x2', '100%');
+    socialGradient.setAttribute('y2', '100%');
+
+    [
+      { offset: '0%', color: '#14ffe9' },
+      { offset: '50%', color: '#ffeb3b' },
+      { offset: '100%', color: '#ff00e0' }
+    ].forEach(({ offset, color }) => {
+      const stop = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
+      stop.setAttribute('offset', offset);
+      stop.setAttribute('stop-color', color);
+      socialGradient.appendChild(stop);
+    });
+
+    socialDefs.appendChild(socialGradient);
+    martini.appendChild(socialDefs);
+
     const martiniStem = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     martiniStem.setAttribute('d', 'M14 10h36L32 34 20 20l12 14v12');
     martiniStem.setAttribute('fill', 'none');
-    martiniStem.setAttribute('stroke', '#ffe6ff');
+    martiniStem.setAttribute('stroke', 'url(#social-glow)');
     martiniStem.setAttribute('stroke-width', '3');
     martiniStem.setAttribute('stroke-linejoin', 'round');
     martiniStem.setAttribute('stroke-linecap', 'round');
@@ -336,7 +358,7 @@
 
     const martiniBase = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     martiniBase.setAttribute('d', 'M28 56h8');
-    martiniBase.setAttribute('stroke', '#ffe6ff');
+    martiniBase.setAttribute('stroke', 'url(#social-glow)');
     martiniBase.setAttribute('stroke-width', '3');
     martiniBase.setAttribute('stroke-linecap', 'round');
     martini.appendChild(martiniBase);
@@ -353,10 +375,12 @@
     skewer.setAttribute('y1', '14');
     skewer.setAttribute('x2', '38');
     skewer.setAttribute('y2', '28');
-    skewer.setAttribute('stroke', '#f6a2ff');
+    skewer.setAttribute('stroke', 'url(#social-glow)');
     skewer.setAttribute('stroke-width', '2');
     skewer.setAttribute('stroke-linecap', 'round');
     martini.appendChild(skewer);
+
+    martini.style.filter = 'drop-shadow(0 0 12px rgba(255, 0, 224, 0.65))';
 
     const socialLabelEl = document.createElement('span');
     socialLabelEl.textContent = 'Social Club';
@@ -368,11 +392,17 @@
     socialLabel = socialLabelEl;
 
     socialBtn.addEventListener('mouseenter', () => {
-      applyStyles(socialBtn, { transform: 'translateY(-2px) scale(1.01)' });
+      applyStyles(socialBtn, {
+        transform: 'translateY(-2px) scale(1.01)',
+        boxShadow: '0 18px 50px rgba(255, 0, 224, 0.35), 0 0 22px rgba(20, 255, 233, 0.45)'
+      });
     });
 
     socialBtn.addEventListener('mouseleave', () => {
-      applyStyles(socialBtn, { transform: 'translateY(0) scale(1)' });
+      applyStyles(socialBtn, {
+        transform: 'translateY(0) scale(1)',
+        boxShadow: '0 12px 28px rgba(0,0,0,0.28)'
+      });
     });
 
     socialBtn.addEventListener('click', () => {
@@ -389,9 +419,7 @@
   }
 
   document.addEventListener('DOMContentLoaded', () => {
-    if (!isConsolePage) {
-      buildButton();
-    }
+    buildButton();
     syncFromStorage();
 
     window.addEventListener('storage', (e) => {
