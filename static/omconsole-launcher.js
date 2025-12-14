@@ -163,12 +163,12 @@
     wrap.id = WRAP_ID;
     applyStyles(wrap, {
       position: 'fixed',
-      bottom: '18px',
-      right: '18px',
+      bottom: '16px',
+      right: '16px',
       zIndex: '99997',
       display: 'flex',
       flexDirection: 'row',
-      alignItems: 'flex-end',
+      alignItems: 'center',
       gap: '10px',
       fontFamily: 'Inter, system-ui, -apple-system, sans-serif'
     });
@@ -198,18 +198,17 @@
     martini.title = 'Open Martini Lounge on chaines.io';
     martini.setAttribute('aria-label', 'Open Martini Lounge on chaines.io');
     applyStyles(martini, {
-      width: '36px',
-      height: '36px',
-      borderRadius: '50%',
-      border: 'none',
-      background: 'transparent',
-      boxShadow: 'none',
+      width: '46px',
+      height: '46px',
+      borderRadius: '16px',
+      border: '1px solid rgba(111,123,247,0.45)',
+      background: 'linear-gradient(145deg, #9bf8f4, #6f7bf7)',
+      boxShadow: '0 12px 26px rgba(111,123,247,0.32), 0 0 18px rgba(155,248,244,0.28)',
       display: 'inline-flex',
       alignItems: 'center',
       justifyContent: 'center',
-      padding: '4px',
-      textDecoration: 'none',
-      transform: 'translateY(6px)'
+      padding: '6px',
+      textDecoration: 'none'
     });
 
     martini.innerHTML = `
@@ -232,11 +231,6 @@
         <path d="M26 50h12" stroke="#0f1b2b" stroke-width="2.5" stroke-linecap="round" />
       </svg>
     `;
-
-    const martiniIcon = martini.querySelector('svg');
-    if (martiniIcon) {
-      applyStyles(martiniIcon, { width: '26px', height: '26px' });
-    }
 
     wrap.appendChild(btn);
     wrap.appendChild(martini);
