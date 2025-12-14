@@ -191,8 +191,11 @@
       right: '16px',
       zIndex: '99997',
       display: 'flex',
-      flexDirection: 'column',
-      gap: '8px',
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      justifyContent: 'flex-end',
+      flexWrap: 'wrap',
+      gap: '10px',
       fontFamily: 'Inter, system-ui, -apple-system, sans-serif'
     });
 
