@@ -302,91 +302,33 @@
     const socialBtn = document.createElement('button');
     socialBtn.id = SOCIAL_ID;
     socialBtn.type = 'button';
-    socialBtn.title = 'Open the Chaines social club (new tab)';
+    socialBtn.title = 'Open Chaines.io (new tab)';
     applyStyles(socialBtn, {
       display: 'inline-flex',
       alignItems: 'center',
       gap: '10px',
       borderRadius: '14px',
-      border: '1px solid rgba(255,255,255,0.24)',
+      border: '1px solid rgba(212,175,55,0.35)',
       padding: '12px 16px',
       cursor: 'pointer',
-      boxShadow: '0 12px 28px rgba(0,0,0,0.28)',
+      boxShadow: '0 18px 40px rgba(0,0,0,0.3)',
       fontWeight: '800',
       letterSpacing: '.3px',
       fontSize: '13px',
       textTransform: 'uppercase',
       background: 'linear-gradient(135deg, #0a1e3a 0%, #162c58 45%, #531bc7 100%)',
-      color: '#fdf2ff',
+      color: '#f8fbff',
+      borderColor: 'rgba(255,255,255,0.22)',
       transition: 'transform 160ms ease, box-shadow 200ms ease'
     });
 
-    const martini = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    martini.setAttribute('aria-hidden', 'true');
-    martini.setAttribute('focusable', 'false');
-    martini.setAttribute('width', '22');
-    martini.setAttribute('height', '22');
-    martini.setAttribute('viewBox', '0 0 64 64');
-
-    const socialDefs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-    const socialGradient = document.createElementNS('http://www.w3.org/2000/svg', 'linearGradient');
-    socialGradient.id = 'social-glow';
-    socialGradient.setAttribute('x1', '0%');
-    socialGradient.setAttribute('y1', '0%');
-    socialGradient.setAttribute('x2', '100%');
-    socialGradient.setAttribute('y2', '100%');
-
-    [
-      { offset: '0%', color: '#14ffe9' },
-      { offset: '50%', color: '#ffeb3b' },
-      { offset: '100%', color: '#ff00e0' }
-    ].forEach(({ offset, color }) => {
-      const stop = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
-      stop.setAttribute('offset', offset);
-      stop.setAttribute('stop-color', color);
-      socialGradient.appendChild(stop);
-    });
-
-    socialDefs.appendChild(socialGradient);
-    martini.appendChild(socialDefs);
-
-    const martiniStem = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    martiniStem.setAttribute('d', 'M14 10h36L32 34 20 20l12 14v12');
-    martiniStem.setAttribute('fill', 'none');
-    martiniStem.setAttribute('stroke', 'url(#social-glow)');
-    martiniStem.setAttribute('stroke-width', '3');
-    martiniStem.setAttribute('stroke-linejoin', 'round');
-    martiniStem.setAttribute('stroke-linecap', 'round');
-    martini.appendChild(martiniStem);
-
-    const martiniBase = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    martiniBase.setAttribute('d', 'M28 56h8');
-    martiniBase.setAttribute('stroke', 'url(#social-glow)');
-    martiniBase.setAttribute('stroke-width', '3');
-    martiniBase.setAttribute('stroke-linecap', 'round');
-    martini.appendChild(martiniBase);
-
-    const olive = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-    olive.setAttribute('cx', '24');
-    olive.setAttribute('cy', '18');
-    olive.setAttribute('r', '3');
-    olive.setAttribute('fill', '#ffcc70');
-    martini.appendChild(olive);
-
-    const skewer = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    skewer.setAttribute('x1', '22');
-    skewer.setAttribute('y1', '14');
-    skewer.setAttribute('x2', '38');
-    skewer.setAttribute('y2', '28');
-    skewer.setAttribute('stroke', 'url(#social-glow)');
-    skewer.setAttribute('stroke-width', '2');
-    skewer.setAttribute('stroke-linecap', 'round');
-    martini.appendChild(skewer);
-
-    martini.style.filter = 'drop-shadow(0 0 12px rgba(255, 0, 224, 0.65))';
+    const martini = document.createElement('img');
+    martini.src = '/static/icons/martini.svg';
+    martini.alt = '';
+    applyStyles(martini, { width: '22px', height: '22px' });
 
     const socialLabelEl = document.createElement('span');
-    socialLabelEl.textContent = 'Social Club';
+    socialLabelEl.textContent = 'Chaines.io';
     applyStyles(socialLabelEl, { fontSize: '13px', fontWeight: '900', letterSpacing: '.4px' });
 
     socialBtn.append(martini, socialLabelEl);
@@ -395,17 +337,11 @@
     socialLabel = socialLabelEl;
 
     socialBtn.addEventListener('mouseenter', () => {
-      applyStyles(socialBtn, {
-        transform: 'translateY(-2px) scale(1.01)',
-        boxShadow: '0 18px 50px rgba(255, 0, 224, 0.35), 0 0 22px rgba(20, 255, 233, 0.45)'
-      });
+      applyStyles(socialBtn, { transform: 'translateY(-2px) scale(1.01)' });
     });
 
     socialBtn.addEventListener('mouseleave', () => {
-      applyStyles(socialBtn, {
-        transform: 'translateY(0) scale(1)',
-        boxShadow: '0 12px 28px rgba(0,0,0,0.28)'
-      });
+      applyStyles(socialBtn, { transform: 'translateY(0) scale(1)' });
     });
 
     socialBtn.addEventListener('click', () => {
