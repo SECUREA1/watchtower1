@@ -649,6 +649,47 @@
       font-weight: 500;
     }
 
+    .sim-entry {
+      padding: 6px 0;
+      border-bottom: 1px dashed rgba(255, 255, 255, 0.05);
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .sim-entry .sim-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .sim-entry small {
+      color: var(--text-soft);
+    }
+
+    .sim-badge {
+      font-size: 10px;
+      padding: 2px 6px 1px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(7, 7, 14, 0.92);
+    }
+
+    .sim-badge.info {
+      color: var(--blue);
+    }
+
+    .sim-badge.ok {
+      color: var(--good);
+      border-color: rgba(72, 213, 151, 0.6);
+    }
+
+    .sim-badge.warn {
+      color: var(--accent-strong);
+      border-color: rgba(255, 142, 56, 0.7);
+    }
+
     .alerts-list {
       display: flex;
       flex-direction: column;
@@ -1177,6 +1218,20 @@
               the <code>training_data</code> SQLite table.
             </div>
           </div>
+
+          <!-- Simulation Playback -->
+          <div class="card-soft">
+            <div class="card-header" style="margin-bottom: 6px;">
+              <div class="card-title-row">
+                <span class="card-title">Simulation Playback</span>
+              </div>
+              <span class="badge-secondary">Offline demo of task execution</span>
+            </div>
+            <div class="log-list" id="simulationFeed"></div>
+            <div class="card-subtitle">
+              Shows primary and secondary task runs, including awareness-triggered jobs.
+            </div>
+          </div>
         </div>
 
         <!-- Operator feedback + Alerts -->
@@ -1329,6 +1384,7 @@
 
   // For per-task feedback UI
   const pendingFeedback = [];
+  const simulationEvents = [];
 
   // ------------------------------
   // Canvas – mirror of DrawingCanvas (mouse + touch)
@@ -1642,6 +1698,39 @@
     }
   }
 
+  function appendSimulationEvent(message, variant = "info") {
+    simulationEvents.push({ message, variant, timestamp: new Date() });
+    if (simulationEvents.length > 80) simulationEvents.shift();
+    renderSimulationFeed();
+  }
+
+  function renderSimulationFeed() {
+    const container = document.getElementById("simulationFeed");
+    container.innerHTML = "";
+
+    if (simulationEvents.length === 0) {
+      container.innerHTML = "<div class='card-subtitle'>Simulation events will appear here.</div>";
+      return;
+    }
+
+    simulationEvents
+      .slice()
+      .reverse()
+      .forEach((evt) => {
+        const div = document.createElement("div");
+        div.className = "sim-entry";
+        const stamp = evt.timestamp instanceof Date ? evt.timestamp : new Date(evt.timestamp);
+        div.innerHTML = `
+          <div class="sim-meta">
+            <strong>${evt.message}</strong>
+            <small>${stamp.toLocaleTimeString()}</small>
+          </div>
+          <span class="sim-badge ${evt.variant}">${evt.variant.toUpperCase()}</span>
+        `;
+        container.appendChild(div);
+      });
+  }
+
   // ------------------------------
   // Execution loop – mirrors real_time_task_control
   // ------------------------------
@@ -1719,11 +1808,13 @@
       taskManager.executing = false;
       clearAlerts();
       renderTasks();
+      appendSimulationEvent("All queued tasks have completed.", "ok");
       return;
     }
 
     task.status = "running";
     renderTasks();
+    appendSimulationEvent(`Executing primary task: ${task.name}`, "info");
 
     const duration = simulateTaskDuration(task);
 
@@ -1739,10 +1830,12 @@
           "A",
           "warn"
         );
+        appendSimulationEvent(`Awareness triggered secondary: ${sec.name}`, "warn");
         setTimeout(() => {
           sec.status = "completed";
           renderTasks();
           trainingSystem.logTrainingData(randomPosition(), sec.name, randomDepth(), sec.name);
+          appendSimulationEvent(`Secondary task finished: ${sec.name}`, "ok");
           queueFeedbackForTask(sec);
         }, duration * 0.7);
       }
@@ -1763,6 +1856,10 @@
       const pos = randomPosition();
       const depth = task.depth || randomDepth();
       trainingSystem.logTrainingData(pos, task.name, depth, task.name);
+      appendSimulationEvent(
+        `${task.name} completed at position ${pos.join(", ")} depth ${depth} m`,
+        "ok"
+      );
       queueFeedbackForTask(task);
 
       executeNextTask();
@@ -1770,6 +1867,10 @@
   }
 
   document.getElementById("btnStartTasks").addEventListener("click", () => {
+    if (taskManager.primaryTasks.length === 0 && taskManager.secondaryTasks.length === 0) {
+      seedDemoData();
+      appendSimulationEvent("Loaded demo tasks for offline run.", "info");
+    }
     if (taskManager.executing) return;
     taskManager.executing = true;
     executeNextTask();
@@ -1781,6 +1882,8 @@
     pendingFeedback.length = 0;
     document.getElementById("feedbackList").innerHTML =
       "<div class='card-subtitle'>Feedback cleared.</div>";
+    simulationEvents.length = 0;
+    renderSimulationFeed();
     clearAlerts();
     renderTasks();
   });
@@ -1886,6 +1989,50 @@
   }
 
   // ------------------------------
+  // Demo tasks and offline simulation preload
+  // ------------------------------
+
+  function seedDemoData() {
+    if (taskManager.primaryTasks.length > 0 || taskManager.secondaryTasks.length > 0) return;
+
+    // Ensure the canvas has dimensions before seeding demo shapes
+    resizeCanvas();
+
+    const demoRect = {
+      type: "rectangle",
+      coordinates: [canvasWidth * 0.1, canvasHeight * 0.2, canvasWidth * 0.45, canvasHeight * 0.55],
+      taskName: "Dig Area"
+    };
+    const demoLine = {
+      type: "line",
+      coordinates: [canvasWidth * 0.55, canvasHeight * 0.3, canvasWidth * 0.85, canvasHeight * 0.65],
+      taskName: "Pipe Laying"
+    };
+
+    drawnShapes.push(demoRect, demoLine);
+    redrawCanvas();
+
+    const digTask = new Task("Dig Area", 8, 6, "Loam", 3.5, demoRect.coordinates, "primary");
+    const pipeTask = new Task("Pipe Laying", 6, 5, "Clay", 2.5, demoLine.coordinates, "primary");
+    const secondary = new Task("Track Reset", 5, 5, "", 0, null, "secondary");
+
+    taskManager.addTask(digTask);
+    taskManager.addTask(pipeTask);
+    taskManager.addTask(secondary);
+    appendSimulationEvent("Demo tasks loaded: Dig Area, Pipe Laying, Track Reset.", "info");
+    renderTasks();
+  }
+
+  function startDemoRun() {
+    seedDemoData();
+    if (!taskManager.executing) {
+      taskManager.executing = true;
+      appendSimulationEvent("Starting offline simulation run.", "info");
+      executeNextTask();
+    }
+  }
+
+  // ------------------------------
   // Sensor simulation – mirrors your get_* helpers
   // ------------------------------
 
@@ -1941,6 +2088,8 @@
 
   // Initial render
   renderTasks();
+  renderSimulationFeed();
+  startDemoRun();
 </script>
   <script src="static/omconsole-launcher.js"></script>
 </body>
