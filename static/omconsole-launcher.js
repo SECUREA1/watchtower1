@@ -6,6 +6,7 @@
   const OVERLAY_ID = 'omconsole-overlay';
   const BTN_ID = 'omconsole-launch-btn';
   const WRAP_ID = 'omconsole-launch-wrap';
+  const SOCIAL_URL = 'https://www.chaines.io';
   // Use an absolute URL so the iframe loads correctly from nested routes
   // (e.g., /live/) instead of resolving relative to the current page.
   const FRAME_URL = '/omconsole_render_single_games_ROUTING.html';
@@ -14,17 +15,37 @@
   let pinned = false;
   let overlay = null;
   let button = null;
+  let buttonIcon = null;
+  let buttonLabel = null;
 
   const applyStyles = (el, styles) => Object.assign(el.style, styles);
 
   function updateButton() {
     if (!button) return;
-    button.textContent = pinned ? 'OMConsole Active' : 'Open OMConsole';
     button.setAttribute('aria-pressed', pinned ? 'true' : 'false');
-    applyStyles(button, pinned
-      ? { background: 'linear-gradient(135deg, #d4af37, #f2d57a)', color: '#061022', borderColor: 'rgba(255,255,255,0.35)' }
-      : { background: 'linear-gradient(180deg, #0b2a66, #0a1e3a)', color: '#eaf2ff', borderColor: 'rgba(212,175,55,0.35)' }
-    );
+    if (buttonLabel) {
+      buttonLabel.textContent = 'Social Club';
+    }
+
+    const activeStyles = pinned
+      ? {
+          background: 'linear-gradient(135deg, #14ffe9 0%, #ffeb3b 50%, #ff00e0 100%)',
+          boxShadow: '0 18px 50px rgba(255, 0, 224, 0.35), 0 0 22px rgba(20, 255, 233, 0.45)',
+          borderColor: 'rgba(255,255,255,0.65)',
+          color: '#040712'
+        }
+      : {
+          background: 'linear-gradient(135deg, #0a1e3a 0%, #162c58 45%, #531bc7 100%)',
+          boxShadow: '0 16px 40px rgba(0,0,0,0.4), 0 0 30px rgba(83, 27, 199, 0.35)',
+          borderColor: 'rgba(255,255,255,0.22)',
+          color: '#f8fbff'
+        };
+
+    applyStyles(button, activeStyles);
+
+    if (buttonIcon) {
+      buttonIcon.style.filter = pinned ? 'drop-shadow(0 0 12px rgba(255, 0, 224, 0.7))' : 'drop-shadow(0 0 10px rgba(83, 27, 199, 0.55))';
+    }
   }
 
   function removeOverlay() {
@@ -174,19 +195,102 @@
     const btn = document.createElement('button');
     btn.id = BTN_ID;
     btn.type = 'button';
-    btn.textContent = 'Open OMConsole';
-    btn.title = 'Launch the OMConsole cursor/control overlay';
+    btn.title = 'Open the Chaines social club (new tab)';
     applyStyles(btn, {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: '10px',
       borderRadius: '14px',
       border: '1px solid rgba(212,175,55,0.35)',
-      padding: '10px 14px',
+      padding: '12px 16px',
       cursor: 'pointer',
       boxShadow: '0 18px 40px rgba(0,0,0,0.3)',
       fontWeight: '800',
-      letterSpacing: '.2px',
-      fontSize: '13px'
+      letterSpacing: '.3px',
+      fontSize: '13px',
+      textTransform: 'uppercase',
+      background: 'linear-gradient(135deg, #0a1e3a 0%, #162c58 45%, #531bc7 100%)',
+      color: '#f8fbff',
+      borderColor: 'rgba(255,255,255,0.22)',
+      transition: 'transform 160ms ease, box-shadow 200ms ease'
     });
-    btn.addEventListener('click', () => setPinned(!pinned));
+
+    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    icon.setAttribute('aria-hidden', 'true');
+    icon.setAttribute('focusable', 'false');
+    icon.setAttribute('width', '22');
+    icon.setAttribute('height', '22');
+    icon.setAttribute('viewBox', '0 0 64 64');
+    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    const gradient = document.createElementNS('http://www.w3.org/2000/svg', 'linearGradient');
+    gradient.id = 'social-glow';
+    gradient.setAttribute('x1', '0%');
+    gradient.setAttribute('y1', '0%');
+    gradient.setAttribute('x2', '100%');
+    gradient.setAttribute('y2', '100%');
+
+    const stops = [
+      { offset: '0%', color: '#14ffe9' },
+      { offset: '50%', color: '#ffeb3b' },
+      { offset: '100%', color: '#ff00e0' }
+    ];
+
+    stops.forEach(({ offset, color }) => {
+      const stop = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
+      stop.setAttribute('offset', offset);
+      stop.setAttribute('stop-color', color);
+      gradient.appendChild(stop);
+    });
+
+    defs.appendChild(gradient);
+    icon.appendChild(defs);
+
+    const ring = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    ring.setAttribute('cx', '32');
+    ring.setAttribute('cy', '32');
+    ring.setAttribute('r', '28');
+    ring.setAttribute('fill', 'none');
+    ring.setAttribute('stroke', 'url(#social-glow)');
+    ring.setAttribute('stroke-width', '4');
+    ring.setAttribute('opacity', '0.85');
+    icon.appendChild(ring);
+
+    const bolt = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    bolt.setAttribute('d', 'M30 6 L18 34 H30 L26 58 L46 26 H34 L40 6 Z');
+    bolt.setAttribute('fill', 'url(#social-glow)');
+    bolt.setAttribute('stroke', '#050910');
+    bolt.setAttribute('stroke-width', '2');
+    bolt.setAttribute('stroke-linejoin', 'round');
+    icon.appendChild(bolt);
+
+    const spark = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    spark.setAttribute('cx', '48');
+    spark.setAttribute('cy', '16');
+    spark.setAttribute('r', '4');
+    spark.setAttribute('fill', '#fff4a3');
+    spark.setAttribute('opacity', '0.9');
+    icon.appendChild(spark);
+
+    const label = document.createElement('span');
+    label.textContent = 'Social Club';
+    applyStyles(label, { fontSize: '13px', fontWeight: '900', letterSpacing: '.4px' });
+
+    btn.append(icon, label);
+
+    buttonIcon = icon;
+    buttonLabel = label;
+
+    btn.addEventListener('mouseenter', () => {
+      applyStyles(btn, { transform: 'translateY(-2px) scale(1.01)' });
+    });
+
+    btn.addEventListener('mouseleave', () => {
+      applyStyles(btn, { transform: 'translateY(0) scale(1)' });
+    });
+
+    btn.addEventListener('click', () => {
+      window.open(SOCIAL_URL, '_blank', 'noopener,noreferrer');
+    });
 
     wrap.appendChild(btn);
     document.body.appendChild(wrap);
