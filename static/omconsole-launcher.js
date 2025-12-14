@@ -6,6 +6,7 @@
   const OVERLAY_ID = 'omconsole-overlay';
   const BTN_ID = 'omconsole-launch-btn';
   const WRAP_ID = 'omconsole-launch-wrap';
+  const MARTINI_ID = 'omconsole-martini-link';
   // Use an absolute URL so the iframe loads correctly from nested routes
   // (e.g., /live/) instead of resolving relative to the current page.
   const FRAME_URL = '/omconsole_render_single_games_ROUTING.html';
@@ -166,8 +167,9 @@
       right: '16px',
       zIndex: '99997',
       display: 'flex',
-      flexDirection: 'column',
-      gap: '8px',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: '10px',
       fontFamily: 'Inter, system-ui, -apple-system, sans-serif'
     });
 
@@ -188,7 +190,50 @@
     });
     btn.addEventListener('click', () => setPinned(!pinned));
 
+    const martini = document.createElement('a');
+    martini.id = MARTINI_ID;
+    martini.href = 'https://chaines.io';
+    martini.target = '_blank';
+    martini.rel = 'noopener noreferrer';
+    martini.title = 'Open Martini Lounge on chaines.io';
+    martini.setAttribute('aria-label', 'Open Martini Lounge on chaines.io');
+    applyStyles(martini, {
+      width: '46px',
+      height: '46px',
+      borderRadius: '16px',
+      border: '1px solid rgba(111,123,247,0.45)',
+      background: 'linear-gradient(145deg, #9bf8f4, #6f7bf7)',
+      boxShadow: '0 12px 26px rgba(111,123,247,0.32), 0 0 18px rgba(155,248,244,0.28)',
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '6px',
+      textDecoration: 'none'
+    });
+
+    martini.innerHTML = `
+      <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+        <defs>
+          <linearGradient id="martini-stem-mini" x1="32" y1="28" x2="32" y2="56" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#9bf8f4" />
+            <stop offset="1" stop-color="#5d6cf6" />
+          </linearGradient>
+          <linearGradient id="martini-bowl-mini" x1="12" y1="10" x2="52" y2="34" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#e6fff6" />
+            <stop offset="1" stop-color="#8be1ff" />
+          </linearGradient>
+        </defs>
+        <path d="M14 10h36L32 32Z" fill="url(#martini-bowl-mini)" stroke="#0f1b2b" stroke-width="2" stroke-linejoin="round" />
+        <path d="M22 22c6 4 14 4 20 0" stroke="#0f1b2b" stroke-width="2" stroke-linecap="round" />
+        <path d="m40 14 6 6" stroke="#ff6f61" stroke-width="2" stroke-linecap="round" />
+        <circle cx="44" cy="18" r="3" fill="#ff6f61" stroke="#0f1b2b" stroke-width="1.5" />
+        <path d="M32 32v16" stroke="url(#martini-stem-mini)" stroke-width="4" stroke-linecap="round" />
+        <path d="M26 50h12" stroke="#0f1b2b" stroke-width="2.5" stroke-linecap="round" />
+      </svg>
+    `;
+
     wrap.appendChild(btn);
+    wrap.appendChild(martini);
     document.body.appendChild(wrap);
 
     button = btn;
@@ -197,9 +242,7 @@
   }
 
   document.addEventListener('DOMContentLoaded', () => {
-    if (!isConsolePage) {
-      buildButton();
-    }
+    buildButton();
     syncFromStorage();
 
     window.addEventListener('storage', (e) => {
