@@ -6,6 +6,7 @@ WORKDIR /usr/share/nginx/html
 # copy site files
 COPY start.html            /usr/share/nginx/html/index.html
 COPY start.html            /usr/share/nginx/html/start.html
+COPY secure.html           /usr/share/nginx/html/secure.html
 COPY rednode.html          /usr/share/nginx/html/rednode.html
 COPY dashboard1.html       /usr/share/nginx/html/dashboard1.html
 COPY dashboard.html        /usr/share/nginx/html/dashboard.html
