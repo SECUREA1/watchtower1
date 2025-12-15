@@ -167,6 +167,17 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+    // Security page (handles both /secure and /secure.html)
+  const securePaths = new Set(["/secure", "/secure/", "/secure.html"]);
+  if ((req.method === "GET" || req.method === "HEAD") && securePaths.has(urlPath)) {
+    const served = await tryServeFile(res, "secure.html", req.method);
+    if (!served) {
+      res.writeHead(404);
+      res.end("Not found");
+    }
+    return;
+  }
+
   const isRednodeRequest = ["/rednode", "/rednode.html"].includes(urlPath);
   if ((req.method === "GET" || req.method === "HEAD") && isRednodeRequest) {
     const served = await tryServeFile(res, "rednode.html", req.method);
