@@ -51,6 +51,5 @@ EOF
 # Expose documentation only; Render provides actual PORT via env
 EXPOSE 80
 
-# Replace "listen 80;" with "listen ${PORT};" at container start, then run nginx
-CMD ["sh", "-c", "sed -e \"s/listen 80;/listen ${PORT};/g\" /etc/nginx/conf.d/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
-]
+# Replace "listen 80;" with runtime PORT (default 80) at container start, then run nginx
+CMD ["sh", "-c", "PORT=${PORT:-80}; sed -e \"s/listen 80;/listen ${PORT};/g\" /etc/nginx/conf.d/default.conf.template > /etc/nginx/conf.d/default.conf && exec nginx -g 'daemon off;'"]
