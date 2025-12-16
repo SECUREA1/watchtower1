@@ -22,6 +22,7 @@ COPY rednodetelmatics.html /usr/share/nginx/html/dashboard/rednodetelmatics.html
 # Static directories
 COPY live/                 /usr/share/nginx/html/live/
 COPY static/               /usr/share/nginx/html/static/
+COPY dashboard/            /usr/share/nginx/html/dashboard/
 
 # Create nginx config template at build-time
 RUN cat > /etc/nginx/conf.d/default.conf.template <<'EOF'
