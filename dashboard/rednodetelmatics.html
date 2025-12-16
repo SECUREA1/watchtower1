@@ -45,6 +45,7 @@
       display:grid;
       grid-template-columns: 360px 1fr;
       height:100%;
+      min-height:100vh;
     }
     .sidebar{
       border-right:1px solid var(--stroke);
@@ -351,6 +352,30 @@
       margin-top:10px;font-size:11px;color:var(--muted2);
     }
     .link{color:var(--accent2);text-decoration:none;font-weight:700;}
+
+    /* Mobile-friendly vertical layout */
+    @media(max-width: 960px){
+      body{overflow:auto;}
+      .app{
+        grid-template-columns: 1fr;
+        grid-template-rows: auto 1fr;
+        height:auto;
+      }
+      .sidebar{
+        border-right:none;
+        border-bottom:1px solid var(--stroke);
+        position:sticky;
+        top:0;
+        z-index:10;
+        background: linear-gradient(180deg, rgba(7,6,10,0.96), rgba(7,6,10,0.9));
+      }
+      .content{
+        grid-template-columns: 1fr;
+        height:auto;
+      }
+      .pane{min-height:auto; max-height:none;}
+      .topbar{flex-wrap:wrap;}
+    }
   </style>
 </head>
 
@@ -393,6 +418,14 @@
       </div>
       <div class="row">
         <button class="btn" id="btnStartStream">Start Telemetry Stream</button>
+      </div>
+      <div class="row" style="flex-direction:column; align-items:flex-start; gap:8px;">
+        <label style="width:100%">Simulation &amp; Offline</label>
+        <div style="display:flex; gap:8px; width:100%; flex-wrap:wrap;">
+          <button class="btn" id="btnStartSim">Start Simulation</button>
+          <button class="btn secondary" id="btnStopSim">Stop Simulation</button>
+        </div>
+        <div class="hint">Run synthetic telemetry, scoring, calibration, and export directly in this page for wear-and-tear rehearsal.</div>
       </div>
       <div class="small">Use these hooks to connect to RedNode cloud or your own gateway. See README: <a class="link" href="https://github.com/SECUREA1/REDNODE" target="_blank">SECUREA1/REDNODE</a></div>
     </div>
@@ -518,7 +551,12 @@ const App = (() => {
     integration: {
       apiBase: "",
       apiKey: "",
-      ws: null
+      ws: null,
+      simulation: {
+        enabled: false,
+        timer: null,
+        wear: 0
+      }
     }
   };
 
@@ -538,6 +576,8 @@ const App = (() => {
     btnTestConn: document.getElementById("btnTestConn"),
     btnFetchMachines: document.getElementById("btnFetchMachines"),
     btnStartStream: document.getElementById("btnStartStream"),
+    btnStartSim: document.getElementById("btnStartSim"),
+    btnStopSim: document.getElementById("btnStopSim"),
 
     gateMaxTemp: document.getElementById("gateMaxTemp"),
     gateMaxVib: document.getElementById("gateMaxVib"),
@@ -2255,6 +2295,11 @@ const App = (() => {
     ui.btnTestConn.onclick = async ()=>{
       const base = ui.rnApiBase.value.trim();
       const key = ui.rnApiKey.value.trim();
+      if(state.integration.simulation.enabled || base.toLowerCase().includes("sim")){
+        log("Simulation mode: connection virtualized.");
+        alert("Simulation mode active: connection OK in-browser.");
+        return;
+      }
       if(!base || !key){ alert("Specify API base and key."); return; }
       log(`Testing connection to ${base}`);
       try{
@@ -2271,6 +2316,11 @@ const App = (() => {
     ui.btnFetchMachines.onclick = async ()=>{
       const base = ui.rnApiBase.value.trim();
       const key = ui.rnApiKey.value.trim();
+      if(state.integration.simulation.enabled || base.toLowerCase().includes("sim")){
+        log("Simulation mode: emitting demo machines list.");
+        alert("Simulation: Machines ready in UI. Use scoring + calibration with synthetic stream.");
+        return;
+      }
       if(!base || !key){ alert("Specify API base and key."); return; }
       log("Fetching machines list...");
       try{
@@ -2289,9 +2339,16 @@ const App = (() => {
     ui.btnStartStream.onclick = ()=>{
       const base = ui.rnApiBase.value.trim();
       const key = ui.rnApiKey.value.trim();
+      if(state.integration.simulation.enabled || base.toLowerCase().includes("sim")){
+        startSimulationLoop();
+        return;
+      }
       if(!base || !key){ alert("Specify API base and key."); return; }
       openTelemetryStream(base.replace(/^http/, "ws") + "/v1/telemetry/stream?api_key=" + encodeURIComponent(key));
     };
+
+    ui.btnStartSim.onclick = ()=> startSimulationLoop();
+    ui.btnStopSim.onclick = ()=> stopSimulationLoop();
   }
 
   // open a websocket to receive telemetry (stub)
@@ -2326,6 +2383,84 @@ const App = (() => {
       log("Failed to open telemetry stream: " + e.message);
       alert("Failed to start stream. See console.");
     }
+  }
+
+  // in-browser synthetic stream for offline calibration and wear simulation
+  function startSimulationLoop(){
+    const sim = state.integration.simulation;
+    if(sim.enabled){ log("Simulation already running."); return; }
+    if(!state.rawRows.length){
+      generateSampleData();
+    }
+    sim.enabled = true;
+    sim.wear = sim.wear || 0.04;
+    ui.rnApiBase.value = ui.rnApiBase.value || "SIMULATION";
+    log("Simulation mode enabled: generating synthetic telemetry in-browser.");
+    sim.timer = setInterval(()=>{
+      const row = synthesizeTelemetryRow();
+      state.rawRows.unshift(row);
+      state.columns = unique([...state.columns, ...Object.keys(row)]);
+      if(state.rawRows.length > 1400) state.rawRows.pop();
+      if(state.scoredRows.length){
+        computeScores();
+      }
+      render();
+    }, 1400);
+    render();
+  }
+
+  function stopSimulationLoop(){
+    const sim = state.integration.simulation;
+    if(!sim.enabled){ log("Simulation already stopped."); return; }
+    try{ clearInterval(sim.timer); }catch(e){}
+    sim.enabled = false;
+    sim.timer = null;
+    log("Simulation stopped.");
+  }
+
+  function synthesizeTelemetryRow(){
+    const sim = state.integration.simulation;
+    sim.wear = clamp(sim.wear + 0.003, 0, 1);
+    const machines = ["SIM-EXC-1","SIM-EXC-2","SIM-LOAD-7","SIM-CRANE-4","SIM-TRUCK-2"];
+    const sites = ["Yard-A","Yard-B","Quarry","Bridge","Depot"];
+    const baseRow = state.rawRows[0] || {};
+    const machine = (baseRow.MachineID || baseRow.machineId || machines[Math.floor(Math.random()*machines.length)]);
+    const site = (baseRow.JobSite || baseRow.jobsite || sites[Math.floor(Math.random()*sites.length)]);
+    const rpmBase = parseNumeric(baseRow.RPM || baseRow.rpm) || 680;
+    const torqueBase = parseNumeric(baseRow.Torque || baseRow.torque) || 120;
+    const vibBase = parseNumeric(baseRow.Vibration || baseRow.vibration) || 1.2;
+    const tempBase = parseNumeric(baseRow.Temperature || baseRow.temperature) || 68;
+    const fuelBase = parseNumeric(baseRow.FuelLevel || baseRow.fuel) || 0.55;
+    const signalBase = parseNumeric(baseRow.SignalQuality || baseRow.signalQuality) || 0.82;
+    const greaseBase = parseNumeric(baseRow.GreasePressure || baseRow.greasePressure) || 2800;
+    const bearingBase = parseNumeric(baseRow.BearingTemp || baseRow.bearingTemp) || 60;
+    const engLoadBase = parseNumeric(baseRow.EngineLoad || baseRow.engineLoad) || 58;
+    const hydBase = parseNumeric(baseRow.HydraulicPressure || baseRow.hydraulicPressure) || 2100;
+    const movementBase = parseNumeric(baseRow.MovementRate || baseRow.movementRate) || 40;
+
+    const wearHeat = tempBase + 8*sim.wear + (Math.random()*6 - 2);
+    const wearVib = vibBase + 1.6*sim.wear + (Math.random()*0.6 - 0.2);
+    const wearLoad = engLoadBase + 12*sim.wear + (Math.random()*4 - 2);
+
+    return {
+      MachineID: machine,
+      JobSite: site,
+      Timestamp: new Date().toISOString(),
+      RPM: round(rpmBase + (Math.random()*160 - 80),0),
+      Torque: round(torqueBase + (Math.random()*36 - 18),2),
+      Temperature: round(wearHeat,2),
+      Vibration: round(Math.max(0.1, wearVib),3),
+      FuelLevel: round(Math.max(0.04, fuelBase - sim.wear*0.03 + (Math.random()*0.02 - 0.01)),3),
+      SignalQuality: round(Math.max(0.3, signalBase + (Math.random()*0.08 - 0.04)),3),
+      MovementRate: round(Math.max(0, movementBase + (Math.random()*14 - 7)),2),
+      GreasePressure: round(Math.max(800, greaseBase - sim.wear*120 + (Math.random()*60 - 30)),1),
+      BearingTemp: round(Math.max(40, bearingBase + sim.wear*6 + (Math.random()*4 - 2)),2),
+      EngineHours: round((parseNumeric(baseRow.EngineHours || baseRow.engineHours) || 1500) + 0.1,1),
+      EngineLoad: round(Math.min(100, wearLoad),2),
+      HydraulicPressure: round(Math.max(1200, hydBase - sim.wear*40 + (Math.random()*40 - 20)),1),
+      Operator: baseRow.Operator || baseRow.operator || "sim-op",
+      SequenceID: "SIM_" + String(Date.now()).slice(-6)
+    };
   }
 
   /** -------------------------
