@@ -17,6 +17,7 @@ COPY omconsole_render_single_games_ROUTING.html /usr/share/nginx/html/omconsole_
 
 COPY live/                 /usr/share/nginx/html/live/
 COPY static/               /usr/share/nginx/html/static/
+COPY dashboard/            /usr/share/nginx/html/dashboard/
 
 # Create nginx config template at build-time
 RUN cat > /etc/nginx/conf.d/default.conf.template <<'EOF'
