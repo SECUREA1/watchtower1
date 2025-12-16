@@ -34,10 +34,20 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
+    # Serve dashboard files directly (avoid SPA fallback)
+    # This ensures requests like /dashboard/rednodetelmatics.html
+    # return the actual file instead of falling back to index.html.
+    location ^~ /dashboard/ {
+        # root is already set globally; try the file, directory, or the .html variant, otherwise 404
+        try_files $uri $uri/ $uri.html =404;
+    }
+
+    # SPA fallback for other routes
     location / {
         try_files $uri $uri/ $uri.html /index.html;
     }
 
+    # Static assets caching
     location ~* \.(?:css|js|png|jpg|jpeg|gif|ico|svg|woff2?|ttf|eot)$ {
         expires 7d;
         add_header Cache-Control "public";
