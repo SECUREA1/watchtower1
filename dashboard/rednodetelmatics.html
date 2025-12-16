@@ -133,6 +133,8 @@
     }
     .btn:hover{filter:brightness(1.06);}
     .btn:active{transform:translateY(1px);}
+    .btn.block{width:100%; text-align:center;}
+    .btn.large{padding:12px 14px; font-size:13px; letter-spacing:0.03em;}
     .btn.secondary{
       background: rgba(255,255,255,0.04);
     }
@@ -140,6 +142,14 @@
       background: rgba(255,77,109,0.12);
       border-color: rgba(255,77,109,0.20);
     }
+    .microcopy{
+      color:var(--muted2);
+      font-size:11px;
+      line-height:1.4;
+      margin:6px 0 0;
+    }
+    .actionStack{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start;}
+    .actionStack .microcopy{margin-top:8px;}
     .pill{
       display:inline-flex;
       align-items:center;
@@ -397,6 +407,7 @@
       .dropzone button{flex:1 1 160px;}
       .grid2, .grid3{grid-template-columns:1fr;}
       .grid2 .btn, .grid3 .btn{width:100%;}
+      .actionStack{grid-template-columns:1fr;}
     }
   </style>
 </head>
@@ -590,6 +601,13 @@ const App = (() => {
         timer: null,
         wear: 0
       }
+    },
+
+    // calibration context
+    calibration: {
+      bestObjective: null,
+      bestWeights: null,
+      lastMeta: null
     }
   };
 
@@ -1511,13 +1529,19 @@ const App = (() => {
           </div>
         </div>
         <div class="hr"></div>
-        <div class="grid2">
-          <button class="btn" id="btnCalibrate">Run Calibration</button>
-          <button class="btn secondary" id="btnCalReset">Reset Best</button>
+        <div class="actionStack">
+          <div>
+            <button class="btn block large" id="btnCalibrate">Run Calibration</button>
+            <div class="microcopy">Runs a guided stochastic search against the objective below. Use after loading data and setting a target column.</div>
+          </div>
+          <div>
+            <button class="btn secondary block" id="btnCalReset">Reset Best</button>
+            <div class="microcopy">Clears the stored best weights and metadata so you can start a fresh run.</div>
+          </div>
         </div>
         <div class="hr"></div>
         <div class="hint">
-          Quick stochastic tuner — for production use constrained optimization & cross-validation.
+          Quick stochastic tuner — for production use constrained optimization, cross-validation, and production gateways.
         </div>
       </div>
 
@@ -1526,6 +1550,9 @@ const App = (() => {
         <div class="kv">
           <div class="k">Best Objective</div><div class="v" id="calBestObj">—</div>
           <div class="k">Best Weights</div><div class="v" id="calBestW">—</div>
+          <div class="k">Last Run</div><div class="v" id="calLastRun">—</div>
+          <div class="k">Scope + Objective</div><div class="v" id="calScopeLabel">—</div>
+          <div class="k">Iterations</div><div class="v" id="calIterLabel">—</div>
         </div>
         <div class="hr"></div>
         <div class="small">Tip: after calibration, hit <b>Compute Health Scores</b> in Scoring tab.</div>
@@ -1537,9 +1564,9 @@ const App = (() => {
     targetSel.innerHTML = `<option value="">(choose)</option>` + cols.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
 
     document.getElementById("btnCalReset").onclick = ()=>{
-      document.getElementById("calBestObj").textContent = "—";
-      document.getElementById("calBestW").textContent = "—";
-      log("Calibration output reset.");
+      state.calibration = {bestObjective:null, bestWeights:null, lastMeta:null};
+      hydrateCalibrationOutputs();
+      log("Calibration output reset to defaults.");
     };
 
     document.getElementById("btnCalibrate").onclick = async ()=>{
@@ -1553,28 +1580,65 @@ const App = (() => {
       const sigma = clamp(parseFloat(document.getElementById("calSigma").value||"0.15"), 0.01, 0.80);
       const normMode = document.getElementById("calNorm").value;
 
-      log(`Calibration started: target=${targetCol}, obj=${objective}, scope=${scope}, iters=${iters}`);
+      const scopeLabel = (scope==="per_machine") ? "Per-machine batches" : (scope==="global" ? "Global profile" : "Active profile scope");
+      const objectiveLabel = (objective==="spearman") ? "Spearman correlation" : "Pearson correlation";
+      log(`[Calibration] Starting • target=${targetCol} • ${objectiveLabel} • ${scopeLabel} • ${iters} iterations • σ=${sigma} • norm=${normMode}`);
+      const meta = {
+        scopeLabel,
+        objectiveLabel,
+        iters,
+        sigma,
+        timestamp: new Date().toLocaleString()
+      };
 
       if(scope === "per_machine"){
-        await calibratePerMachine(targetCol, objective, iters, sigma, normMode);
+        const res = await calibratePerMachine(targetCol, objective, iters, sigma, normMode);
+        if(res) setCalibrationResult(res.bestScore, res.summary, meta);
       } else {
         const profRef = (scope==="global") ? state.profiles.global : getActiveProfileRef();
         const res = await calibrateOnce(profRef, targetCol, objective, iters, sigma, normMode, null);
-        document.getElementById("calBestObj").textContent = res.bestScore.toFixed(5);
-        document.getElementById("calBestW").textContent = res.summary;
+        setCalibrationResult(res.bestScore, res.summary, meta);
       }
 
       persistProfileScope();
-      log("Calibration complete.");
+      log("[Calibration] Complete — updated weights saved to current scope.");
       render();
     };
+
+    hydrateCalibrationOutputs();
+  }
+
+  function hydrateCalibrationOutputs(){
+    const {calibration} = state;
+    const bestObj = calibration.bestObjective;
+    const bestW = calibration.bestWeights;
+    const meta = calibration.lastMeta;
+
+    const bestObjEl = document.getElementById("calBestObj");
+    const bestWEl = document.getElementById("calBestW");
+    const lastRunEl = document.getElementById("calLastRun");
+    const scopeEl = document.getElementById("calScopeLabel");
+    const iterEl = document.getElementById("calIterLabel");
+
+    if(bestObjEl) bestObjEl.textContent = (typeof bestObj === "number" && isFinite(bestObj)) ? bestObj.toFixed(5) : "—";
+    if(bestWEl) bestWEl.textContent = bestW || "—";
+    if(lastRunEl) lastRunEl.textContent = meta?.timestamp || "—";
+    if(scopeEl) scopeEl.textContent = meta ? `${meta.scopeLabel} · ${meta.objectiveLabel}` : "—";
+    if(iterEl) iterEl.textContent = meta ? `${meta.iters} iterations · σ=${meta.sigma}` : "—";
+  }
+
+  function setCalibrationResult(bestScore, summary, meta){
+    state.calibration.bestObjective = (typeof bestScore === "number" && isFinite(bestScore)) ? bestScore : null;
+    state.calibration.bestWeights = summary || null;
+    state.calibration.lastMeta = meta || null;
+    hydrateCalibrationOutputs();
   }
 
   async function calibratePerMachine(targetCol, objective, iters, sigma, normMode){
     const midCol = state.schema.machineId;
     if(!midCol){
       alert("Per-machine calibration requires MachineID mapping.");
-      return;
+      return null;
     }
     const machines = unique(state.rawRows.map(r=>String(r[midCol]||"(none)")));
     let bestOverall = -Infinity;
@@ -1593,8 +1657,10 @@ const App = (() => {
       log(`Machine ${m}: best=${res.bestScore.toFixed(4)}`);
     }
 
-    document.getElementById("calBestObj").textContent = bestOverall.toFixed(5);
-    document.getElementById("calBestW").textContent = `Per-machine calibrated (${machines.length} machines)`;
+    return {
+      bestScore: bestOverall,
+      summary: `Per-machine calibrated (${machines.length} machines)`
+    };
   }
 
   async function calibrateOnce(profileRef, targetCol, objective, iters, sigma, normMode, rowFilterFn){
