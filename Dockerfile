@@ -3,7 +3,7 @@ FROM nginx:alpine
 
 WORKDIR /usr/share/nginx/html
 
-# copy site files
+# Copy site files
 COPY start.html            /usr/share/nginx/html/index.html
 COPY start.html            /usr/share/nginx/html/start.html
 COPY rednode.html          /usr/share/nginx/html/rednode.html
@@ -15,6 +15,11 @@ COPY sensor2.html          /usr/share/nginx/html/sensor2.html
 COPY omconsole_render_single.html /usr/share/nginx/html/omconsole_render_single.html
 COPY omconsole_render_single_games_ROUTING.html /usr/share/nginx/html/omconsole_render_single_games_ROUTING.html
 
+# Dashboard folder + new telematics page
+RUN mkdir -p /usr/share/nginx/html/dashboard
+COPY rednodetelmatics.html /usr/share/nginx/html/dashboard/rednodetelmatics.html
+
+# Static directories
 COPY live/                 /usr/share/nginx/html/live/
 COPY static/               /usr/share/nginx/html/static/
 
@@ -47,3 +52,4 @@ EXPOSE 80
 
 # Replace "listen 80;" with "listen ${PORT};" at container start, then run nginx
 CMD ["sh", "-c", "sed -e \"s/listen 80;/listen ${PORT};/g\" /etc/nginx/conf.d/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
+]
