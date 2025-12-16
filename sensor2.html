@@ -801,6 +801,27 @@
             <button class="btn btn-ghost btn-sm" id="btnStartSim">Start Simulation</button>
             <button class="btn btn-danger btn-sm" id="btnStopSim" disabled>Stop Simulation</button>
           </div>
+
+          <div class="card-subtitle" style="margin-top: 6px;">
+            Enable full HTML simulation so every subsystem can be exercised without hardware, then tune wear-and-tear drift.
+          </div>
+
+          <div class="two-col" style="margin-top: 6px; gap: 10px;">
+            <div class="form-row">
+              <label for="fullSimToggle">Full HTML simulation</label>
+              <label class="badge" style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                <input id="fullSimToggle" type="checkbox" checked style="transform: scale(1.1); accent-color: #2f80ed;" />
+                <span>Run all parts in-browser</span>
+              </label>
+            </div>
+            <div class="form-row">
+              <label for="wearRange">Wear calibration</label>
+              <div class="hstack" style="gap: 10px; align-items: center;">
+                <input id="wearRange" type="range" min="0" max="1" step="0.05" value="0.15" />
+                <span class="card-subtitle" id="wearLabel">+15% simulated load</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -921,20 +942,22 @@
   }
 
   function readSensors() {
-    const pressure = rand(5, 50);
+    const wearMultiplier = 1 + wearLevel * 0.6;
+    const pressure = rand(5, 50) * wearMultiplier;
     const volume = rand(0.5, 3.0);
-    const weight = rand(200, 500);
+    const weight = rand(200, 500) * (1 + wearLevel * 0.2);
     const moisture = rand(0, 100);
-    const vibration = rand(0, 10);
-    const temperature = rand(-10, 40);
+    const vibration = rand(0, 10 + wearLevel * 6);
+    const temperature = rand(-10, 40) + wearLevel * 25;
     const inclination = rand(-15, 15);
     return { pressure, volume, weight, moisture, vibration, temperature, inclination };
   }
 
   function readMovement() {
     const position = rand(0, 100);
-    const velocity = rand(0, 10);
-    const acceleration = rand(-5, 5);
+    const wearDrag = Math.max(0.35, 1 - wearLevel * 0.35);
+    const velocity = rand(0, 10) * wearDrag;
+    const acceleration = rand(-5, 5) * wearDrag;
     return { position, velocity, acceleration };
   }
 
@@ -1048,6 +1071,10 @@
   const matTiltInput = document.getElementById("matTilt");
   const matPressureLimitInput = document.getElementById("matPressureLimit");
 
+  const fullSimToggle = document.getElementById("fullSimToggle");
+  const wearRange = document.getElementById("wearRange");
+  const wearLabel = document.getElementById("wearLabel");
+
   const overrideSetting = document.getElementById("overrideSetting");
   const overrideValue = document.getElementById("overrideValue");
   const btnOverrideUpdate = document.getElementById("btnOverrideUpdate");
@@ -1103,6 +1130,36 @@
   }
 
   materialSelect.addEventListener("change", loadMaterialFieldsFromSelection);
+
+  // -----------------------------
+  // Full simulation + wear calibration
+  // -----------------------------
+
+  let htmlSimulationMode = fullSimToggle.checked;
+  let wearLevel = parseFloat(wearRange.value) || 0;
+
+  function updateWearLabel(value) {
+    const pct = Math.round(value * 100);
+    wearLabel.textContent = `+${pct}% simulated load`;
+  }
+
+  function syncSimulationToggle() {
+    htmlSimulationMode = fullSimToggle.checked;
+    if (htmlSimulationMode && !simRunning) {
+      startSimulation();
+    }
+    if (!htmlSimulationMode && simRunning) {
+      stopSimulation();
+    }
+  }
+
+  fullSimToggle.addEventListener("change", syncSimulationToggle);
+  wearRange.addEventListener("input", (e) => {
+    wearLevel = parseFloat(e.target.value) || 0;
+    updateWearLabel(wearLevel);
+  });
+
+  updateWearLabel(wearLevel);
   loadMaterialFieldsFromSelection();
 
   // -----------------------------
@@ -1276,8 +1333,23 @@
     // Machine adjustments
     const { adjustments, props } = adjustMachineControls(currentMaterialType, pressure);
 
+    // Apply simulated wear so operators can calibrate drift over time
+    const wearSlowdown = Math.max(0.35, 1 - wearLevel * 0.25);
+    adjustments.speed = Math.max(0.1, adjustments.speed * wearSlowdown);
+    adjustments.force = adjustments.force * (1 + wearLevel * 0.15);
+    adjustments.pressure_limit = Math.max(1, adjustments.pressure_limit * (1 - wearLevel * 0.12));
+    adjustments.pressure_exceeded = pressure > adjustments.pressure_limit;
+
     // Movement validation
-    const movementsValidated = aiAnalyzer([velocity, acceleration, inclination]);
+    const validationPad = [
+      Math.max(4, 10 - wearLevel * 4),
+      Math.max(2, 5 - wearLevel * 2),
+      Math.max(6, 15 - wearLevel * 6)
+    ];
+    const movementsValidated = aiAnalyzer(
+      [velocity * (1 + wearLevel * 0.35), acceleration * (1 + wearLevel * 0.35), inclination],
+      validationPad
+    );
 
     // Update metrics
     metricMaterialFinal.textContent = finalMaterialName;
@@ -1355,6 +1427,9 @@
 
   btnStartSim.addEventListener("click", startSimulation);
   btnStopSim.addEventListener("click", stopSimulation);
+
+  // Default to full HTML simulation so every subsystem can be exercised immediately
+  syncSimulationToggle();
 
   // -----------------------------
   // Apply material selection (manual)
