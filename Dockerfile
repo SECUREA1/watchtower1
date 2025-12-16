@@ -17,12 +17,13 @@ COPY omconsole_render_single_games_ROUTING.html /usr/share/nginx/html/omconsole_
 
 # Dashboard folder + new telematics page
 RUN mkdir -p /usr/share/nginx/html/dashboard
-COPY rednodetelmatics.html /usr/share/nginx/html/dashboard/rednodetelmatics.html
+
+# Copy the dashboard directory (includes rednodetelmatics.html)
+COPY dashboard/            /usr/share/nginx/html/dashboard/
 
 # Static directories
 COPY live/                 /usr/share/nginx/html/live/
 COPY static/               /usr/share/nginx/html/static/
-COPY dashboard/            /usr/share/nginx/html/dashboard/
 
 # Create nginx config template at build-time
 RUN cat > /etc/nginx/conf.d/default.conf.template <<'EOF_CONF'
