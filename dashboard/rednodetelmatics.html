@@ -473,7 +473,13 @@ const App = (() => {
       fuel: "",
       signalQuality: "",
       operator: "",
-      sequenceId: ""
+      sequenceId: "",
+      movementRate: "",
+      greasePressure: "",
+      bearingTemp: "",
+      engineHours: "",
+      engineLoad: "",
+      hydraulicPressure: ""
     },
 
     // normalization config (multi-scale)
@@ -506,11 +512,7 @@ const App = (() => {
     },
 
     // bin thresholds for telemetry features
-    bins: {
-      highTemp: 0.80,
-      highVib: 0.80,
-      lowFuel: 0.30
-    },
+    bins: defaultBins(),
 
     // integration state (not persisted)
     integration: {
@@ -562,20 +564,38 @@ const App = (() => {
   function defaultWeights(){
     return {
       benefits: {
-        rpm: 0.30,
-        torque: 0.15,
-        signal: 0.25,
-        fuelEfficiency: 0.10,
-        uptime: 0.20
+        rpm: 0.22,
+        torque: 0.12,
+        signal: 0.18,
+        fuelEfficiency: 0.08,
+        uptime: 0.14,
+        movementRate: 0.10,
+        greasePressure: 0.08,
+        hydraulicResponse: 0.08
       },
       costs: {
-        temperature: 0.45,
-        vibration: 0.35,
-        complexity: 0.20
+        temperature: 0.30,
+        vibration: 0.25,
+        complexity: 0.10,
+        bearingTemp: 0.18,
+        engineLoad: 0.17
       },
       difficultyBoostK: 0.10,
       normalizeBenefits: true,
       normalizeCosts: true
+    };
+  }
+
+  function defaultBins(){
+    return {
+      highTemp: 0.80,
+      highVib: 0.80,
+      lowFuel: 0.30,
+      lowGrease: 0.40,
+      highBearing: 0.78,
+      softHydraulics: 0.40,
+      highEngineLoad: 0.78,
+      movementProd: 0.70
     };
   }
 
@@ -715,13 +735,18 @@ const App = (() => {
         <div class="k">+ RPM</div><div class="v">${c.rpm.toFixed(4)}</div>
         <div class="k">+ Torque</div><div class="v">${c.torque.toFixed(4)}</div>
         <div class="k">+ Signal</div><div class="v">${c.signal.toFixed(4)}</div>
+        <div class="k">+ Movement Rate</div><div class="v">${c.movementRate.toFixed(4)}</div>
+        <div class="k">+ Grease Pressure</div><div class="v">${c.greasePressure.toFixed(4)}</div>
+        <div class="k">+ Hydraulic Response</div><div class="v">${c.hydraulicResponse.toFixed(4)}</div>
         <div class="k">- Temp</div><div class="v">${c.temperature.toFixed(4)}</div>
         <div class="k">- Vibration</div><div class="v">${c.vibration.toFixed(4)}</div>
+        <div class="k">- Bearing Temp</div><div class="v">${c.bearingTemp.toFixed(4)}</div>
+        <div class="k">- Engine Load</div><div class="v">${c.engineLoad.toFixed(4)}</div>
         <div class="k">Difficulty Boost</div><div class="v">${c.difficultyBoost.toFixed(4)}</div>
       </div>
       <div class="hr"></div>
       <div class="small mono">
-        Raw: rpm=${fmt(r.raw.rpm)} temp=${fmt(r.raw.temperature)} vib=${fmt(r.raw.vibration)} torque=${fmt(r.raw.torque)} fuel=${fmt(r.raw.fuel)} signal=${fmt(r.raw.signalQuality)}
+        Raw: rpm=${fmt(r.raw.rpm)} temp=${fmt(r.raw.temperature)} vib=${fmt(r.raw.vibration)} torque=${fmt(r.raw.torque)} fuel=${fmt(r.raw.fuel)} signal=${fmt(r.raw.signalQuality)} move=${fmt(r.raw.movementRate)} grease=${fmt(r.raw.greasePressure)} bearing=${fmt(r.raw.bearingTemp)} engLoad=${fmt(r.raw.engineLoad)} hyd=${fmt(r.raw.hydraulicPressure)}
       </div>
     `;
   }
@@ -901,7 +926,7 @@ const App = (() => {
       state.scoredRows = [];
       state.lastScoreStats = null;
       state.selectedRowIndex = null;
-      state.schema = {machineId:"", timestamp:"", jobsite:"", location:"", rpm:"", torque:"", temperature:"", vibration:"", fuel:"", signalQuality:"", operator:"", sequenceId:""};
+      state.schema = {machineId:"", timestamp:"", jobsite:"", location:"", rpm:"", torque:"", temperature:"", vibration:"", fuel:"", signalQuality:"", operator:"", sequenceId:"", movementRate:"", greasePressure:"", bearingTemp:"", engineHours:"", engineLoad:"", hydraulicPressure:""};
       log("Dataset cleared.");
       render();
     };
@@ -909,6 +934,25 @@ const App = (() => {
     document.getElementById("normScope").value = state.norm.scope;
     document.getElementById("normMethod").value = state.norm.method;
     document.getElementById("normClip").value = String(state.norm.clip01);
+
+    const set = (id, val) => { const el = document.getElementById(id); if(el) el.value = val || ""; };
+    set("mapMachine", state.schema.machineId);
+    set("mapTimestamp", state.schema.timestamp);
+    set("mapJobsite", state.schema.jobsite);
+    set("mapLocation", state.schema.location);
+    set("mapRPM", state.schema.rpm);
+    set("mapTorque", state.schema.torque);
+    set("mapTemp", state.schema.temperature);
+    set("mapVib", state.schema.vibration);
+    set("mapFuel", state.schema.fuel);
+    set("mapSignal", state.schema.signalQuality);
+    set("mapMovement", state.schema.movementRate);
+    set("mapGrease", state.schema.greasePressure);
+    set("mapBearing", state.schema.bearingTemp);
+    set("mapHyd", state.schema.hydraulicPressure);
+    set("mapHours", state.schema.engineHours);
+    set("mapLoad", state.schema.engineLoad);
+    set("mapOperator", state.schema.operator);
 
     document.getElementById("normScope").onchange = (e)=>{ state.norm.scope = e.target.value; log(`Normalization scope → ${state.norm.scope}`); };
     document.getElementById("normMethod").onchange = (e)=>{ state.norm.method = e.target.value; log(`Normalization method → ${state.norm.method}`); };
@@ -963,6 +1007,27 @@ const App = (() => {
         </div>
 
         <div>
+          <div class="small">Movement Rate / Cycles</div>${select("mapMovement")}
+        </div>
+        <div>
+          <div class="small">Grease Pressure</div>${select("mapGrease")}
+        </div>
+
+        <div>
+          <div class="small">Bearing Temp</div>${select("mapBearing")}
+        </div>
+        <div>
+          <div class="small">Hydraulic Pressure</div>${select("mapHyd")}
+        </div>
+
+        <div>
+          <div class="small">Engine Hours</div>${select("mapHours")}
+        </div>
+        <div>
+          <div class="small">Engine Load</div>${select("mapLoad")}
+        </div>
+
+        <div>
           <div class="small">Operator</div>${select("mapOperator")}
         </div>
         <div>
@@ -984,6 +1049,12 @@ const App = (() => {
     state.schema.vibration = document.getElementById("mapVib")?.value || "";
     state.schema.fuel = document.getElementById("mapFuel")?.value || "";
     state.schema.signalQuality = document.getElementById("mapSignal")?.value || "";
+    state.schema.movementRate = document.getElementById("mapMovement")?.value || "";
+    state.schema.greasePressure = document.getElementById("mapGrease")?.value || "";
+    state.schema.bearingTemp = document.getElementById("mapBearing")?.value || "";
+    state.schema.hydraulicPressure = document.getElementById("mapHyd")?.value || "";
+    state.schema.engineHours = document.getElementById("mapHours")?.value || "";
+    state.schema.engineLoad = document.getElementById("mapLoad")?.value || "";
     state.schema.operator = document.getElementById("mapOperator")?.value || "";
   }
 
@@ -1035,6 +1106,12 @@ const App = (() => {
     state.schema.signalQuality = state.schema.signalQuality || find(["signalquality","signal_quality","quality"]);
     state.schema.operator = state.schema.operator || find(["operator","driver","user"]);
     state.schema.sequenceId = state.schema.sequenceId || find(["sequenceid","sequence_id","seq","event_id"]);
+    state.schema.movementRate = state.schema.movementRate || find(["movements","movement_rate","cycle_rate","swing_cycles"]);
+    state.schema.greasePressure = state.schema.greasePressure || find(["grease_pressure","grease","lube_pressure"]);
+    state.schema.bearingTemp = state.schema.bearingTemp || find(["bearing_temp","bearing_temperature","hub_temp"]);
+    state.schema.engineHours = state.schema.engineHours || find(["engine_hours","hours","odo_hours"]);
+    state.schema.engineLoad = state.schema.engineLoad || find(["engine_load","load_pct","load_percent"]);
+    state.schema.hydraulicPressure = state.schema.hydraulicPressure || find(["hydraulic_pressure","hyd_pressure","hydraulics"]);
     log("Auto-mapped telemetry schema (best effort). Confirm mappings in Data tab.");
   }
 
@@ -1051,6 +1128,12 @@ const App = (() => {
       const vib = round(0.3 + Math.random()*9.5,3);
       const fuel = round(Math.max(0.05, Math.random()),3);
       const signal = round(0.5 + Math.random()*0.5,3);
+      const moves = round(10 + Math.random()*90,2);
+      const grease = round(2500 + Math.random()*1500,1);
+      const bearing = round(48 + Math.random()*26,2);
+      const engHours = round(1200 + Math.random()*800,1);
+      const engLoad = round(40 + Math.random()*50,2);
+      const hyd = round(1800 + Math.random()*600,1);
       const seq = "SEQ_" + String(1 + Math.floor(i/6)).padStart(3,"0");
       rows.push({
         MachineID: m,
@@ -1062,6 +1145,12 @@ const App = (() => {
         Vibration: vib,
         FuelLevel: fuel,
         SignalQuality: signal,
+        MovementRate: moves,
+        GreasePressure: grease,
+        BearingTemp: bearing,
+        EngineHours: engHours,
+        EngineLoad: engLoad,
+        HydraulicPressure: hyd,
         Operator: "op" + String(1+Math.floor(Math.random()*6)),
         SequenceID: seq
       });
@@ -1084,6 +1173,12 @@ const App = (() => {
     state.schema.signalQuality = "SignalQuality";
     state.schema.operator = "Operator";
     state.schema.sequenceId = "SequenceID";
+    state.schema.movementRate = "MovementRate";
+    state.schema.greasePressure = "GreasePressure";
+    state.schema.bearingTemp = "BearingTemp";
+    state.schema.engineHours = "EngineHours";
+    state.schema.engineLoad = "EngineLoad";
+    state.schema.hydraulicPressure = "HydraulicPressure";
 
     hydrateScopeSelectors();
     log("Generated sample telemetry dataset (380 rows).");
@@ -1108,7 +1203,7 @@ const App = (() => {
         </div>
         <div class="hr"></div>
         <div class="hint">
-          Health values are computed per telemetry record with hierarchical weights.
+          Health values are computed per telemetry record with hierarchical weights across drivetrain, lubrication, hydraulic responsiveness, and workload.
         </div>
       </div>
 
@@ -1173,12 +1268,12 @@ const App = (() => {
     };
 
     const prof = getActiveProfileRef();
-    renderWeightSliders("benefitSliders", prof.benefits, ["rpm","torque","signal","fuelEfficiency","uptime"], (k,v)=>{
+    renderWeightSliders("benefitSliders", prof.benefits, ["rpm","torque","signal","fuelEfficiency","uptime","movementRate","greasePressure","hydraulicResponse"], (k,v)=>{
       prof.benefits[k]=v;
       persistProfileScope();
     });
 
-    renderWeightSliders("costSliders", prof.costs, ["temperature","vibration","complexity"], (k,v)=>{
+    renderWeightSliders("costSliders", prof.costs, ["temperature","vibration","bearingTemp","engineLoad","complexity"], (k,v)=>{
       prof.costs[k]=v;
       persistProfileScope();
     });
@@ -1224,7 +1319,7 @@ const App = (() => {
         if(n) state.norm = n;
         if(g) state.gates = g;
         if(t) state.tokens = t;
-        if(b) state.bins = b;
+        if(b) state.bins = Object.assign(defaultBins(), b);
         syncGatesUIFromState();
         log("Loaded config from localStorage.");
         render();
@@ -1505,6 +1600,15 @@ const App = (() => {
           <div><div class="small">High Vib ≥</div><input id="binVib" class="num" value="${state.bins.highVib}"></div>
           <div><div class="small">Low Fuel ≤</div><input id="binFuel" class="num" value="${state.bins.lowFuel}"></div>
         </div>
+        <div class="grid3" style="margin-top:10px;">
+          <div><div class="small">Low Grease ≤</div><input id="binGrease" class="num" value="${state.bins.lowGrease}"></div>
+          <div><div class="small">Hot Bearings ≥</div><input id="binBearing" class="num" value="${state.bins.highBearing}"></div>
+          <div><div class="small">Soft Hydraulics ≤</div><input id="binHyd" class="num" value="${state.bins.softHydraulics}"></div>
+        </div>
+        <div class="grid3" style="margin-top:10px;">
+          <div><div class="small">Engine Load ≥</div><input id="binLoad" class="num" value="${state.bins.highEngineLoad}"></div>
+          <div><div class="small">Movement Productivity ≥</div><input id="binMove" class="num" value="${state.bins.movementProd}"></div>
+        </div>
         <div class="hr"></div>
         <div class="grid2">
           <button class="btn" id="btnRebin">Recompute Tags</button>
@@ -1524,7 +1628,12 @@ const App = (() => {
         "Tags:\n" +
         "- highTemp if temperature_norm >= HIGH TEMP threshold\n" +
         "- highVib if vibration_norm >= HIGH VIB threshold\n" +
-        "- lowFuel if fuel_norm <= LOW FUEL threshold\n\n" +
+        "- lowFuel if fuel_norm <= LOW FUEL threshold\n" +
+        "- lowGrease if grease_norm <= LOW GREASE threshold\n" +
+        "- bearingHeat if bearing_temp_norm >= HOT BEARING threshold\n" +
+        "- softHydraulics if hydraulic_norm <= SOFT HYD threshold\n" +
+        "- engineLoad if engine_load_norm >= HIGH LOAD threshold\n" +
+        "- productiveMovement if movement_norm >= MOVEMENT PRODUCTIVITY threshold\n\n" +
         "Tags map to maintenance flows and alerting."
       );
     };
@@ -1537,6 +1646,11 @@ const App = (() => {
       state.bins.highTemp = clamp(parseFloat(document.getElementById("binTemp").value), 0, 1);
       state.bins.highVib = clamp(parseFloat(document.getElementById("binVib").value), 0, 1);
       state.bins.lowFuel = clamp(parseFloat(document.getElementById("binFuel").value), 0, 1);
+      state.bins.lowGrease = clamp(parseFloat(document.getElementById("binGrease").value), 0, 1);
+      state.bins.highBearing = clamp(parseFloat(document.getElementById("binBearing").value), 0, 1);
+      state.bins.softHydraulics = clamp(parseFloat(document.getElementById("binHyd").value), 0, 1);
+      state.bins.highEngineLoad = clamp(parseFloat(document.getElementById("binLoad").value), 0, 1);
+      state.bins.movementProd = clamp(parseFloat(document.getElementById("binMove").value), 0, 1);
 
       if(!state.scoredRows.length){
         alert("Compute scores first.");
@@ -1620,7 +1734,7 @@ const App = (() => {
           if(cfg.norm) state.norm = cfg.norm;
           if(cfg.gates) state.gates = cfg.gates;
           if(cfg.tokens) state.tokens = cfg.tokens;
-          if(cfg.bins) state.bins = cfg.bins;
+      if(cfg.bins) state.bins = Object.assign(defaultBins(), cfg.bins);
           syncGatesUIFromState();
           log("Imported config JSON.");
           render();
@@ -1637,7 +1751,7 @@ const App = (() => {
       state.norm = { scope:"global", method:"minmax", clip01:true };
       state.gates = { maxTemp:110, maxVib:9.0, minSignal:0.6, policy:"zero" };
       state.tokens = { healthy:0.80, attention:0.60, warning:0.40 };
-      state.bins = { highTemp:0.80, highVib:0.80, lowFuel:0.30 };
+      state.bins = defaultBins();
       log("Factory reset applied.");
       render();
     };
@@ -1669,15 +1783,22 @@ const App = (() => {
       const signalQuality = parseNumeric(schema.signalQuality ? row[schema.signalQuality] : null);
       const operator = schema.operator ? String(row[schema.operator] ?? "") : "";
       const seqId = schema.sequenceId ? String(row[schema.sequenceId] ?? "") : "";
+      const movementRate = parseNumeric(schema.movementRate ? row[schema.movementRate] : null);
+      const greasePressure = parseNumeric(schema.greasePressure ? row[schema.greasePressure] : null);
+      const bearingTemp = parseNumeric(schema.bearingTemp ? row[schema.bearingTemp] : null);
+      const engineHours = parseNumeric(schema.engineHours ? row[schema.engineHours] : null);
+      const engineLoad = parseNumeric(schema.engineLoad ? row[schema.engineLoad] : null);
+      const hydraulicPressure = parseNumeric(schema.hydraulicPressure ? row[schema.hydraulicPressure] : null);
 
       // derived features
       const fuelEfficiency = isFinite(fuel) ? fuel : NaN;
-      const uptimeProxy = 1.0; // placeholder for longer-term telemetry
+      const uptimeProxy = isFinite(engineHours) ? engineHours : 1.0; // placeholder for longer-term telemetry
 
       return {
         _i: idx,
         machineId, jobsite, timestamp, sequenceId: seqId, raw: row,
         rpm, torque, temperature, vibration, fuel, signalQuality, operator,
+        movementRate, greasePressure, bearingTemp, engineHours, engineLoad, hydraulicPressure,
         fuelEfficiency, uptimeProxy
       };
     });
@@ -1704,7 +1825,13 @@ const App = (() => {
         temperature: buildStats(arr.map(x=>x.temperature)),
         vibration: buildStats(arr.map(x=>x.vibration)),
         fuel: buildStats(arr.map(x=>x.fuel || NaN)),
-        signal: buildStats(arr.map(x=>x.signalQuality || NaN))
+        signal: buildStats(arr.map(x=>x.signalQuality || NaN)),
+        movement: buildStats(arr.map(x=>x.movementRate || NaN)),
+        grease: buildStats(arr.map(x=>x.greasePressure || NaN)),
+        bearing: buildStats(arr.map(x=>x.bearingTemp || NaN)),
+        engineHours: buildStats(arr.map(x=>x.engineHours || NaN)),
+        engineLoad: buildStats(arr.map(x=>x.engineLoad || NaN)),
+        hydraulic: buildStats(arr.map(x=>x.hydraulicPressure || NaN))
       };
     }
 
@@ -1717,9 +1844,15 @@ const App = (() => {
       const torqueN = normalize(r.torque, st.torque);
       const signalN = normalize(defaultIfNaN(r.signalQuality, 0.8), st.signal);
       const fuelN = normalize(defaultIfNaN(r.fuel, 0.6), st.fuel);
+      const movementN = normalize(defaultIfNaN(r.movementRate, 0.5), st.movement);
+      const greaseN = normalize(defaultIfNaN(r.greasePressure, 2200), st.grease);
+      const hydraulicN = normalize(defaultIfNaN(r.hydraulicPressure, 1600), st.hydraulic);
+      const engineHoursN = normalize(defaultIfNaN(r.engineHours, 1.0), st.engineHours);
 
       const tempPen = normalize(r.temperature, st.temperature);
       const vibPen = normalize(r.vibration, st.vibration);
+      const bearingPen = normalize(r.bearingTemp, st.bearing);
+      const loadPen = normalize(r.engineLoad, st.engineLoad);
 
       const gated = gateFailTelemetry(r, tempPen, vibPen, signalN);
 
@@ -1734,8 +1867,8 @@ const App = (() => {
         w = effectiveWeightsForRow(r.machineId, r.jobsite);
       }
 
-      const wb = deepClone(w.benefits);
-      const wc = deepClone(w.costs);
+      const wb = Object.assign({rpm:0, torque:0, signal:0, fuelEfficiency:0, uptime:0, movementRate:0, greasePressure:0, hydraulicResponse:0}, deepClone(w.benefits));
+      const wc = Object.assign({temperature:0, vibration:0, complexity:0, bearingTemp:0, engineLoad:0}, deepClone(w.costs));
       if(w.normalizeBenefits) renormInPlace(wb);
       if(w.normalizeCosts) renormInPlace(wc);
 
@@ -1744,15 +1877,20 @@ const App = (() => {
         torque: wb.torque * torqueN,
         signal: wb.signal * signalN,
         fuelEfficiency: wb.fuelEfficiency * fuelN,
-        uptime: wb.uptime * 1.0,
+        uptime: wb.uptime * engineHoursN,
+        movementRate: wb.movementRate * movementN,
+        greasePressure: wb.greasePressure * greaseN,
+        hydraulicResponse: wb.hydraulicResponse * hydraulicN,
         temperature: wc.temperature * tempPen,
         vibration: wc.vibration * vibPen,
+        bearingTemp: wc.bearingTemp * bearingPen,
+        engineLoad: wc.engineLoad * loadPen,
         complexity: wc.complexity * 0,
         difficultyBoost: 0
       };
 
-      let value = (contrib.rpm + contrib.torque + contrib.signal + contrib.fuelEfficiency + contrib.uptime)
-                - (contrib.temperature + contrib.vibration + contrib.complexity);
+      let value = (contrib.rpm + contrib.torque + contrib.signal + contrib.fuelEfficiency + contrib.uptime + contrib.movementRate + contrib.greasePressure + contrib.hydraulicResponse)
+                - (contrib.temperature + contrib.vibration + contrib.bearingTemp + contrib.engineLoad + contrib.complexity);
 
       const diff = defaultIfNaN(r.difficulty || 0, 0);
       const kBoost = w.difficultyBoostK ?? 0;
@@ -1770,8 +1908,8 @@ const App = (() => {
         machineId: r.machineId,
         jobsite: r.jobsite,
         sequenceId: r.sequenceId,
-        raw: { rpm: r.rpm, temperature: r.temperature, vibration: r.vibration, torque: r.torque, fuel: r.fuel, signalQuality: r.signalQuality },
-        features: { rpmN, torqueN, signalN, fuelN, tempPen, vibPen },
+        raw: { rpm: r.rpm, temperature: r.temperature, vibration: r.vibration, torque: r.torque, fuel: r.fuel, signalQuality: r.signalQuality, movementRate: r.movementRate, greasePressure: r.greasePressure, bearingTemp: r.bearingTemp, engineLoad: r.engineLoad, hydraulicPressure: r.hydraulicPressure },
+        features: { rpmN, torqueN, signalN, fuelN, movementN, greaseN, hydraulicN, engineHoursN, tempPen, vibPen, bearingPen, loadPen },
         contributions: contrib,
         value: finalValue,
         gated: gated,
@@ -1882,6 +2020,11 @@ const App = (() => {
     if(r.features.tempPen >= state.bins.highTemp) tags.push("highTemp");
     if(r.features.vibPen >= state.bins.highVib) tags.push("highVib");
     if(r.features.fuelN <= state.bins.lowFuel) tags.push("lowFuel");
+    if(r.features.greaseN <= state.bins.lowGrease) tags.push("lowGrease");
+    if(r.features.bearingPen >= state.bins.highBearing) tags.push("bearingHeat");
+    if(r.features.hydraulicN <= state.bins.softHydraulics) tags.push("softHydraulics");
+    if(r.features.loadPen >= state.bins.highEngineLoad) tags.push("engineLoad");
+    if(r.features.movementN >= state.bins.movementProd) tags.push("productiveMovement");
     if(!tags.length) tags.push("baseline");
     return `${m}:${j}:${tags.join("-")}`;
   }
@@ -1933,6 +2076,8 @@ const App = (() => {
             <th>Status</th>
             <th>Tag</th>
             <th class="mono">rpmN</th>
+            <th class="mono">moveN</th>
+            <th class="mono">greaseN</th>
             <th class="mono">tempPen</th>
             <th class="mono">vibPen</th>
             <th>Gated</th>
@@ -1951,6 +2096,8 @@ const App = (() => {
           <td>${tokenBadge(r.token)}</td>
           <td title="${escapeHtml(r.binId)}">${escapeHtml(r.binId)}</td>
           <td class="mono">${r.features.rpmN.toFixed(3)}</td>
+          <td class="mono">${r.features.movementN.toFixed(3)}</td>
+          <td class="mono">${r.features.greaseN.toFixed(3)}</td>
           <td class="mono">${r.features.tempPen.toFixed(3)}</td>
           <td class="mono">${r.features.vibPen.toFixed(3)}</td>
           <td>${gated}</td>
@@ -2288,18 +2435,18 @@ const App = (() => {
     const header = [
       "MachineID","JobSite","SequenceID",
       "Health","Status","Tag","Gated",
-      "rpmN","torqueN","signalN","fuelN","tempPen","vibPen",
-      "c_rpm","c_torque","c_signal","c_fuel","c_uptime","c_temperature","c_vibration","c_difficultyBoost",
-      "raw_rpm","raw_temperature","raw_vibration","raw_torque","raw_fuel","raw_signalQuality"
+      "rpmN","torqueN","signalN","fuelN","movementN","greaseN","hydraulicN","engineHoursN","tempPen","vibPen","bearingPen","loadPen",
+      "c_rpm","c_torque","c_signal","c_fuel","c_uptime","c_movement","c_grease","c_hydraulic","c_temperature","c_vibration","c_bearing","c_engineLoad","c_difficultyBoost",
+      "raw_rpm","raw_temperature","raw_vibration","raw_torque","raw_fuel","raw_signalQuality","raw_movementRate","raw_greasePressure","raw_bearingTemp","raw_engineLoad","raw_hydraulicPressure"
     ];
     const lines = [header.join(",")];
     for(const r of state.scoredRows){
       const row = [
         csvCell(r.machineId), csvCell(r.jobsite), csvCell(r.sequenceId),
         r.value, r.token, csvCell(r.binId), r.gated,
-        r.features.rpmN, r.features.torqueN, r.features.signalN, r.features.fuelN, r.features.tempPen, r.features.vibPen,
-        r.contributions.rpm, r.contributions.torque, r.contributions.signal, r.contributions.fuelEfficiency, r.contributions.uptime, r.contributions.temperature, r.contributions.vibration, r.contributions.difficultyBoost,
-        r.raw.rpm, r.raw.temperature, r.raw.vibration, r.raw.torque, r.raw.fuel, r.raw.signalQuality
+        r.features.rpmN, r.features.torqueN, r.features.signalN, r.features.fuelN, r.features.movementN, r.features.greaseN, r.features.hydraulicN, r.features.engineHoursN, r.features.tempPen, r.features.vibPen, r.features.bearingPen, r.features.loadPen,
+        r.contributions.rpm, r.contributions.torque, r.contributions.signal, r.contributions.fuelEfficiency, r.contributions.uptime, r.contributions.movementRate, r.contributions.greasePressure, r.contributions.hydraulicResponse, r.contributions.temperature, r.contributions.vibration, r.contributions.bearingTemp, r.contributions.engineLoad, r.contributions.difficultyBoost,
+        r.raw.rpm, r.raw.temperature, r.raw.vibration, r.raw.torque, r.raw.fuel, r.raw.signalQuality, r.raw.movementRate, r.raw.greasePressure, r.raw.bearingTemp, r.raw.engineLoad, r.raw.hydraulicPressure
       ];
       lines.push(row.map(csvCell).join(","));
     }
