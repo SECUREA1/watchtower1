@@ -25,7 +25,7 @@ COPY static/               /usr/share/nginx/html/static/
 COPY dashboard/            /usr/share/nginx/html/dashboard/
 
 # Create nginx config template at build-time
-RUN cat > /etc/nginx/conf.d/default.conf.template <<'EOF'
+RUN cat > /etc/nginx/conf.d/default.conf.template <<'EOF_CONF'
 server {
     listen 80;
     server_name _;
@@ -46,11 +46,10 @@ server {
         try_files $uri $uri/ $uri.html /index.html;
     }
 }
-EOF
+EOF_CONF
 
 # Expose documentation only; Render provides actual PORT via env
 EXPOSE 80
 
 # Replace "listen 80;" with "listen ${PORT};" at container start, then run nginx
 CMD ["sh", "-c", "sed -e \"s/listen 80;/listen ${PORT};/g\" /etc/nginx/conf.d/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
-]
