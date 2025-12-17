@@ -330,6 +330,62 @@
 
     .three-overlay.active { opacity: 0.65; }
 
+    .map-card { position: relative; }
+
+    .map-overlay-panel__scrim {
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at 40% 20%, rgba(5, 5, 9, 0.75), rgba(5, 5, 9, 0.4));
+      backdrop-filter: blur(4px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 120ms ease;
+      z-index: 8;
+    }
+
+    .map-overlay-panel__scrim.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .map-overlay-panel {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      width: min(440px, 92vw);
+      background: rgba(6, 6, 12, 0.96);
+      border-radius: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: var(--shadow-card);
+      padding: 14px;
+      display: none;
+      z-index: 10;
+    }
+
+    .map-overlay-panel.active { display: block; }
+
+    .map-overlay-panel header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .map-overlay-panel .panel-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 10px;
+    }
+
+    .map-overlay-panel .panel-footer {
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      display: grid;
+      gap: 8px;
+    }
+
     .three-flyout {
       position: fixed;
       inset: auto 18px 18px auto;
@@ -1137,7 +1193,7 @@
         </div>
 
         <!-- Map -->
-        <div class="card-soft">
+        <div class="card-soft map-card">
           <div class="card-header">
             <div class="card-title-row">
               <span class="card-title">Live Site Map</span>
@@ -1175,9 +1231,157 @@
               <button class="btn btn-sm btn-ghost" id="btnUndoShape" title="Undo last draw">Undo</button>
               <button class="btn btn-sm btn-ghost" id="btnDeleteSelected" title="Delete selected shape">Delete</button>
               <button class="btn btn-sm btn-ghost" id="btnResetView" title="Reset pan/zoom">Reset View</button>
+              <button class="btn btn-sm btn-ghost" id="btnOverlayPanel" title="Open overlay + 3D tuner">Overlay Panel</button>
               <button class="btn btn-sm btn-ghost" id="btnToggle3D" title="Open inline 3D overlay preview">3D View</button>
               <button class="btn btn-sm btn-ghost" id="btnPopup3D" title="Pop out a larger 3D view">Pop-up</button>
               <button class="btn btn-sm btn-danger" id="btnClearMap" title="Clear all shapes">Clear Map</button>
+            </div>
+          </div>
+
+          <div id="overlayPanelScrim" class="map-overlay-panel__scrim" aria-hidden="true"></div>
+          <div id="overlayPanel" class="map-overlay-panel" aria-hidden="true">
+            <header>
+              <div>
+                <div class="card-title" style="letter-spacing: 0.08em;">Overlay Tuner</div>
+                <div class="card-subtitle">Show Overlay · Locked to map · Inline orbit / popup</div>
+              </div>
+              <div class="hstack" style="gap: 6px;">
+                <button class="btn btn-sm btn-ghost" id="btnOverlayPanel3D">3D Viewer</button>
+                <button class="btn btn-sm btn-ghost" id="btnOverlayPanelPopup">Pop-up</button>
+                <button class="btn btn-sm btn-danger" id="btnOverlayPanelClose">Close</button>
+              </div>
+            </header>
+
+            <div class="overlay-summary" id="overlayPanelStatus">Overlay stays locked to the map (pan/zoom).</div>
+
+            <div class="panel-grid" style="margin-top: 8px;">
+              <div class="toggle-row" style="margin: 0;">
+                <div class="toggle-label">
+                  <strong>Show Overlay</strong><br/>
+                  <span style="font-size: 10px;">Wireframe/image sticks to the map.</span>
+                </div>
+                <div id="overlayPanelToggle" class="pill-toggle" role="switch" aria-checked="false">
+                  <div class="pill-toggle-thumb"></div>
+                </div>
+              </div>
+
+              <div class="form-row">
+                <label for="overlayPanelLayer">Layer</label>
+                <select id="overlayPanelLayer">
+                  <option value="below">Below shapes</option>
+                  <option value="above">Above shapes</option>
+                </select>
+              </div>
+
+              <div class="form-row">
+                <label>Opacity</label>
+                <div class="hstack" style="width: 100%;">
+                  <input id="overlayPanelOpacity" type="range" min="0" max="1" step="0.01" value="0.55" />
+                  <span class="unit-badge" id="overlayPanelOpacityLabel">0.55</span>
+                </div>
+              </div>
+
+              <div class="form-row">
+                <label>Rotation</label>
+                <div class="hstack" style="width: 100%;">
+                  <input id="overlayPanelRotation" type="range" min="-180" max="180" step="1" value="0" />
+                  <span class="unit-badge" id="overlayPanelRotationLabel">0°</span>
+                </div>
+              </div>
+
+              <div class="form-row">
+                <label>Position (ft)</label>
+                <div class="hstack" style="width: 100%;">
+                  <input id="overlayPanelPosX" type="number" step="0.5" />
+                  <span class="unit-badge">X</span>
+                  <input id="overlayPanelPosY" type="number" step="0.5" />
+                  <span class="unit-badge">Y</span>
+                </div>
+              </div>
+
+              <div class="form-row">
+                <label for="overlayPanelPosZ">Elevation (ft)</label>
+                <input id="overlayPanelPosZ" type="number" step="0.5" />
+              </div>
+
+              <div class="form-row">
+                <label for="overlayPanelScale">Scale (ft / model unit)</label>
+                <input id="overlayPanelScale" type="number" min="0.0001" step="0.01" />
+              </div>
+
+              <div class="form-row">
+                <label for="overlayPanelProjection">Projection Plane</label>
+                <select id="overlayPanelProjection">
+                  <option value="XZ">XZ (Y up)</option>
+                  <option value="XY">XY</option>
+                  <option value="YZ">YZ</option>
+                </select>
+              </div>
+
+              <div class="form-row">
+                <label for="overlayPanelFlipX">Flip X</label>
+                <select id="overlayPanelFlipX">
+                  <option value="0">Off</option>
+                  <option value="1">On</option>
+                </select>
+              </div>
+
+              <div class="form-row">
+                <label for="overlayPanelFlipY">Flip Y</label>
+                <select id="overlayPanelFlipY">
+                  <option value="0">Off</option>
+                  <option value="1">On</option>
+                </select>
+              </div>
+
+              <div class="form-row">
+                <label for="overlayPanelName">Overlay Label</label>
+                <input id="overlayPanelName" type="text" placeholder="Name your overlay" />
+              </div>
+            </div>
+
+            <div class="panel-footer">
+              <div class="overlay-hint" style="margin:0;">
+                OBJ/PLY is projected to 2D and drawn as wireframe so it aligns with the site map.
+              </div>
+              <div class="overlay-hint" style="margin:0;">
+                Overlay Canvas Tools: select · move · scale · rotate. Turn on Edit on Canvas, then click the overlay on the map. Drag to move, drag corners to scale, drag the rotate handle to rotate. Hold Shift while rotating to snap · hold Alt + scroll to scale · arrow keys to nudge · R reset rotation · Esc deselect.
+              </div>
+              <div class="toggle-row" style="margin: 0;">
+                <div class="toggle-label">
+                  <strong>Edit on Canvas</strong><br/>
+                  <span style="font-size: 10px;">Shows bounds + handles directly on the map.</span>
+                </div>
+                <div id="overlayPanelEdit" class="pill-toggle" role="switch" aria-checked="false">
+                  <div class="pill-toggle-thumb"></div>
+                </div>
+              </div>
+              <div class="panel-grid">
+                <div class="form-row">
+                  <label for="overlayPanelSnap">Rotate Snap (Shift)</label>
+                  <select id="overlayPanelSnap">
+                    <option value="0">Off</option>
+                    <option value="5">5°</option>
+                    <option value="15">15°</option>
+                    <option value="45">45°</option>
+                    <option value="90">90°</option>
+                  </select>
+                </div>
+                <div class="form-row">
+                  <label for="overlayPanelAspect">Lock Aspect (image)</label>
+                  <select id="overlayPanelAspect">
+                    <option value="1">On</option>
+                    <option value="0">Off</option>
+                  </select>
+                </div>
+                <div class="form-row">
+                  <label>3D View</label>
+                  <div class="hstack" style="gap: 6px;">
+                    <button class="btn btn-sm btn-ghost" id="overlayPanelInline">Inline</button>
+                    <button class="btn btn-sm btn-ghost" id="overlayPanelCenter">Center</button>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -2196,6 +2400,7 @@
     statusMachine: document.getElementById("statusMachine"),
     chipToolLabel: document.getElementById("chipToolLabel"),
     scalePxPerFt: document.getElementById("scalePxPerFt"),
+    btnOverlayPanel: document.getElementById("btnOverlayPanel"),
 
     // tool buttons
     toolAuto: document.getElementById("toolAuto"),
@@ -2251,6 +2456,32 @@
     overlayProjection: document.getElementById("overlayProjection"),
     overlayFlipX: document.getElementById("overlayFlipX"),
     overlayFlipY: document.getElementById("overlayFlipY"),
+
+    overlayPanel: document.getElementById("overlayPanel"),
+    overlayPanelScrim: document.getElementById("overlayPanelScrim"),
+    overlayPanelToggle: document.getElementById("overlayPanelToggle"),
+    overlayPanelLayer: document.getElementById("overlayPanelLayer"),
+    overlayPanelOpacity: document.getElementById("overlayPanelOpacity"),
+    overlayPanelOpacityLabel: document.getElementById("overlayPanelOpacityLabel"),
+    overlayPanelRotation: document.getElementById("overlayPanelRotation"),
+    overlayPanelRotationLabel: document.getElementById("overlayPanelRotationLabel"),
+    overlayPanelPosX: document.getElementById("overlayPanelPosX"),
+    overlayPanelPosY: document.getElementById("overlayPanelPosY"),
+    overlayPanelPosZ: document.getElementById("overlayPanelPosZ"),
+    overlayPanelScale: document.getElementById("overlayPanelScale"),
+    overlayPanelProjection: document.getElementById("overlayPanelProjection"),
+    overlayPanelFlipX: document.getElementById("overlayPanelFlipX"),
+    overlayPanelFlipY: document.getElementById("overlayPanelFlipY"),
+    overlayPanelName: document.getElementById("overlayPanelName"),
+    overlayPanelStatus: document.getElementById("overlayPanelStatus"),
+    overlayPanelEdit: document.getElementById("overlayPanelEdit"),
+    overlayPanelSnap: document.getElementById("overlayPanelSnap"),
+    overlayPanelAspect: document.getElementById("overlayPanelAspect"),
+    overlayPanelInline: document.getElementById("overlayPanelInline"),
+    overlayPanelCenter: document.getElementById("overlayPanelCenter"),
+    btnOverlayPanel3D: document.getElementById("btnOverlayPanel3D"),
+    btnOverlayPanelPopup: document.getElementById("btnOverlayPanelPopup"),
+    btnOverlayPanelClose: document.getElementById("btnOverlayPanelClose"),
 
     btnOverlayFit: document.getElementById("btnOverlayFit"),
     btnOverlayCenter: document.getElementById("btnOverlayCenter"),
@@ -2658,6 +2889,63 @@
       const name = overlay.name || "Untitled";
       el.overlaySelectedSummary.textContent = `${typeLabel} · ${name}`;
     }
+  }
+
+  function syncOverlayFormControls() {
+    if (el.overlayLayer) el.overlayLayer.value = overlay.layer;
+    if (el.overlayOpacity) el.overlayOpacity.value = overlay.opacity.toFixed(2);
+    if (el.overlayOpacityLabel) el.overlayOpacityLabel.textContent = overlay.opacity.toFixed(2);
+    if (el.overlayRotation) el.overlayRotation.value = overlay.rotationDeg;
+    if (el.overlayRotationLabel) el.overlayRotationLabel.textContent = `${overlay.rotationDeg}°`;
+    if (el.overlayPosX) el.overlayPosX.value = String(Number(overlay.posXFt).toFixed(2));
+    if (el.overlayPosY) el.overlayPosY.value = String(Number(overlay.posYFt).toFixed(2));
+    if (el.overlayPosZ) el.overlayPosZ.value = String(Number(overlay.posZFt).toFixed(2));
+    if (el.overlayImgWidthFt) el.overlayImgWidthFt.value = overlay.img.widthFt;
+    if (el.overlayImgHeightFt) el.overlayImgHeightFt.value = overlay.img.heightFt;
+    if (el.overlayModelScale) el.overlayModelScale.value = overlay.model.scaleFtPerUnit;
+    if (el.overlayProjection) el.overlayProjection.value = overlay.model.projPlane;
+    if (el.overlayFlipX) el.overlayFlipX.value = overlay.model.flipX ? "1" : "0";
+    if (el.overlayFlipY) el.overlayFlipY.value = overlay.model.flipY ? "1" : "0";
+  }
+
+  function syncOverlayPanel() {
+    if (!el.overlayPanel) return;
+    const on = overlay.enabled && !!overlay.type;
+
+    el.overlayPanelToggle?.classList.toggle("on", on);
+    el.overlayPanelToggle?.setAttribute("aria-checked", on ? "true" : "false");
+    if (el.overlayPanelLayer) el.overlayPanelLayer.value = overlay.layer;
+    if (el.overlayPanelOpacity) el.overlayPanelOpacity.value = overlay.opacity.toFixed(2);
+    if (el.overlayPanelOpacityLabel) el.overlayPanelOpacityLabel.textContent = overlay.opacity.toFixed(2);
+    if (el.overlayPanelRotation) el.overlayPanelRotation.value = overlay.rotationDeg;
+    if (el.overlayPanelRotationLabel) el.overlayPanelRotationLabel.textContent = `${overlay.rotationDeg}°`;
+    if (el.overlayPanelPosX) el.overlayPanelPosX.value = String(Number(overlay.posXFt).toFixed(2));
+    if (el.overlayPanelPosY) el.overlayPanelPosY.value = String(Number(overlay.posYFt).toFixed(2));
+    if (el.overlayPanelPosZ) el.overlayPanelPosZ.value = String(Number(overlay.posZFt).toFixed(2));
+    if (el.overlayPanelScale) el.overlayPanelScale.value = overlay.model.scaleFtPerUnit;
+    if (el.overlayPanelProjection) el.overlayPanelProjection.value = overlay.model.projPlane;
+    if (el.overlayPanelFlipX) el.overlayPanelFlipX.value = overlay.model.flipX ? "1" : "0";
+    if (el.overlayPanelFlipY) el.overlayPanelFlipY.value = overlay.model.flipY ? "1" : "0";
+    if (el.overlayPanelName) el.overlayPanelName.value = overlay.name || "";
+    if (el.overlayPanelEdit) {
+      el.overlayPanelEdit.classList.toggle("on", state.canvasEdit);
+      el.overlayPanelEdit.setAttribute("aria-checked", state.canvasEdit ? "true" : "false");
+    }
+    if (el.overlayPanelSnap) el.overlayPanelSnap.value = String(state.snapDeg);
+    if (el.overlayPanelAspect) el.overlayPanelAspect.value = state.lockAspect ? "1" : "0";
+
+    if (el.overlayPanelStatus) {
+      const name = overlay.name || overlay.type || "overlay";
+      const layer = overlay.layer === "above" ? "above shapes" : "below shapes";
+      el.overlayPanelStatus.textContent = on ? `${name} · ${layer}` : "Overlay off · load or enable an asset";
+    }
+  }
+
+  function refreshOverlayUI() {
+    renderOverlayBadge();
+    showOverlayControls();
+    syncOverlayFormControls();
+    syncOverlayPanel();
   }
 
   function showOverlayControls() {
@@ -4080,9 +4368,9 @@
 
   function setOverlayEnabled(on) {
     overlay.enabled = !!on;
-    el.overlayToggle.classList.toggle("on", overlay.enabled);
-    el.overlayToggle.setAttribute("aria-checked", overlay.enabled ? "true" : "false");
-    renderOverlayBadge();
+    el.overlayToggle?.classList.toggle("on", overlay.enabled);
+    el.overlayToggle?.setAttribute("aria-checked", overlay.enabled ? "true" : "false");
+    refreshOverlayUI();
     redrawCanvas();
   }
 
@@ -4105,8 +4393,7 @@
 
     overlay.posZFt = 0;
     setOverlayEnabled(false);
-    showOverlayControls();
-    renderOverlayBadge();
+    refreshOverlayUI();
     appendSimulationEvent("Overlay cleared.", "warn");
     redrawCanvas();
   }
@@ -4162,9 +4449,8 @@
           el.overlayRotation.value = "0";
           el.overlayRotationLabel.textContent = "0°";
 
-          showOverlayControls();
+          refreshOverlayUI();
           setOverlayEnabled(true);
-          renderOverlayBadge();
           appendSimulationEvent(`Overlay loaded: image "${file.name}"`, "ok");
           redrawCanvas();
         };
@@ -4211,9 +4497,8 @@
         el.overlayRotation.value = "0";
         el.overlayRotationLabel.textContent = "0°";
 
-        showOverlayControls();
+        refreshOverlayUI();
         setOverlayEnabled(true);
-        renderOverlayBadge();
         appendSimulationEvent(`Overlay loaded: ${overlay.model.format} "${file.name}" (${overlay.model.vertices.length} verts)`, "ok");
         redrawCanvas();
         return;
@@ -4274,9 +4559,8 @@
         el.overlayRotation.value = "0";
         el.overlayRotationLabel.textContent = "0°";
 
-        showOverlayControls();
+        refreshOverlayUI();
         setOverlayEnabled(true);
-        renderOverlayBadge();
         appendSimulationEvent(`Overlay loaded: ${overlay.model.format} "${file.name}" (${overlay.model.vertices.length} verts)`, "ok");
         redrawCanvas();
         return;
@@ -5653,30 +5937,35 @@
   el.overlayOpacity.addEventListener("input", () => {
     overlay.opacity = clamp(parseFloat(el.overlayOpacity.value), 0, 1);
     el.overlayOpacityLabel.textContent = overlay.opacity.toFixed(2);
+    syncOverlayPanel();
     redrawCanvas();
   });
 
   el.overlayRotation.addEventListener("input", () => {
     overlay.rotationDeg = parseInt(el.overlayRotation.value, 10) || 0;
     el.overlayRotationLabel.textContent = `${overlay.rotationDeg}°`;
+    syncOverlayPanel();
     requestThreeRender();
     redrawCanvas();
   });
 
   el.overlayPosX.addEventListener("change", () => {
     overlay.posXFt = parseFloat(el.overlayPosX.value) || overlay.posXFt;
+    syncOverlayPanel();
     requestThreeRender();
     redrawCanvas();
   });
 
   el.overlayPosY.addEventListener("change", () => {
     overlay.posYFt = parseFloat(el.overlayPosY.value) || overlay.posYFt;
+    syncOverlayPanel();
     requestThreeRender();
     redrawCanvas();
   });
 
   el.overlayPosZ.addEventListener("change", () => {
     overlay.posZFt = parseFloat(el.overlayPosZ.value) || overlay.posZFt;
+    syncOverlayPanel();
     requestThreeRender();
   });
 
@@ -5692,6 +5981,7 @@
 
   el.overlayModelScale.addEventListener("change", () => {
     overlay.model.scaleFtPerUnit = Math.max(0.0001, parseFloat(el.overlayModelScale.value) || overlay.model.scaleFtPerUnit);
+    syncOverlayPanel();
     requestThreeRender();
     redrawCanvas();
   });
@@ -5699,20 +5989,155 @@
   el.overlayProjection.addEventListener("change", () => {
     overlay.model.projPlane = el.overlayProjection.value || "XZ";
     rebuildModelProjection();
+    syncOverlayPanel();
     requestThreeRender();
     redrawCanvas();
   });
 
   el.overlayFlipX.addEventListener("change", () => {
     overlay.model.flipX = el.overlayFlipX.value === "1";
+    syncOverlayPanel();
     requestThreeRender();
     redrawCanvas();
   });
 
   el.overlayFlipY.addEventListener("change", () => {
     overlay.model.flipY = el.overlayFlipY.value === "1";
+    syncOverlayPanel();
     requestThreeRender();
     redrawCanvas();
+  });
+
+  function setOverlayPanelOpen(open) {
+    const on = !!open;
+    el.overlayPanel?.classList.toggle("active", on);
+    el.overlayPanel?.setAttribute("aria-hidden", on ? "false" : "true");
+    el.overlayPanelScrim?.classList.toggle("active", on);
+    if (on) syncOverlayPanel();
+  }
+
+  el.btnOverlayPanel?.addEventListener("click", () => setOverlayPanelOpen(true));
+  el.btnOverlayPanelClose?.addEventListener("click", () => setOverlayPanelOpen(false));
+  el.overlayPanelScrim?.addEventListener("click", () => setOverlayPanelOpen(false));
+
+  el.overlayPanelToggle?.addEventListener("click", () => setOverlayEnabled(!overlay.enabled));
+  el.overlayPanelLayer?.addEventListener("change", () => {
+    overlay.layer = el.overlayPanelLayer.value === "above" ? "above" : "below";
+    syncOverlayFormControls();
+    redrawCanvas();
+  });
+  el.overlayPanelOpacity?.addEventListener("input", () => {
+    overlay.opacity = clamp(parseFloat(el.overlayPanelOpacity.value), 0, 1);
+    syncOverlayFormControls();
+    syncOverlayPanel();
+    redrawCanvas();
+  });
+  el.overlayPanelRotation?.addEventListener("input", () => {
+    overlay.rotationDeg = parseInt(el.overlayPanelRotation.value, 10) || 0;
+    syncOverlayFormControls();
+    syncOverlayPanel();
+    requestThreeRender();
+    redrawCanvas();
+  });
+  el.overlayPanelPosX?.addEventListener("change", () => {
+    overlay.posXFt = parseFloat(el.overlayPanelPosX.value) || overlay.posXFt;
+    syncOverlayFormControls();
+    syncOverlayPanel();
+    requestThreeRender();
+    redrawCanvas();
+  });
+  el.overlayPanelPosY?.addEventListener("change", () => {
+    overlay.posYFt = parseFloat(el.overlayPanelPosY.value) || overlay.posYFt;
+    syncOverlayFormControls();
+    syncOverlayPanel();
+    requestThreeRender();
+    redrawCanvas();
+  });
+  el.overlayPanelPosZ?.addEventListener("change", () => {
+    overlay.posZFt = parseFloat(el.overlayPanelPosZ.value) || overlay.posZFt;
+    syncOverlayFormControls();
+    syncOverlayPanel();
+    requestThreeRender();
+  });
+  el.overlayPanelScale?.addEventListener("change", () => {
+    overlay.model.scaleFtPerUnit = Math.max(0.0001, parseFloat(el.overlayPanelScale.value) || overlay.model.scaleFtPerUnit);
+    syncOverlayFormControls();
+    syncOverlayPanel();
+    requestThreeRender();
+    redrawCanvas();
+  });
+  el.overlayPanelProjection?.addEventListener("change", () => {
+    overlay.model.projPlane = el.overlayPanelProjection.value || overlay.model.projPlane;
+    rebuildModelProjection();
+    syncOverlayFormControls();
+    syncOverlayPanel();
+    requestThreeRender();
+    redrawCanvas();
+  });
+  el.overlayPanelFlipX?.addEventListener("change", () => {
+    overlay.model.flipX = el.overlayPanelFlipX.value === "1";
+    syncOverlayFormControls();
+    syncOverlayPanel();
+    requestThreeRender();
+    redrawCanvas();
+  });
+  el.overlayPanelFlipY?.addEventListener("change", () => {
+    overlay.model.flipY = el.overlayPanelFlipY.value === "1";
+    syncOverlayFormControls();
+    syncOverlayPanel();
+    requestThreeRender();
+    redrawCanvas();
+  });
+  el.overlayPanelName?.addEventListener("input", () => {
+    overlay.name = el.overlayPanelName.value || "";
+    refreshOverlayUI();
+    requestThreeRender();
+    redrawCanvas();
+  });
+
+  el.overlayPanelEdit?.addEventListener("click", () => {
+    state.canvasEdit = !state.canvasEdit;
+    if (ui.canvasEditToggle) {
+      ui.canvasEditToggle.classList.toggle("on", state.canvasEdit);
+      ui.canvasEditToggle.setAttribute("aria-checked", state.canvasEdit ? "true" : "false");
+    }
+    syncOverlayPanel();
+    redrawWithGizmo();
+  });
+
+  el.overlayPanelSnap?.addEventListener("change", () => {
+    state.snapDeg = parseInt(el.overlayPanelSnap.value, 10) || 0;
+    if (ui.rotateSnap) ui.rotateSnap.value = String(state.snapDeg);
+  });
+
+  el.overlayPanelAspect?.addEventListener("change", () => {
+    state.lockAspect = el.overlayPanelAspect.value === "1";
+    if (ui.aspectLock) ui.aspectLock.value = el.overlayPanelAspect.value;
+  });
+
+  el.overlayPanelInline?.addEventListener("click", () => {
+    setOverlayPanelOpen(true);
+    setThreeActive(true, false);
+    syncThreeInputs();
+  });
+
+  el.overlayPanelCenter?.addEventListener("click", () => {
+    threeView.yawDeg = 35;
+    threeView.pitchDeg = -25;
+    threeView.distanceFt = 90;
+    syncThreeInputs();
+    setThreeActive(true, threeView.popup);
+  });
+
+  el.btnOverlayPanel3D?.addEventListener("click", () => {
+    setThreeActive(true, false);
+    syncThreeInputs();
+  });
+
+  el.btnOverlayPanelPopup?.addEventListener("click", () => {
+    setOverlayPanelOpen(true);
+    setThreeActive(true, true);
+    syncThreeInputs();
   });
 
   el.btnOverlayFit.addEventListener("click", () => fitOverlayToShapes());
@@ -5812,8 +6237,7 @@
     overlay.posZFt = parseFloat(el.overlayPosZ.value) || 0;
     syncThreeInputs();
     setOverlayEnabled(false);
-    showOverlayControls();
-    renderOverlayBadge();
+    refreshOverlayUI();
 
     setCanvasSizeToCSS();
 
