@@ -2410,6 +2410,12 @@
       // Canvas context init (with DPR scaling for crispness)
       el.ctx = el.canvas.getContext("2d");
 
+      // Remember where the live canvas wrapper normally lives so we can shuttle it into the modal and back
+      const mapCanvasHome = {
+        parent: el.canvasWrapper?.parentElement || null,
+        placeholder: document.createComment("canvas-wrapper-home"),
+      };
+
       // ------------------------------
       // Rendering: Tasks table + metrics
       // ------------------------------
@@ -2632,13 +2638,19 @@
 
         el.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-        // Keep 3D overlay in sync
+        // Keep 3D overlay in sync (same backing buffer + map scaling)
         threeOverlay.resize();
 
         redrawCanvas();
       }
 
       window.addEventListener("resize", setCanvasSizeToCSS);
+
+      // React to container-driven resizes (e.g., when the canvas moves into the modal)
+      const canvasResizeObserver = new ResizeObserver(() => setCanvasSizeToCSS());
+      if (el.canvasWrapper) {
+        canvasResizeObserver.observe(el.canvasWrapper);
+      }
 
       function worldToScreenPx(xFt, yFt) {
         const s = view.pxPerFt * view.zoom;
@@ -4877,6 +4889,7 @@
         enabled: false,
         interactive: false,
         initialized: false,
+        cameraHeight: 160,
         lastMapVersion: -1,
         lastAssetVersion: -1,
         dirty: true,
@@ -4931,10 +4944,15 @@
             this.scene.add(this.assetGroup);
             this.scene.add(this.machineGroup);
 
-            // camera
-            this.camera = new THREE.PerspectiveCamera(55, 1, 0.1, 2400);
-            this.camera.position.set(90, 110, 90);
-            this.camera.lookAt(40, 0, 40);
+            // camera (orthographic so screen pixels map directly to world feet)
+            const rect = el.threeOverlay.getBoundingClientRect();
+            const s = view.pxPerFt * view.zoom || 1;
+            const halfW = Math.max(1, rect.width || 1) / s / 2;
+            const halfH = Math.max(1, rect.height || 1) / s / 2;
+            this.camera = new THREE.OrthographicCamera(-halfW, halfW, halfH, -halfH, -500, 2000);
+            this.camera.up.set(0, 0, 1);
+            this.camera.position.set(0, this.cameraHeight, 0);
+            this.camera.lookAt(0, 0, 0);
 
             // controls
             if (THREE.OrbitControls) {
@@ -4942,8 +4960,9 @@
               this.controls.enableDamping = true;
               this.controls.dampingFactor = 0.08;
               this.controls.screenSpacePanning = true;
+              this.controls.enableRotate = true;
               this.controls.enabled = false;
-              this.controls.target.set(40, 0, 40);
+              this.controls.target.set(0, 0, 0);
               this.controls.update();
             }
 
@@ -4975,6 +4994,9 @@
             this.setInteractive(false);
           }
 
+          this.resize();
+          this._syncCameraToView();
+
           this.dirty = true;
           redrawCanvas();
         },
@@ -4987,6 +5009,19 @@
           el.threeOverlay.classList.toggle("interactive", this.interactive);
           el.canvasWrapper.classList.toggle("three-interactive", this.interactive);
           el.btn3DView.classList.toggle("btn-active", this.interactive);
+
+          if (this.interactive && this.controls) {
+            const vw = this._computeViewWindow();
+            if (vw) {
+              this.controls.target.set(vw.centerX, 0, vw.centerY);
+              this.controls.update();
+            }
+          }
+
+          // When dropping back to overlay mode, snap the view back to map alignment
+          if (!this.interactive) {
+            this._syncCameraToView();
+          }
         },
 
         resize() {
@@ -4995,8 +5030,55 @@
           const w = Math.max(1, Math.floor(rect.width));
           const h = Math.max(1, Math.floor(rect.height));
           this.renderer.setSize(w, h, false);
-          this.camera.aspect = w / h;
+          this._syncCameraToView();
+        },
+
+        _computeViewWindow() {
+          const rect = el.threeOverlay.getBoundingClientRect();
+          const w = Math.max(1, rect.width || 1);
+          const h = Math.max(1, rect.height || 1);
+
+          // If the overlay is hidden (display:none), bail so we don't zero the camera
+          if (w <= 1 || h <= 1) return null;
+
+          const s = view.pxPerFt * view.zoom || 1;
+          const halfW = w / s / 2;
+          const halfH = h / s / 2;
+          const centerX = (w / 2 - view.offsetXPx) / s;
+          const centerY = (h / 2 - view.offsetYPx) / s;
+
+          return { w, h, halfW, halfH, centerX, centerY };
+        },
+
+        _syncCameraToView() {
+          if (!this.initialized || !this.camera) return;
+          const vw = this._computeViewWindow();
+          if (!vw) return;
+
+          const { w, h, halfW, halfH, centerX, centerY } = vw;
+
+          // Orthographic frustum matches the 2D map scaling (1ft -> view.pxPerFt px)
+          this.camera.left = -halfW;
+          this.camera.right = halfW;
+          this.camera.top = halfH;
+          this.camera.bottom = -halfH;
           this.camera.updateProjectionMatrix();
+
+          // Keep the camera centered on the same world window as the 2D canvas
+          if (!this.interactive) {
+            this.camera.position.set(centerX, this.cameraHeight, centerY);
+            this.camera.lookAt(centerX, 0, centerY);
+            this.camera.up.set(0, 0, 1);
+            if (this.controls) {
+              this.controls.target.set(centerX, 0, centerY);
+              this.controls.update();
+            }
+          }
+
+          // Renderer size must stay in lockstep with the DOM element
+          if (this.renderer) {
+            this.renderer.setSize(Math.max(1, Math.floor(w)), Math.max(1, Math.floor(h)), false);
+          }
         },
 
         requestRebuild() {
@@ -5005,7 +5087,12 @@
 
         _loop() {
           requestAnimationFrame(() => this._loop());
-          if (!this.enabled || !this.initialized) return;
+          if (!this.initialized) return;
+
+          // Keep the camera + renderer aligned to the 2D view even when hidden
+          this._syncCameraToView();
+
+          if (!this.enabled) return;
 
           // rebuild if needed
           if (this.dirty || this.lastMapVersion !== mapModel.version || this.lastAssetVersion !== assetLibrary.version) {
@@ -5240,6 +5327,13 @@
           bucket.position.set(0, 0, 0.7);
           bucketPivot.add(bucket);
 
+          const tipMarker = new THREE.Mesh(
+            new THREE.SphereGeometry(0.35, 14, 14),
+            new THREE.MeshStandardMaterial({ color: 0x48d597, emissive: new THREE.Color(0x48d597), emissiveIntensity: 0.9 })
+          );
+          tipMarker.position.set(0, 0, 1.1);
+          bucketPivot.add(tipMarker);
+
           // work envelope disc
           const reachGeom = new THREE.CylinderGeometry(machine.arm.reachMaxFt, machine.arm.reachMaxFt, 0.08, 64);
           const reachMat = new THREE.MeshStandardMaterial({ color: 0x3f82ff, transparent: true, opacity: 0.12, metalness: 0.0, roughness: 1 });
@@ -5248,7 +5342,7 @@
           g.add(reachDisk);
 
           // store refs
-          g.userData = { upper, boomPivot, stickPivot, bucketPivot, reachDisk };
+          g.userData = { upper, boomPivot, stickPivot, bucketPivot, reachDisk, boom, stick, bucket, tipMarker };
 
           return g;
         },
@@ -5260,7 +5354,8 @@
           this.machineGroup.visible = !!machine.active;
           if (!machine.active) return;
 
-          const { upper, boomPivot, stickPivot, bucketPivot, reachDisk } = this.machineGroup.userData || {};
+          const { upper, boomPivot, stickPivot, bucketPivot, reachDisk, boom, stick, bucket, tipMarker } =
+            this.machineGroup.userData || {};
 
           // position in world (x,z)
           this.machineGroup.position.set(machine.xFt, 0, machine.yFt);
@@ -5270,6 +5365,24 @@
 
           // upper swing (arm sweep)
           if (upper) upper.rotation.y = -machine.arm.swingRad;
+
+          // boom/stick lengths respond to the live reach (keeps 2D + 3D in lockstep)
+          const reach = Math.max(2, machine.arm.reachFt || 0);
+          const boomLen = reach * 0.62;
+          const stickLen = reach * 0.38;
+
+          if (boom) {
+            boom.scale.z = boomLen / 8;
+            boom.position.z = boomLen / 2;
+          }
+          if (stickPivot) stickPivot.position.z = boomLen;
+          if (stick) {
+            stick.scale.z = stickLen / 6;
+            stick.position.z = stickLen / 2;
+          }
+          if (bucketPivot) bucketPivot.position.z = stickLen;
+          if (bucket) bucket.position.z = Math.max(0.45, stickLen * 0.12);
+          if (tipMarker) tipMarker.position.z = Math.max(0.6, stickLen * 0.14 + 0.25);
 
           // boom/stick/bucket pitch (fake based on digging)
           const dig = machine.mode === "operating" ? 1 : 0;
@@ -5284,6 +5397,22 @@
           // reach disk opacity changes during operating
           if (reachDisk && reachDisk.material) {
             reachDisk.material.opacity = machine.mode === "operating" ? 0.18 : 0.08;
+            const reachScale = machine.arm.reachMaxFt ? machine.arm.reachFt / machine.arm.reachMaxFt : 1;
+            reachDisk.scale.setScalar(Math.max(0.25, Math.min(1.5, reachScale || 1)));
+          }
+
+          // bucket fill / tip highlights reflect live payload
+          const fillPct = clamp(machine.bucketFillPct, 0, 100) / 100;
+          const fillColor = fillPct > 0.66 ? 0xff375f : fillPct > 0.33 ? 0xffca5f : 0x48d597;
+          if (bucket && bucket.material) {
+            bucket.material.emissive = new THREE.Color(fillColor);
+            bucket.material.emissiveIntensity = 0.25 + fillPct * 0.9;
+            bucket.material.needsUpdate = true;
+          }
+          if (tipMarker && tipMarker.material) {
+            tipMarker.material.color = new THREE.Color(fillColor);
+            tipMarker.material.emissive = new THREE.Color(fillColor);
+            tipMarker.material.emissiveIntensity = 0.6 + fillPct * 0.6;
           }
         },
       };
@@ -5470,15 +5599,21 @@
         appendSimulationEvent(`3D view ${threeOverlay.interactive ? "interactive (orbit ON)" : "overlay (orbit OFF)"}.`, "info");
       });
 
-      // Pop-up map modal (moves the mapPanel DOM node)
+      // Pop-up map modal (moves the shared canvas wrapper into the modal)
       function openMapModal() {
         if (!el.mapModal) return;
         el.mapModal.classList.add("open");
         el.mapModal.setAttribute("aria-hidden", "false");
         document.body.classList.add("map-expanded");
 
-        // move panel into modal
-        el.mapModalBody.appendChild(el.mapPanel);
+        // move the live canvas wrapper (keeps all event listeners + 3D renderer intact)
+        if (el.canvasWrapper && el.canvasWrapper.parentElement) {
+          if (!mapCanvasHome.placeholder.parentNode) {
+            mapCanvasHome.parent = el.canvasWrapper.parentElement;
+            el.canvasWrapper.parentElement.insertBefore(mapCanvasHome.placeholder, el.canvasWrapper);
+          }
+          el.mapModalBody.appendChild(el.canvasWrapper);
+        }
 
         setTimeout(() => {
           setCanvasSizeToCSS();
@@ -5492,8 +5627,13 @@
         el.mapModal.setAttribute("aria-hidden", "true");
         document.body.classList.remove("map-expanded");
 
-        // move panel back to dock
-        el.mapPanelDock.appendChild(el.mapPanel);
+        // move canvas wrapper back to its home slot
+        if (mapCanvasHome.placeholder.parentNode) {
+          mapCanvasHome.placeholder.parentNode.replaceChild(el.canvasWrapper, mapCanvasHome.placeholder);
+          mapCanvasHome.placeholder = document.createComment("canvas-wrapper-home");
+        } else if (mapCanvasHome.parent) {
+          mapCanvasHome.parent.appendChild(el.canvasWrapper);
+        }
 
         setTimeout(() => {
           setCanvasSizeToCSS();
