@@ -305,7 +305,7 @@
     .metric-trend.neutral { color: var(--text-muted); }
 
     /* ===== Canvas wrapper & overlays ===== */
-    .canvas-wrapper {
+      .canvas-wrapper {
       position: relative;
       overflow: hidden;
       border-radius: var(--radius-md);
@@ -314,6 +314,73 @@
         radial-gradient(circle at top, rgba(255, 255, 255, 0.04), transparent 60%),
         linear-gradient(145deg, #141421, #050509);
       user-select: none;
+    }
+
+    .three-overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(circle at 10% 10%, rgba(63, 130, 255, 0.08), transparent 45%),
+        radial-gradient(circle at 85% 70%, rgba(255, 55, 95, 0.08), transparent 50%);
+      filter: saturate(1.1);
+      opacity: 0.0;
+      transition: opacity 180ms ease;
+      z-index: 0;
+    }
+
+    .three-overlay.active { opacity: 0.65; }
+
+    .three-flyout {
+      position: fixed;
+      inset: auto 18px 18px auto;
+      width: min(520px, 92vw);
+      max-height: 70vh;
+      background: rgba(8, 8, 14, 0.96);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 16px;
+      box-shadow: var(--shadow-card);
+      padding: 12px;
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 70;
+      backdrop-filter: blur(10px);
+    }
+
+    .three-flyout.active { display: flex; }
+
+    .three-flyout header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .three-flyout-controls {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .three-canvas-wrapper {
+      position: relative;
+      border-radius: 12px;
+      overflow: hidden;
+      background: radial-gradient(circle at 20% 20%, rgba(63, 130, 255, 0.1), transparent 40%),
+        radial-gradient(circle at 70% 70%, rgba(255, 55, 95, 0.12), transparent 45%),
+        linear-gradient(145deg, #0c0c15, #050509);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    #overlay3DCanvas {
+      width: 100%;
+      height: 260px;
+      display: block;
+    }
+
+    @media (max-width: 600px) {
+      #overlay3DCanvas { height: 200px; }
+      .three-flyout-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
 
     #siteCanvas {
@@ -1108,11 +1175,14 @@
               <button class="btn btn-sm btn-ghost" id="btnUndoShape" title="Undo last draw">Undo</button>
               <button class="btn btn-sm btn-ghost" id="btnDeleteSelected" title="Delete selected shape">Delete</button>
               <button class="btn btn-sm btn-ghost" id="btnResetView" title="Reset pan/zoom">Reset View</button>
+              <button class="btn btn-sm btn-ghost" id="btnToggle3D" title="Open inline 3D overlay preview">3D View</button>
+              <button class="btn btn-sm btn-ghost" id="btnPopup3D" title="Pop out a larger 3D view">Pop-up</button>
               <button class="btn btn-sm btn-danger" id="btnClearMap" title="Clear all shapes">Clear Map</button>
             </div>
           </div>
 
           <div class="canvas-wrapper">
+            <div id="inlineThreeOverlay" class="three-overlay" aria-hidden="true"></div>
             <canvas id="siteCanvas"></canvas>
 
             <div class="canvas-overlay-status" id="canvasStatus">
@@ -1171,12 +1241,12 @@
             </div>
 
             <div class="form-row">
-              <label for="overlayFile">Upload .OBJ / .PLY / Image</label>
-              <input id="overlayFile" type="file" accept=".obj,.ply,.png,.jpg,.jpeg,.webp,.bmp" />
+              <label for="overlayFile">Upload .GLB / .GLTF / .OBJ / .PLY / Image</label>
+              <input id="overlayFile" type="file" accept=".glb,.gltf,.obj,.ply,.png,.jpg,.jpeg,.webp,.bmp" />
             </div>
 
             <div class="overlay-hint" id="overlayHint" style="margin-bottom: 10px;">
-              Drop in a site photo (image) or a lightweight 3D model (.OBJ/.PLY). 3D is rendered as a <strong>top-down wireframe projection</strong>
+              Drop in a site photo (image) or a lightweight 3D model (.GLB/.GLTF/.OBJ/.PLY). 3D is rendered as a <strong>top-down wireframe projection</strong>
               so it can be aligned to the map (offline, no external libs).
             </div>
 
@@ -1283,6 +1353,55 @@
             <div class="overlay-summary" style="margin-top: 10px;">
               Tip: Select an overlay on the map (Select tool) to edit it here. For images, only width is required (height stays
               locked to aspect ratio). Models use <strong>Scale</strong> (ft / unit) for size.
+            </div>
+            
+            <div class="card-soft" style="margin-top: 10px;">
+              <div class="card-header" style="margin-bottom: 6px;">
+                <div class="card-title-row">
+                  <span class="card-title">3D Overlay &amp; Boom Preview</span>
+                  <span class="badge-secondary">GLTF / GLB / OBJ</span>
+                </div>
+                <span class="card-tagline">Inline orbit · Popup · XYZ alignment</span>
+              </div>
+
+              <div class="controls-grid">
+                <div class="form-row">
+                  <label for="overlayPosZ">Elevation (Z ft)</label>
+                  <input id="overlayPosZ" type="number" min="-500" max="500" step="0.5" value="0" />
+                </div>
+                <div class="form-row">
+                  <label for="threeYaw">Orbit Yaw (deg)</label>
+                  <input id="threeYaw" type="range" min="-180" max="180" step="1" value="35" />
+                </div>
+                <div class="form-row">
+                  <label for="threePitch">Orbit Pitch (deg)</label>
+                  <input id="threePitch" type="range" min="-85" max="85" step="1" value="-25" />
+                </div>
+                <div class="form-row">
+                  <label for="threeDistance">Orbit Distance (ft)</label>
+                  <input id="threeDistance" type="range" min="20" max="240" step="1" value="90" />
+                </div>
+                <div class="form-row">
+                  <label for="threeShowOverlay">Layers</label>
+                  <select id="threeShowOverlay">
+                    <option value="both">Overlay + Machine</option>
+                    <option value="overlay">Overlay only</option>
+                    <option value="machine">Machine only</option>
+                  </select>
+                </div>
+                <div class="form-row">
+                  <label for="threeLabels">Labels</label>
+                  <select id="threeLabels">
+                    <option value="1">Show labels</option>
+                    <option value="0">Hide labels</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="card-subtitle" style="margin-top: 8px;">
+                The 3D view orbits around the overlay anchor (X/Y/Z) and renders the excavator boom (turret + boom + arm + bucket)
+                in real time. Use <strong>3D View</strong> to dock inline or <strong>Pop-up</strong> for a larger view.
+              </div>
             </div>
           </div>
 
@@ -1598,6 +1717,38 @@
   <div class="footer-note">
     Omconsole web twin: map geometry → overlay alignment → task queue → live excavator simulation → training logs → operator feedback.
     Units: feet / inches.
+  </div>
+
+  <div id="threeFlyout" class="three-flyout" aria-live="polite">
+    <header>
+      <div>
+        <div class="card-title" style="letter-spacing: 0.08em;">3D Overlay Orbit</div>
+        <div class="card-subtitle">GLB / GLTF / OBJ projected with excavator boom logic</div>
+      </div>
+      <div class="hstack" style="gap: 6px;">
+        <button class="btn btn-sm btn-ghost" id="btnCenter3D">Center on overlay</button>
+        <button class="btn btn-sm btn-danger" id="btnClose3D">Close</button>
+      </div>
+    </header>
+
+    <div class="three-canvas-wrapper">
+      <canvas id="overlay3DCanvas"></canvas>
+    </div>
+
+    <div class="three-flyout-controls">
+      <div class="form-row">
+        <label for="threeYawQuick">Yaw</label>
+        <input id="threeYawQuick" type="number" min="-180" max="180" step="1" value="35" />
+      </div>
+      <div class="form-row">
+        <label for="threePitchQuick">Pitch</label>
+        <input id="threePitchQuick" type="number" min="-85" max="85" step="1" value="-25" />
+      </div>
+      <div class="form-row">
+        <label for="threeDistanceQuick">Distance</label>
+        <input id="threeDistanceQuick" type="number" min="20" max="240" step="1" value="90" />
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1985,6 +2136,7 @@
 
     posXFt: 40,
     posYFt: 40,
+    posZFt: 0,
 
     // Image overlay
     img: {
@@ -2008,8 +2160,25 @@
       preRotate: { xDeg: 0, yDeg: 0, zDeg: 0 },
       centerU: 0,
       centerV: 0,
-      bbox: null
+      bbox: null,
+      bbox3D: null,
+      center3D: { x: 0, y: 0, z: 0 }
     }
+  };
+
+  const threeView = {
+    enabled: false,
+    popup: false,
+    yawDeg: 35,
+    pitchDeg: -25,
+    distanceFt: 90,
+    show: "both", // overlay | machine | both
+    labels: true,
+    canvas: null,
+    ctx: null,
+    rafId: null,
+    orbiting: false,
+    orbitStart: null
   };
 
   // ------------------------------
@@ -2071,6 +2240,7 @@
     overlayRotationLabel: document.getElementById("overlayRotationLabel"),
     overlayPosX: document.getElementById("overlayPosX"),
     overlayPosY: document.getElementById("overlayPosY"),
+    overlayPosZ: document.getElementById("overlayPosZ"),
 
     overlayControlsImage: document.getElementById("overlayControlsImage"),
     overlayImgWidthFt: document.getElementById("overlayImgWidthFt"),
@@ -2085,6 +2255,23 @@
     btnOverlayFit: document.getElementById("btnOverlayFit"),
     btnOverlayCenter: document.getElementById("btnOverlayCenter"),
     btnOverlayClear: document.getElementById("btnOverlayClear"),
+
+    // 3D view controls
+    inlineThreeOverlay: document.getElementById("inlineThreeOverlay"),
+    btnToggle3D: document.getElementById("btnToggle3D"),
+    btnPopup3D: document.getElementById("btnPopup3D"),
+    threeFlyout: document.getElementById("threeFlyout"),
+    overlay3DCanvas: document.getElementById("overlay3DCanvas"),
+    threeYaw: document.getElementById("threeYaw"),
+    threePitch: document.getElementById("threePitch"),
+    threeDistance: document.getElementById("threeDistance"),
+    threeShowOverlay: document.getElementById("threeShowOverlay"),
+    threeLabels: document.getElementById("threeLabels"),
+    threeYawQuick: document.getElementById("threeYawQuick"),
+    threePitchQuick: document.getElementById("threePitchQuick"),
+    threeDistanceQuick: document.getElementById("threeDistanceQuick"),
+    btnCenter3D: document.getElementById("btnCenter3D"),
+    btnClose3D: document.getElementById("btnClose3D"),
 
     // machine telemetry
     machineTelemetryBadge: document.getElementById("machineTelemetryBadge"),
@@ -3006,6 +3193,236 @@
     }
   }
 
+  function getOverlayWorldPoints3D() {
+    if (overlay.type !== "model" || !overlay.model.vertices.length) return [];
+    const pts = [];
+    const scale = overlay.model.scaleFtPerUnit;
+    const rot = degToRad(overlay.rotationDeg);
+    const cos = Math.cos(rot), sin = Math.sin(rot);
+    const flipX = overlay.model.flipX ? -1 : 1;
+    const flipY = overlay.model.flipY ? -1 : 1;
+    const center = overlay.model.center3D || { x: 0, y: 0, z: 0 };
+
+    for (const v of overlay.model.vertices) {
+      const x0 = (v.x - center.x) * scale * flipX;
+      const y0 = (v.y - center.y) * scale * flipY;
+      const z0 = (v.z - center.z) * scale;
+      const x = x0 * cos - y0 * sin + overlay.posXFt;
+      const y = x0 * sin + y0 * cos + overlay.posYFt;
+      const z = z0 + overlay.posZFt;
+      pts.push({ x, y, z });
+    }
+    return pts;
+  }
+
+  function computeMachineJoints3D() {
+    const base = { x: machine.xFt, y: machine.yFt, z: 0 };
+    const turret = { x: base.x, y: base.y, z: 3 };
+
+    const heading = machine.turretRad || 0;
+    const dir = { x: Math.cos(heading), y: Math.sin(heading) };
+
+    const boomLen = 12;
+    const boomAngle = lerp(degToRad(10), degToRad(75), clamp(machine.boomLift, 0, 1));
+    const boomEnd = {
+      x: turret.x + dir.x * boomLen * Math.cos(boomAngle),
+      y: turret.y + dir.y * boomLen * Math.cos(boomAngle),
+      z: turret.z + boomLen * Math.sin(boomAngle)
+    };
+
+    const armLen = clamp(machine.reachFt, 6, 24);
+    const armAngle = lerp(degToRad(5), degToRad(70), clamp((machine.bucketTiltDeg + 45) / 90, 0, 1));
+    const armEnd = {
+      x: boomEnd.x + dir.x * armLen * Math.cos(armAngle),
+      y: boomEnd.y + dir.y * armLen * Math.cos(armAngle),
+      z: boomEnd.z + armLen * Math.sin(armAngle)
+    };
+
+    const bucketLen = 3.2;
+    const curlRad = degToRad(machine.bucketCurlDeg || 0);
+    const bucketEnd = {
+      x: armEnd.x + dir.x * bucketLen * Math.cos(curlRad),
+      y: armEnd.y + dir.y * bucketLen * Math.cos(curlRad),
+      z: armEnd.z + bucketLen * Math.sin(curlRad)
+    };
+
+    return { base, turret, boomEnd, armEnd, bucketEnd };
+  }
+
+  function ensureThreeCanvas() {
+    threeView.canvas = el.overlay3DCanvas;
+    if (!threeView.canvas) return;
+    threeView.ctx = threeView.canvas.getContext("2d");
+    const rect = threeView.canvas.getBoundingClientRect();
+    threeView.canvas.width = rect.width * window.devicePixelRatio;
+    threeView.canvas.height = rect.height * window.devicePixelRatio;
+  }
+
+  function requestThreeRender() {
+    if (!threeView.enabled) return;
+    if (!threeView.rafId) {
+      threeView.rafId = requestAnimationFrame(drawThreeScene);
+    }
+  }
+
+  function setThreeActive(on, popup = false) {
+    threeView.enabled = !!on;
+    threeView.popup = popup;
+    el.inlineThreeOverlay.classList.toggle("active", on && !popup);
+    el.threeFlyout.classList.toggle("active", on && popup);
+    if (on) {
+      ensureThreeCanvas();
+      requestThreeRender();
+    } else if (threeView.rafId) {
+      cancelAnimationFrame(threeView.rafId);
+      threeView.rafId = null;
+    }
+  }
+
+  function syncThreeInputs() {
+    el.threeYaw.value = String(threeView.yawDeg);
+    el.threePitch.value = String(threeView.pitchDeg);
+    el.threeDistance.value = String(threeView.distanceFt);
+    el.threeYawQuick.value = String(threeView.yawDeg);
+    el.threePitchQuick.value = String(threeView.pitchDeg);
+    el.threeDistanceQuick.value = String(threeView.distanceFt);
+    el.threeShowOverlay.value = threeView.show;
+    el.threeLabels.value = threeView.labels ? "1" : "0";
+  }
+
+  function drawThreeScene() {
+    threeView.rafId = null;
+    if (!threeView.enabled) return;
+    ensureThreeCanvas();
+    const ctx = threeView.ctx;
+    if (!ctx || !threeView.canvas) return;
+
+    const w = threeView.canvas.width;
+    const h = threeView.canvas.height;
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.clearRect(0,0,w,h);
+    ctx.fillStyle = "rgba(10,10,18,0.96)";
+    ctx.fillRect(0,0,w,h);
+
+    const target = { x: overlay.posXFt, y: overlay.posYFt, z: overlay.posZFt };
+    const cam = buildCamera(target);
+
+    drawGrid3D(ctx, cam, w, h);
+
+    if (threeView.show !== "machine") drawOverlay3D(ctx, cam, w, h);
+    if (threeView.show !== "overlay") drawMachine3D(ctx, cam, w, h);
+
+    if (threeView.labels) drawLabels3D(ctx, cam, w, h);
+
+    threeView.rafId = requestAnimationFrame(drawThreeScene);
+  }
+
+  function buildCamera(target) {
+    const yaw = degToRad(threeView.yawDeg);
+    const pitch = degToRad(threeView.pitchDeg);
+    const dist = Math.max(10, threeView.distanceFt);
+    const pos = {
+      x: target.x + dist * Math.cos(pitch) * Math.cos(yaw),
+      y: target.y + dist * Math.cos(pitch) * Math.sin(yaw),
+      z: target.z + dist * Math.sin(pitch)
+    };
+    return { pos, yaw, pitch, target };
+  }
+
+  function project3D(pt, cam, w, h) {
+    const dx = pt.x - cam.pos.x;
+    const dy = pt.y - cam.pos.y;
+    const dz = pt.z - cam.pos.z;
+
+    const cosy = Math.cos(-cam.yaw), siny = Math.sin(-cam.yaw);
+    const rx = dx * cosy - dy * siny;
+    const ry = dx * siny + dy * cosy;
+    const cosp = Math.cos(-cam.pitch), sinp = Math.sin(-cam.pitch);
+    const ry2 = ry * cosp - dz * sinp;
+    const rz2 = ry * sinp + dz * cosp;
+
+    const f = Math.min(w, h) * 0.7;
+    const denom = Math.max(1, rz2 + 1e-3);
+    const sx = w/2 + (rx / denom) * f;
+    const sy = h/2 - (ry2 / denom) * f;
+    return { x: sx, y: sy, z: rz2 };
+  }
+
+  function drawGrid3D(ctx, cam, w, h) {
+    const size = 200;
+    ctx.strokeStyle = "rgba(255,255,255,0.06)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = -size; i <= size; i += 10) {
+      const a = project3D({ x: i, y: -size, z: 0 }, cam, w, h);
+      const b = project3D({ x: i, y: size, z: 0 }, cam, w, h);
+      ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+      const c = project3D({ x: -size, y: i, z: 0 }, cam, w, h);
+      const d = project3D({ x: size, y: i, z: 0 }, cam, w, h);
+      ctx.moveTo(c.x, c.y); ctx.lineTo(d.x, d.y);
+    }
+    ctx.stroke();
+  }
+
+  function drawOverlay3D(ctx, cam, w, h) {
+    if (overlay.type !== "model" || overlay.model.edges.length === 0) return;
+    const verts = getOverlayWorldPoints3D();
+    const maxEdges = 16000;
+    const step = overlay.model.edges.length > maxEdges ? Math.ceil(overlay.model.edges.length / maxEdges) : 1;
+
+    ctx.strokeStyle = "rgba(255,255,255,0.9)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let i = 0; i < overlay.model.edges.length; i += step) {
+      const [a, b] = overlay.model.edges[i];
+      const pa = project3D(verts[a], cam, w, h);
+      const pb = project3D(verts[b], cam, w, h);
+      ctx.moveTo(pa.x, pa.y);
+      ctx.lineTo(pb.x, pb.y);
+    }
+    ctx.stroke();
+  }
+
+  function drawMachine3D(ctx, cam, w, h) {
+    const joints = computeMachineJoints3D();
+    const pts = [joints.base, joints.turret, joints.boomEnd, joints.armEnd, joints.bucketEnd].map(p => project3D(p, cam, w, h));
+    ctx.strokeStyle = "#ffca5f";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    for (let i = 0; i < pts.length - 1; i++) {
+      ctx.moveTo(pts[i].x, pts[i].y);
+      ctx.lineTo(pts[i+1].x, pts[i+1].y);
+    }
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(255,202,95,0.9)";
+    pts.forEach(p => {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 6, 0, Math.PI*2);
+      ctx.fill();
+    });
+  }
+
+  function drawLabels3D(ctx, cam, w, h) {
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.font = `${14 * window.devicePixelRatio}px var(--font-mono)`;
+    const overlayLabel = project3D({ x: overlay.posXFt, y: overlay.posYFt, z: overlay.posZFt }, cam, w, h);
+    ctx.fillText("Overlay anchor", overlayLabel.x + 6, overlayLabel.y - 6);
+
+    const joints = computeMachineJoints3D();
+    const labels = [
+      { p: joints.base, t: "Tracks" },
+      { p: joints.turret, t: "Turret" },
+      { p: joints.boomEnd, t: "Boom" },
+      { p: joints.armEnd, t: "Arm" },
+      { p: joints.bucketEnd, t: "Bucket" }
+    ];
+    labels.forEach(l => {
+      const pt = project3D(l.p, cam, w, h);
+      ctx.fillText(l.t, pt.x + 6, pt.y - 6);
+    });
+  }
+
   // ------------------------------
   // Tooling: Auto tool selection based on main task type
   // ------------------------------
@@ -3683,7 +4100,10 @@
     overlay.model.centerU = 0;
     overlay.model.centerV = 0;
     overlay.model.bbox = null;
+    overlay.model.bbox3D = null;
+    overlay.model.center3D = { x: 0, y: 0, z: 0 };
 
+    overlay.posZFt = 0;
     setOverlayEnabled(false);
     showOverlayControls();
     renderOverlayBadge();
@@ -3735,6 +4155,8 @@
           }
           el.overlayPosX.value = String(overlay.posXFt);
           el.overlayPosY.value = String(overlay.posYFt);
+          overlay.posZFt = 0;
+          el.overlayPosZ.value = "0";
 
           overlay.rotationDeg = 0;
           el.overlayRotation.value = "0";
@@ -3750,6 +4172,50 @@
           alert("Failed to load image overlay.");
         };
         img.src = url;
+        return;
+      }
+
+      if (ext === "glb" || ext === "gltf") {
+        const parsed = await parseGLTFOrGLB(file, ext);
+
+        overlay.type = "model";
+        overlay.name = file.name;
+        overlay.model.format = parsed.format || ext.toUpperCase();
+        overlay.model.vertices = parsed.vertices || [];
+        overlay.model.edges = parsed.edges || [];
+
+        computeModelBounds3D();
+        rebuildModelProjection();
+
+        const shapesBB = mapModel.getBoundingBoxFt();
+        const targetWft = shapesBB ? Math.max(40, Math.min(240, shapesBB.w || 120)) : 120;
+        const modelBB3D = overlay.model.bbox3D;
+        const wUnits = modelBB3D ? Math.max(1e-6, modelBB3D.maxX - modelBB3D.minX) : 1;
+        overlay.model.scaleFtPerUnit = targetWft / wUnits;
+
+        el.overlayModelScale.value = String(overlay.model.scaleFtPerUnit.toFixed(3));
+
+        if (shapesBB) {
+          overlay.posXFt = shapesBB.cx;
+          overlay.posYFt = shapesBB.cy;
+        } else {
+          overlay.posXFt = 40;
+          overlay.posYFt = 40;
+        }
+        overlay.posZFt = 0;
+        el.overlayPosX.value = String(overlay.posXFt);
+        el.overlayPosY.value = String(overlay.posYFt);
+        el.overlayPosZ.value = "0";
+
+        overlay.rotationDeg = 0;
+        el.overlayRotation.value = "0";
+        el.overlayRotationLabel.textContent = "0°";
+
+        showOverlayControls();
+        setOverlayEnabled(true);
+        renderOverlayBadge();
+        appendSimulationEvent(`Overlay loaded: ${overlay.model.format} "${file.name}" (${overlay.model.vertices.length} verts)`, "ok");
+        redrawCanvas();
         return;
       }
 
@@ -3771,6 +4237,8 @@
           overlay.model.vertices = parsed.vertices;
           overlay.model.edges = parsed.edges;
         }
+
+        computeModelBounds3D();
 
         // projection defaults
         overlay.model.projPlane = el.overlayProjection.value || "XZ";
@@ -3799,6 +4267,8 @@
         }
         el.overlayPosX.value = String(overlay.posXFt);
         el.overlayPosY.value = String(overlay.posYFt);
+        overlay.posZFt = 0;
+        el.overlayPosZ.value = "0";
 
         overlay.rotationDeg = 0;
         el.overlayRotation.value = "0";
@@ -3922,6 +4392,224 @@
     return { vertices, edges };
   }
 
+  async function parseGLTFOrGLB(file, ext) {
+    if (ext === "gltf") {
+      const text = await file.text();
+      const json = JSON.parse(text);
+      const buffers = await loadGLTFBuffers(json, file);
+      return extractGLTFGeometry(json, buffers);
+    }
+
+    // GLB binary
+    const ab = await file.arrayBuffer();
+    const dv = new DataView(ab);
+    const magic = dv.getUint32(0, true);
+    if (magic !== 0x46546c67) throw new Error("Invalid GLB magic");
+    const version = dv.getUint32(4, true);
+    if (version < 2) throw new Error("Unsupported GLB version");
+    const length = dv.getUint32(8, true);
+    let offset = 12;
+    let jsonChunk = null;
+    let binChunk = null;
+    while (offset + 8 <= length) {
+      const chunkLen = dv.getUint32(offset, true); offset += 4;
+      const chunkType = dv.getUint32(offset, true); offset += 4;
+      const chunkData = ab.slice(offset, offset + chunkLen);
+      offset += chunkLen;
+      if (chunkType === 0x4E4F534A) { jsonChunk = chunkData; }
+      if (chunkType === 0x004E4942) { binChunk = chunkData; }
+    }
+    if (!jsonChunk) throw new Error("GLB JSON chunk missing");
+    const jsonText = new TextDecoder().decode(jsonChunk);
+    const json = JSON.parse(jsonText);
+    const buffers = [];
+    if (binChunk) buffers.push(binChunk);
+    return extractGLTFGeometry(json, buffers);
+  }
+
+  async function loadGLTFBuffers(gltf, sourceFile) {
+    const buffers = [];
+    if (!gltf.buffers) return buffers;
+
+    for (let i = 0; i < gltf.buffers.length; i++) {
+      const buf = gltf.buffers[i];
+      if (!buf || !buf.uri) continue;
+      if (buf.uri.startsWith("data:")) {
+        const b64 = buf.uri.split(",")[1] || "";
+        const binary = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+        buffers.push(binary.buffer);
+      } else {
+        // attempt to resolve relative to source file (same folder) using File API
+        const fileName = buf.uri.split("/").pop();
+        if (fileName && sourceFile?.webkitRelativePath) {
+          // not supported here; skip
+        }
+      }
+    }
+
+    return buffers;
+  }
+
+  function extractGLTFGeometry(gltf, buffers) {
+    const accessors = gltf.accessors || [];
+    const bufferViews = gltf.bufferViews || [];
+    const nodes = gltf.nodes || [];
+    const meshes = gltf.meshes || [];
+
+    const worldNodes = [];
+    const root = gltf.scenes?.[gltf.scene || 0]?.nodes || gltf.nodes?.map((_, i) => i) || [];
+
+    function getNodeTransform(n) {
+      const node = nodes[n] || {};
+      if (node.matrix && node.matrix.length === 16) return node.matrix.slice();
+      const t = node.translation || [0,0,0];
+      const r = node.rotation || [0,0,0,1];
+      const s = node.scale || [1,1,1];
+      return composeTRS(t, r, s);
+    }
+
+    function walk(nodeIdx, parentMat) {
+      const matLocal = getNodeTransform(nodeIdx);
+      const worldMat = parentMat ? mulMat4(parentMat, matLocal) : matLocal;
+      worldNodes[nodeIdx] = worldMat;
+      const children = nodes[nodeIdx]?.children || [];
+      for (const c of children) walk(c, worldMat);
+    }
+
+    for (const n of root) walk(n, makeIdentity4());
+
+    const positions = [];
+    const edgesSet = new Set();
+
+    const POSITION = 34962;
+    const INDEX_DTYPES = new Map([
+      [5121, Uint8Array],
+      [5123, Uint16Array],
+      [5125, Uint32Array]
+    ]);
+
+    function readAccessor(idx) {
+      const acc = accessors[idx];
+      if (!acc) return null;
+      const bv = bufferViews[acc.bufferView];
+      if (!bv) return null;
+      const buffer = buffers[bv.buffer || 0];
+      if (!buffer) return null;
+      const byteOffset = (bv.byteOffset || 0) + (acc.byteOffset || 0);
+      const len = acc.count;
+      const type = acc.type;
+      const compType = acc.componentType;
+
+      let TypedArray = Float32Array;
+      if (INDEX_DTYPES.has(compType)) TypedArray = INDEX_DTYPES.get(compType);
+
+      const compCount = type === "VEC3" ? 3 : type === "VEC2" ? 2 : type === "VEC4" ? 4 : 3;
+      const view = new TypedArray(buffer, byteOffset, len * compCount);
+      return { view, compCount };
+    }
+
+    for (let n = 0; n < nodes.length; n++) {
+      const node = nodes[n];
+      if (node?.mesh == null) continue;
+      const mesh = meshes[node.mesh];
+      if (!mesh) continue;
+      const worldMat = worldNodes[n] || makeIdentity4();
+
+      for (const prim of mesh.primitives || []) {
+        const posAccessor = prim.attributes?.POSITION;
+        if (posAccessor == null) continue;
+        const posData = readAccessor(posAccessor);
+        if (!posData) continue;
+
+        const baseIndex = positions.length;
+        const view = posData.view;
+        for (let i = 0; i < view.length; i += posData.compCount) {
+          const x = view[i];
+          const y = view[i + 1];
+          const z = view[i + 2] || 0;
+          const p = mulVec4(worldMat, [x, y, z, 1]);
+          positions.push({ x: p[0], y: p[1], z: p[2] });
+        }
+
+        const idxAccessor = prim.indices;
+        if (idxAccessor != null) {
+          const idxData = readAccessor(idxAccessor);
+          if (idxData) {
+            const arr = idxData.view;
+            for (let k = 0; k + 2 < arr.length; k += 3) {
+              const a = baseIndex + arr[k];
+              const b = baseIndex + arr[k + 1];
+              const c = baseIndex + arr[k + 2];
+              addEdge(edgesSet, a, b);
+              addEdge(edgesSet, b, c);
+              addEdge(edgesSet, c, a);
+            }
+          }
+        } else if (posData) {
+          for (let k = 0; k + 2 < posData.view.length / posData.compCount; k += 3) {
+            const a = baseIndex + k;
+            const b = baseIndex + k + 1;
+            const c = baseIndex + k + 2;
+            addEdge(edgesSet, a, b);
+            addEdge(edgesSet, b, c);
+            addEdge(edgesSet, c, a);
+          }
+        }
+      }
+    }
+
+    const edges = Array.from(edgesSet).map(key => key.split(",").map(v => parseInt(v, 10)));
+    return { vertices: positions, edges, format: "GLTF" };
+  }
+
+  function addEdge(set, a, b) {
+    if (a === b) return;
+    const key = a < b ? `${a},${b}` : `${b},${a}`;
+    set.add(key);
+  }
+
+  function composeTRS(t, r, s) {
+    const [x, y, z, w] = r;
+    const xx = x * x, yy = y * y, zz = z * z;
+    const xy = x * y, xz = x * z, yz = y * z;
+    const wx = w * x, wy = w * y, wz = w * z;
+
+    return [
+      (1 - 2 * (yy + zz)) * s[0], 2 * (xy - wz) * s[0], 2 * (xz + wy) * s[0], 0,
+      2 * (xy + wz) * s[1], (1 - 2 * (xx + zz)) * s[1], 2 * (yz - wx) * s[1], 0,
+      2 * (xz - wy) * s[2], 2 * (yz + wx) * s[2], (1 - 2 * (xx + yy)) * s[2], 0,
+      t[0], t[1], t[2], 1
+    ];
+  }
+
+  function mulMat4(a, b) {
+    const out = new Array(16).fill(0);
+    for (let r = 0; r < 4; r++) {
+      for (let c = 0; c < 4; c++) {
+        out[r*4 + c] =
+          a[r*4 + 0] * b[c + 0] +
+          a[r*4 + 1] * b[c + 4] +
+          a[r*4 + 2] * b[c + 8] +
+          a[r*4 + 3] * b[c + 12];
+      }
+    }
+    return out;
+  }
+
+  function mulVec4(m, v) {
+    const x = v[0], y = v[1], z = v[2], w = v[3];
+    return [
+      m[0]*x + m[4]*y + m[8]*z + m[12]*w,
+      m[1]*x + m[5]*y + m[9]*z + m[13]*w,
+      m[2]*x + m[6]*y + m[10]*z + m[14]*w,
+      m[3]*x + m[7]*y + m[11]*z + m[15]*w
+    ];
+  }
+
+  function makeIdentity4() {
+    return [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
+  }
+
   function rebuildModelProjection() {
     const plane = overlay.model.projPlane;
     const verts = overlay.model.vertices;
@@ -3951,6 +4639,25 @@
 
     overlay.model.centerU = (minU + maxU) / 2;
     overlay.model.centerV = (minV + maxV) / 2;
+  }
+
+  function computeModelBounds3D() {
+    const verts = overlay.model.vertices || [];
+    if (!verts.length) {
+      overlay.model.bbox3D = null;
+      overlay.model.center3D = { x: 0, y: 0, z: 0 };
+      return;
+    }
+
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    for (const v of verts) {
+      minX = Math.min(minX, v.x); maxX = Math.max(maxX, v.x);
+      minY = Math.min(minY, v.y); maxY = Math.max(maxY, v.y);
+      minZ = Math.min(minZ, v.z); maxZ = Math.max(maxZ, v.z);
+    }
+    overlay.model.bbox3D = { minX, minY, minZ, maxX, maxY, maxZ };
+    overlay.model.center3D = { x: (minX + maxX)/2, y: (minY + maxY)/2, z: (minZ + maxZ)/2 };
   }
 
   function fitOverlayToShapes() {
@@ -4952,17 +5659,25 @@
   el.overlayRotation.addEventListener("input", () => {
     overlay.rotationDeg = parseInt(el.overlayRotation.value, 10) || 0;
     el.overlayRotationLabel.textContent = `${overlay.rotationDeg}°`;
+    requestThreeRender();
     redrawCanvas();
   });
 
   el.overlayPosX.addEventListener("change", () => {
     overlay.posXFt = parseFloat(el.overlayPosX.value) || overlay.posXFt;
+    requestThreeRender();
     redrawCanvas();
   });
 
   el.overlayPosY.addEventListener("change", () => {
     overlay.posYFt = parseFloat(el.overlayPosY.value) || overlay.posYFt;
+    requestThreeRender();
     redrawCanvas();
+  });
+
+  el.overlayPosZ.addEventListener("change", () => {
+    overlay.posZFt = parseFloat(el.overlayPosZ.value) || overlay.posZFt;
+    requestThreeRender();
   });
 
   el.overlayImgWidthFt.addEventListener("change", () => {
@@ -4977,28 +5692,80 @@
 
   el.overlayModelScale.addEventListener("change", () => {
     overlay.model.scaleFtPerUnit = Math.max(0.0001, parseFloat(el.overlayModelScale.value) || overlay.model.scaleFtPerUnit);
+    requestThreeRender();
     redrawCanvas();
   });
 
   el.overlayProjection.addEventListener("change", () => {
     overlay.model.projPlane = el.overlayProjection.value || "XZ";
     rebuildModelProjection();
+    requestThreeRender();
     redrawCanvas();
   });
 
   el.overlayFlipX.addEventListener("change", () => {
     overlay.model.flipX = el.overlayFlipX.value === "1";
+    requestThreeRender();
     redrawCanvas();
   });
 
   el.overlayFlipY.addEventListener("change", () => {
     overlay.model.flipY = el.overlayFlipY.value === "1";
+    requestThreeRender();
     redrawCanvas();
   });
 
   el.btnOverlayFit.addEventListener("click", () => fitOverlayToShapes());
   el.btnOverlayCenter.addEventListener("click", () => centerOverlayOnShapes());
   el.btnOverlayClear.addEventListener("click", () => clearOverlay());
+
+  function bindThreeControl(input, key) {
+    input?.addEventListener("input", () => {
+      const val = parseFloat(input.value);
+      if (key === "yawDeg" || key === "pitchDeg") threeView[key] = val || 0;
+      if (key === "distanceFt") threeView[key] = Math.max(10, val || threeView[key]);
+      syncThreeInputs();
+      setThreeActive(true, threeView.popup);
+    });
+  }
+
+  bindThreeControl(el.threeYaw, "yawDeg");
+  bindThreeControl(el.threePitch, "pitchDeg");
+  bindThreeControl(el.threeDistance, "distanceFt");
+  bindThreeControl(el.threeYawQuick, "yawDeg");
+  bindThreeControl(el.threePitchQuick, "pitchDeg");
+  bindThreeControl(el.threeDistanceQuick, "distanceFt");
+
+  el.threeShowOverlay.addEventListener("change", () => {
+    threeView.show = el.threeShowOverlay.value || "both";
+    setThreeActive(true, threeView.popup);
+  });
+
+  el.threeLabels.addEventListener("change", () => {
+    threeView.labels = el.threeLabels.value === "1";
+    setThreeActive(true, threeView.popup);
+  });
+
+  el.btnToggle3D.addEventListener("click", () => {
+    const activateInline = !(threeView.enabled && !threeView.popup);
+    setThreeActive(activateInline, false);
+    syncThreeInputs();
+  });
+
+  el.btnPopup3D.addEventListener("click", () => {
+    setThreeActive(true, true);
+    syncThreeInputs();
+  });
+
+  el.btnClose3D.addEventListener("click", () => setThreeActive(false, false));
+
+  el.btnCenter3D.addEventListener("click", () => {
+    threeView.yawDeg = 35;
+    threeView.pitchDeg = -25;
+    threeView.distanceFt = 90;
+    syncThreeInputs();
+    setThreeActive(true, threeView.popup);
+  });
 
   // Drag & drop overlay onto the overlay card
   const overlayCard = document.getElementById("overlayCard");
@@ -5042,6 +5809,8 @@
     el.overlayRotationLabel.textContent = `${overlay.rotationDeg}°`;
     overlay.posXFt = parseFloat(el.overlayPosX.value) || 40;
     overlay.posYFt = parseFloat(el.overlayPosY.value) || 40;
+    overlay.posZFt = parseFloat(el.overlayPosZ.value) || 0;
+    syncThreeInputs();
     setOverlayEnabled(false);
     showOverlayControls();
     renderOverlayBadge();
