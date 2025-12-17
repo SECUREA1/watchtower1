@@ -883,6 +883,55 @@
       color: var(--text-soft);
     }
 
+    .overlay-meta-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+      padding: 8px 10px;
+      border-radius: 12px;
+      background: rgba(7, 7, 15, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      margin-bottom: 8px;
+    }
+
+    .overlay-meta-label {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      font-size: 11px;
+      color: var(--text-soft);
+      line-height: 1.2;
+    }
+
+    .overlay-meta-label strong { color: var(--text-main); }
+
+    .overlay-selected-pill {
+      border-radius: var(--radius-pill);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      padding: 6px 12px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--text-main);
+      white-space: nowrap;
+      background: rgba(5, 5, 12, 0.9);
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .overlay-summary {
+      margin-top: 8px;
+      padding: 8px 10px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      background: rgba(7, 7, 15, 0.65);
+      font-size: 11px;
+      color: var(--text-soft);
+      line-height: 1.5;
+    }
+
     .kv-grid {
       display: grid;
       grid-template-columns: 1fr auto;
@@ -1102,10 +1151,23 @@
           <div class="card-soft" id="overlayCard">
             <div class="card-header" style="margin-bottom: 6px;">
               <div class="card-title-row">
-                <span class="card-title">3D / Image Overlay</span>
+                <span class="card-title">3D / Image Overlays</span>
                 <span class="badge-secondary" id="overlayBadge">No overlay</span>
               </div>
               <span class="card-tagline">Upload · Position · Rotate · Opacity</span>
+            </div>
+
+            <div class="overlay-meta-row">
+              <div class="overlay-meta-label">
+                <strong>3D layers · Image overlays</strong>
+                <span>Upload · Place · Scale (ft) · Rotate · Layer</span>
+              </div>
+              <div class="overlay-selected-pill" id="overlaySelectedSummary">No overlay loaded</div>
+            </div>
+
+            <div class="overlay-summary">
+              Workflow: Upload → choose asset → set width/scale → click on the map to drop. Use <strong>Select</strong> to move;
+              use the panel below to fine-tune.
             </div>
 
             <div class="form-row">
@@ -1216,6 +1278,11 @@
               <button class="btn btn-sm btn-ghost" id="btnOverlayFit">Fit to shapes</button>
               <button class="btn btn-sm btn-ghost" id="btnOverlayCenter">Center on shapes</button>
               <button class="btn btn-sm btn-danger" id="btnOverlayClear">Clear overlay</button>
+            </div>
+
+            <div class="overlay-summary" style="margin-top: 10px;">
+              Tip: Select an overlay on the map (Select tool) to edit it here. For images, only width is required (height stays
+              locked to aspect ratio). Models use <strong>Scale</strong> (ft / unit) for size.
             </div>
           </div>
 
@@ -1911,6 +1978,11 @@
     layer: "below", // "below" | "above"
     rotationDeg: 0,
 
+    render: {
+      wireColor: "rgba(255,255,255,0.85)",
+      wireWidth: 1
+    },
+
     posXFt: 40,
     posYFt: 40,
 
@@ -1933,6 +2005,7 @@
       scaleFtPerUnit: 1,
       flipX: false,
       flipY: false,
+      preRotate: { xDeg: 0, yDeg: 0, zDeg: 0 },
       centerU: 0,
       centerV: 0,
       bbox: null
@@ -1989,6 +2062,7 @@
     // overlay controls
     overlayFile: document.getElementById("overlayFile"),
     overlayBadge: document.getElementById("overlayBadge"),
+    overlaySelectedSummary: document.getElementById("overlaySelectedSummary"),
     overlayToggle: document.getElementById("overlayToggle"),
     overlayLayer: document.getElementById("overlayLayer"),
     overlayOpacity: document.getElementById("overlayOpacity"),
@@ -2386,10 +2460,17 @@
   function renderOverlayBadge() {
     if (!overlay.type) {
       el.overlayBadge.textContent = "No overlay";
+      if (el.overlaySelectedSummary) el.overlaySelectedSummary.textContent = "No overlay loaded";
       return;
     }
     const on = overlay.enabled ? "ON" : "OFF";
     el.overlayBadge.textContent = `${overlay.type.toUpperCase()} · ${on}`;
+
+    if (el.overlaySelectedSummary) {
+      const typeLabel = overlay.type === "model" ? "MODEL" : "IMAGE";
+      const name = overlay.name || "Untitled";
+      el.overlaySelectedSummary.textContent = `${typeLabel} · ${name}`;
+    }
   }
 
   function showOverlayControls() {
@@ -4980,6 +5061,1169 @@
 
   // Expose debugging helpers
   window.RN = { mapModel, taskManager, trainingSystem, simEngine, machine, view, overlay, setTool };
+</script>
+
+<!-- RedNode Overlay Tools Extension (append-only) -->
+<script>
+/**
+ * ============================================================
+ * RedNode Overlay Tools Extension (APPEND-ONLY)
+ * - Canvas overlay gizmo: select/move/scale/rotate
+ * - Rotate snap, aspect lock (image), alt+wheel scale
+ * - Advanced model pre-rotation (pitch/yaw/roll) before projection
+ * - Improved OBJ/PLY parsers (OBJ 'l' edges, PLY 'edge' element)
+ * - Wireframe style controls (color/width)
+ *
+ * NOTE: This does not remove or edit your existing code. It
+ * attaches to window.RN (already exposed by your script).
+ * ============================================================
+ */
+(() => {
+  if (!window.RN || !window.RN.overlay || !window.RN.view) {
+    console.warn("[RN Overlay Tools] window.RN not found; extension not applied.");
+    return;
+  }
+
+  const RN = window.RN;
+  const overlay = RN.overlay;
+  const view = RN.view;
+
+  // ------------------------------
+  // Local helpers (append-only)
+  // ------------------------------
+  const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+  const degToRadLocal = (d) => (d * Math.PI) / 180;
+  const radToDegLocal = (r) => (r * 180) / Math.PI;
+
+  const cssVar = (name, fallback) => {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return v || fallback;
+  };
+
+  // ------------------------------
+  // Inject tiny UI helper styles
+  // ------------------------------
+  (() => {
+    const style = document.createElement("style");
+    style.textContent = `
+      .rn-overlay-tools-divider {
+        margin: 10px 0;
+        height: 1px;
+        background: rgba(255,255,255,0.06);
+      }
+      .rn-overlay-tools-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+      @media (max-width: 600px) {
+        .rn-overlay-tools-grid { grid-template-columns: minmax(0, 1fr); }
+      }
+      .rn-overlay-details summary {
+        cursor: pointer;
+        user-select: none;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.14em;
+        color: var(--text-soft);
+        padding: 6px 8px;
+        border-radius: 10px;
+        border: 1px solid rgba(255,255,255,0.08);
+        background: rgba(7, 7, 14, 0.95);
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin: 2px 0 10px;
+      }
+      .rn-overlay-details summary:hover {
+        background: rgba(15, 15, 26, 0.98);
+      }
+    `;
+    document.head.appendChild(style);
+  })();
+
+  // ------------------------------
+  // Ensure overlay render/options exist
+  // ------------------------------
+  overlay.render = overlay.render || {};
+  overlay.render.wireColor = overlay.render.wireColor || "rgba(255,255,255,0.85)";
+  overlay.render.wireWidth = clamp(parseInt(overlay.render.wireWidth ?? 1, 10) || 1, 1, 6);
+
+  overlay.model.preRotate = overlay.model.preRotate || { xDeg: 0, yDeg: 0, zDeg: 0 };
+
+  // ------------------------------
+  // Extension state
+  // ------------------------------
+  const state = {
+    canvasEdit: false,
+    selected: false,
+
+    dragMode: null,      // "move" | "scale" | "rotate"
+    activeHandle: null,  // "nw"|"ne"|"se"|"sw"|"rot"
+    pointerId: null,
+
+    startPointerFt: null,
+    startOverlay: null,
+
+    snapDeg: 15,
+    lockAspect: true
+  };
+
+  // ------------------------------
+  // Inject UI into existing overlay card (clean + contained)
+  // ------------------------------
+  const overlayCard = document.getElementById("overlayCard");
+  const btnFit = document.getElementById("btnOverlayFit");
+  const btnRow = btnFit ? btnFit.closest(".hstack") : null;
+
+  function injectToolsUI() {
+    if (!overlayCard || !btnRow) return;
+
+    // Avoid double-inject
+    if (document.getElementById("rnOverlayTools")) return;
+
+    const tools = document.createElement("div");
+    tools.id = "rnOverlayTools";
+    tools.innerHTML = `
+      <div class="rn-overlay-tools-divider"></div>
+
+      <div class="card-header" style="margin-bottom: 6px;">
+        <div class="card-title-row">
+          <span class="card-title">Overlay Canvas Tools</span>
+        </div>
+        <span class="badge-secondary">select · move · scale · rotate</span>
+      </div>
+
+      <div class="overlay-hint" style="margin-bottom: 10px;">
+        Turn on <strong>Edit on Canvas</strong>, then click the overlay on the map.
+        Drag to move, drag corners to scale, drag the rotate handle to rotate.
+        <br/><span style="opacity:0.85;">
+          Hold <strong>Shift</strong> while rotating to snap · hold <strong>Alt</strong> + scroll to scale · arrow keys to nudge · <strong>R</strong> reset rotation · <strong>Esc</strong> deselect.
+        </span>
+      </div>
+
+      <div class="toggle-row">
+        <div class="toggle-label">
+          <strong>Edit on Canvas</strong><br/>
+          <span style="font-size: 10px;">Shows bounds + handles directly on the map.</span>
+        </div>
+        <div id="overlayCanvasEditToggle" class="pill-toggle" role="switch" aria-checked="false">
+          <div class="pill-toggle-thumb"></div>
+        </div>
+      </div>
+
+      <div class="rn-overlay-tools-grid">
+        <div class="form-row">
+          <label>Rotate Snap (Shift)</label>
+          <select id="overlayRotateSnap">
+            <option value="0">Off</option>
+            <option value="5">5°</option>
+            <option value="15" selected>15°</option>
+            <option value="45">45°</option>
+            <option value="90">90°</option>
+          </select>
+        </div>
+
+        <div class="form-row">
+          <label>Lock Aspect (image)</label>
+          <select id="overlayAspectLock">
+            <option value="1" selected>On</option>
+            <option value="0">Off</option>
+          </select>
+        </div>
+      </div>
+
+      <details class="rn-overlay-details" id="rnOverlayWireStyle">
+        <summary>Wireframe Style (3D)</summary>
+        <div class="rn-overlay-tools-grid" style="margin-top: 6px;">
+          <div class="form-row">
+            <label>Wire Color</label>
+            <select id="overlayWireColor">
+              <option value="rgba(255,255,255,0.85)" selected>White</option>
+              <option value="rgba(255,55,95,0.9)">Accent</option>
+              <option value="rgba(63,130,255,0.9)">Blue</option>
+              <option value="rgba(255,202,95,0.9)">Amber</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>Wire Width</label>
+            <input id="overlayWireWidth" type="number" min="1" max="6" step="1" value="1" />
+          </div>
+        </div>
+      </details>
+
+      <details class="rn-overlay-details" id="rnOverlayConfigTools">
+        <summary>Config Tools</summary>
+        <div class="hstack" style="margin-top: 8px;">
+          <button class="btn btn-sm btn-ghost" id="btnOverlayResetXform">Reset rotation</button>
+          <button class="btn btn-sm btn-ghost" id="btnOverlayCopyCfg">Copy config</button>
+          <button class="btn btn-sm btn-ghost" id="btnOverlayLoadCfg">Load config</button>
+        </div>
+        <div class="card-subtitle" style="margin-top: 6px;">
+          Copy/Load stores <em>alignment</em> (pos/rot/size/scale/plane/flips/style). File content is not stored.
+        </div>
+      </details>
+    `;
+
+    // Insert before existing Fit/Center/Clear row
+    btnRow.insertAdjacentElement("beforebegin", tools);
+
+    // Advanced model pre-rotation controls (inside existing model controls)
+    const modelControls = document.getElementById("overlayControlsModel");
+    if (modelControls && !document.getElementById("rnOverlayModelAdvanced")) {
+      const adv = document.createElement("details");
+      adv.id = "rnOverlayModelAdvanced";
+      adv.className = "rn-overlay-details";
+      adv.innerHTML = `
+        <summary>Advanced Model Orientation (3D)</summary>
+        <div class="overlay-hint" style="margin: 8px 0 10px;">
+          Pre-rotate the model <strong>before</strong> projection (fixes axis mismatches in OBJ/PLY).
+        </div>
+        <div class="controls-grid">
+          <div class="form-row">
+            <label for="overlayModelRotX">Pre-rotate X (Pitch)</label>
+            <input id="overlayModelRotX" type="range" min="-180" max="180" step="1" value="0" />
+          </div>
+          <div class="form-row">
+            <label for="overlayModelRotY">Pre-rotate Y (Yaw)</label>
+            <input id="overlayModelRotY" type="range" min="-180" max="180" step="1" value="0" />
+          </div>
+          <div class="form-row">
+            <label for="overlayModelRotZ">Pre-rotate Z (Roll)</label>
+            <input id="overlayModelRotZ" type="range" min="-180" max="180" step="1" value="0" />
+          </div>
+          <div class="form-row">
+            <label>Reset pre-rotate</label>
+            <button class="btn btn-sm btn-ghost" id="btnOverlayResetPreRotate">Reset</button>
+          </div>
+        </div>
+      `;
+      modelControls.appendChild(adv);
+    }
+  }
+
+  injectToolsUI();
+
+  // ------------------------------
+  // Grab injected + existing UI elements
+  // ------------------------------
+  const ui = {
+    // injected
+    canvasEditToggle: document.getElementById("overlayCanvasEditToggle"),
+    rotateSnap: document.getElementById("overlayRotateSnap"),
+    aspectLock: document.getElementById("overlayAspectLock"),
+    wireColor: document.getElementById("overlayWireColor"),
+    wireWidth: document.getElementById("overlayWireWidth"),
+    btnResetXform: document.getElementById("btnOverlayResetXform"),
+    btnCopyCfg: document.getElementById("btnOverlayCopyCfg"),
+    btnLoadCfg: document.getElementById("btnOverlayLoadCfg"),
+
+    modelRotX: document.getElementById("overlayModelRotX"),
+    modelRotY: document.getElementById("overlayModelRotY"),
+    modelRotZ: document.getElementById("overlayModelRotZ"),
+    btnResetPreRotate: document.getElementById("btnOverlayResetPreRotate"),
+
+    // existing controls (keep in sync)
+    posX: document.getElementById("overlayPosX"),
+    posY: document.getElementById("overlayPosY"),
+    rotation: document.getElementById("overlayRotation"),
+    rotationLabel: document.getElementById("overlayRotationLabel"),
+    imgW: document.getElementById("overlayImgWidthFt"),
+    imgH: document.getElementById("overlayImgHeightFt"),
+    modelScale: document.getElementById("overlayModelScale")
+  };
+
+  function redrawWithGizmo() {
+    // Call original redraw if available
+    if (typeof window.redrawCanvas === "function") window.redrawCanvas();
+    // If patching fails in a browser edge-case, we still draw gizmo right after:
+    try { drawOverlayGizmo(); } catch {}
+  }
+
+  function syncUIFromOverlay() {
+    if (ui.posX) ui.posX.value = String(Number(overlay.posXFt).toFixed(2));
+    if (ui.posY) ui.posY.value = String(Number(overlay.posYFt).toFixed(2));
+
+    if (ui.rotation) ui.rotation.value = String(Math.round(overlay.rotationDeg || 0));
+    if (ui.rotationLabel) ui.rotationLabel.textContent = `${Math.round(overlay.rotationDeg || 0)}°`;
+
+    if (overlay.type === "image") {
+      if (ui.imgW) ui.imgW.value = String(Math.round(overlay.img.widthFt || 0));
+      if (ui.imgH) ui.imgH.value = String(Math.round(overlay.img.heightFt || 0));
+    }
+
+    if (overlay.type === "model") {
+      if (ui.modelScale) ui.modelScale.value = String(Number(overlay.model.scaleFtPerUnit || 1).toFixed(3));
+      if (ui.modelRotX) ui.modelRotX.value = String(Math.round(overlay.model.preRotate?.xDeg || 0));
+      if (ui.modelRotY) ui.modelRotY.value = String(Math.round(overlay.model.preRotate?.yDeg || 0));
+      if (ui.modelRotZ) ui.modelRotZ.value = String(Math.round(overlay.model.preRotate?.zDeg || 0));
+    }
+  }
+
+  // ------------------------------
+  // Wire injected UI behavior
+  // ------------------------------
+  if (ui.rotateSnap) {
+    state.snapDeg = parseInt(ui.rotateSnap.value, 10) || 0;
+    ui.rotateSnap.addEventListener("change", () => {
+      state.snapDeg = parseInt(ui.rotateSnap.value, 10) || 0;
+    });
+  }
+
+  if (ui.aspectLock) {
+    state.lockAspect = ui.aspectLock.value === "1";
+    ui.aspectLock.addEventListener("change", () => {
+      state.lockAspect = ui.aspectLock.value === "1";
+    });
+  }
+
+  if (ui.wireColor) {
+    ui.wireColor.value = overlay.render.wireColor;
+    ui.wireColor.addEventListener("change", () => {
+      overlay.render.wireColor = ui.wireColor.value || overlay.render.wireColor;
+      redrawWithGizmo();
+    });
+  }
+
+  if (ui.wireWidth) {
+    ui.wireWidth.value = String(overlay.render.wireWidth);
+    ui.wireWidth.addEventListener("change", () => {
+      overlay.render.wireWidth = clamp(parseInt(ui.wireWidth.value, 10) || 1, 1, 6);
+      ui.wireWidth.value = String(overlay.render.wireWidth);
+      redrawWithGizmo();
+    });
+  }
+
+  if (ui.canvasEditToggle) {
+    ui.canvasEditToggle.addEventListener("click", () => {
+      state.canvasEdit = ui.canvasEditToggle.classList.toggle("on");
+      ui.canvasEditToggle.setAttribute("aria-checked", state.canvasEdit ? "true" : "false");
+
+      if (!state.canvasEdit) {
+        state.selected = false;
+        state.dragMode = null;
+        state.activeHandle = null;
+      }
+      redrawWithGizmo();
+    });
+  }
+
+  if (ui.btnResetXform) {
+    ui.btnResetXform.addEventListener("click", () => {
+      overlay.rotationDeg = 0;
+      syncUIFromOverlay();
+      redrawWithGizmo();
+      if (typeof window.appendSimulationEvent === "function") window.appendSimulationEvent("Overlay: rotation reset to 0°.", "info");
+    });
+  }
+
+  function overlayConfig() {
+    return {
+      type: overlay.type,
+      name: overlay.name,
+      enabled: overlay.enabled,
+      opacity: overlay.opacity,
+      layer: overlay.layer,
+      rotationDeg: overlay.rotationDeg,
+      posXFt: overlay.posXFt,
+      posYFt: overlay.posYFt,
+      image: overlay.type === "image" ? {
+        widthFt: overlay.img.widthFt,
+        heightFt: overlay.img.heightFt,
+        aspect: overlay.img.aspect
+      } : null,
+      model: overlay.type === "model" ? {
+        format: overlay.model.format,
+        projPlane: overlay.model.projPlane,
+        scaleFtPerUnit: overlay.model.scaleFtPerUnit,
+        flipX: overlay.model.flipX,
+        flipY: overlay.model.flipY,
+        preRotate: overlay.model.preRotate
+      } : null,
+      render: overlay.render
+    };
+  }
+
+  if (ui.btnCopyCfg) {
+    ui.btnCopyCfg.addEventListener("click", async () => {
+      const text = JSON.stringify(overlayConfig(), null, 2);
+      try {
+        await navigator.clipboard.writeText(text);
+        if (typeof window.appendSimulationEvent === "function") window.appendSimulationEvent("Overlay config copied to clipboard.", "ok");
+      } catch {
+        prompt("Copy overlay config:", text);
+      }
+    });
+  }
+
+  if (ui.btnLoadCfg) {
+    ui.btnLoadCfg.addEventListener("click", () => {
+      const raw = prompt("Paste overlay config JSON:");
+      if (!raw) return;
+      try {
+        const cfg = JSON.parse(raw);
+
+        overlay.opacity = typeof cfg.opacity === "number" ? clamp(cfg.opacity, 0, 1) : overlay.opacity;
+        overlay.layer = cfg.layer === "above" ? "above" : "below";
+        overlay.rotationDeg = Number.isFinite(cfg.rotationDeg) ? cfg.rotationDeg : overlay.rotationDeg;
+        overlay.posXFt = Number.isFinite(cfg.posXFt) ? cfg.posXFt : overlay.posXFt;
+        overlay.posYFt = Number.isFinite(cfg.posYFt) ? cfg.posYFt : overlay.posYFt;
+
+        if (cfg.render) {
+          overlay.render.wireColor = cfg.render.wireColor || overlay.render.wireColor;
+          overlay.render.wireWidth = clamp(parseInt(cfg.render.wireWidth, 10) || overlay.render.wireWidth, 1, 6);
+          if (ui.wireColor) ui.wireColor.value = overlay.render.wireColor;
+          if (ui.wireWidth) ui.wireWidth.value = String(overlay.render.wireWidth);
+        }
+
+        if (overlay.type === "image" && cfg.image) {
+          overlay.img.widthFt = Math.max(1, Number(cfg.image.widthFt) || overlay.img.widthFt);
+          overlay.img.heightFt = Math.max(1, Number(cfg.image.heightFt) || overlay.img.heightFt);
+        }
+
+        if (overlay.type === "model" && cfg.model) {
+          overlay.model.projPlane = cfg.model.projPlane || overlay.model.projPlane;
+          overlay.model.scaleFtPerUnit = Math.max(0.0001, Number(cfg.model.scaleFtPerUnit) || overlay.model.scaleFtPerUnit);
+          overlay.model.flipX = !!cfg.model.flipX;
+          overlay.model.flipY = !!cfg.model.flipY;
+          overlay.model.preRotate = {
+            xDeg: Number(cfg.model.preRotate?.xDeg) || 0,
+            yDeg: Number(cfg.model.preRotate?.yDeg) || 0,
+            zDeg: Number(cfg.model.preRotate?.zDeg) || 0
+          };
+          if (typeof window.rebuildModelProjection === "function") window.rebuildModelProjection();
+        }
+
+        syncUIFromOverlay();
+        redrawWithGizmo();
+        if (typeof window.appendSimulationEvent === "function") window.appendSimulationEvent("Overlay config applied.", "ok");
+      } catch (e) {
+        alert("Invalid overlay config JSON.");
+      }
+    });
+  }
+
+  // Advanced model pre-rotate handlers
+  function setPreRotate(axis, deg) {
+    overlay.model.preRotate = overlay.model.preRotate || { xDeg: 0, yDeg: 0, zDeg: 0 };
+    overlay.model.preRotate[axis] = deg;
+    if (typeof window.rebuildModelProjection === "function") window.rebuildModelProjection();
+    redrawWithGizmo();
+  }
+  if (ui.modelRotX) ui.modelRotX.addEventListener("input", () => setPreRotate("xDeg", parseInt(ui.modelRotX.value, 10) || 0));
+  if (ui.modelRotY) ui.modelRotY.addEventListener("input", () => setPreRotate("yDeg", parseInt(ui.modelRotY.value, 10) || 0));
+  if (ui.modelRotZ) ui.modelRotZ.addEventListener("input", () => setPreRotate("zDeg", parseInt(ui.modelRotZ.value, 10) || 0));
+  if (ui.btnResetPreRotate) ui.btnResetPreRotate.addEventListener("click", () => {
+    overlay.model.preRotate = { xDeg: 0, yDeg: 0, zDeg: 0 };
+    if (ui.modelRotX) ui.modelRotX.value = "0";
+    if (ui.modelRotY) ui.modelRotY.value = "0";
+    if (ui.modelRotZ) ui.modelRotZ.value = "0";
+    if (typeof window.rebuildModelProjection === "function") window.rebuildModelProjection();
+    redrawWithGizmo();
+  });
+
+  // ------------------------------
+  // Parser upgrades (append-only overrides)
+  // ------------------------------
+  function patchedParseOBJ(text) {
+    const vertices = [];
+    const edgesSet = new Set();
+
+    const addEdge = (a, b) => {
+      if (!Number.isFinite(a) || !Number.isFinite(b)) return;
+      if (a === b) return;
+      const aa = Math.min(a, b);
+      const bb = Math.max(a, b);
+      edgesSet.add(`${aa},${bb}`);
+    };
+
+    const toIndex = (n, count) => {
+      if (!Number.isFinite(n) || n === 0) return null;
+      const idx = n < 0 ? (count + n) : (n - 1);
+      return idx >= 0 ? idx : null;
+    };
+
+    const lines = (text || "").split(/\r?\n/);
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line || line.startsWith("#")) continue;
+
+      if (line.startsWith("v ")) {
+        const parts = line.split(/\s+/);
+        const x = parseFloat(parts[1]);
+        const y = parseFloat(parts[2]);
+        const z = parseFloat(parts[3]);
+        if ([x, y, z].every(Number.isFinite)) vertices.push({ x, y, z });
+        continue;
+      }
+
+      if (line.startsWith("l ")) {
+        // polyline edges: l v1 v2 v3 ...
+        const parts = line.split(/\s+/).slice(1);
+        const idx = parts
+          .map(p => p.split("/")[0])
+          .map(v => parseInt(v, 10))
+          .map(n => toIndex(n, vertices.length))
+          .filter(n => n !== null);
+
+        for (let i = 0; i < idx.length - 1; i++) addEdge(idx[i], idx[i + 1]);
+        continue;
+      }
+
+      if (line.startsWith("f ")) {
+        const parts = line.split(/\s+/).slice(1);
+        const idx = parts
+          .map(p => p.split("/")[0])
+          .map(v => parseInt(v, 10))
+          .map(n => toIndex(n, vertices.length))
+          .filter(n => n !== null);
+
+        if (idx.length >= 2) {
+          for (let i = 0; i < idx.length; i++) {
+            addEdge(idx[i], idx[(i + 1) % idx.length]);
+          }
+        }
+      }
+    }
+
+    const edges = Array.from(edgesSet).map(k => k.split(",").map(n => parseInt(n, 10)));
+    return { vertices, edges };
+  }
+
+  function patchedParsePLY(text) {
+    const lines = (text || "").split(/\r?\n/);
+    let i = 0;
+    if (!lines[i]?.startsWith("ply")) throw new Error("Not a PLY file");
+
+    const elements = [];
+    let headerDone = false;
+
+    for (; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line.startsWith("element ")) {
+        const parts = line.split(/\s+/);
+        const name = parts[1];
+        const count = parseInt(parts[2], 10) || 0;
+        elements.push({ name, count });
+      } else if (line === "end_header") {
+        headerDone = true;
+        i++;
+        break;
+      }
+    }
+    if (!headerDone) throw new Error("PLY header not found/end_header missing");
+
+    const vertices = [];
+    const edgesSet = new Set();
+
+    const addEdge = (a, b) => {
+      if (!Number.isFinite(a) || !Number.isFinite(b)) return;
+      if (a === b) return;
+      const aa = Math.min(a, b);
+      const bb = Math.max(a, b);
+      edgesSet.add(`${aa},${bb}`);
+    };
+
+    for (const elDef of elements) {
+      if (elDef.name === "vertex") {
+        for (let v = 0; v < elDef.count && i < lines.length; v++, i++) {
+          const parts = lines[i].trim().split(/\s+/);
+          const x = parseFloat(parts[0]);
+          const y = parseFloat(parts[1]);
+          const z = parseFloat(parts[2]);
+          if ([x, y, z].every(Number.isFinite)) vertices.push({ x, y, z });
+          else vertices.push({ x: 0, y: 0, z: 0 });
+        }
+      } else if (elDef.name === "face") {
+        for (let f = 0; f < elDef.count && i < lines.length; f++, i++) {
+          const parts = lines[i].trim().split(/\s+/).map(n => parseInt(n, 10));
+          if (parts.length < 4) continue;
+          const n = parts[0];
+          const idx = parts.slice(1, 1 + n).filter(v => Number.isFinite(v));
+          if (idx.length >= 2) {
+            for (let k = 0; k < idx.length; k++) {
+              addEdge(idx[k], idx[(k + 1) % idx.length]);
+            }
+          }
+        }
+      } else if (elDef.name === "edge") {
+        for (let e = 0; e < elDef.count && i < lines.length; e++, i++) {
+          const parts = lines[i].trim().split(/\s+/).map(n => parseInt(n, 10));
+          if (parts.length < 2) continue;
+          addEdge(parts[0], parts[1]);
+        }
+      } else {
+        // Skip unknown element blocks
+        i += elDef.count;
+      }
+    }
+
+    const edges = Array.from(edgesSet).map(k => k.split(",").map(n => parseInt(n, 10)));
+    return { vertices, edges };
+  }
+
+  if (typeof window.parseOBJ === "function") {
+    window.parseOBJ = patchedParseOBJ;
+    try { parseOBJ = patchedParseOBJ; } catch {}
+  }
+  if (typeof window.parsePLY === "function") {
+    window.parsePLY = patchedParsePLY;
+    try { parsePLY = patchedParsePLY; } catch {}
+  }
+
+  // ------------------------------
+  // Patch rebuildModelProjection to include preRotate (append-only override)
+  // ------------------------------
+  function rotate3(v, rx, ry, rz) {
+    let x = v.x, y = v.y, z = v.z;
+
+    // X
+    if (rx !== 0) {
+      const cx = Math.cos(rx), sx = Math.sin(rx);
+      const y2 = y * cx - z * sx;
+      const z2 = y * sx + z * cx;
+      y = y2; z = z2;
+    }
+    // Y
+    if (ry !== 0) {
+      const cy = Math.cos(ry), sy = Math.sin(ry);
+      const x2 = x * cy + z * sy;
+      const z2 = -x * sy + z * cy;
+      x = x2; z = z2;
+    }
+    // Z
+    if (rz !== 0) {
+      const cz = Math.cos(rz), sz = Math.sin(rz);
+      const x2 = x * cz - y * sz;
+      const y2 = x * sz + y * cz;
+      x = x2; y = y2;
+    }
+    return { x, y, z };
+  }
+
+  function patchedRebuildModelProjection() {
+    const plane = overlay.model.projPlane;
+    const verts = overlay.model.vertices || [];
+    const projected = new Array(verts.length);
+
+    const pr = overlay.model.preRotate || { xDeg: 0, yDeg: 0, zDeg: 0 };
+    const rx = degToRadLocal(pr.xDeg || 0);
+    const ry = degToRadLocal(pr.yDeg || 0);
+    const rz = degToRadLocal(pr.zDeg || 0);
+
+    let minU = Infinity, minV = Infinity, maxU = -Infinity, maxV = -Infinity;
+
+    for (let i = 0; i < verts.length; i++) {
+      const v0 = verts[i];
+      const v = (rx || ry || rz) ? rotate3(v0, rx, ry, rz) : v0;
+
+      let u = 0, vv = 0;
+      if (plane === "XZ") { u = v.x; vv = v.z; }
+      else if (plane === "XY") { u = v.x; vv = v.y; }
+      else { u = v.y; vv = v.z; } // YZ
+
+      projected[i] = { u, v: vv };
+
+      minU = Math.min(minU, u);
+      maxU = Math.max(maxU, u);
+      minV = Math.min(minV, vv);
+      maxV = Math.max(maxV, vv);
+    }
+
+    overlay.model.projected = projected;
+    overlay.model.bbox = { minU, minV, maxU, maxV };
+
+    overlay.model.centerU = (minU + maxU) / 2;
+    overlay.model.centerV = (minV + maxV) / 2;
+  }
+
+  if (typeof window.rebuildModelProjection === "function") {
+    window.rebuildModelProjection = patchedRebuildModelProjection;
+    try { rebuildModelProjection = patchedRebuildModelProjection; } catch {}
+  }
+
+  // ------------------------------
+  // Patch drawOverlayLayer to use wireColor/wireWidth for 3D (append-only override)
+  // ------------------------------
+  function patchedDrawOverlayLayer(which) {
+    if (!overlay.enabled || !overlay.type) return;
+    if (overlay.layer !== which) return;
+
+    const canvas = document.getElementById("siteCanvas");
+    const ctx = canvas.getContext("2d");
+
+    ctx.save();
+    ctx.globalAlpha = clamp(overlay.opacity, 0, 1);
+
+    // IMAGE: same behavior
+    if (overlay.type === "image" && (overlay.img.bitmap || overlay.img.element)) {
+      const imgObj = overlay.img.bitmap || overlay.img.element;
+      const c = window.worldToScreenPx(overlay.posXFt, overlay.posYFt);
+      const rot = degToRadLocal(overlay.rotationDeg);
+
+      const wPx = overlay.img.widthFt * view.pxPerFt * view.zoom;
+      const hPx = overlay.img.heightFt * view.pxPerFt * view.zoom;
+
+      ctx.translate(c.xPx, c.yPx);
+      ctx.rotate(rot);
+      ctx.drawImage(imgObj, -wPx / 2, -hPx / 2, wPx, hPx);
+      ctx.restore();
+      return;
+    }
+
+    // MODEL: use configurable style
+    if (overlay.type === "model" && overlay.model.edges?.length > 0 && overlay.model.projected?.length > 0) {
+      const rot = degToRadLocal(overlay.rotationDeg);
+      const cos = Math.cos(rot), sin = Math.sin(rot);
+      const scale = overlay.model.scaleFtPerUnit;
+
+      const flipX = overlay.model.flipX ? -1 : 1;
+      const flipY = overlay.model.flipY ? -1 : 1;
+
+      const ptsScreen = new Array(overlay.model.projected.length);
+      for (let i = 0; i < overlay.model.projected.length; i++) {
+        const uv = overlay.model.projected[i];
+        const u0 = (uv.u - overlay.model.centerU) * scale * flipX;
+        const v0 = (uv.v - overlay.model.centerV) * scale * flipY;
+
+        const ux = u0 * cos - v0 * sin;
+        const vy = u0 * sin + v0 * cos;
+
+        ptsScreen[i] = window.worldToScreenPx(overlay.posXFt + ux, overlay.posYFt + vy);
+      }
+
+      ctx.lineWidth = clamp(parseInt(overlay.render?.wireWidth, 10) || 1, 1, 6);
+      ctx.strokeStyle = overlay.render?.wireColor || "rgba(255,255,255,0.85)";
+      ctx.beginPath();
+
+      const maxEdges = 16000;
+      const edges = overlay.model.edges;
+      const step = edges.length > maxEdges ? Math.ceil(edges.length / maxEdges) : 1;
+
+      for (let e = 0; e < edges.length; e += step) {
+        const a = edges[e][0], b = edges[e][1];
+        const pa = ptsScreen[a], pb = ptsScreen[b];
+        if (!pa || !pb) continue;
+        ctx.moveTo(pa.xPx, pa.yPx);
+        ctx.lineTo(pb.xPx, pb.yPx);
+      }
+
+      ctx.stroke();
+      ctx.restore();
+      return;
+    }
+
+    ctx.restore();
+  }
+
+  if (typeof window.drawOverlayLayer === "function") {
+    window.drawOverlayLayer = patchedDrawOverlayLayer;
+    try { drawOverlayLayer = patchedDrawOverlayLayer; } catch {}
+  }
+
+  // ------------------------------
+  // Canvas Gizmo: geometry helpers
+  // ------------------------------
+  function overlayHalfExtentsFt() {
+    if (!overlay.enabled || !overlay.type) return null;
+
+    if (overlay.type === "image") {
+      return {
+        hx: Math.max(0.5, (overlay.img.widthFt || 0) / 2),
+        hy: Math.max(0.5, (overlay.img.heightFt || 0) / 2)
+      };
+    }
+
+    if (overlay.type === "model" && overlay.model?.bbox) {
+      const wUnits = Math.max(1e-6, overlay.model.bbox.maxU - overlay.model.bbox.minU);
+      const hUnits = Math.max(1e-6, overlay.model.bbox.maxV - overlay.model.bbox.minV);
+      return {
+        hx: Math.max(0.5, (wUnits * overlay.model.scaleFtPerUnit) / 2),
+        hy: Math.max(0.5, (hUnits * overlay.model.scaleFtPerUnit) / 2)
+      };
+    }
+
+    return { hx: 20, hy: 12 };
+  }
+
+  function toLocal(worldPt) {
+    const cx = overlay.posXFt, cy = overlay.posYFt;
+    const rot = degToRadLocal(overlay.rotationDeg || 0);
+
+    const dx = worldPt.xFt - cx;
+    const dy = worldPt.yFt - cy;
+
+    const c = Math.cos(-rot), s = Math.sin(-rot);
+    return { x: dx * c - dy * s, y: dx * s + dy * c };
+  }
+
+  function toWorld(local) {
+    const cx = overlay.posXFt, cy = overlay.posYFt;
+    const rot = degToRadLocal(overlay.rotationDeg || 0);
+
+    const c = Math.cos(rot), s = Math.sin(rot);
+    const x = local.x * c - local.y * s;
+    const y = local.x * s + local.y * c;
+    return { xFt: cx + x, yFt: cy + y };
+  }
+
+  function handleLocalPositions(hx, hy) {
+    const rotHandleOffsetFt = 6;
+    return {
+      nw: { x: -hx, y: -hy },
+      ne: { x: +hx, y: -hy },
+      se: { x: +hx, y: +hy },
+      sw: { x: -hx, y: +hy },
+      rot: { x: 0, y: -hy - rotHandleOffsetFt }
+    };
+  }
+
+  function hitTestOverlay(worldPt) {
+    if (!overlay.enabled || !overlay.type) return null;
+
+    const ext = overlayHalfExtentsFt();
+    if (!ext) return null;
+
+    const { hx, hy } = ext;
+
+    const tolPx = 12;
+    const tolFt = tolPx / (view.pxPerFt * view.zoom);
+
+    const local = toLocal(worldPt);
+    const handles = handleLocalPositions(hx, hy);
+
+    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+    for (const key of ["nw", "ne", "se", "sw"]) {
+      if (dist(local, handles[key]) <= tolFt) return { kind: "corner", handle: key, hx, hy };
+    }
+    if (dist(local, handles.rot) <= tolFt) return { kind: "rotate", handle: "rot", hx, hy };
+
+    if (Math.abs(local.x) <= hx + tolFt && Math.abs(local.y) <= hy + tolFt) {
+      return { kind: "inside", handle: "inside", hx, hy };
+    }
+
+    return null;
+  }
+
+  // ------------------------------
+  // Gizmo renderer (drawn after normal redraw)
+  // ------------------------------
+  function drawOverlayGizmo() {
+    if (!state.canvasEdit) return;
+    if (!overlay.enabled || !overlay.type) return;
+
+    const ext = overlayHalfExtentsFt();
+    if (!ext) return;
+
+    const { hx, hy } = ext;
+
+    const canvas = document.getElementById("siteCanvas");
+    const ctx = canvas.getContext("2d");
+
+    const accent = cssVar("--accent-strong", "#ff6b8f");
+    const subtle = "rgba(255,255,255,0.55)";
+    const bg = "rgba(2,2,8,0.65)";
+
+    const corners = [
+      toWorld({ x: -hx, y: -hy }),
+      toWorld({ x: +hx, y: -hy }),
+      toWorld({ x: +hx, y: +hy }),
+      toWorld({ x: -hx, y: +hy })
+    ];
+
+    const sp = corners.map(p => window.worldToScreenPx(p.xFt, p.yFt));
+    const center = window.worldToScreenPx(overlay.posXFt, overlay.posYFt);
+
+    ctx.save();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = state.selected ? accent : subtle;
+    ctx.setLineDash(state.selected ? [] : [6, 4]);
+
+    ctx.beginPath();
+    ctx.moveTo(sp[0].xPx, sp[0].yPx);
+    for (let i = 1; i < sp.length; i++) ctx.lineTo(sp[i].xPx, sp[i].yPx);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // center dot
+    ctx.fillStyle = state.selected ? accent : subtle;
+    ctx.beginPath();
+    ctx.arc(center.xPx, center.yPx, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // handles
+    const handles = handleLocalPositions(hx, hy);
+    const keys = ["nw", "ne", "se", "sw", "rot"];
+    const handleSize = 10;
+
+    for (const k of keys) {
+      const wp = toWorld(handles[k]);
+      const hp = window.worldToScreenPx(wp.xFt, wp.yFt);
+
+      ctx.fillStyle = bg;
+      ctx.fillRect(hp.xPx - handleSize / 2, hp.yPx - handleSize / 2, handleSize, handleSize);
+
+      ctx.strokeStyle = state.selected ? accent : subtle;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(hp.xPx - handleSize / 2, hp.yPx - handleSize / 2, handleSize, handleSize);
+    }
+
+    // label
+    ctx.font = `11px ${cssVar("--font-mono", "ui-monospace")}`;
+    ctx.textBaseline = "bottom";
+    ctx.fillStyle = "rgba(249,251,255,0.92)";
+    ctx.fillText(`OVERLAY: ${overlay.name || overlay.type}`, center.xPx + 10, center.yPx - 10);
+
+    ctx.restore();
+  }
+
+  // Patch redrawCanvas to always draw the gizmo after the normal scene
+  if (typeof window.redrawCanvas === "function") {
+    const origRedraw = window.redrawCanvas;
+    window.redrawCanvas = function(...args) {
+      origRedraw.apply(this, args);
+      try { drawOverlayGizmo(); } catch {}
+    };
+    try { redrawCanvas = window.redrawCanvas; } catch {}
+  }
+
+  // ------------------------------
+  // Pointer interception (capture phase)
+  // ------------------------------
+  const canvas = document.getElementById("siteCanvas");
+
+  function canvasLocalPx(evt) {
+    const rect = canvas.getBoundingClientRect();
+    return { xPx: evt.clientX - rect.left, yPx: evt.clientY - rect.top };
+  }
+
+  function screenToWorldFromEvent(evt) {
+    const p = canvasLocalPx(evt);
+    const w = window.screenToWorldFt(p.xPx, p.yPx);
+    return { ...w, xPx: p.xPx, yPx: p.yPx };
+  }
+
+  function startDrag(hit, pt, evt) {
+    state.selected = true;
+    state.pointerId = evt.pointerId;
+    state.startPointerFt = { xFt: pt.xFt, yFt: pt.yFt };
+
+    state.startOverlay = {
+      posXFt: overlay.posXFt,
+      posYFt: overlay.posYFt,
+      rotationDeg: overlay.rotationDeg || 0,
+
+      imgWidthFt: overlay.img.widthFt,
+      imgHeightFt: overlay.img.heightFt,
+      modelScale: overlay.model.scaleFtPerUnit || 1,
+
+      hx: hit.hx,
+      hy: hit.hy,
+
+      rotateRefRad: Math.atan2(pt.yFt - overlay.posYFt, pt.xFt - overlay.posXFt)
+    };
+
+    if (hit.kind === "inside") state.dragMode = "move";
+    else if (hit.kind === "corner") { state.dragMode = "scale"; state.activeHandle = hit.handle; }
+    else if (hit.kind === "rotate") { state.dragMode = "rotate"; state.activeHandle = "rot"; }
+
+    canvas.setPointerCapture(evt.pointerId);
+    redrawWithGizmo();
+  }
+
+  function updateDrag(pt, evt) {
+    if (!state.dragMode || state.pointerId !== evt.pointerId) return;
+    if (!state.startPointerFt || !state.startOverlay) return;
+
+    const base = state.startOverlay;
+    const start = state.startPointerFt;
+
+    if (state.dragMode === "move") {
+      overlay.posXFt = base.posXFt + (pt.xFt - start.xFt);
+      overlay.posYFt = base.posYFt + (pt.yFt - start.yFt);
+      syncUIFromOverlay();
+      redrawWithGizmo();
+      return;
+    }
+
+    if (state.dragMode === "rotate") {
+      const nowRad = Math.atan2(pt.yFt - base.posYFt, pt.xFt - base.posXFt);
+      const deltaRad = nowRad - base.rotateRefRad;
+      let deg = base.rotationDeg + radToDegLocal(deltaRad);
+
+      // normalize (-180, 180]
+      deg = ((deg + 180) % 360 + 360) % 360 - 180;
+
+      if (evt.shiftKey && state.snapDeg > 0) {
+        deg = Math.round(deg / state.snapDeg) * state.snapDeg;
+      }
+
+      overlay.rotationDeg = deg;
+      syncUIFromOverlay();
+      redrawWithGizmo();
+      return;
+    }
+
+    if (state.dragMode === "scale") {
+      const local = toLocal({ xFt: pt.xFt, yFt: pt.yFt });
+      const newHx = Math.max(0.5, Math.abs(local.x));
+      const newHy = Math.max(0.5, Math.abs(local.y));
+
+      const scaleFactor = Math.max(newHx / Math.max(0.5, base.hx), newHy / Math.max(0.5, base.hy));
+
+      if (overlay.type === "image") {
+        if (state.lockAspect) {
+          overlay.img.widthFt = Math.max(1, base.imgWidthFt * scaleFactor);
+          overlay.img.heightFt = Math.max(1, base.imgHeightFt * scaleFactor);
+        } else {
+          overlay.img.widthFt = Math.max(1, newHx * 2);
+          overlay.img.heightFt = Math.max(1, newHy * 2);
+        }
+      } else if (overlay.type === "model") {
+        overlay.model.scaleFtPerUnit = Math.max(0.0001, base.modelScale * scaleFactor);
+      }
+
+      syncUIFromOverlay();
+      redrawWithGizmo();
+      return;
+    }
+  }
+
+  function endDrag(evt) {
+    if (state.pointerId !== evt.pointerId) return;
+    state.dragMode = null;
+    state.activeHandle = null;
+    state.pointerId = null;
+    state.startPointerFt = null;
+    state.startOverlay = null;
+    redrawWithGizmo();
+  }
+
+  function onPointerDownCapture(evt) {
+    if (!state.canvasEdit) return;
+    if (!overlay.enabled || !overlay.type) return;
+
+    const pt = screenToWorldFromEvent(evt);
+    const hit = hitTestOverlay(pt);
+
+    if (!hit) {
+      // click outside overlay: deselect but allow normal tools
+      if (state.selected) {
+        state.selected = false;
+        redrawWithGizmo();
+      }
+      return;
+    }
+
+    evt.preventDefault();
+    evt.stopImmediatePropagation();
+    startDrag(hit, pt, evt);
+  }
+
+  function onPointerMoveCapture(evt) {
+    if (!state.canvasEdit) return;
+    if (!state.dragMode) return;
+
+    const pt = screenToWorldFromEvent(evt);
+    evt.preventDefault();
+    evt.stopImmediatePropagation();
+    updateDrag(pt, evt);
+  }
+
+  function onPointerUpCapture(evt) {
+    if (!state.canvasEdit) return;
+    if (!state.dragMode) return;
+
+    evt.preventDefault();
+    evt.stopImmediatePropagation();
+    endDrag(evt);
+  }
+
+  function onWheelCapture(evt) {
+    if (!state.canvasEdit) return;
+    if (!state.selected) return;
+    if (!overlay.enabled || !overlay.type) return;
+
+    // ALT + wheel => scale overlay (doesn't steal normal map zoom unless ALT is pressed)
+    if (!evt.altKey) return;
+
+    evt.preventDefault();
+    evt.stopImmediatePropagation();
+
+    const factor = evt.deltaY > 0 ? 0.94 : 1.06;
+
+    if (overlay.type === "image") {
+      overlay.img.widthFt = Math.max(1, overlay.img.widthFt * factor);
+      overlay.img.heightFt = Math.max(1, overlay.img.heightFt * factor);
+    } else if (overlay.type === "model") {
+      overlay.model.scaleFtPerUnit = Math.max(0.0001, overlay.model.scaleFtPerUnit * factor);
+    }
+
+    syncUIFromOverlay();
+    redrawWithGizmo();
+  }
+
+  function onKeyDownCapture(evt) {
+    if (!state.canvasEdit || !state.selected) return;
+
+    // don't hijack typing
+    const tag = (evt.target && evt.target.tagName) ? evt.target.tagName.toLowerCase() : "";
+    if (["input", "textarea", "select"].includes(tag)) return;
+
+    const step = evt.shiftKey ? 2 : 0.5;
+
+    if (evt.key === "Escape") {
+      state.selected = false;
+      redrawWithGizmo();
+      return;
+    }
+
+    if (evt.key.toLowerCase() === "r") {
+      overlay.rotationDeg = 0;
+      syncUIFromOverlay();
+      redrawWithGizmo();
+      evt.preventDefault();
+      return;
+    }
+
+    if (evt.key === "ArrowLeft") {
+      overlay.posXFt -= step;
+      syncUIFromOverlay(); redrawWithGizmo();
+      evt.preventDefault();
+    } else if (evt.key === "ArrowRight") {
+      overlay.posXFt += step;
+      syncUIFromOverlay(); redrawWithGizmo();
+      evt.preventDefault();
+    } else if (evt.key === "ArrowUp") {
+      overlay.posYFt -= step;
+      syncUIFromOverlay(); redrawWithGizmo();
+      evt.preventDefault();
+    } else if (evt.key === "ArrowDown") {
+      overlay.posYFt += step;
+      syncUIFromOverlay(); redrawWithGizmo();
+      evt.preventDefault();
+    }
+  }
+
+  if (canvas) {
+    canvas.addEventListener("pointerdown", onPointerDownCapture, true);
+    canvas.addEventListener("pointermove", onPointerMoveCapture, true);
+    canvas.addEventListener("pointerup", onPointerUpCapture, true);
+    canvas.addEventListener("pointercancel", onPointerUpCapture, true);
+    canvas.addEventListener("wheel", onWheelCapture, { capture: true, passive: false });
+  }
+  window.addEventListener("keydown", onKeyDownCapture, true);
+
+  // Initial sync + repaint
+  syncUIFromOverlay();
+  redrawWithGizmo();
+
+  if (typeof window.appendSimulationEvent === "function") {
+    window.appendSimulationEvent("Overlay Tools Extension loaded (canvas edit + advanced model controls).", "info");
+  }
+})();
 </script>
 
 <!-- Optional external launcher (safe if missing) -->
