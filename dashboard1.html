@@ -496,6 +496,8 @@
     .legend-point { background: #48d597; border-radius: 50%; }
     .legend-nogo { background: rgba(255, 85, 85, 0.9); }
     .legend-overlay { background: rgba(255, 255, 255, 0.85); }
+    .legend-dig { background: linear-gradient(135deg, #48d597, #ffca5f, #ff375f); }
+    .legend-pile { background: linear-gradient(135deg, #5bc0ff, #9b7bff); }
 
     .canvas-overlay-status {
       position: absolute;
@@ -1422,11 +1424,13 @@
               </div>
             </div>
 
-            <div class="canvas-overlay-legend">
-              <div class="legend-row"><span class="legend-swatch legend-overlay"></span> Overlay (image / 3D wire)</div>
-              <div class="legend-row"><span class="legend-swatch legend-rect"></span> Area tasks</div>
-              <div class="legend-row"><span class="legend-swatch legend-line"></span> Pipe / cable runs</div>
-              <div class="legend-row"><span class="legend-swatch legend-point"></span> Posts / points</div>
+              <div class="canvas-overlay-legend">
+                <div class="legend-row"><span class="legend-swatch legend-overlay"></span> Overlay (image / 3D wire)</div>
+              <div class="legend-row"><span class="legend-swatch legend-dig"></span> Dig radiance (depth-weighted)</div>
+              <div class="legend-row"><span class="legend-swatch legend-pile"></span> Pile radiance (dumped fill)</div>
+                <div class="legend-row"><span class="legend-swatch legend-rect"></span> Area tasks</div>
+                <div class="legend-row"><span class="legend-swatch legend-line"></span> Pipe / cable runs</div>
+                <div class="legend-row"><span class="legend-swatch legend-point"></span> Posts / points</div>
               <div class="legend-row"><span class="legend-swatch legend-nogo"></span> No-go zones</div>
             </div>
           </div>
@@ -2397,6 +2401,14 @@
     offsetYPx: 20
   };
 
+  const materialMap = {
+    cellSizeFt: 8,
+    digCells: new Map(),
+    pileCells: new Map(),
+    maxDepthInches: 0,
+    maxPileDrop: 0
+  };
+
   // Tooling
   const TOOL = {
     AUTO: "auto",
@@ -2744,7 +2756,14 @@
   }
 
   function renderMapBadge() {
-    el.mapShapesBadge.textContent = `${mapModel.count()} shape${mapModel.count() === 1 ? "" : "s"}`;
+    const digCells = materialMap.digCells.size;
+    const pileCells = materialMap.pileCells.size;
+    const extras = [];
+    if (digCells > 0) extras.push(`${digCells} dig cell${digCells === 1 ? "" : "s"}`);
+    if (pileCells > 0) extras.push(`${pileCells} pile${pileCells === 1 ? "" : "s"}`);
+
+    const base = `${mapModel.count()} shape${mapModel.count() === 1 ? "" : "s"}`;
+    el.mapShapesBadge.textContent = extras.length ? `${base} · ${extras.join(" · ")}` : base;
   }
 
   // ------------------------------
@@ -2926,6 +2945,133 @@
   function screenToWorldFt(xPx, yPx) {
     const s = view.pxPerFt * view.zoom;
     return { xFt: (xPx - view.offsetXPx) / s, yFt: (yPx - view.offsetYPx) / s };
+  }
+
+  function resetMaterialRadiance() {
+    materialMap.digCells.clear();
+    materialMap.pileCells.clear();
+    materialMap.maxDepthInches = 0;
+    materialMap.maxPileDrop = 0;
+  }
+
+  function materialCellKey(xFt, yFt) {
+    const size = materialMap.cellSizeFt;
+    const gx = Math.floor(xFt / size);
+    const gy = Math.floor(yFt / size);
+    return `${gx},${gy}`;
+  }
+
+  function materialCellCenter(key) {
+    const [gx, gy] = key.split(",").map(Number);
+    const size = materialMap.cellSizeFt;
+    return { xFt: (gx + 0.5) * size, yFt: (gy + 0.5) * size };
+  }
+
+  function recordDigRadiance(xFt, yFt, depthInches) {
+    if (!Number.isFinite(depthInches) || depthInches <= 0) return;
+    const key = materialCellKey(xFt, yFt);
+    const center = materialCellCenter(key);
+    const cell = materialMap.digCells.get(key) || { ...center, depthSum: 0, count: 0, max: 0 };
+
+    cell.depthSum += depthInches;
+    cell.count += 1;
+    cell.max = Math.max(cell.max, depthInches);
+
+    materialMap.digCells.set(key, cell);
+    materialMap.maxDepthInches = Math.max(materialMap.maxDepthInches, cell.depthSum / Math.max(1, cell.count), cell.max);
+  }
+
+  function recordPileRadiance(xFt, yFt, dropPct) {
+    if (!Number.isFinite(dropPct) || dropPct <= 0) return;
+    const key = materialCellKey(xFt, yFt);
+    const center = materialCellCenter(key);
+    const cell = materialMap.pileCells.get(key) || { ...center, dropSum: 0, count: 0, max: 0 };
+
+    cell.dropSum += dropPct;
+    cell.count += 1;
+    cell.max = Math.max(cell.max, dropPct);
+
+    materialMap.pileCells.set(key, cell);
+    materialMap.maxPileDrop = Math.max(materialMap.maxPileDrop, cell.dropSum / Math.max(1, cell.count), cell.max);
+  }
+
+  function lerpStops(stops, t) {
+    const clamped = clamp(t, 0, 1);
+    for (let i = 0; i < stops.length - 1; i++) {
+      const a = stops[i];
+      const b = stops[i + 1];
+      if (clamped <= b.t) {
+        const u = (clamped - a.t) / Math.max(1e-6, b.t - a.t);
+        return {
+          r: Math.round(lerp(a.c[0], b.c[0], u)),
+          g: Math.round(lerp(a.c[1], b.c[1], u)),
+          b: Math.round(lerp(a.c[2], b.c[2], u))
+        };
+      }
+    }
+    const last = stops[stops.length - 1];
+    return { r: last.c[0], g: last.c[1], b: last.c[2] };
+  }
+
+  function depthRadianceColor(depthInches) {
+    const maxDepth = Math.max(12, materialMap.maxDepthInches || 12);
+    const t = clamp(depthInches / maxDepth, 0, 1);
+    const color = lerpStops([
+      { t: 0, c: [72, 213, 151] },
+      { t: 0.5, c: [255, 202, 95] },
+      { t: 1, c: [255, 55, 95] }
+    ], t);
+    return { inner: `rgba(${color.r},${color.g},${color.b},0.42)`, outer: `rgba(${color.r},${color.g},${color.b},0)` };
+  }
+
+  function pileRadianceColor(dropPct) {
+    const maxDrop = Math.max(5, materialMap.maxPileDrop || 5);
+    const t = clamp(dropPct / maxDrop, 0, 1);
+    const color = lerpStops([
+      { t: 0, c: [91, 192, 255] },
+      { t: 0.6, c: [155, 123, 255] },
+      { t: 1, c: [255, 255, 255] }
+    ], t);
+    return { inner: `rgba(${color.r},${color.g},${color.b},0.36)`, outer: `rgba(${color.r},${color.g},${color.b},0)` };
+  }
+
+  function drawMaterialRadiance() {
+    const ctx = el.ctx;
+    const s = view.pxPerFt * view.zoom;
+
+    ctx.save();
+
+    const radiusFt = materialMap.cellSizeFt * 1.05;
+
+    materialMap.digCells.forEach(cell => {
+      const avgDepth = cell.depthSum / Math.max(1, cell.count);
+      const { inner, outer } = depthRadianceColor(avgDepth);
+      const c = worldToScreenPx(cell.xFt, cell.yFt);
+      const rPx = radiusFt * s;
+      const g = ctx.createRadialGradient(c.xPx, c.yPx, 0, c.xPx, c.yPx, rPx);
+      g.addColorStop(0, inner);
+      g.addColorStop(1, outer);
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(c.xPx, c.yPx, rPx, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    materialMap.pileCells.forEach(cell => {
+      const avgDrop = cell.dropSum / Math.max(1, cell.count);
+      const { inner, outer } = pileRadianceColor(avgDrop);
+      const c = worldToScreenPx(cell.xFt, cell.yFt);
+      const rPx = radiusFt * 0.8 * s;
+      const g = ctx.createRadialGradient(c.xPx, c.yPx, 0, c.xPx, c.yPx, rPx);
+      g.addColorStop(0, inner);
+      g.addColorStop(1, outer);
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(c.xPx, c.yPx, rPx, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    ctx.restore();
   }
 
   function drawGrid() {
@@ -3794,6 +3940,7 @@
 
     drawGrid();
     drawEarthworksOverlay();
+    drawMaterialRadiance();
 
     // overlay BELOW shapes
     drawOverlayLayer("below");
@@ -4510,6 +4657,7 @@
   function clearMap() {
     if (simEngine.running) simEngine.stop("Map cleared by operator");
     mapModel.clearAll();
+    resetMaterialRadiance();
     uiState.selection.selectedShapeId = null;
     uiState.measure.stage = 0;
     uiState.measure.aFt = null;
@@ -5854,6 +6002,9 @@
       const speed = this.speedMultiplier;
       machine.currentAction = step.label;
 
+      const meta = step.meta || {};
+      const preFillPct = machine.bucketFillPct;
+
       // set target crosshair
       if (step?.toFt) machine.targetFt = { xFt: step.toFt.xFt, yFt: step.toFt.yFt };
 
@@ -5868,11 +6019,19 @@
       }
 
       // Apply bucket delta at end of step (dump etc)
-      const meta = step.meta || {};
       const deltaPct = (typeof meta.bucketDeltaPct === "number") ? meta.bucketDeltaPct : null;
       if (deltaPct !== null) {
         if (deltaPct <= -99) machine.bucketFillPct = 0;
         else machine.bucketFillPct = clamp(machine.bucketFillPct + deltaPct, 0, 100);
+      }
+
+      if (typeof meta.depthDeltaInches === "number" && meta.depthDeltaInches > 0) {
+        recordDigRadiance(machine.xFt, machine.yFt, meta.depthDeltaInches);
+      }
+
+      const dumpedPct = Math.max(0, preFillPct - machine.bucketFillPct);
+      if (dumpedPct > 0) {
+        recordPileRadiance(machine.xFt, machine.yFt, dumpedPct);
       }
 
       // Training record
@@ -6082,6 +6241,7 @@
     if (simEngine.running) simEngine.stop("Demo load");
 
     mapModel.clearAll();
+    resetMaterialRadiance();
     taskManager.clearQueue();
     pendingFeedback.length = 0;
     simulationEvents.length = 0;
