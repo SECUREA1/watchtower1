@@ -217,6 +217,12 @@
       border-color: rgba(34,197,94,.28);
       background: linear-gradient(180deg, rgba(34,197,94,.18), rgba(34,197,94,.08));
     }
+    button.mini{
+      padding:7px 10px;
+      border-radius:12px;
+      font-size:12px;
+      box-shadow:none;
+    }
 
     input, select, textarea{
       width:100%;
@@ -274,6 +280,11 @@
       display:flex; gap:8px; flex-wrap:wrap;
       border-top:1px solid var(--border);
       background: rgba(255,255,255,.02);
+      align-items:center;
+      justify-content:space-between;
+    }
+    .cam-actions .left, .cam-actions .right{
+      display:flex; gap:8px; flex-wrap:wrap; align-items:center;
     }
 
     .toggle{
@@ -305,7 +316,7 @@
     table{
       width:100%;
       border-collapse:collapse;
-      min-width: 980px;
+      min-width: 1080px;
       font-size:13px;
     }
     thead th{
@@ -330,6 +341,22 @@
       white-space:nowrap;
     }
     tbody tr:hover{background: rgba(255,255,255,.04)}
+    .details-cell{
+      display:flex; gap:8px; align-items:center;
+      max-width: 560px;
+    }
+    .details-text{
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+      max-width: 480px;
+      color: rgba(255,236,235,.82);
+    }
+    .details-text.expanded{
+      white-space:normal;
+      word-break:break-word;
+      max-width: 560px;
+    }
 
     /* Lists */
     .list{
@@ -436,15 +463,9 @@
               <div class="subtitle">Select cameras, open streams, show overlays, capture, annotate, or pop out.</div>
             </div>
             <div class="row">
-              <button id="btnStart" class="good" type="button">
-                ▶ Start Cameras
-              </button>
-              <button id="btnStop" class="danger" type="button">
-                ■ Stop Cameras
-              </button>
-              <button id="btnToggleDisplay" class="ghost" type="button">
-                👁 Hide Display
-              </button>
+              <button id="btnStart" class="good" type="button">▶ Start Cameras</button>
+              <button id="btnStop" class="danger" type="button">■ Stop Cameras</button>
+              <button id="btnToggleDisplay" class="ghost" type="button">👁 Hide Display</button>
             </div>
           </div>
 
@@ -461,6 +482,11 @@
                 <span id="recStatus" class="status off">OFF</span>
               </div>
 
+              <div class="toggle">
+                <input id="chkMinDetails" type="checkbox" checked />
+                <label for="chkMinDetails"><b>Minimize Details</b> <span class="small">(logs show first lines)</span></label>
+              </div>
+
               <div class="spacer"></div>
 
               <button id="btnExport" type="button" class="ghost">⬇ Export Logs JSON</button>
@@ -470,12 +496,13 @@
             <div class="card" style="margin-bottom:12px">
               <div class="card-h">
                 <div class="title"><span aria-hidden="true">🎛️</span> Camera Control</div>
-                <div class="subtitle">Choose which streams to open (max depends on device).</div>
+                <div class="subtitle">Choose streams and (optionally) bind each slot to a real device.</div>
               </div>
               <div class="card-b">
                 <div id="camSelect" class="row" style="gap:8px"></div>
                 <div class="hint" style="margin-top:10px">
-                  If you only have one webcam, select <b>Camera 0</b>. On laptops/phones, multiple streams may be limited.
+                  If you only have one webcam, select <b>Camera 0</b>. If multiple cameras exist, pick a device per slot.
+                  Some browsers/devices limit simultaneous streams.
                 </div>
               </div>
             </div>
@@ -622,26 +649,42 @@
       objectMemory: "rednode.security.objectMemory.v1",
       customLabels: "rednode.security.customLabels.v1",
       knownFaces:  "rednode.security.knownFaces.v1",
-      settings:    "rednode.security.settings.v1",
+      settings:    "rednode.security.settings.v2", // bumped to include new settings
+      unknownFaces:"rednode.security.unknownFaces.v1",
+      camBindings: "rednode.security.camBindings.v1",
     };
+
+    // persisted settings
+    const defaultSettings = {
+      demoMode: true,
+      recognitionMode: false,
+      cameraDisplayOn: true,
+      minimizeDetails: true,
+      selectedSlots: [0],          // which UI slots enabled
+    };
+    let settings = loadJSON(LS_KEYS.settings, defaultSettings);
 
     let objectMemory = loadJSON(LS_KEYS.objectMemory, {});
     let customLabels = loadJSON(LS_KEYS.customLabels, {});
     let knownFaces   = loadJSON(LS_KEYS.knownFaces,  {});
-    let unknownFacesQueue = [];
+    let unknownFacesQueue = loadJSON(LS_KEYS.unknownFaces, []);
     let trackedObjects = new Set(Object.keys(objectMemory));
 
     const MAX_CAM_UI = 4;
-    let camStreams = new Map();
-    let cameraDisplayOn = true;
+    let camStreams = new Map(); // slotIndex -> MediaStream
+    let cameraDisplayOn = !!settings.cameraDisplayOn;
 
-    let recognitionMode = false;
-    let demoMode = true;
+    let recognitionMode = !!settings.recognitionMode;
+    let demoMode = !!settings.demoMode;
 
     const DEMO_CLASSES = ["person","backpack","bottle","laptop","cell phone","book","chair","knife","cup","handbag","keyboard","remote"];
     const DEMO_PEOPLE  = ["Unknown","Ava","Noah","Mia","Liam","Zoe","Ethan","Ivy","Kai","Nina"];
 
     const lastEventByLabel = new Map();
+
+    // Real device enumeration (optional binding per slot)
+    let devices = []; // videoinput list
+    let camBindings = loadJSON(LS_KEYS.camBindings, {}); // slotIndex -> deviceId OR "__default__"
 
     const el = (id)=>document.getElementById(id);
     const camGrid = el("camGrid");
@@ -664,31 +707,52 @@
 
     el("year").textContent = new Date().getFullYear();
 
-    buildCameraSelectors();
+    // Apply settings to UI
+    el("chkDemoMode").checked = demoMode;
+    el("chkRecognition").checked = recognitionMode;
+    el("chkMinDetails").checked = !!settings.minimizeDetails;
+
+    el("recStatus").className = "status " + (recognitionMode ? "on" : "off");
+    el("recStatus").textContent = recognitionMode ? "ON" : "OFF";
+    recBadge.textContent = recognitionMode ? "On" : "Off";
+    modeBadge.textContent = demoMode ? "Demo" : "Live";
+    el("btnToggleDisplay").textContent = cameraDisplayOn ? "👁 Hide Display" : "👁 Show Display";
+
+    // Build UI
     buildCameraCards();
+    // selectors need device list; build now with placeholders, then refresh after enumerate
+    buildCameraSelectors();
     refreshAll();
 
-    el("chkDemoMode").checked = true;
-    demoMode = true;
-    modeBadge.textContent = "Demo";
-
+    // Events
     el("chkDemoMode").addEventListener("change", (e)=>{
       demoMode = !!e.target.checked;
+      settings.demoMode = demoMode;
       modeBadge.textContent = demoMode ? "Demo" : "Live";
+      saveSettings();
     });
 
     el("chkRecognition").addEventListener("change", (e)=>{
       recognitionMode = !!e.target.checked;
+      settings.recognitionMode = recognitionMode;
       el("recStatus").className = "status " + (recognitionMode ? "on" : "off");
       el("recStatus").textContent = recognitionMode ? "ON" : "OFF";
       recBadge.textContent = recognitionMode ? "On" : "Off";
-      if(!recognitionMode){
-        lastEventByLabel.clear();
-      }
+      if(!recognitionMode) lastEventByLabel.clear();
+      saveSettings();
+    });
+
+    el("chkMinDetails").addEventListener("change", (e)=>{
+      settings.minimizeDetails = !!e.target.checked;
+      saveSettings();
+      renderLogTable();
     });
 
     el("btnToggleDisplay").addEventListener("click", ()=>{
       cameraDisplayOn = !cameraDisplayOn;
+      settings.cameraDisplayOn = cameraDisplayOn;
+      saveSettings();
+
       el("btnToggleDisplay").textContent = cameraDisplayOn ? "👁 Hide Display" : "👁 Show Display";
       document.querySelectorAll("canvas.overlay").forEach(c=>{
         const ctx = c.getContext("2d");
@@ -697,7 +761,7 @@
     });
 
     el("btnStart").addEventListener("click", async ()=>{
-      await startSelectedCameras();
+      await startSelectedCameras(false);
     });
 
     el("btnStop").addEventListener("click", ()=>{
@@ -707,9 +771,12 @@
     el("btnExport").addEventListener("click", ()=>{
       const payload = {
         exportedAt: new Date().toISOString(),
+        settings,
         objectMemory,
         customLabels,
         knownFaces,
+        unknownFacesQueue,
+        camBindings,
       };
       downloadJSON(payload, "rednode_security_logs.json");
     });
@@ -788,22 +855,52 @@
       toast("Unknown face removed.");
     });
 
+    /***********************
+     * Camera UI + Devices
+     ***********************/
     function buildCameraSelectors(){
       camSelect.innerHTML = "";
+
       for(let i=0;i<MAX_CAM_UI;i++){
-        const wrap = document.createElement("label");
+        const wrap = document.createElement("div");
         wrap.className = "toggle";
-        wrap.style.gap = "8px";
+        wrap.style.gap = "10px";
+
         const cb = document.createElement("input");
         cb.type = "checkbox";
         cb.id = "camChk_"+i;
-        cb.checked = (i === 0);
-        const txt = document.createElement("span");
-        txt.innerHTML = `<b>Camera ${i}</b>`;
+        cb.checked = settings.selectedSlots.includes(i);
+
+        cb.addEventListener("change", ()=>{
+          const picked = [];
+          for(let s=0;s<MAX_CAM_UI;s++){
+            const c = el("camChk_"+s);
+            if(c && c.checked) picked.push(s);
+          }
+          settings.selectedSlots = picked;
+          saveSettings();
+        });
+
+        const label = document.createElement("span");
+        label.innerHTML = `<b>Camera ${i}</b>`;
+
+        const sel = document.createElement("select");
+        sel.id = "camDev_"+i;
+        sel.style.maxWidth = "320px";
+        // fill with current devices
+        renderDeviceSelectOptions(sel, i);
+
+        sel.addEventListener("change", ()=>{
+          camBindings[i] = sel.value;
+          saveJSON(LS_KEYS.camBindings, camBindings);
+        });
+
         wrap.appendChild(cb);
-        wrap.appendChild(txt);
+        wrap.appendChild(label);
+        wrap.appendChild(sel);
         camSelect.appendChild(wrap);
       }
+
       const applyBtn = document.createElement("button");
       applyBtn.type = "button";
       applyBtn.className = "ghost";
@@ -812,6 +909,64 @@
         await startSelectedCameras(true);
       });
       camSelect.appendChild(applyBtn);
+
+      const refreshBtn = document.createElement("button");
+      refreshBtn.type = "button";
+      refreshBtn.className = "ghost";
+      refreshBtn.textContent = "Refresh Devices";
+      refreshBtn.addEventListener("click", async ()=>{
+        await enumerateVideoDevices(true);
+      });
+      camSelect.appendChild(refreshBtn);
+    }
+
+    function renderDeviceSelectOptions(selectEl, slot){
+      const current = camBindings[slot] || "__default__";
+      selectEl.innerHTML = "";
+
+      const def = document.createElement("option");
+      def.value = "__default__";
+      def.textContent = "Default camera";
+      selectEl.appendChild(def);
+
+      if(!devices.length){
+        const opt = document.createElement("option");
+        opt.value = "__none__";
+        opt.textContent = "No devices listed (start once)";
+        selectEl.appendChild(opt);
+      }else{
+        devices.forEach((d, idx)=>{
+          const opt = document.createElement("option");
+          opt.value = d.deviceId;
+          opt.textContent = d.label ? d.label : `Camera Device ${idx+1}`;
+          selectEl.appendChild(opt);
+        });
+      }
+
+      // restore selected value if present
+      selectEl.value = current;
+      if([...selectEl.options].every(o=>o.value !== current)){
+        selectEl.value = "__default__";
+        camBindings[slot] = "__default__";
+        saveJSON(LS_KEYS.camBindings, camBindings);
+      }
+    }
+
+    async function enumerateVideoDevices(force=false){
+      try{
+        // Some browsers only reveal labels after permission is granted.
+        // If not granted yet, this will still return deviceIds but labels may be blank.
+        const list = await navigator.mediaDevices.enumerateDevices();
+        devices = list.filter(d=>d.kind === "videoinput");
+        // rerender selectors
+        for(let i=0;i<MAX_CAM_UI;i++){
+          const sel = el("camDev_"+i);
+          if(sel) renderDeviceSelectOptions(sel, i);
+        }
+        if(force) toast("Device list refreshed.");
+      }catch(e){
+        console.warn("enumerateDevices failed:", e);
+      }
     }
 
     function buildCameraCards(){
@@ -822,26 +977,31 @@
         card.dataset.cam = String(i);
 
         card.innerHTML = `
-          <div class=\"cam-top\">
+          <div class="cam-top">
             <div>
-              <div class=\"cam-name\">Camera ${i}</div>
-              <div class=\"cam-meta\">
-                <span class=\"dot\" id=\"camDot_${i}\"></span>
-                <span id=\"camStatus_${i}\">Off</span>
+              <div class="cam-name">Camera ${i}</div>
+              <div class="cam-meta">
+                <span class="dot" id="camDot_${i}"></span>
+                <span id="camStatus_${i}">Off</span>
               </div>
             </div>
-            <span class=\"pill-mini\" id=\"camFps_${i}\">—</span>
+            <span class="pill-mini" id="camFps_${i}">—</span>
           </div>
 
-          <div class=\"cam-body\">
-            <video id=\"vid_${i}\" playsinline muted></video>
-            <canvas class=\"overlay\" id=\"ov_${i}\"></canvas>
+          <div class="cam-body">
+            <video id="vid_${i}" playsinline muted></video>
+            <canvas class="overlay" id="ov_${i}"></canvas>
           </div>
 
-          <div class=\"cam-actions\">
-            <button type=\"button\" class=\"ghost\" data-act=\"capture\">📸 Capture</button>
-            <button type=\"button\" class=\"ghost\" data-act=\"annotate\">✍️ Annotate</button>
-            <button type=\"button\" class=\"ghost\" data-act=\"pop\">🗔 Open</button>
+          <div class="cam-actions">
+            <div class="left">
+              <button type="button" class="ghost mini" data-act="capture">📸 Capture</button>
+              <button type="button" class="ghost mini" data-act="annotate">✍️ Annotate</button>
+              <button type="button" class="ghost mini" data-act="pop">🗔 Open</button>
+            </div>
+            <div class="right">
+              <button type="button" class="ghost mini" data-act="snap">⬇ Snapshot</button>
+            </div>
           </div>
         `;
 
@@ -851,6 +1011,7 @@
             if(act === "capture") captureFrame(i);
             if(act === "annotate") annotateFrame(i);
             if(act === "pop") popoutCamera(i);
+            if(act === "snap") snapshotDownload(i);
           });
         });
 
@@ -876,17 +1037,20 @@
         const cb = el("camChk_"+i);
         if(cb && cb.checked) want.push(i);
       }
+      settings.selectedSlots = want;
+      saveSettings();
 
+      // stop cameras not wanted
       for(const [idx] of camStreams.entries()){
-        if(!want.includes(idx)){
-          stopCamera(idx);
-        }
+        if(!want.includes(idx)) stopCamera(idx);
       }
 
+      // start wanted
       for(const idx of want){
         if(!camStreams.has(idx)){
           const ok = await startCamera(idx);
           if(!ok && !applyOnly){
+            // keep going
           }
         }
       }
@@ -898,27 +1062,39 @@
       }
     }
 
-    async function startCamera(idx){
+    async function startCamera(slotIdx){
       try{
-        const constraints = { video: { width: {ideal: 1280}, height:{ideal:720} }, audio:false };
+        const pick = (camBindings[slotIdx] || "__default__");
+        const videoConstraints = {
+          width: {ideal: 1280},
+          height:{ideal: 720},
+        };
+        if(pick && pick !== "__default__" && pick !== "__none__"){
+          videoConstraints.deviceId = { exact: pick };
+        }
+
+        const constraints = { video: videoConstraints, audio:false };
         const stream = await navigator.mediaDevices.getUserMedia(constraints);
 
-        camStreams.set(idx, stream);
-        const v = el("vid_"+idx);
+        camStreams.set(slotIdx, stream);
+        const v = el("vid_"+slotIdx);
         v.srcObject = stream;
         await v.play();
 
-        const ov = el("ov_"+idx);
+        // refresh device list (now labels usually available)
+        await enumerateVideoDevices(false);
+
+        const ov = el("ov_"+slotIdx);
         resizeOverlayToVideo(v, ov);
 
-        setCamStatus(idx, true);
-        renderLoop(idx);
+        setCamStatus(slotIdx, true);
+        renderLoop(slotIdx);
         return true;
       }catch(err){
         console.warn("Camera start failed:", err);
-        setCamStatus(idx, false);
+        setCamStatus(slotIdx, false);
         setGlobalPerm(false, "Camera: Permission blocked");
-        toast("Camera permission blocked or unavailable.");
+        toast("Camera permission blocked/unavailable (or device already in use).");
         return false;
       }
     }
@@ -972,6 +1148,7 @@
           ctx.clearRect(0,0,ov.width,ov.height);
 
           if(recognitionMode){
+            // demo simulated detections
             if(demoMode){
               demoSimulateDetections(ctx, ov.width, ov.height);
             }else{
@@ -995,6 +1172,9 @@
       requestAnimationFrame(tick);
     }
 
+    /***********************
+     * Demo detections + logs
+     ***********************/
     function demoSimulateDetections(ctx, w, h, livePlaceholder=false){
       const n = randInt(1, 3);
       for(let i=0;i<n;i++){
@@ -1054,7 +1234,11 @@
         return;
       }
 
-      const dist = Math.hypot((box.x+box.w/2) - (last.box.x+last.box.w/2), (box.y+box.h/2) - (last.box.y+last.box.h/2));
+      const dist = Math.hypot(
+        (box.x+box.w/2) - (last.box.x+last.box.w/2),
+        (box.y+box.h/2) - (last.box.y+last.box.h/2)
+      );
+
       if(dist > 25){
         if(person && last.status !== "Picked Up"){
           recordEvent(label, "Picked Up", box, person, null);
@@ -1093,21 +1277,60 @@
       updateObjectDropdown();
     }
 
+    /***********************
+     * Logs: minimized/expand buttons
+     ***********************/
     function appendLogRow(label, evt){
       if(logSearch.value.trim()){
         renderLogTable();
         return;
       }
+      const tr = buildLogTr(label, evt);
+      logBody.prepend(tr);
+    }
+
+    function buildLogTr(label, evt){
       const tr = document.createElement("tr");
+      const detailsRaw = JSON.stringify(evt.box);
+      const minimized = !!settings.minimizeDetails;
+
+      const tdDetails = document.createElement("td");
+      const wrap = document.createElement("div");
+      wrap.className = "details-cell";
+
+      const text = document.createElement("div");
+      text.className = "details-text";
+      text.textContent = detailsRaw;
+
+      if(minimized){
+        // keep ellipsis styling
+      }else{
+        text.classList.add("expanded");
+      }
+
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "ghost mini";
+      btn.textContent = minimized ? "Expand" : "Collapse";
+
+      btn.addEventListener("click", ()=>{
+        const isExpanded = text.classList.toggle("expanded");
+        btn.textContent = isExpanded ? "Collapse" : "Expand";
+      });
+
+      wrap.appendChild(text);
+      wrap.appendChild(btn);
+      tdDetails.appendChild(wrap);
+
       tr.innerHTML = `
         <td>${fmtTime(evt.time)}</td>
         <td>${escapeHtml(label)}</td>
         <td>${escapeHtml(evt.status)}</td>
         <td>${escapeHtml(evt.person || "No one")}</td>
         <td>${evt.held_duration != null ? (evt.held_duration.toFixed(2)+"s") : "-"}</td>
-        <td>${escapeHtml(JSON.stringify(evt.box))}</td>
       `;
-      logBody.prepend(tr);
+      tr.appendChild(tdDetails);
+      return tr;
     }
 
     function renderLogTable(){
@@ -1126,19 +1349,13 @@
 
       logBody.innerHTML = "";
       for(const r of rows.slice(0, 800)){
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-          <td>${fmtTime(r.evt.time)}</td>
-          <td>${escapeHtml(r.label)}</td>
-          <td>${escapeHtml(r.evt.status)}</td>
-          <td>${escapeHtml(r.evt.person || "No one")}</td>
-          <td>${r.evt.held_duration != null ? (r.evt.held_duration.toFixed(2)+"s") : "-"}</td>
-          <td>${escapeHtml(JSON.stringify(r.evt.box))}</td>
-        `;
-        logBody.appendChild(tr);
+        logBody.appendChild(buildLogTr(r.label, r.evt));
       }
     }
 
+    /***********************
+     * Dropdowns + history
+     ***********************/
     function updateObjectDropdown(){
       const keys = Object.keys(objectMemory);
       objectSelect.innerHTML = "";
@@ -1205,6 +1422,9 @@
       }
     }
 
+    /***********************
+     * Unknown face queue
+     ***********************/
     function pushUnknownFacePreview(){
       const c = document.createElement("canvas");
       c.width = 256; c.height = 256;
@@ -1248,12 +1468,13 @@
       }
 
       const img = new Image();
-      img.onload = ()=>{
-        ctx.drawImage(img, 0, 0, facePreview.width, facePreview.height);
-      };
+      img.onload = ()=>{ ctx.drawImage(img, 0, 0, facePreview.width, facePreview.height); };
       img.src = unknownFacesQueue[0].imgDataUrl;
     }
 
+    /***********************
+     * Camera actions
+     ***********************/
     function captureFrame(idx){
       if(!camStreams.has(idx)){ toast("Camera is off."); return; }
       toast(`Captured frame (Camera ${idx}) — demo stub.`);
@@ -1290,6 +1511,35 @@
       vv.play();
     }
 
+    function snapshotDownload(idx){
+      const v = el("vid_"+idx);
+      if(!v || !v.srcObject){ toast("Camera is off."); return; }
+      const c = document.createElement("canvas");
+      const w = v.videoWidth || 1280;
+      const h = v.videoHeight || 720;
+      c.width = w; c.height = h;
+      const g = c.getContext("2d");
+      g.drawImage(v, 0, 0, w, h);
+
+      // include overlay if present and display is on
+      const ov = el("ov_"+idx);
+      if(ov && cameraDisplayOn){
+        try{ g.drawImage(ov, 0, 0, w, h); }catch(e){}
+      }
+
+      const url = c.toDataURL("image/png");
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `rednode_cam${idx}_${Date.now()}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      toast("Snapshot downloaded.");
+    }
+
+    /***********************
+     * Refresh + Persistence
+     ***********************/
     function refreshAll(){
       updateObjectDropdown();
       renderLogTable();
@@ -1302,13 +1552,22 @@
       saveJSON(LS_KEYS.objectMemory, objectMemory);
       saveJSON(LS_KEYS.customLabels, customLabels);
       saveJSON(LS_KEYS.knownFaces, knownFaces);
+      saveJSON(LS_KEYS.unknownFaces, unknownFacesQueue);
+      saveSettings();
       trackedObjects = new Set(Object.keys(objectMemory));
+    }
+
+    function saveSettings(){
+      saveJSON(LS_KEYS.settings, settings);
     }
 
     function getDisplayName(yoloLabel){
       return customLabels[yoloLabel] || yoloLabel;
     }
 
+    /***********************
+     * Utils
+     ***********************/
     function fmtTime(ms){
       const d = new Date(ms);
       const pad = (n)=>String(n).padStart(2,"0");
@@ -1375,10 +1634,14 @@
       setTimeout(()=>t.remove(), 1800);
     }
 
+    /***********************
+     * Boot
+     ***********************/
     setGlobalPerm(false, "Camera: Not started");
-    recBadge.textContent = "Off";
     renderUnknownFace();
+    enumerateVideoDevices(false);
 
+    // Demo: drip unknown faces
     setInterval(()=>{
       if(recognitionMode && demoMode && Math.random() < 0.08){
         pushUnknownFacePreview();
@@ -1387,3 +1650,4 @@
   </script>
 </body>
 </html>
+
