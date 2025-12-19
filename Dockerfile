@@ -4,16 +4,20 @@ FROM nginx:alpine
 WORKDIR /usr/share/nginx/html
 
 # Copy site files
-COPY start.html            /usr/share/nginx/html/index.html
-COPY start.html            /usr/share/nginx/html/start.html
-COPY rednode.html          /usr/share/nginx/html/rednode.html
-COPY secure.html           /usr/share/nginx/html/secure.html
-COPY dashboard1.html       /usr/share/nginx/html/dashboard1.html
-COPY dashboard.html        /usr/share/nginx/html/dashboard.html
-COPY home.html             /usr/share/nginx/html/home.html
-COPY sensor2.html          /usr/share/nginx/html/sensor2.html
-COPY omconsole_render_single.html /usr/share/nginx/html/omconsole_render_single.html
-COPY omconsole_render_single_games_ROUTING.html /usr/share/nginx/html/omconsole_render_single_games_ROUTING.html
+COPY start.html                                    /usr/share/nginx/html/index.html
+COPY start.html                                    /usr/share/nginx/html/start.html
+COPY rednode.html                                  /usr/share/nginx/html/rednode.html
+COPY secure.html                                   /usr/share/nginx/html/secure.html
+COPY dashboard1.html                               /usr/share/nginx/html/dashboard1.html
+COPY dashboard.html                                /usr/share/nginx/html/dashboard.html
+COPY home.html                                     /usr/share/nginx/html/home.html
+COPY sensor2.html                                  /usr/share/nginx/html/sensor2.html
+COPY omconsole_render_single.html                  /usr/share/nginx/html/omconsole_render_single.html
+COPY omconsole_render_single_games_ROUTING.html    /usr/share/nginx/html/omconsole_render_single_games_ROUTING.html
+
+# New pages: make sure these files exist in your build context
+COPY marketplace.html      /usr/share/nginx/html/marketplace.html
+COPY chainmarket.html      /usr/share/nginx/html/chainmarket.html
 
 # Dashboard folder + new telematics page
 RUN mkdir -p /usr/share/nginx/html/dashboard
@@ -24,6 +28,11 @@ COPY dashboard/            /usr/share/nginx/html/dashboard/
 # Static directories
 COPY live/                 /usr/share/nginx/html/live/
 COPY static/               /usr/share/nginx/html/static/
+
+# If you have additional assets for marketplace/chainmarket, copy them too:
+# (optional — uncomment if you have a marketplace/ or chainmarket/ asset folder)
+# COPY marketplace/        /usr/share/nginx/html/marketplace/
+# COPY chainmarket/        /usr/share/nginx/html/chainmarket/
 
 # Create nginx config template at build-time
 RUN cat > /etc/nginx/conf.d/default.conf.template <<'EOF_CONF'
@@ -62,5 +71,5 @@ EOF_CONF
 # Expose documentation only; Render provides actual PORT via env
 EXPOSE 80
 
-# Replace "listen 80;" with "listen ${PORT};" at container start, then run nginx
-CMD ["sh", "-c", "sed -e \"s/listen 80;/listen ${PORT};/g\" /etc/nginx/conf.d/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
+# Provide a safe default if PORT isn't set (uses 80)
+CMD ["sh", "-c", "sed -e \"s/listen 80;/listen ${PORT:-80};/g\" /etc/nginx/conf.d/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
