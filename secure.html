@@ -1650,4 +1650,1562 @@
   </script>
 </body>
 </html>
+  <!-- ✅ Computer Vision libraries (CDN) -->
+  <!-- Face detection/recognition + bundled TFJS -->
+  <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.15/dist/face-api.js"></script>
+  <script>
+    // Expose TFJS bundled with face-api to the global namespace,
+    // so coco-ssd can reuse the same TFJS instance.
+    window.tf = faceapi.tf;
+  </script>
+
+  <!-- Object detection (COCO-SSD) -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3"></script>
+
+  <!-- ✅ RedNode Security Console Logic (Live CV + Demo + Persistent DB) -->
+  <script>
+    /***********************
+     * Storage + Structures
+     ***********************/
+    const LS_KEYS = {
+      objectMemory:  "rednode.security.objectMemory.v1",
+      customLabels:  "rednode.security.customLabels.v1",
+      knownFaces:    "rednode.security.knownFaces.v1",
+      unknownFaces:  "rednode.security.unknownFaces.v1",
+      settings:      "rednode.security.settings.v1",
+      trackCounter:  "rednode.security.trackCounter.v1",
+    };
+
+    // Settings persisted
+    let settings = loadJSON(LS_KEYS.settings, {
+      demoMode: false,                 // ✅ default LIVE CV
+      recognitionMode: false,
+      detectionIntervalMs: 250,        // how often we run inference per camera
+      objScoreThreshold: 0.55,         // coco-ssd threshold
+      faceScoreThreshold: 0.5,         // tiny face detector threshold
+      faceMatchThreshold: 0.55,        // lower = stricter match
+      trackIouThreshold: 0.35,         // IoU threshold to keep same track
+      movePxThreshold: 25,             // movement threshold for Moved/Held events
+      moveLogCooldownMs: 1500,         // prevent log spam
+      trackForgetMs: 2200,             // remove track if not seen
+      unknownFaceMinIntervalMs: 4500,  // prevent unknown face spam
+      maxUnknownQueue: 12,
+      faceInputSize: 416,              // 128/160/224/320/416/512
+    });
+
+    // Main DBs (localStorage)
+    let objectMemory = loadJSON(LS_KEYS.objectMemory, {});
+    let customLabels = loadJSON(LS_KEYS.customLabels, {});
+    let knownFaces   = normalizeKnownFaces(loadJSON(LS_KEYS.knownFaces, {}));
+    let unknownFacesQueue = loadJSON(LS_KEYS.unknownFaces, []);
+    if (!Array.isArray(unknownFacesQueue)) unknownFacesQueue = [];
+
+    let trackedObjects = new Set(Object.keys(objectMemory));
+
+    // Camera + render state
+    const MAX_CAM_UI = 4;
+    let camStreams = new Map();   // idx -> MediaStream
+    let camStates  = new Map();   // idx -> { tracks, latest, ... }
+    let cameraDisplayOn = true;
+
+    // Modes
+    let recognitionMode = !!settings.recognitionMode;
+    let demoMode = !!settings.demoMode;
+
+    // Demo-only labels (kept from your original file)
+    const DEMO_CLASSES = ["person","backpack","bottle","laptop","cell phone","book","chair","knife","cup","handbag","keyboard","remote"];
+    const DEMO_PEOPLE  = ["Unknown","Ava","Noah","Mia","Liam","Zoe","Ethan","Ivy","Kai","Nina"];
+    const lastEventByLabel = new Map();
+
+    // Global track id (persists across reloads so DB recall is stable)
+    let globalTrackId = Number(localStorage.getItem(LS_KEYS.trackCounter) || "1");
+    function nextGlobalTrackId(){
+      const id = globalTrackId++;
+      localStorage.setItem(LS_KEYS.trackCounter, String(globalTrackId));
+      return id;
+    }
+
+    // CV models
+    let cocoModel = null;
+    let cvReady = false;
+    let cvInitPromise = null;
+    let faceMatcher = null;
+
+    // Face-api model folder (CDN)
+    const FACE_MODEL_URL = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.15/model/";
+
+    // Simple debounced save (prevents localStorage spam)
+    let _saveTimer = null;
+    function scheduleSaveAll(){
+      if(_saveTimer) return;
+      _saveTimer = setTimeout(()=>{
+        _saveTimer = null;
+        saveAll();
+      }, 300);
+    }
+
+    /***********************
+     * UI refs
+     ***********************/
+    const el = (id)=>document.getElementById(id);
+
+    const camGrid = el("camGrid");
+    const camSelect = el("camSelect");
+    const permDot = el("permDot");
+    const permText = el("permText");
+    const recBadge = el("recBadge");
+    const modeBadge = el("modeBadge");
+
+    const logBody = el("logBody");
+    const logSearch = el("logSearch");
+
+    const objectSelect = el("objectSelect");
+    const historyBox = el("historyBox");
+
+    const trackedList = el("trackedList");
+    const unknownCount = el("unknownCount");
+    const facePreview = el("facePreview");
+    const faceName = el("faceName");
+
+    el("year").textContent = new Date().getFullYear();
+
+    /***********************
+     * Boot UI
+     ***********************/
+    buildCameraSelectors();
+    buildCameraCards();
+    applyModeBadges();
+    refreshAll();
+
+    // Apply saved settings to toggles
+    el("chkDemoMode").checked = demoMode;
+    el("chkRecognition").checked = recognitionMode;
+    setRecUI(recognitionMode);
+
+    // Toggle Demo/Live
+    el("chkDemoMode").addEventListener("change", async (e)=>{
+      demoMode = !!e.target.checked;
+      settings.demoMode = demoMode;
+      applyModeBadges();
+      scheduleSaveAll();
+
+      // If switching to Live while recognition ON, ensure models load
+      if(recognitionMode && !demoMode){
+        try{
+          await ensureCvReady();
+        }catch(err){
+          demoMode = true;
+          settings.demoMode = true;
+          el("chkDemoMode").checked = true;
+          applyModeBadges();
+        }
+      }
+    });
+
+    // Toggle Recognition
+    el("chkRecognition").addEventListener("change", async (e)=>{
+      recognitionMode = !!e.target.checked;
+      settings.recognitionMode = recognitionMode;
+      setRecUI(recognitionMode);
+      scheduleSaveAll();
+
+      if(recognitionMode){
+        if(!demoMode){
+          try{
+            await ensureCvReady();
+          }catch(err){
+            recognitionMode = false;
+            settings.recognitionMode = false;
+            el("chkRecognition").checked = false;
+            setRecUI(false);
+            scheduleSaveAll();
+          }
+        }
+      }else{
+        lastEventByLabel.clear();
+        // Keep tracks but stop inference; overlays cleared only if display hidden
+      }
+    });
+
+    // Hide/show overlay only (recognition continues)
+    el("btnToggleDisplay").addEventListener("click", ()=>{
+      cameraDisplayOn = !cameraDisplayOn;
+      el("btnToggleDisplay").textContent = cameraDisplayOn ? "👁 Hide Display" : "👁 Show Display";
+      if(!cameraDisplayOn){
+        document.querySelectorAll("canvas.overlay").forEach(c=>{
+          const ctx = c.getContext("2d");
+          ctx.clearRect(0,0,c.width,c.height);
+        });
+      }
+    });
+
+    el("btnStart").addEventListener("click", async ()=>{ await startSelectedCameras(); });
+    el("btnStop").addEventListener("click", ()=>{ stopAllCameras(); });
+
+    el("btnExport").addEventListener("click", ()=>{
+      const payload = {
+        exportedAt: new Date().toISOString(),
+        settings,
+        objectMemory,
+        customLabels,
+        knownFaces,
+        unknownFacesQueue: unknownFacesQueue.map(x=>({
+          capturedAt: x.capturedAt,
+          camIdx: x.camIdx,
+          // include image + descriptor so you can restore/relabel later
+          imgDataUrl: x.imgDataUrl,
+          descriptor: x.descriptor
+        }))
+      };
+      downloadJSON(payload, "rednode_security_db.json");
+    });
+
+    el("btnClear").addEventListener("click", ()=>{
+      if(!confirm("Clear all logs, known faces, labels, and memory?")) return;
+
+      objectMemory = {};
+      customLabels = {};
+      knownFaces = {};
+      unknownFacesQueue = [];
+      trackedObjects = new Set();
+      lastEventByLabel.clear();
+
+      // Reset track counter
+      globalTrackId = 1;
+      localStorage.setItem(LS_KEYS.trackCounter, "1");
+
+      rebuildFaceMatcher();
+      saveAll();
+      refreshAll();
+      toast("Cleared all data.");
+    });
+
+    logSearch.addEventListener("input", ()=>renderLogTable());
+
+    el("btnShowHistory").addEventListener("click", ()=>{
+      const obj = objectSelect.value;
+      historyBox.value = formatHistory(obj);
+    });
+
+    el("btnCopyHistory").addEventListener("click", async ()=>{
+      try{
+        await navigator.clipboard.writeText(historyBox.value || "");
+        toast("Copied history to clipboard.");
+      }catch(e){
+        alert("Clipboard blocked. Select + copy manually.");
+      }
+    });
+
+    el("btnRefreshTracked").addEventListener("click", ()=>renderTracked());
+
+    el("btnSaveCustomLabel").addEventListener("click", ()=>{
+      const obj = objectSelect.value;
+      const v = el("customLabelInput").value.trim();
+      if(!obj || obj === "__none__"){ toast("Select a valid object first."); return; }
+      if(!v){ toast("Enter a custom label name."); return; }
+      customLabels[obj] = v;
+      scheduleSaveAll();
+      refreshAll();
+      toast(`Custom label set: ${getDisplayName(obj)} → ${v}`);
+      el("customLabelInput").value = "";
+    });
+
+    el("btnAddNewLabel").addEventListener("click", ()=>{
+      const name = prompt("Enter new object name:");
+      if(!name) return;
+      const k = "userObj_" + Date.now();
+      customLabels[k] = name;
+      if(!objectMemory[k]) objectMemory[k] = [];
+      trackedObjects.add(k);
+      scheduleSaveAll();
+      refreshAll();
+      toast(`New label created: ${name}`);
+    });
+
+    // Save unknown face into known faces DB
+    el("btnSaveFace").addEventListener("click", ()=>{
+      if(unknownFacesQueue.length === 0){ toast("No unknown faces in queue."); return; }
+      const name = faceName.value.trim();
+      if(!name){ toast("Enter a name first."); return; }
+
+      const item = unknownFacesQueue.shift();
+      if(!knownFaces[name]){
+        knownFaces[name] = { createdAt: Date.now(), descriptors: [] };
+      }
+      // Add a sample descriptor
+      if(item && item.descriptor && Array.isArray(item.descriptor)){
+        knownFaces[name].descriptors.push(item.descriptor);
+      }
+
+      faceName.value = "";
+      rebuildFaceMatcher();
+      scheduleSaveAll();
+      renderUnknownFace();
+      toast(`Saved face sample as "${name}".`);
+    });
+
+    el("btnRejectFace").addEventListener("click", ()=>{
+      if(unknownFacesQueue.length === 0){ toast("No unknown faces to reject."); return; }
+      unknownFacesQueue.shift();
+      scheduleSaveAll();
+      renderUnknownFace();
+      toast("Unknown face removed.");
+    });
+
+    /***********************
+     * CV init + helpers
+     ***********************/
+    async function ensureCvReady(){
+      if(cvReady) return true;
+      if(cvInitPromise) return cvInitPromise;
+
+      cvInitPromise = (async ()=>{
+        try{
+          toast("Loading AI models… (first time can take a bit)");
+          await setPreferredBackend();
+          // COCO-SSD object detector
+          cocoModel = await cocoSsd.load({ base: "lite_mobilenet_v2" });
+          // Face-api models
+          await faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODEL_URL);
+          await faceapi.nets.faceLandmark68TinyNet.loadFromUri(FACE_MODEL_URL);
+          await faceapi.nets.faceRecognitionNet.loadFromUri(FACE_MODEL_URL);
+
+          cvReady = true;
+          rebuildFaceMatcher();
+          toast("AI models ready ✅");
+          return true;
+        }catch(err){
+          console.error(err);
+          cvReady = false;
+          cvInitPromise = null;
+          toast("AI model load failed ❌ (check CSP / network).");
+          throw err;
+        }
+      })();
+
+      return cvInitPromise;
+    }
+
+    async function setPreferredBackend(){
+      // Prefer WebGL if available
+      try{
+        if(tf.getBackend() !== "webgl"){
+          await tf.setBackend("webgl");
+        }
+      }catch(e){
+        // fallback to whatever is available
+      }
+      await tf.ready();
+    }
+
+    function normalizeKnownFaces(obj){
+      // Backwards compatible with older structure where knownFaces[name] = {createdAt}
+      const out = {};
+      for(const [name, data] of Object.entries(obj || {})){
+        if(!data || typeof data !== "object"){
+          out[name] = { createdAt: Date.now(), descriptors: [] };
+          continue;
+        }
+        out[name] = {
+          createdAt: data.createdAt || Date.now(),
+          descriptors: Array.isArray(data.descriptors) ? data.descriptors : []
+        };
+      }
+      return out;
+    }
+
+    function rebuildFaceMatcher(){
+      try{
+        const labeled = [];
+        for(const [name, data] of Object.entries(knownFaces)){
+          const descs = (data.descriptors || [])
+            .filter(d => Array.isArray(d) && d.length)
+            .map(d => new Float32Array(d));
+
+          if(descs.length){
+            labeled.push(new faceapi.LabeledFaceDescriptors(name, descs));
+          }
+        }
+        faceMatcher = labeled.length ? new faceapi.FaceMatcher(labeled, settings.faceMatchThreshold) : null;
+      }catch(e){
+        console.warn("FaceMatcher build failed:", e);
+        faceMatcher = null;
+      }
+    }
+
+    function setRecUI(on){
+      el("recStatus").className = "status " + (on ? "on" : "off");
+      el("recStatus").textContent = on ? "ON" : "OFF";
+      recBadge.textContent = on ? "On" : "Off";
+    }
+
+    function applyModeBadges(){
+      modeBadge.textContent = demoMode ? "Demo" : "Live CV";
+    }
+
+    /***********************
+     * Camera UI builders
+     ***********************/
+    function buildCameraSelectors(){
+      camSelect.innerHTML = "";
+      for(let i=0;i<MAX_CAM_UI;i++){
+        const wrap = document.createElement("label");
+        wrap.className = "toggle";
+        wrap.style.gap = "8px";
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.id = "camChk_"+i;
+        cb.checked = (i === 0);
+        const txt = document.createElement("span");
+        txt.innerHTML = `<b>Camera ${i}</b>`;
+        wrap.appendChild(cb);
+        wrap.appendChild(txt);
+        camSelect.appendChild(wrap);
+      }
+      const applyBtn = document.createElement("button");
+      applyBtn.type = "button";
+      applyBtn.className = "ghost";
+      applyBtn.textContent = "Apply Selection";
+      applyBtn.addEventListener("click", async ()=>{
+        await startSelectedCameras(true);
+      });
+      camSelect.appendChild(applyBtn);
+    }
+
+    function buildCameraCards(){
+      camGrid.innerHTML = "";
+      for(let i=0;i<MAX_CAM_UI;i++){
+        const card = document.createElement("div");
+        card.className = "cam";
+        card.dataset.cam = String(i);
+
+        card.innerHTML = `
+          <div class="cam-top">
+            <div>
+              <div class="cam-name">Camera ${i}</div>
+              <div class="cam-meta">
+                <span class="dot" id="camDot_${i}"></span>
+                <span id="camStatus_${i}">Off</span>
+              </div>
+            </div>
+            <span class="pill-mini" id="camFps_${i}">—</span>
+          </div>
+
+          <div class="cam-body">
+            <video id="vid_${i}" playsinline muted></video>
+            <canvas class="overlay" id="ov_${i}"></canvas>
+          </div>
+
+          <div class="cam-actions">
+            <button type="button" class="ghost" data-act="capture">📸 Capture</button>
+            <button type="button" class="ghost" data-act="annotate">✍️ Annotate</button>
+            <button type="button" class="ghost" data-act="pop">🗔 Open</button>
+          </div>
+        `;
+
+        card.querySelectorAll("button[data-act]").forEach(btn=>{
+          btn.addEventListener("click", ()=>{
+            const act = btn.dataset.act;
+            if(act === "capture") captureFrame(i);
+            if(act === "annotate") annotateFrame(i);
+            if(act === "pop") popoutCamera(i);
+          });
+        });
+
+        camGrid.appendChild(card);
+      }
+    }
+
+    function setCamStatus(i, on){
+      const dot = el("camDot_"+i);
+      const st = el("camStatus_"+i);
+      dot.className = "dot " + (on ? "ok" : "bad");
+      st.textContent = on ? "On" : "Off";
+    }
+
+    function setGlobalPerm(ok, txt){
+      permDot.className = "dot " + (ok ? "ok" : "bad");
+      permText.textContent = txt;
+    }
+
+    /***********************
+     * Camera start/stop
+     ***********************/
+    async function startSelectedCameras(applyOnly=false){
+      const want = [];
+      for(let i=0;i<MAX_CAM_UI;i++){
+        const cb = el("camChk_"+i);
+        if(cb && cb.checked) want.push(i);
+      }
+
+      // Stop cameras that are not selected
+      for(const [idx] of camStreams.entries()){
+        if(!want.includes(idx)){
+          stopCamera(idx);
+        }
+      }
+
+      // Start selected cameras that are not running
+      for(const idx of want){
+        if(!camStreams.has(idx)){
+          const ok = await startCamera(idx);
+          if(!ok && !applyOnly){
+            // no-op
+          }
+        }
+      }
+
+      if(camStreams.size > 0){
+        setGlobalPerm(true, "Camera: Streaming");
+      }else{
+        setGlobalPerm(false, "Camera: Not streaming");
+      }
+    }
+
+    async function startCamera(idx){
+      try{
+        const constraints = { video: { width: {ideal: 1280}, height:{ideal:720} }, audio:false };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+        camStreams.set(idx, stream);
+        camStates.set(idx, makeCamState(idx));
+
+        const v = el("vid_"+idx);
+        v.srcObject = stream;
+        await v.play();
+
+        const ov = el("ov_"+idx);
+        resizeOverlayToVideo(v, ov);
+
+        setCamStatus(idx, true);
+        renderLoop(idx);
+        return true;
+      }catch(err){
+        console.warn("Camera start failed:", err);
+        setCamStatus(idx, false);
+        setGlobalPerm(false, "Camera: Permission blocked");
+        toast("Camera permission blocked or unavailable.");
+        return false;
+      }
+    }
+
+    function stopCamera(idx){
+      const stream = camStreams.get(idx);
+      if(stream){
+        stream.getTracks().forEach(t=>t.stop());
+      }
+      camStreams.delete(idx);
+      camStates.delete(idx);
+
+      const v = el("vid_"+idx);
+      if(v){ v.srcObject = null; }
+
+      setCamStatus(idx, false);
+      el("camFps_"+idx).textContent = "—";
+
+      const ov = el("ov_"+idx);
+      if(ov){
+        const ctx = ov.getContext("2d");
+        ctx.clearRect(0,0,ov.width,ov.height);
+      }
+    }
+
+    function stopAllCameras(){
+      for(const [idx] of camStreams.entries()) stopCamera(idx);
+      setGlobalPerm(false, "Camera: Not started");
+    }
+
+    function resizeOverlayToVideo(video, canvas){
+      const w = video.videoWidth || 1280;
+      const h = video.videoHeight || 720;
+      canvas.width = w;
+      canvas.height = h;
+    }
+
+    function makeCamState(idx){
+      return {
+        camIdx: idx,
+        tracks: new Map(), // id -> track
+        lastDetectAt: 0,
+        detecting: false,
+        latest: {
+          ts: 0,
+          objects: [],
+          people: [],
+          faces: [],
+          tracks: [],
+        },
+        lastUnknownAt: 0,
+      };
+    }
+
+    /***********************
+     * Render + Vision loop
+     ***********************/
+    function renderLoop(idx){
+      const v = el("vid_"+idx);
+      const ov = el("ov_"+idx);
+      if(!v || !ov) return;
+
+      let frames = 0;
+      let lastFpsStamp = performance.now();
+
+      const tick = ()=>{
+        if(!camStreams.has(idx)) return;
+
+        if(ov.width !== (v.videoWidth||ov.width) || ov.height !== (v.videoHeight||ov.height)){
+          resizeOverlayToVideo(v, ov);
+        }
+
+        const state = camStates.get(idx);
+
+        // Inference scheduling (runs even when overlay hidden)
+        if(recognitionMode){
+          if(demoMode){
+            // Demo draws directly in overlay when display is on
+            if(cameraDisplayOn){
+              const ctx = ov.getContext("2d");
+              ctx.clearRect(0,0,ov.width,ov.height);
+              demoSimulateDetections(ctx, ov.width, ov.height);
+            }
+          }else{
+            // Live CV mode
+            const now = performance.now();
+            if(state && cvReady && !state.detecting && (now - state.lastDetectAt > settings.detectionIntervalMs)){
+              state.detecting = true;
+              runVision(idx).finally(()=>{
+                const s = camStates.get(idx);
+                if(s){
+                  s.detecting = false;
+                  s.lastDetectAt = performance.now();
+                }
+              });
+            }
+
+            // Draw latest overlays
+            if(cameraDisplayOn && state){
+              const ctx = ov.getContext("2d");
+              ctx.clearRect(0,0,ov.width,ov.height);
+              drawOverlays(ctx, state.latest);
+            }
+          }
+        }else{
+          // If recognition off, keep overlay cleared when display is on
+          if(cameraDisplayOn){
+            const ctx = ov.getContext("2d");
+            ctx.clearRect(0,0,ov.width,ov.height);
+          }
+        }
+
+        // FPS counter
+        frames++;
+        const now2 = performance.now();
+        if(now2 - lastFpsStamp > 1000){
+          const fps = Math.round((frames * 1000) / (now2 - lastFpsStamp));
+          el("camFps_"+idx).textContent = fps + " fps";
+          frames = 0;
+          lastFpsStamp = now2;
+        }
+
+        requestAnimationFrame(tick);
+      };
+
+      requestAnimationFrame(tick);
+    }
+
+    async function runVision(idx){
+      const state = camStates.get(idx);
+      const v = el("vid_"+idx);
+      if(!state || !v || v.readyState < 2) return;
+
+      // If models not loaded yet, do it now (only needed once)
+      if(!cvReady){
+        await ensureCvReady();
+      }
+      if(!cocoModel) return;
+
+      const ts = Date.now();
+
+      // 1) Object detection (COCO-SSD)
+      let preds = [];
+      try{
+        preds = await cocoModel.detect(v);
+      }catch(e){
+        console.warn("coco-ssd detect failed:", e);
+        return;
+      }
+
+      const objects = preds
+        .filter(p => p.score >= settings.objScoreThreshold)
+        .map(p => ({
+          cls: p.class,
+          score: p.score,
+          box: boxFromBbox(p.bbox),
+        }));
+
+      const persons = objects.filter(o => o.cls === "person");
+      const nonPersons = objects.filter(o => o.cls !== "person");
+
+      // 2) Face detection + descriptors (only if any person, for speed)
+      let faces = [];
+      if(persons.length){
+        try{
+          const opts = new faceapi.TinyFaceDetectorOptions({
+            inputSize: settings.faceInputSize,
+            scoreThreshold: settings.faceScoreThreshold
+          });
+          const dets = await faceapi
+            .detectAllFaces(v, opts)
+            .withFaceLandmarks(true)
+            .withFaceDescriptors();
+
+          faces = dets.map(d => {
+            const b = d.detection.box;
+            const descriptor = d.descriptor;
+            const match = faceMatcher ? faceMatcher.findBestMatch(descriptor) : null;
+            const isKnown = !!match && match.label !== "unknown" && match.distance <= settings.faceMatchThreshold;
+            const name = isKnown ? match.label : "Unknown";
+            return {
+              name,
+              distance: match ? match.distance : null,
+              descriptor: Array.from(descriptor),
+              box: { x: b.x, y: b.y, w: b.width, h: b.height },
+            };
+          });
+        }catch(e){
+          console.warn("face detect failed:", e);
+        }
+      }
+
+      // Assign face names to person boxes by containment
+      const people = persons.map(p => {
+        const pbox = p.box;
+        const faceInside = faces
+          .filter(f => pointInBox(
+            f.box.x + f.box.w/2,
+            f.box.y + f.box.h/2,
+            pbox
+          ))
+          .sort((a,b)=>{
+            const da = (a.distance ?? 999);
+            const db = (b.distance ?? 999);
+            return da - db;
+          });
+
+        const bestFace = faceInside[0] || null;
+        return {
+          name: bestFace ? bestFace.name : "Unknown",
+          box: pbox,
+          score: p.score
+        };
+      });
+
+      // Queue unknown faces (with cooldown + de-dupe)
+      for(const f of faces){
+        if(f.name === "Unknown"){
+          maybeQueueUnknownFace(idx, v, f, ts);
+        }
+      }
+
+      // Update tracks (object tracking + event logging)
+      updateTracksFromDetections(state, nonPersons, people, ts);
+
+      // Build overlay view
+      const activeTracks = Array.from(state.tracks.values())
+        .filter(t => (ts - t.lastSeen) <= settings.trackForgetMs)
+        .map(t => ({
+          key: t.key,
+          cls: t.cls,
+          score: t.score,
+          box: t.box,
+          status: t.status || "—",
+          person: t.lastPerson || null,
+          heldSec: (t.isHeld && t.holdStart) ? ((ts - t.holdStart)/1000) : null,
+        }));
+
+      state.latest = {
+        ts,
+        objects,
+        people,
+        faces,
+        tracks: activeTracks,
+      };
+    }
+
+    /***********************
+     * Tracking + Logging
+     ***********************/
+    function updateTracksFromDetections(state, detections, people, ts){
+      const tracks = Array.from(state.tracks.values());
+      const usedTrackIds = new Set();
+
+      for(const det of detections){
+        // Find best match track (same class) by IoU
+        let best = null;
+        let bestIou = 0;
+
+        for(const tr of tracks){
+          if(tr.cls !== det.cls) continue;
+          if(usedTrackIds.has(tr.id)) continue;
+          const iou = computeIoU(tr.box, det.box);
+          if(iou > bestIou){
+            bestIou = iou;
+            best = tr;
+          }
+        }
+
+        if(best && bestIou >= settings.trackIouThreshold){
+          // Update existing track
+          best.score = det.score;
+          best.lastSeen = ts;
+
+          const prevBox = best.box;
+          best.box = det.box;
+
+          // Event logic
+          updateTrackEvents(best, prevBox, people, ts);
+
+          usedTrackIds.add(best.id);
+        }else{
+          // Create new track
+          const id = nextGlobalTrackId();
+          const key = `${det.cls}#${id}`;
+
+          const tr = {
+            id,
+            key,
+            cls: det.cls,
+            score: det.score,
+            box: det.box,
+            lastSeen: ts,
+
+            status: null,
+            lastLogAt: 0,
+
+            isHeld: false,
+            holdStart: null,
+            lastPerson: null,
+          };
+
+          // Determine initial state
+          const person = associatePerson(det.box, people);
+          if(person){
+            tr.isHeld = true;
+            tr.holdStart = ts;
+            tr.lastPerson = person;
+            tr.status = "Picked Up";
+            tr.lastLogAt = ts;
+            recordEvent(key, "Picked Up", det.box, person, null, det.score, state.camIdx);
+          }else{
+            tr.status = "Placed";
+            tr.lastLogAt = ts;
+            recordEvent(key, "Placed", det.box, null, null, det.score, state.camIdx);
+          }
+
+          state.tracks.set(id, tr);
+          usedTrackIds.add(id);
+        }
+      }
+
+      // Remove stale tracks
+      for(const [id, tr] of state.tracks.entries()){
+        if((ts - tr.lastSeen) > settings.trackForgetMs){
+          state.tracks.delete(id);
+        }
+      }
+    }
+
+    function updateTrackEvents(track, prevBox, people, ts){
+      const personNow = associatePerson(track.box, people);
+      const moved = centerDistancePx(prevBox, track.box) >= settings.movePxThreshold;
+
+      // Transition: not-held -> held
+      if(personNow && !track.isHeld){
+        track.isHeld = true;
+        track.holdStart = ts;
+        track.lastPerson = personNow;
+        track.status = "Picked Up";
+        track.lastLogAt = ts;
+        recordEvent(track.key, "Picked Up", track.box, personNow, null, track.score, null);
+        return;
+      }
+
+      // Transition: held -> not-held
+      if(!personNow && track.isHeld){
+        const heldSec = track.holdStart ? ((ts - track.holdStart)/1000) : null;
+        const who = track.lastPerson;
+
+        track.isHeld = false;
+        track.holdStart = null;
+        track.lastPerson = null;
+
+        track.status = "Placed";
+        track.lastLogAt = ts;
+        recordEvent(track.key, "Placed", track.box, who, heldSec, track.score, null);
+        return;
+      }
+
+      // Same state: optionally log movement with cooldown
+      const canLogMove = (ts - track.lastLogAt) >= settings.moveLogCooldownMs;
+      if(moved && canLogMove){
+        const evt = track.isHeld ? "Held" : "Moved";
+        const heldSec = (track.isHeld && track.holdStart) ? ((ts - track.holdStart)/1000) : null;
+        track.status = evt;
+        track.lastLogAt = ts;
+        recordEvent(track.key, evt, track.box, personNow || track.lastPerson, heldSec, track.score, null);
+      }
+    }
+
+    function associatePerson(objBox, people){
+      if(!people || !people.length) return null;
+
+      const cx = objBox.x + objBox.w/2;
+      const cy = objBox.y + objBox.h/2;
+
+      let bestName = null;
+      let bestScore = 0;
+
+      for(const p of people){
+        const pbox = p.box;
+
+        // primary: object center inside person box
+        const inside = pointInBox(cx, cy, pbox);
+        if(inside){
+          return p.name || "Unknown";
+        }
+
+        // fallback: small IoU
+        const iou = computeIoU(objBox, pbox);
+        if(iou > bestScore){
+          bestScore = iou;
+          bestName = p.name || "Unknown";
+        }
+      }
+
+      return bestScore > 0.02 ? bestName : null;
+    }
+
+    function recordEvent(label, status, box, person=null, held_duration=null, score=null, cam=null){
+      const evt = {
+        time: Date.now(),
+        box,
+        status,
+        person,
+        held_duration,
+        score,
+        cam
+      };
+
+      if(!objectMemory[label]) objectMemory[label] = [];
+      objectMemory[label].push(evt);
+      trackedObjects.add(label);
+
+      scheduleSaveAll();
+      appendLogRow(label, evt);
+      renderTracked();
+      updateObjectDropdown();
+    }
+
+    /***********************
+     * Overlay drawing
+     ***********************/
+    function drawOverlays(ctx, latest){
+      if(!latest) return;
+
+      // People boxes
+      for(const p of (latest.people || [])){
+        const b = p.box;
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "rgba(255,107,107,.95)";
+        ctx.fillStyle = "rgba(0,0,0,.25)";
+        roundRect(ctx, b.x, b.y, b.w, b.h, 12);
+        ctx.stroke();
+        ctx.fill();
+        ctx.font = "800 14px ui-monospace, Menlo, monospace";
+        ctx.fillStyle = "rgba(255,239,237,.95)";
+        ctx.fillText(`person: ${p.name}`, b.x + 10, b.y + 20);
+      }
+
+      // Object tracks
+      for(const t of (latest.tracks || [])){
+        const b = t.box;
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "rgba(255,239,237,.85)";
+        ctx.fillStyle = "rgba(0,0,0,.28)";
+        roundRect(ctx, b.x, b.y, b.w, b.h, 12);
+        ctx.stroke();
+        ctx.fill();
+
+        const pct = Math.round((t.score || 0) * 100);
+        const title = `${getDisplayName(t.key)} ${pct}%`;
+        const sub = t.person ? `${t.status} • ${t.person}` : `${t.status}`;
+
+        ctx.font = "800 14px ui-monospace, Menlo, monospace";
+        ctx.fillStyle = "rgba(255,239,237,.95)";
+        ctx.fillText(title, b.x + 10, b.y + 20);
+
+        ctx.font = "700 12px ui-monospace, Menlo, monospace";
+        ctx.fillStyle = "rgba(251,191,36,.95)";
+        ctx.fillText(sub, b.x + 10, b.y + 40);
+      }
+    }
+
+    /***********************
+     * Unknown face queue (LIVE)
+     ***********************/
+    function maybeQueueUnknownFace(camIdx, video, face, ts){
+      const state = camStates.get(camIdx);
+      if(!state) return;
+
+      // cooldown per camera
+      if((ts - state.lastUnknownAt) < settings.unknownFaceMinIntervalMs) return;
+      if(unknownFacesQueue.length >= settings.maxUnknownQueue) return;
+
+      // simple de-dupe vs queue using descriptor distance
+      for(const u of unknownFacesQueue){
+        if(u && Array.isArray(u.descriptor) && face.descriptor){
+          const d = euclid(face.descriptor, u.descriptor);
+          if(d < 0.42) return; // likely same face sample
+        }
+      }
+
+      // Crop face from video
+      const crop = cropFromVideo(video, face.box, 256, 256, 0.20);
+      if(!crop) return;
+
+      unknownFacesQueue.push({
+        capturedAt: Date.now(),
+        camIdx,
+        imgDataUrl: crop,
+        descriptor: face.descriptor
+      });
+
+      state.lastUnknownAt = ts;
+      scheduleSaveAll();
+      renderUnknownFace();
+    }
+
+    function cropFromVideo(video, box, outW, outH, padPct=0.15){
+      try{
+        const vw = video.videoWidth || 0;
+        const vh = video.videoHeight || 0;
+        if(!vw || !vh) return null;
+
+        const padX = box.w * padPct;
+        const padY = box.h * padPct;
+
+        let sx = Math.max(0, Math.floor(box.x - padX));
+        let sy = Math.max(0, Math.floor(box.y - padY));
+        let sw = Math.min(vw - sx, Math.floor(box.w + padX*2));
+        let sh = Math.min(vh - sy, Math.floor(box.h + padY*2));
+
+        if(sw <= 10 || sh <= 10) return null;
+
+        const c = document.createElement("canvas");
+        c.width = outW;
+        c.height = outH;
+        const g = c.getContext("2d");
+        g.drawImage(video, sx, sy, sw, sh, 0, 0, outW, outH);
+        return c.toDataURL("image/png");
+      }catch(e){
+        return null;
+      }
+    }
+
+    function renderUnknownFace(){
+      unknownCount.textContent = "Unknown Faces: " + unknownFacesQueue.length;
+
+      const ctx = facePreview.getContext("2d");
+      ctx.clearRect(0,0,facePreview.width, facePreview.height);
+
+      if(unknownFacesQueue.length === 0){
+        ctx.fillStyle = "rgba(255,239,237,.65)";
+        ctx.font = "700 14px ui-sans-serif";
+        ctx.fillText("No unknown faces.", 56, 132);
+        return;
+      }
+
+      const img = new Image();
+      img.onload = ()=> ctx.drawImage(img, 0, 0, facePreview.width, facePreview.height);
+      img.src = unknownFacesQueue[0].imgDataUrl;
+    }
+
+    /***********************
+     * Logs table + tracked list
+     ***********************/
+    function appendLogRow(label, evt){
+      if(logSearch.value.trim()){
+        renderLogTable();
+        return;
+      }
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${fmtTime(evt.time)}</td>
+        <td>${escapeHtml(getDisplayName(label))}</td>
+        <td>${escapeHtml(evt.status)}</td>
+        <td>${escapeHtml(evt.person || "No one")}</td>
+        <td>${evt.held_duration != null ? (evt.held_duration.toFixed(2)+"s") : "-"}</td>
+        <td>${escapeHtml(JSON.stringify({cam: evt.cam ?? "-", score: evt.score ?? null, box: evt.box}))}</td>
+      `;
+      logBody.prepend(tr);
+    }
+
+    function renderLogTable(){
+      const q = logSearch.value.trim().toLowerCase();
+      const rows = [];
+
+      for(const [label, events] of Object.entries(objectMemory)){
+        for(const evt of events){
+          const display = getDisplayName(label);
+          const line = `${label} ${display} ${evt.status} ${(evt.person||"")} ${JSON.stringify(evt.box)}`.toLowerCase();
+          if(q && !line.includes(q)) continue;
+          rows.push({label, evt});
+        }
+      }
+
+      rows.sort((a,b)=>b.evt.time - a.evt.time);
+
+      logBody.innerHTML = "";
+      for(const r of rows.slice(0, 800)){
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${fmtTime(r.evt.time)}</td>
+          <td>${escapeHtml(getDisplayName(r.label))}</td>
+          <td>${escapeHtml(r.evt.status)}</td>
+          <td>${escapeHtml(r.evt.person || "No one")}</td>
+          <td>${r.evt.held_duration != null ? (r.evt.held_duration.toFixed(2)+"s") : "-"}</td>
+          <td>${escapeHtml(JSON.stringify({cam: r.evt.cam ?? "-", score: r.evt.score ?? null, box: r.evt.box}))}</td>
+        `;
+        logBody.appendChild(tr);
+      }
+    }
+
+    function updateObjectDropdown(){
+      const keys = Object.keys(objectMemory);
+      objectSelect.innerHTML = "";
+
+      if(keys.length === 0){
+        const opt = document.createElement("option");
+        opt.value = "__none__";
+        opt.textContent = "No objects logged";
+        objectSelect.appendChild(opt);
+        historyBox.value = "";
+        return;
+      }
+
+      // sort by display name
+      keys.sort((a,b)=>getDisplayName(a).localeCompare(getDisplayName(b)));
+
+      keys.forEach(k=>{
+        const opt = document.createElement("option");
+        opt.value = k;
+        const disp = getDisplayName(k);
+        opt.textContent = (disp !== k) ? `${disp}  (${k})` : k;
+        objectSelect.appendChild(opt);
+      });
+
+      if(!keys.includes(objectSelect.value)){
+        objectSelect.value = keys[0];
+      }
+    }
+
+    function formatHistory(obj){
+      if(!obj || obj === "__none__") return "No history.";
+      const evts = objectMemory[obj] || [];
+      if(evts.length === 0) return "No history for " + obj + ".";
+
+      return evts.map(evt=>{
+        const b = evt.box;
+        const held = evt.held_duration != null ? `Held for ${evt.held_duration.toFixed(2)}s` : "";
+        const who = evt.person || "No one";
+        const sc = (evt.score != null) ? `score=${Math.round(evt.score*100)}%` : "";
+        const cam = (evt.cam != null) ? `cam=${evt.cam}` : "";
+        return `${fmtTime(evt.time)}: ${getDisplayName(obj)} ${evt.status} by ${who} at (x=${Math.round(b.x)}, y=${Math.round(b.y)}, w=${Math.round(b.w)}, h=${Math.round(b.h)}) ${held} ${cam} ${sc}`.trim();
+      }).join("\n");
+    }
+
+    function renderTracked(){
+      const arr = Array.from(trackedObjects).sort((a,b)=>getDisplayName(a).localeCompare(getDisplayName(b)));
+      trackedList.innerHTML = "";
+      if(arr.length === 0){
+        trackedList.innerHTML = `<div class="item"><span class="small">No tracked objects yet.</span></div>`;
+        return;
+      }
+
+      for(const obj of arr){
+        const evts = objectMemory[obj] || [];
+        const last = evts.length ? evts[evts.length-1] : null;
+
+        const div = document.createElement("div");
+        div.className = "item";
+        div.innerHTML = `
+          <div>
+            <div style="font-weight:800">${escapeHtml(getDisplayName(obj))}</div>
+            <div class="small">${last ? escapeHtml(last.status) + " • " + fmtTime(last.time) : "—"}</div>
+          </div>
+          <div class="pill-mini">${evts.length} events</div>
+        `;
+        div.addEventListener("click", ()=>{
+          objectSelect.value = obj;
+          historyBox.value = formatHistory(obj);
+        });
+        trackedList.appendChild(div);
+      }
+    }
+
+    /***********************
+     * Capture / Annotate / Popout
+     ***********************/
+    function captureFrame(idx){
+      const v = el("vid_"+idx);
+      if(!v || !v.srcObject){ toast("Camera is off."); return; }
+      const c = document.createElement("canvas");
+      c.width = v.videoWidth || 1280;
+      c.height = v.videoHeight || 720;
+      const g = c.getContext("2d");
+      g.drawImage(v, 0, 0, c.width, c.height);
+      downloadDataURL(c.toDataURL("image/png"), `rednode_cam${idx}_${Date.now()}.png`);
+      toast(`Captured frame (Camera ${idx}).`);
+    }
+
+    // Annotate = assign a custom label to the largest currently detected object on that camera (live mode)
+    function annotateFrame(idx){
+      const state = camStates.get(idx);
+      if(!state){ toast("Camera not initialized."); return; }
+
+      // Choose largest active track
+      const candidates = (state.latest && state.latest.tracks) ? state.latest.tracks : [];
+      const best = candidates
+        .filter(t => t && t.box)
+        .sort((a,b)=>(b.box.w*b.box.h) - (a.box.w*a.box.h))[0];
+
+      if(!best){
+        toast("No detected object to annotate (turn Recognition ON).");
+        return;
+      }
+
+      const label = prompt(`Set custom label for:\n${best.key}\n(current: ${getDisplayName(best.key)})`, "");
+      if(!label) return;
+
+      customLabels[best.key] = label.trim();
+      scheduleSaveAll();
+      refreshAll();
+      toast(`Label set: ${best.key} → ${label}`);
+    }
+
+    function popoutCamera(idx){
+      const v = el("vid_"+idx);
+      if(!v || !v.srcObject){ toast("Camera is off."); return; }
+      const w = window.open("", "_blank", "width=920,height=640");
+      if(!w){ toast("Popout blocked by browser."); return; }
+      w.document.write(`
+        <title>RedNode — Camera ${idx}</title>
+        <style>
+          body{margin:0;background:#000;display:grid;place-items:center;height:100vh}
+          video{width:100%;height:100%;object-fit:contain}
+        </style>
+        <video autoplay playsinline muted></video>
+      `);
+      const vv = w.document.querySelector("video");
+      vv.srcObject = v.srcObject;
+      vv.play();
+    }
+
+    /***********************
+     * Demo mode (kept from original)
+     ***********************/
+    function demoSimulateDetections(ctx, w, h){
+      const n = randInt(1, 3);
+      for(let i=0;i<n;i++){
+        const cls = DEMO_CLASSES[randInt(0, DEMO_CLASSES.length-1)];
+        const conf = Math.random() * 0.4 + 0.55;
+        const bw = randInt(Math.floor(w*0.12), Math.floor(w*0.35));
+        const bh = randInt(Math.floor(h*0.12), Math.floor(h*0.35));
+        const x = randInt(10, w - bw - 10);
+        const y = randInt(10, h - bh - 10);
+
+        const label = getDisplayName(cls);
+
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = (cls === "person") ? "rgba(255,107,107,.95)" : "rgba(255,239,237,.85)";
+        ctx.fillStyle   = "rgba(0,0,0,.35)";
+        roundRect(ctx, x, y, bw, bh, 12);
+        ctx.stroke();
+        ctx.fill();
+
+        ctx.font = "700 14px ui-monospace, Menlo, monospace";
+        ctx.fillStyle = "rgba(255,239,237,.95)";
+        const pct = Math.round(conf*100);
+        const personName = (cls === "person") ? DEMO_PEOPLE[randInt(0, DEMO_PEOPLE.length-1)] : null;
+        const tag = (cls === "person") ? `${personName}` : `${label} ${pct}%`;
+        ctx.fillText(tag, x+10, y+22);
+
+        const rating = conf>0.85 ? "Excellent" : conf>0.7 ? "Good" : conf>0.5 ? "Average" : "Poor";
+        ctx.fillStyle = "rgba(251,191,36,.95)";
+        ctx.fillText(`Rating: ${rating}`, x+10, y+44);
+
+        if(cls !== "person"){
+          const person = maybeAttachPerson();
+          updateObjectEvents(label, {x,y,w:bw,h:bh}, person);
+        }else{
+          if(personName === "Unknown" && Math.random() < 0.10){
+            pushDemoUnknownFacePreview();
+          }
+        }
+      }
+    }
+
+    function maybeAttachPerson(){
+      if(Math.random() < 0.35){
+        const name = DEMO_PEOPLE[randInt(1, DEMO_PEOPLE.length-1)];
+        return name;
+      }
+      return null;
+    }
+
+    function updateObjectEvents(label, box, person){
+      const now = Date.now();
+      const list = objectMemory[label] || [];
+      const last = lastEventByLabel.get(label) || (list.length ? list[list.length-1] : null);
+
+      if(!last){
+        recordEvent(label, person ? "Picked Up" : "Placed", box, person, null, null, null);
+        return;
+      }
+
+      const dist = Math.hypot((box.x+box.w/2) - (last.box.x+last.box.w/2), (box.y+box.h/2) - (last.box.y+last.box.h/2));
+      if(dist > 25){
+        if(person && last.status !== "Picked Up"){
+          recordEvent(label, "Picked Up", box, person, null, null, null);
+        }else if(!person && (last.status === "Picked Up" || last.status === "Held")){
+          const held = (now - last.time)/1000;
+          recordEvent(label, "Placed", box, last.person, held, null, null);
+        }
+      }else{
+        if(person && last.status === "Picked Up"){
+          const held = (now - last.time)/1000;
+          recordEvent(label, "Held", box, person, held, null, null);
+        }else if(!person && last.status === "Held"){
+          const held = (now - last.time)/1000;
+          recordEvent(label, "Placed", box, last.person, held, null, null);
+        }
+      }
+    }
+
+    function pushDemoUnknownFacePreview(){
+      // lightweight demo face (same as your original)
+      const c = document.createElement("canvas");
+      c.width = 256; c.height = 256;
+      const g = c.getContext("2d");
+
+      const grad = g.createLinearGradient(0,0,256,256);
+      grad.addColorStop(0, "rgba(255,107,107,.45)");
+      grad.addColorStop(1, "rgba(255,59,48,.35)");
+      g.fillStyle = grad;
+      g.fillRect(0,0,256,256);
+
+      for(let i=0;i<1800;i++){
+        g.fillStyle = `rgba(255,255,255,${Math.random()*0.06})`;
+        g.fillRect(randInt(0,255), randInt(0,255), 2, 2);
+      }
+
+      unknownFacesQueue.push({
+        capturedAt: Date.now(),
+        camIdx: null,
+        imgDataUrl: c.toDataURL("image/png"),
+        descriptor: [] // demo does not generate real descriptor
+      });
+
+      scheduleSaveAll();
+      renderUnknownFace();
+    }
+
+    /***********************
+     * Refresh + Save
+     ***********************/
+    function refreshAll(){
+      updateObjectDropdown();
+      renderLogTable();
+      renderTracked();
+      renderUnknownFace();
+      scheduleSaveAll();
+    }
+
+    function saveAll(){
+      saveJSON(LS_KEYS.objectMemory, objectMemory);
+      saveJSON(LS_KEYS.customLabels, customLabels);
+      saveJSON(LS_KEYS.knownFaces, knownFaces);
+      saveJSON(LS_KEYS.unknownFaces, unknownFacesQueue);
+      saveJSON(LS_KEYS.settings, settings);
+      trackedObjects = new Set(Object.keys(objectMemory));
+    }
+
+    /***********************
+     * Display name helpers
+     ***********************/
+    function getDisplayName(key){
+      // 1) exact key override
+      if(customLabels[key]) return customLabels[key];
+
+      // 2) if key looks like "class#id", allow class-level rename
+      const hashIdx = key.lastIndexOf("#");
+      if(hashIdx > 0){
+        const base = key.slice(0, hashIdx);
+        const id = key.slice(hashIdx + 1);
+        if(customLabels[base]) return `${customLabels[base]} #${id}`;
+        return `${base} #${id}`;
+      }
+
+      // 3) base label fallback
+      return customLabels[key] || key;
+    }
+
+    /***********************
+     * Math helpers
+     ***********************/
+    function boxFromBbox(b){
+      // b = [x,y,w,h]
+      return { x: b[0], y: b[1], w: b[2], h: b[3] };
+    }
+
+    function computeIoU(a, b){
+      const ax2 = a.x + a.w, ay2 = a.y + a.h;
+      const bx2 = b.x + b.w, by2 = b.y + b.h;
+
+      const interX1 = Math.max(a.x, b.x);
+      const interY1 = Math.max(a.y, b.y);
+      const interX2 = Math.min(ax2, bx2);
+      const interY2 = Math.min(ay2, by2);
+
+      const interW = Math.max(0, interX2 - interX1);
+      const interH = Math.max(0, interY2 - interY1);
+      const interArea = interW * interH;
+
+      const aArea = a.w * a.h;
+      const bArea = b.w * b.h;
+
+      const union = aArea + bArea - interArea;
+      return union > 0 ? (interArea / union) : 0;
+    }
+
+    function centerDistancePx(a, b){
+      const acx = a.x + a.w/2, acy = a.y + a.h/2;
+      const bcx = b.x + b.w/2, bcy = b.y + b.h/2;
+      return Math.hypot(acx - bcx, acy - bcy);
+    }
+
+    function pointInBox(x, y, box){
+      return x >= box.x && x <= (box.x + box.w) && y >= box.y && y <= (box.y + box.h);
+    }
+
+    function euclid(a, b){
+      const n = Math.min(a.length, b.length);
+      let s = 0;
+      for(let i=0;i<n;i++){
+        const d = (a[i] - b[i]);
+        s += d*d;
+      }
+      return Math.sqrt(s);
+    }
+
+    /***********************
+     * Utilities
+     ***********************/
+    function fmtTime(ms){
+      const d = new Date(ms);
+      const pad = (n)=>String(n).padStart(2,"0");
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+
+    function randInt(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
+
+    function roundRect(ctx, x, y, w, h, r){
+      const rr = Math.min(r, w/2, h/2);
+      ctx.beginPath();
+      ctx.moveTo(x+rr, y);
+      ctx.arcTo(x+w, y, x+w, y+h, rr);
+      ctx.arcTo(x+w, y+h, x, y+h, rr);
+      ctx.arcTo(x, y+h, x, y, rr);
+      ctx.arcTo(x, y, x+w, y, rr);
+      ctx.closePath();
+    }
+
+    function escapeHtml(s){
+      return String(s)
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;")
+        .replaceAll("'","&#039;");
+    }
+
+    function saveJSON(key, obj){ localStorage.setItem(key, JSON.stringify(obj)); }
+    function loadJSON(key, fallback){
+      try{
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : fallback;
+      }catch(e){ return fallback; }
+    }
+
+    function downloadJSON(obj, filename){
+      const blob = new Blob([JSON.stringify(obj,null,2)], {type:"application/json"});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url), 600);
+    }
+
+    function downloadDataURL(dataUrl, filename){
+      const a = document.createElement("a");
+      a.href = dataUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+
+    function toast(msg){
+      const t = document.createElement("div");
+      t.textContent = msg;
+      t.style.position="fixed";
+      t.style.left="50%";
+      t.style.bottom="22px";
+      t.style.transform="translateX(-50%)";
+      t.style.background="rgba(10,8,14,.92)";
+      t.style.border="1px solid rgba(255,255,255,.12)";
+      t.style.color="rgba(255,239,237,.92)";
+      t.style.padding="10px 12px";
+      t.style.borderRadius="14px";
+      t.style.boxShadow="0 18px 40px rgba(0,0,0,.45)";
+      t.style.zIndex="9999";
+      document.body.appendChild(t);
+      setTimeout(()=>t.remove(), 1800);
+    }
+
+    /***********************
+     * Init badges + unknown
+     ***********************/
+    setGlobalPerm(false, "Camera: Not started");
+    recBadge.textContent = recognitionMode ? "On" : "Off";
+    applyModeBadges();
+    renderUnknownFace();
+
+    // Demo-only unknown face spam (keep your original behavior)
+    setInterval(()=>{
+      if(recognitionMode && demoMode && Math.random() < 0.08){
+        pushDemoUnknownFacePreview();
+      }
+    }, 1200);
+
+    // If user starts in Live + Recognition, load models immediately
+    (async ()=>{
+      if(recognitionMode && !demoMode){
+        try{ await ensureCvReady(); }catch(e){}
+      }
+    })();
+  </script>
 
