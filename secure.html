@@ -188,13 +188,6 @@
 
     .row{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
     .spacer{flex:1}
-    .stack{display:grid; gap:8px}
-    .control-grid{
-      display:grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap:12px;
-      align-items:end;
-    }
 
     /* Buttons + inputs */
     button, .btn{
@@ -507,35 +500,12 @@
                 <div class="title"><span aria-hidden="true">🎛️</span> Camera Control</div>
                 <div class="subtitle">Choose streams and (optionally) bind each slot to a real device.</div>
               </div>
-            <div class="card-b">
-              <div class="control-grid" style="margin-bottom:12px">
-                <div class="stack">
-                  <label class="small" for="mobileFacing">Mobile camera preference</label>
-                  <select id="mobileFacing">
-                    <option value="environment">Back (world)</option>
-                    <option value="user">Front (selfie)</option>
-                  </select>
-                  <span class="hint">iOS may allow only one camera stream at a time.</span>
+              <div class="card-b">
+                <div id="camSelect" class="row" style="gap:8px"></div>
+                <div class="hint" style="margin-top:10px">
+                  If you only have one webcam, select <b>Camera 0</b>. If multiple cameras exist, pick a device per slot.
+                  Some browsers/devices limit simultaneous streams.
                 </div>
-                <div class="stack">
-                  <label class="small" for="fpsCap">FPS cap: <span id="fpsCapValue">12</span></label>
-                  <input id="fpsCap" type="range" min="3" max="30" value="12" />
-                  <span class="hint">Lower FPS improves mobile stability and battery.</span>
-                </div>
-                <div class="stack">
-                  <label class="small" for="faceDetectorMode">Face detector</label>
-                  <select id="faceDetectorMode">
-                    <option value="tiny">Tiny (fast / mobile)</option>
-                    <option value="ssd">SSD (heavier)</option>
-                  </select>
-                  <span class="hint">Tiny is recommended for phones.</span>
-                </div>
-              </div>
-              <div id="camSelect" class="row" style="gap:8px"></div>
-              <div class="hint" style="margin-top:10px">
-                If you only have one webcam, select <b>Camera 0</b>. If multiple cameras exist, pick a device per slot.
-                Some browsers/devices limit simultaneous streams.
-              </div>
               </div>
             </div>
 
@@ -673,6 +643,19 @@
     </footer>
   </main>
 
+  <!-- ✅ Computer Vision libraries (CDN) -->
+  <!-- Face detection/recognition + bundled TFJS -->
+  <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.15/dist/face-api.js"></script>
+  <script>
+    // Make TFJS available globally for coco-ssd
+    if (window.faceapi && window.faceapi.tf) {
+      window.tf = window.faceapi.tf;
+    }
+  </script>
+
+  <!-- Object detection (COCO-SSD) -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+
   <!-- ✅ RedNode Security Console Logic (Live CV + Demo + Persistent DB) -->
   <script>
     (function(){
@@ -697,9 +680,6 @@
         cameraDisplayOn: true,
         minimizeDetails: true,
         selectedSlots: [0],
-        fpsCap: 12,
-        mobileFacing: "environment",
-        faceDetectorMode: "tiny",
 
         // Live CV tuning
         detectionIntervalMs: 300,
@@ -757,19 +737,7 @@
       let cvReady = false;
       let cvInitPromise = null;
       let faceMatcher = null;
-      const FACEAPI_URLS = [
-        "https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.15/dist/face-api.js",
-        "https://unpkg.com/@vladmandic/face-api@1.7.15/dist/face-api.js",
-      ];
-      const WASM_URLS = [
-        "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@4.22.0/dist/tf-backend-wasm.min.js",
-        "https://unpkg.com/@tensorflow/tfjs-backend-wasm@4.22.0/dist/tf-backend-wasm.min.js",
-      ];
-      const COCO_URLS = [
-        "https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js",
-        "https://unpkg.com/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js",
-      ];
-      const FACE_MODEL_URL = "https://vladmandic.github.io/face-api/model/";
+      const FACE_MODEL_URL = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.15/model/";
 
       // Debounced save
       let _saveTimer = null;
@@ -803,10 +771,6 @@
       const unknownCount = el("unknownCount");
       const facePreview = el("facePreview");
       const faceName = el("faceName");
-      const fpsCap = el("fpsCap");
-      const fpsCapValue = el("fpsCapValue");
-      const mobileFacing = el("mobileFacing");
-      const faceDetectorMode = el("faceDetectorMode");
 
       el("year").textContent = new Date().getFullYear();
 
@@ -870,31 +834,6 @@
         settings.minimizeDetails = !!e.target.checked;
         saveSettings();
         renderLogTable();
-      });
-      fpsCap.addEventListener("input", (e)=>{
-        settings.fpsCap = Number(e.target.value) || 12;
-        fpsCapValue.textContent = String(settings.fpsCap);
-        saveSettings();
-      });
-
-      mobileFacing.addEventListener("change", (e)=>{
-        settings.mobileFacing = e.target.value || "environment";
-        saveSettings();
-        toast("Camera preference updated. Restart cameras to apply.");
-      });
-
-      faceDetectorMode.addEventListener("change", async (e)=>{
-        settings.faceDetectorMode = e.target.value || "tiny";
-        saveSettings();
-        if(recognitionMode && !demoMode){
-          try{
-            await ensureCvReady();
-            await loadFaceDetector(settings.faceDetectorMode);
-            toast("Face detector updated.");
-          }catch(err){
-            toast("Face detector update failed.");
-          }
-        }
       });
 
       el("btnToggleDisplay").addEventListener("click", ()=>{
@@ -1036,52 +975,23 @@
           try{
             toast("Loading AI models… (first time can take a bit)");
 
-            const faceUrl = await loadScriptAny(FACEAPI_URLS);
-            if(!window.faceapi || !window.faceapi.tf){
-              throw new Error("FaceAPI loaded but TFJS missing.");
-            }
-            window.tf = window.faceapi.tf;
-
+            // Prefer WebGL if available
             try{
-              const wasmUrl = await loadScriptAny(WASM_URLS, { timeoutMs: 25000 });
-              if(window.tf?.wasm?.setWasmPaths){
-                window.tf.wasm.setWasmPaths("https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@4.22.0/dist/");
+              if(window.tf && tf.getBackend && tf.setBackend){
+                if(tf.getBackend() !== "webgl"){
+                  await tf.setBackend("webgl");
+                }
+                if(tf.ready) await tf.ready();
               }
-              console.info("WASM backend loaded:", wasmUrl);
-            }catch(e){
-              console.info("WASM backend not available, continuing with WebGL/CPU.");
-            }
-
-            const prefer = isLikelyIOS() ? ["wasm","webgl","cpu"] : ["webgl","wasm","cpu"];
-            let chosen = null;
-            for(const b of prefer){
-              try{
-                await window.tf.setBackend(b);
-                await window.tf.ready();
-                chosen = b;
-                break;
-              }catch(e){ /* ignore */ }
-            }
-            if(!chosen){
-              await window.tf.setBackend("cpu");
-              await window.tf.ready();
-            }
+            }catch(e){ /* ignore */ }
 
             // COCO-SSD
-            await loadScriptAny(COCO_URLS, { timeoutMs: 25000 });
-            if(!window.cocoSsd){
-              throw new Error("COCO-SSD failed to load.");
-            }
-            try{
-              cocoModel = await window.cocoSsd.load({ base: "lite_mobilenet_v2" });
-            }catch(e){
-              cocoModel = await window.cocoSsd.load();
-            }
+            cocoModel = await cocoSsd.load({ base: "lite_mobilenet_v2" });
 
             // Face-api nets
+            await faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODEL_URL);
             await faceapi.nets.faceLandmark68TinyNet.loadFromUri(FACE_MODEL_URL);
             await faceapi.nets.faceRecognitionNet.loadFromUri(FACE_MODEL_URL);
-            await loadFaceDetector(settings.faceDetectorMode);
 
             cvReady = true;
             rebuildFaceMatcher();
@@ -1097,19 +1007,6 @@
         })();
 
         return cvInitPromise;
-      }
-
-      async function loadFaceDetector(mode){
-        if(!window.faceapi) return;
-        if(mode === "ssd"){
-          if(!faceapi.nets.ssdMobilenetv1.params){
-            await faceapi.nets.ssdMobilenetv1.loadFromUri(FACE_MODEL_URL);
-          }
-        }else{
-          if(!faceapi.nets.tinyFaceDetector.params){
-            await faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODEL_URL);
-          }
-        }
       }
 
       function normalizeKnownFaces(obj){
@@ -1153,10 +1050,6 @@
         el("chkDemoMode").checked = demoMode;
         el("chkRecognition").checked = recognitionMode;
         el("chkMinDetails").checked = !!settings.minimizeDetails;
-        fpsCap.value = String(settings.fpsCap || 12);
-        fpsCapValue.textContent = String(settings.fpsCap || 12);
-        mobileFacing.value = settings.mobileFacing || "environment";
-        faceDetectorMode.value = settings.faceDetectorMode || "tiny";
 
         setRecUI(recognitionMode);
         applyModeBadges();
@@ -1348,22 +1241,11 @@
        * Camera start/stop
        ***********************/
       async function startSelectedCameras(applyOnly=false){
-        let want = [];
+        const want = [];
         for(let i=0;i<MAX_CAM_UI;i++){
           const cb = el("camChk_"+i);
           if(cb && cb.checked) want.push(i);
         }
-
-        if(isLikelyIOS() && want.length > 1){
-          toast("iOS typically allows one camera stream. Starting the first selected camera only.");
-          want = [want[0]];
-          settings.selectedSlots = want;
-          for(let i=0;i<MAX_CAM_UI;i++){
-            const cb = el("camChk_"+i);
-            if(cb) cb.checked = want.includes(i);
-          }
-        }
-
         settings.selectedSlots = want;
         saveSettings();
 
@@ -1380,7 +1262,6 @@
               // continue
             }
           }
-          await sleep(200);
         }
 
         if(camStreams.size > 0){
@@ -1396,12 +1277,9 @@
           const videoConstraints = {
             width: {ideal: 1280},
             height:{ideal: 720},
-            frameRate: { ideal: settings.fpsCap || 12, max: settings.fpsCap || 12 },
           };
           if(pick && pick !== "__default__" && pick !== "__none__"){
             videoConstraints.deviceId = { exact: pick };
-          }else if(settings.mobileFacing){
-            videoConstraints.facingMode = { ideal: settings.mobileFacing };
           }
 
           const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio:false });
@@ -1470,7 +1348,6 @@
           tracks: new Map(), // id -> track
           lastDetectAt: 0,
           detecting: false,
-          lastFrameAt: 0,
           latest: {
             ts: 0,
             objects: [],
@@ -1502,18 +1379,6 @@
           }
 
           const state = camStates.get(idx);
-          if(!state){
-            requestAnimationFrame(tick);
-            return;
-          }
-
-          const nowFrame = performance.now();
-          const cap = settings.fpsCap || 12;
-          if(nowFrame - state.lastFrameAt < (1000 / cap)){
-            requestAnimationFrame(tick);
-            return;
-          }
-          state.lastFrameAt = nowFrame;
 
           // Recognition on?
           if(recognitionMode){
@@ -1614,12 +1479,10 @@
         let faces = [];
         if(persons.length){
           try{
-            const opts = settings.faceDetectorMode === "ssd"
-              ? new faceapi.SsdMobilenetv1Options({ minConfidence: settings.faceScoreThreshold })
-              : new faceapi.TinyFaceDetectorOptions({
-                inputSize: settings.faceInputSize,
-                scoreThreshold: settings.faceScoreThreshold
-              });
+            const opts = new faceapi.TinyFaceDetectorOptions({
+              inputSize: settings.faceInputSize,
+              scoreThreshold: settings.faceScoreThreshold
+            });
 
             const dets = await faceapi
               .detectAllFaces(v, opts)
@@ -2491,7 +2354,6 @@
       }
 
       function randInt(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
-      function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
       function roundRect(ctx, x, y, w, h, r){
         const rr = Math.min(r, w/2, h/2);
@@ -2540,39 +2402,6 @@
         document.body.appendChild(a);
         a.click();
         a.remove();
-      }
-
-      function loadScript(url, { timeoutMs = 20000 } = {}){
-        return new Promise((resolve, reject)=>{
-          const s = document.createElement("script");
-          const t = setTimeout(()=>{
-            s.remove();
-            reject(new Error(`Timeout loading: ${url}`));
-          }, timeoutMs);
-
-          s.src = url;
-          s.async = true;
-          s.onload = ()=>{ clearTimeout(t); resolve(url); };
-          s.onerror = ()=>{ clearTimeout(t); reject(new Error(`Failed to load: ${url}`)); };
-          document.head.appendChild(s);
-        });
-      }
-
-      async function loadScriptAny(urls, opts){
-        let lastErr = null;
-        for(const url of urls){
-          try{
-            return await loadScript(url, opts);
-          }catch(e){
-            lastErr = e;
-          }
-        }
-        throw lastErr || new Error("All script sources failed.");
-      }
-
-      function isLikelyIOS(){
-        return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-          (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
       }
 
       function toast(msg){
