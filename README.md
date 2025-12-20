@@ -1,66 +1,53 @@
-# RedNode Excavation
+# RedNode Object Detection Server (FastAPI + YOLOv8)
 
-Single-page excavation-themed chat and streaming client with optional WebSocket backend and
-persistent chat history.
+This server provides a `/detect` endpoint that accepts an image and returns YOLOv8 detections.
 
-## Deploying on Render
+## Setup
 
-1. **Static site**
-   - Type: *Static Site*
-   - Build Command: *(leave blank)*
-   - Publish Directory: `.`
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
-2. **WebSocket server** (optional)
-   - Type: *Web Service*
-   - Build Command: `npm ci`
-   - Start Command: `node server.js`
-   - Health Check Path: `/healthz`
+### Download the YOLOv8 model
 
-The WebSocket endpoint will be available at `wss://<service-name>.onrender.com/ws`.
-Configure this URL in the client via the "configure" button on the welcome screen.
+Ultralytics will automatically download `yolov8n.pt` the first time you run the server.
+If you want to pre-download, run:
 
-### Persistent chat history
+```bash
+python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
+```
 
-Chat messages, including attachments, are stored in the `app.db` SQLite
-database. The server sends the full history to new connections and broadcasts
-the number of currently connected users so the client can display a live online
-count.
+## Run
 
-### Attachments
+```bash
+uvicorn app:app --reload --host 0.0.0.0 --port 8000
+```
 
-Chat messages can include images, videos, or other files. Uploads are stored in
-the database along with the original filename and MIME type so the full post and
-its metadata are available to other users and when reloading the chat.
+## Example request
 
-### Captions
+```bash
+curl -X POST http://localhost:8000/detect \
+  -F "image=@/path/to/image.jpg"
+```
 
-Video broadcasts and uploads now include a **CC** button by default. Users can
-customize caption appearance with adjustable fonts and colors to suit personal
-readability preferences. Caption tracks ship in multiple languages including
-English, Portuguese/English bilingual, Korean, and Arabic/English bilingual for
-improved accuracy.
+## Example response
 
-### Voice-to-text captions
-
-Live video broadcasts automatically generate captions using the browser's
-SpeechRecognition API. When you start broadcasting, your spoken audio is
-transcribed into caption cues shown on the stream, adapting to the language
-configured for the page.
-
-### File-type backups
-
-Run `python backup.py` to copy repository files into the `backups/` directory.
-The script uses the same backup process for every file type, storing each
-extension in its own subdirectory and preserving metadata so all files retain
-their information.
-
-### Excavator commands
-
-The chat supports playful slash commands that also ping a mock excavator
-endpoint. Try:
-
-- `/dig` – digs a mighty trench
-- `/scoop` – scoops up a big pile of dirt
-- `/dump` – dumps the load into a truck
-- `/spin` – spins the cab around
-- `/honk` – honks the horn proudly
+```json
+{
+  "image_width": 1280,
+  "image_height": 720,
+  "detections": [
+    {
+      "x1": 125.2,
+      "y1": 210.5,
+      "x2": 310.8,
+      "y2": 512.9,
+      "class_id": 0,
+      "class_name": "person",
+      "confidence": 0.87
+    }
+  ]
+}
+```
