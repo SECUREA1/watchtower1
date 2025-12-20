@@ -1,125 +1,162 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <title>RedNode Launching…</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RedNode COCO-SSD Mobile/WebView Test</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+        margin: 0;
+        background: #0f172a;
+        color: #e2e8f0;
+      }
+      header {
+        padding: 16px 20px;
+        background: #1e293b;
+        border-bottom: 1px solid #334155;
+      }
+      main {
+        display: grid;
+        gap: 16px;
+        padding: 16px;
+      }
+      .stage {
+        position: relative;
+        max-width: 960px;
+        margin: 0 auto;
+      }
+      video,
+      canvas {
+        width: 100%;
+        border-radius: 12px;
+      }
+      canvas {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+      }
+      button {
+        padding: 10px 16px;
+        border-radius: 8px;
+        border: none;
+        background: #38bdf8;
+        color: #0f172a;
+        font-weight: 600;
+      }
+      button:disabled {
+        opacity: 0.6;
+      }
+      .log {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        background: #020617;
+        border: 1px solid #1e293b;
+        border-radius: 12px;
+        padding: 12px;
+        white-space: pre-wrap;
+        max-height: 220px;
+        overflow-y: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>RedNode COCO-SSD Mobile/WebView Test</h1>
+      <p>Loads TFJS + COCO-SSD with backend fallback and optional server detection.</p>
+    </header>
+    <main>
+      <section class="stage">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>
+      </section>
+      <section class="controls">
+        <button id="start">Start Camera + Detection</button>
+        <button id="stop" disabled>Stop</button>
+      </section>
+      <section>
+        <h3>Logs</h3>
+        <div id="log" class="log"></div>
+      </section>
+    </main>
 
-  <style>
-    body{font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,Arial;margin:22px;color:#111;background:#fff}
-    .wrap{max-width:880px;margin:22px auto;padding:18px;border-radius:10px;border:1px solid #e6e6e6;background:#fafafa}
-    h1{margin:0 0 10px;font-size:20px}
-    p{margin:8px 0;color:#333}
-    .ok{color:green;font-weight:700}
-    .warn{color:#b45b00;font-weight:700}
-    .info{color:#0b5cff}
-    a.button{display:inline-block;padding:8px 12px;border-radius:8px;background:#0b5cff;color:#fff;text-decoration:none;margin:6px 6px 6px 0}
-    pre{background:#f4f4f4;padding:10px;border-radius:6px;overflow:auto}
-    .note{font-size:13px;color:#666;margin-top:8px}
-  </style>
+    <script type="module">
+      import {
+        initDetection,
+        detectLoop,
+        drawDetections,
+        createLogger,
+      } from './detection.js';
 
-  <script>
-    // Guarded redirect: redirect to start.html only if the site root was requested.
-    function redirectToStartIfRoot() {
-      try {
-        const pathname = (window.location && window.location.pathname) ? window.location.pathname : '/';
-        // treat exactly '/' or '/index.html' or '/index.htm' as the "root" case
-        if (pathname === '/' || pathname === '/index.html' || pathname === '/index.htm') {
-          const search = window.location.search || '';
-          const hash = window.location.hash || '';
-          // preserve query and hash
-          const destination = 'start.html' + search + hash;
-          window.location.replace(destination);
-          return true;
+      const video = document.getElementById('video');
+      const overlay = document.getElementById('overlay');
+      const startBtn = document.getElementById('start');
+      const stopBtn = document.getElementById('stop');
+      const logEl = document.getElementById('log');
+
+      const logger = createLogger(logEl);
+      let stopLoop = null;
+      let mediaStream = null;
+
+      async function startCamera() {
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' },
+          audio: false,
+        });
+        video.srcObject = mediaStream;
+        await video.play();
+      }
+
+      function stopCamera() {
+        if (mediaStream) {
+          mediaStream.getTracks().forEach((track) => track.stop());
+          mediaStream = null;
         }
-      } catch (err) {
-        // if unexpected error, fall through to non-redirect behavior
-        console.warn('Redirect guard encountered an error', err);
+        video.srcObject = null;
       }
-      return false;
-    }
 
-    // Display a helpful UI when index.html is served for non-root paths
-    async function showStatusUI() {
-      const container = document.getElementById('statusContainer');
-      // Basic message explaining why we didn't redirect
-      container.innerHTML = `
-        <div class="wrap">
-          <h1>RedNode — Index page</h1>
-          <p class="warn">Index page was served for the requested path. To avoid masking other pages (like /secure.html), this page will <strong>not</strong> automatically redirect.</p>
-          <p class="note">If you expected to see another page (for example <code>/secure.html</code>), use the links below to open it directly or verify its availability on the server.</p>
+      startBtn.addEventListener('click', async () => {
+        startBtn.disabled = true;
+        try {
+          await startCamera();
+          const { model, usingServerFallback } = await initDetection({
+            logger,
+            serverUrl: 'http://localhost:8000/detect',
+            wasmPath: 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@3.21.0/dist/',
+          });
 
-          <div id="checks" style="margin-top:12px">
-            <p><strong>Requested path:</strong> <code id="requestedPath"></code></p>
-            <p><strong>Quick checks:</strong></p>
-            <ul id="checkList">
-              <li>Check whether <code>/secure.html</code> is present on the server — performing a fast HEAD request...</li>
-            </ul>
-          </div>
+          stopLoop = detectLoop(video, (result) => {
+            drawDetections(overlay, video, result);
+          }, {
+            fps: 8,
+            maxSize: 640,
+            model,
+            usingServerFallback,
+            logger,
+            serverUrl: 'http://localhost:8000/detect',
+          });
 
-          <div style="margin-top:12px">
-            <a class="button" id="openRequested" href="#">Open requested path</a>
-            <a class="button" id="openSecure" href="/secure.html">Open Security Cam (/secure.html)</a>
-            <a class="button" id="openStart" href="start.html">Open Start</a>
-          </div>
-
-          <div style="margin-top:12px" id="resultArea"></div>
-          <p class="note">If <code>/secure.html</code> is missing from the deployed files, check your static publish settings or the service that is mapped to <strong>rednode.ai</strong> in your hosting dashboard (Render). Ensure the static service publishes files from the repository root and that <code>secure.html</code> is present in the deployed snapshot.</p>
-        </div>
-      `;
-
-      // fill requested path and openRequested link
-      const reqPath = window.location.pathname || '/';
-      document.getElementById('requestedPath').textContent = reqPath;
-      const openRequested = document.getElementById('openRequested');
-      openRequested.href = reqPath;
-
-      // perform a HEAD check for /secure.html to help diagnose
-      const resultArea = document.getElementById('resultArea');
-      try {
-        // HEAD may be blocked on some servers; this is a gentle check (no body).
-        const res = await fetch('/secure.html', { method: 'HEAD', cache: 'no-store' });
-        if (res.ok) {
-          resultArea.innerHTML = '<p class="ok">✓ <strong>/secure.html</strong> exists on the server (HTTP ' + res.status + '). Click <a href="/secure.html">Open Security Cam</a>.</p>';
-        } else if (res.status === 404) {
-          resultArea.innerHTML = '<p class="warn">✖ <strong>/secure.html</strong> returned HTTP 404 — the file is not present on the deployed site.</p><p class="note">Deploy the site with <code>secure.html</code> present at the repo root, and ensure your hosting publish path serves that file.</p>';
-        } else {
-          resultArea.innerHTML = '<p class="info">ℹ <strong>/secure.html</strong> returned HTTP ' + res.status + '. You may want to open it directly to inspect.</p>';
+          stopBtn.disabled = false;
+        } catch (error) {
+          logger.error('Failed to start detection', error);
+          startBtn.disabled = false;
         }
-      } catch (err) {
-        // Some hosts block HEAD or some errors: fallback to informative message
-        resultArea.innerHTML = '<p class="warn">⚠ Unable to perform a HEAD check for <code>/secure.html</code> (' + (err && err.message ? err.message : 'network error') + ').</p><p class="note">Click <a href="/secure.html">Open Security Cam</a> to test directly (this will load the page if present).</p>';
-      }
-    }
+      });
 
-    // Initialization
-    (function init() {
-      // If root requested -> perform original redirect behavior
-      const didRedirect = redirectToStartIfRoot();
-      if (didRedirect) return;
-
-      // If we didn't redirect, show the diagnostic UI so the user can open the requested page
-      if (document.readyState === 'loading') {
-        window.addEventListener('DOMContentLoaded', showStatusUI);
-      } else {
-        showStatusUI();
-      }
-    })();
-  </script>
-</head>
-
-<body>
-  <noscript>
-    <div style="padding:22px;background:#fff7ea;border:1px solid #f2d6b2;margin:18px;border-radius:8px;">
-      <strong>JavaScript required.</strong> This page normally redirects to the Start experience when visiting the site root. If you expected another page like <code>/secure.html</code>, open it directly:
-      <p><a href="/secure.html" class="button">Open /secure.html</a> <a href="start.html" class="button">Open start.html</a></p>
-    </div>
-  </noscript>
-
-  <!-- Fallback minimal content while script runs -->
-  <div id="statusContainer" style="max-width:880px;margin:22px auto;padding:12px">
-    <p>Launching RedNode… If you are at the site root you will be redirected to <a href="start.html">start.html</a>.</p>
-  </div>
-  <script src="static/omconsole-launcher.js" defer></script>
-</body>
+      stopBtn.addEventListener('click', () => {
+        if (stopLoop) {
+          stopLoop();
+          stopLoop = null;
+        }
+        stopCamera();
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+      });
+    </script>
+  </body>
 </html>
