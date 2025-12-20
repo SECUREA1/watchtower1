@@ -1,13 +1,18 @@
-# RedNode Storage & Sync Server (FastAPI)
+# RedNode Face Storage (Local | Cloud)
 
-This server powers RedNode's **local/server storage** flow for face images and recognition logs. It supports:
+This repo provides a single-file **RedNode dashboard** (`rednode.html`) and a **FastAPI** backend (`app.py`) that stores face images locally and optionally commits them to GitHub. The client uses **IndexedDB (Dexie)** for local storage and can automatically upload to the server when **Cloud** mode is selected.
 
-- Local server-side storage under `DATA_DIR`.
-- Optional GitHub commit or PR-based ingestion.
-- Auth via a dev `ADMIN_TOKEN` (easy to replace with JWT/session auth).
-- Batch log ingestion for recognition events.
+## Highlights
 
-## Setup
+- **Local + Cloud** storage mode selector in the dashboard settings.
+- Automatic, throttled uploads with retry/backoff when Cloud mode is enabled.
+- **Opt-in consent** captured automatically when Cloud is selected; sent with every upload.
+- Server-side GitHub commits (no client GitHub tokens).
+- Optional PR-based ingestion (`GITHUB_PR_FLOW=1`).
+
+---
+
+## Server Setup
 
 ```bash
 python -m venv .venv
@@ -15,15 +20,14 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Configuration
-
-Set these environment variables as needed:
+### Environment Variables
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `DATA_DIR` | Root folder for stored files/logs | `./data` |
 | `MAX_UPLOAD_BYTES` | Upload size cap (bytes) | `2097152` |
-| `ADMIN_TOKEN` | Dev auth token for API access | unset (auth disabled) |
+| `ADMIN_TOKEN` | API auth token (required unless public ingest) | unset |
+| `ALLOW_PUBLIC_INGEST` | Allow unauthenticated uploads (still requires consent) | `0` |
 | `GITHUB_ENABLED` | Enable GitHub ingestion | `0` |
 | `GITHUB_TOKEN` | GitHub token (server-only secret) | unset |
 | `GITHUB_OWNER` | GitHub org/user | unset |
@@ -31,7 +35,7 @@ Set these environment variables as needed:
 | `GITHUB_BRANCH` | Target branch | `main` |
 | `GITHUB_PR_FLOW` | `1` to open PRs instead of direct commit | `0` |
 
-### Example
+### Example (direct commit)
 
 ```bash
 export ADMIN_TOKEN=dev-token
@@ -40,33 +44,55 @@ export GITHUB_TOKEN=ghp_***
 export GITHUB_OWNER=your-org
 export GITHUB_REPO=rednode-data
 export GITHUB_BRANCH=main
-export GITHUB_PR_FLOW=1
+export GITHUB_PR_FLOW=0
 ```
 
-## Run
+### Example (public ingest for testing)
+
+```bash
+export ALLOW_PUBLIC_INGEST=1
+```
+
+> **Security warning:** Do not use `ALLOW_PUBLIC_INGEST=1` in public production environments.
+
+---
+
+## Run the Server
 
 ```bash
 uvicorn app:app --reload --host 0.0.0.0 --port 8000
 ```
 
-## API Overview
+Check health:
 
-- `POST /api/faces/add` — store a face image + metadata (multipart form)
-- `GET /api/faces/list` — list faces index
-- `GET /api/faces/image/{face_id}` — serve or redirect to stored image
-- `POST /api/faces/sync` — batch ingest base64 faces
-- `POST /api/logs/add` — append logs to daily JSONL files
+```bash
+curl http://localhost:8000/healthz
+```
 
-## Client Integration
+---
 
-Open `secure.html` in a browser. The new **Storage & Sync** panel lets you:
+## Client Usage
 
-- Choose global default storage (Local vs Server).
-- Select per-upload storage.
-- Provide consent for server uploads.
-- Save faces/logs and sync local records to the server.
+Open `rednode.html` in a browser. In **Settings → Face Storage (Local | Cloud)**:
 
-The client only uses `ADMIN_TOKEN` or a JWT **you provide**. The GitHub token is **never** exposed in the browser.
+1. Choose **Cloud** for Storage Mode.
+2. Enable **Auto-upload**.
+3. Click **Capture & Upload Now** to capture a camera frame, or let auto-upload sync pending local records.
+4. Use **Sync Local → Cloud** to retry any pending items.
+
+The client keeps a local IndexedDB copy regardless of upload status.
+
+---
+
+## GitHub Commit Flow
+
+When `GITHUB_ENABLED=1`, the server commits image + metadata + `index.json` in a **single Git tree commit**. When `GITHUB_PR_FLOW=1`, the server:
+
+1. Creates a branch `add-face-<uuid>-<timestamp>`
+2. Commits the files to that branch
+3. Opens a PR and returns its URL
+
+---
 
 ## Data Layout
 
@@ -77,7 +103,16 @@ DATA_DIR/
     meta/
     index.json
   logs/
-    2024-04-23.jsonl
+    YYYY-MM-DD.jsonl
 ```
 
-See `EXAMPLE_RESPONSES.md` for example payloads.
+---
+
+## Security Guidance
+
+- Keep `GITHUB_TOKEN` server-side only.
+- Set `ALLOW_PUBLIC_INGEST=0` for production.
+- Use proper authentication (JWT/session) for uploads.
+- Consider object storage (S3/GCS) for images.
+
+See [SECURITY_NOTES.md](SECURITY_NOTES.md) for detailed recommendations.

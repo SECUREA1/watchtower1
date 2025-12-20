@@ -1,11 +1,12 @@
 # Security & Privacy Notes
 
-- **Consent required**: The server rejects face uploads without explicit consent in metadata. The client prompts users before server/GitHub uploads.
-- **Secrets stay server-side**: `GITHUB_TOKEN` is stored only in server environment variables; never ship it to the client.
-- **Auth**: Use `ADMIN_TOKEN` for demos only. Replace with JWT/session auth in production.
-- **Rate limiting**: Add IP/user-based throttling (e.g., Redis-backed limiter) to prevent abuse.
-- **Storage & scalability**: For production, store images in object storage (S3/GCS/Azure Blob) and metadata in a database instead of GitHub.
-- **Data retention**: Define retention policies for logs and face images; consider automatic deletion workflows.
-- **Moderation**: Scan/validate uploaded content (face detection, malware scanning, image sanitization).
-- **Transport security**: Use HTTPS/TLS everywhere, and set CORS to trusted origins only.
-- **Auditability**: Log access to face images and record admin actions.
+**Production recommendations:**
+
+- **Do not use `ALLOW_PUBLIC_INGEST=1`** on public servers. Keep it only for local testing.
+- Use **JWT/session-based auth** and per-user authorization for uploads.
+- Store images in **object storage (S3/GCS/Azure Blob)** and keep only metadata + index in GitHub.
+- Use **PR-based ingestion** (`GITHUB_PR_FLOW=1`) to allow human review before merges.
+- Add **rate limiting**, **abuse detection**, and **virus scanning** on uploaded content.
+- Restrict CORS origins to trusted domains.
+- Encrypt sensitive metadata and comply with local data retention policies.
+- Implement robust audit logs for access to face images and commits.
