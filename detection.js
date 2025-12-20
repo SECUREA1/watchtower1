@@ -227,3 +227,87 @@ export function drawDetections(canvas, video, result) {
     ctx.fillText(`${label} ${(score * 100).toFixed(1)}%`, drawX, Math.max(12, drawY - 4));
   }
 }
+
+export async function captureFrameBlob(source, options = {}) {
+  const {
+    mimeType = 'image/jpeg',
+    quality = 0.9,
+    maxSize = 640,
+  } = options;
+
+  const canvas = document.createElement('canvas');
+  let width = 0;
+  let height = 0;
+
+  if (source instanceof HTMLVideoElement) {
+    width = source.videoWidth;
+    height = source.videoHeight;
+  } else if (source instanceof HTMLCanvasElement) {
+    width = source.width;
+    height = source.height;
+  } else if (source instanceof HTMLImageElement) {
+    width = source.naturalWidth;
+    height = source.naturalHeight;
+  }
+
+  if (!width || !height) {
+    throw new Error('captureFrameBlob: invalid source dimensions.');
+  }
+
+  const longSide = Math.max(width, height);
+  const scale = longSide > maxSize ? maxSize / longSide : 1;
+  const outWidth = Math.round(width * scale);
+  const outHeight = Math.round(height * scale);
+
+  canvas.width = outWidth;
+  canvas.height = outHeight;
+
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(source, 0, 0, outWidth, outHeight);
+
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) return reject(new Error('Failed to capture frame blob.'));
+      resolve(blob);
+    }, mimeType, quality);
+  });
+}
+
+export function drawThumbnail(target, label = 'Face') {
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, size, size);
+  grad.addColorStop(0, 'rgba(255,107,107,0.6)');
+  grad.addColorStop(1, 'rgba(56,189,248,0.6)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.beginPath();
+  ctx.arc(size / 2, size / 2, size / 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
+  ctx.font = 'bold 10px ui-sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(label.slice(0, 8), size / 2, size - 8);
+
+  if (target instanceof HTMLImageElement) {
+    target.src = canvas.toDataURL('image/png');
+  } else if (target instanceof HTMLCanvasElement) {
+    const targetCtx = target.getContext('2d');
+    target.width = size;
+    target.height = size;
+    targetCtx.drawImage(canvas, 0, 0);
+  }
+}
+
+export function applyDprCanvas(canvas, width, height) {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  return ctx;
+}
