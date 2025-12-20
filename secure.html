@@ -384,33 +384,6 @@
       color:var(--muted);
       white-space:nowrap;
     }
-    .debug-panel{
-      border:1px solid var(--border);
-      border-radius:14px;
-      background: rgba(7,6,12,.7);
-      box-shadow: var(--shadow2);
-    }
-    .debug-panel .card-b{padding:12px}
-    .debug-status{
-      font-family: var(--mono);
-      font-size: 12px;
-      color: rgba(255,239,237,.86);
-      line-height: 1.5;
-      display:grid;
-      gap:6px;
-    }
-    .debug-log{
-      margin-top:10px;
-      max-height:160px;
-      overflow:auto;
-      font-family: var(--mono);
-      font-size: 11px;
-      color: rgba(255,239,237,.75);
-      border-top:1px solid rgba(255,255,255,.08);
-      padding-top:8px;
-      display:grid;
-      gap:6px;
-    }
 
     /* Footer */
     .footer{
@@ -543,15 +516,6 @@
                     <div class="small"><span id="fpsVal">12</span> fps</div>
                   </div>
 
-                  <div style="min-width:220px">
-                    <label class="small" for="detectorMode"><b>Face detector</b></label>
-                    <select id="detectorMode">
-                      <option value="tiny">TinyFaceDetector (fast / mobile)</option>
-                      <option value="ssd">SSD Mobilenet (heavier)</option>
-                    </select>
-                    <div class="small">Use Tiny on phones for reliability.</div>
-                  </div>
-
                   <div class="hint" style="max-width:360px">
                     On iOS, only one active camera is typical. Start with Camera 0 and use HTTPS.
                   </div>
@@ -562,17 +526,6 @@
                   If you only have one webcam, select <b>Camera 0</b>. If multiple cameras exist, pick a device per slot.
                   Some browsers/devices limit simultaneous streams.
                 </div>
-              </div>
-            </div>
-
-            <div class="card debug-panel" style="margin-bottom:12px">
-              <div class="card-h">
-                <div class="title"><span aria-hidden="true">🧪</span> CV Status / Debug</div>
-                <div class="subtitle">Camera permission • Backend • Model load • Per-camera status</div>
-              </div>
-              <div class="card-b">
-                <div id="cvStatusSummary" class="debug-status"></div>
-                <div id="cvStatusLog" class="debug-log"></div>
               </div>
             </div>
 
@@ -712,13 +665,6 @@
 
   <!-- ✅ RedNode Security Console Logic (Live CV + Demo + Persistent DB) -->
   <script>
-    /*
-      How to test (Live CV):
-      - HTTPS is required for camera on iOS Safari (or localhost in dev).
-      - iOS typically allows one camera stream; start Camera 0 first.
-      - Check the CV Status / Debug panel for permission, backend, and model load steps.
-      - Confirm backend selection + model load messages before enabling Recognition Mode.
-    */
     (function(){
       "use strict";
 
@@ -762,7 +708,6 @@
         // Mobile helpers
         mobileFacing: "environment",
         fpsCap: isLikelyMobile() ? 12 : 24,
-        detectorMode: isLikelyMobile() ? "tiny" : "tiny",
       };
 
       // Load settings (merge defaults)
@@ -868,53 +813,6 @@
       }
 
       /***********************
-       * CV Status / Debug UI
-       ***********************/
-      const cvDebugState = {
-        permission: "Not started",
-        backend: "—",
-        faceModels: "Not loaded",
-        cocoStatus: "Not loaded",
-        cameras: {},
-      };
-
-      function renderCvStatus(){
-        if(!cvStatusSummary) return;
-        const lines = [];
-        lines.push(`Camera permission: ${cvDebugState.permission}`);
-        lines.push(`TF backend: ${cvDebugState.backend}`);
-        lines.push(`Face models: ${cvDebugState.faceModels}`);
-        lines.push(`COCO-SSD: ${cvDebugState.cocoStatus}`);
-
-        const camEntries = Object.entries(cvDebugState.cameras);
-        camEntries.sort((a,b)=>Number(a[0]) - Number(b[0]));
-        camEntries.forEach(([idx, status])=>{
-          lines.push(`Camera ${idx}: ${status}`);
-        });
-
-        cvStatusSummary.innerHTML = lines.map(l => `<div>${escapeHtml(l)}</div>`).join("");
-      }
-
-      function updateCvStatus(key, value){
-        cvDebugState[key] = value;
-        renderCvStatus();
-      }
-
-      function updateCameraStatus(idx, value){
-        cvDebugState.cameras[idx] = value;
-        renderCvStatus();
-      }
-
-      function addCvLog(msg){
-        if(!cvStatusLog) return;
-        const row = document.createElement("div");
-        const t = new Date();
-        const stamp = `${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}:${String(t.getSeconds()).padStart(2,"0")}`;
-        row.textContent = `[${stamp}] ${msg}`;
-        cvStatusLog.prepend(row);
-      }
-
-      /***********************
        * DOM refs
        ***********************/
       const el = (id)=>document.getElementById(id);
@@ -928,9 +826,6 @@
       const mobileFacing = el("mobileFacing");
       const fpsCap = el("fpsCap");
       const fpsVal = el("fpsVal");
-      const detectorMode = el("detectorMode");
-      const cvStatusSummary = el("cvStatusSummary");
-      const cvStatusLog = el("cvStatusLog");
 
       const logBody = el("logBody");
       const logSearch = el("logSearch");
@@ -951,7 +846,6 @@
       buildCameraCards();
       buildCameraSelectors();
       applySettingsToUI();
-      renderCvStatus();
       refreshAll();
 
       // Try device list (labels may be blank until permission)
@@ -969,7 +863,7 @@
         // If switching to Live while recognition ON, ensure models load
         if(recognitionMode && !demoMode){
           try{
-            await ensureCvReadySafe();
+            await ensureCvReady();
           }catch(err){
             demoMode = true;
             settings.demoMode = true;
@@ -988,8 +882,7 @@
 
         if(recognitionMode && !demoMode){
           try{
-            addCvLog("Recognition enabled: loading CV models.");
-            await ensureCvReadySafe();
+            await ensureCvReady();
           }catch(err){
             recognitionMode = false;
             settings.recognitionMode = false;
@@ -1021,23 +914,6 @@
           if(fpsVal) fpsVal.textContent = e.target.value;
           settings.fpsCap = Number(e.target.value) || settings.fpsCap;
           saveSettings();
-        });
-      }
-
-      if(detectorMode){
-        detectorMode.addEventListener("change", async (e)=>{
-          settings.detectorMode = e.target.value || "tiny";
-          saveSettings();
-          if(recognitionMode && !demoMode){
-            try{
-              addCvLog("Switching face detector to: " + settings.detectorMode);
-              await ensureCvReadySafe();
-              await loadDetectorModel(settings.detectorMode);
-              updateCvStatus("faceModels", "Detector ready (" + settings.detectorMode + ")");
-            }catch(err){
-              addCvLog("Detector switch failed: " + (err?.message || err));
-            }
-          }
         });
       }
 
@@ -1172,136 +1048,82 @@
       /***********************
        * CV init
        ***********************/
-      async function ensureCvReadySafe(){
-        try{
-          return await ensureCvReady();
-        }catch(err){
-          cvReady = false;
-          cvInitPromise = null;
-          updateCvStatus("faceModels", "Load failed");
-          updateCvStatus("cocoStatus", cocoModel ? "Ready" : "Unavailable");
-          addCvLog("AI load failed: " + (err?.message || err));
-          toast("AI model load failed ❌ (check network/CSP).");
-          throw err;
-        }
-      }
-
       async function ensureCvReady(){
         if(cvReady) return true;
         if(cvInitPromise) return cvInitPromise;
 
         cvInitPromise = (async ()=>{
-          toast("Loading AI models… (first time can take a bit)");
-          updateCvStatus("faceModels", "Loading...");
-          updateCvStatus("cocoStatus", "Loading...");
-          addCvLog("Loading AI runtime (mobile-safe).");
-
-          // Load FaceAPI if needed (mobile-safe fallback)
-          if(!window.faceapi){
-            const src = await loadScriptAny(FACEAPI_URLS, { timeoutMs: 25000 });
-            addCvLog("FaceAPI loaded from: " + src);
-          }
-          if(!window.faceapi || !window.faceapi.tf){
-            throw new Error("FaceAPI failed to load (faceapi.tf missing).");
-          }
-
-          window.tf = window.faceapi.tf;
-
-          // WASM backend (fallback for iOS/Safari)
           try{
-            const wasmSrc = await loadScriptAny(WASM_URLS, { timeoutMs: 25000 });
-            addCvLog("WASM backend script loaded: " + wasmSrc);
-            if(window.tf?.wasm?.setWasmPaths){
-              window.tf.wasm.setWasmPaths("https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@4.22.0/dist/");
-            }
-          }catch(e){
-            addCvLog("WASM backend load failed (continuing): " + (e?.message || e));
-          }
+            toast("Loading AI models… (first time can take a bit)");
 
-          // Choose backend
-          const prefer = isLikelyIOS() ? ["wasm","webgl","cpu"] : ["webgl","wasm","cpu"];
-          let chosen = null;
-          for(const b of prefer){
+            // Load FaceAPI if needed (mobile-safe fallback)
+            if(!window.faceapi){
+              await loadScriptAny(FACEAPI_URLS, { timeoutMs: 25000 });
+            }
+            if(!window.faceapi || !window.faceapi.tf){
+              throw new Error("FaceAPI failed to load (faceapi.tf missing).");
+            }
+
+            window.tf = window.faceapi.tf;
+
+            // WASM backend (fallback for iOS/Safari)
             try{
-              await window.tf.setBackend(b);
-              if(window.tf.ready) await window.tf.ready();
-              chosen = b;
-              break;
-            }catch(e){
-              // continue
-            }
-          }
-          if(!chosen){
-            await window.tf.setBackend("cpu");
-            if(window.tf.ready) await window.tf.ready();
-            chosen = "cpu";
-          }
-          updateCvStatus("backend", chosen);
-          addCvLog("TF backend selected: " + chosen);
-
-          // COCO-SSD loader (optional)
-          try{
-            if(!window.cocoSsd){
-              const cocoSrc = await loadScriptAny(COCO_URLS, { timeoutMs: 25000 });
-              addCvLog("COCO-SSD script loaded: " + cocoSrc);
-            }
-            if(window.cocoSsd){
-              try{
-                cocoModel = await window.cocoSsd.load({ base: "lite_mobilenet_v2" });
-              }catch{
-                cocoModel = await window.cocoSsd.load();
+              if(!window.tf?.wasm?.setWasmPaths){
+                await loadScriptAny(WASM_URLS, { timeoutMs: 25000 });
               }
-              updateCvStatus("cocoStatus", "Ready");
-              addCvLog("COCO-SSD model ready.");
-            }else{
-              cocoModel = null;
-              updateCvStatus("cocoStatus", "COCO-SSD unavailable (continuing with face detection only)");
-              addCvLog("COCO-SSD unavailable (continuing with face detection only).");
+              if(window.tf?.wasm?.setWasmPaths){
+                window.tf.wasm.setWasmPaths("https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@4.22.0/dist/");
+              }
+            }catch(e){
+              console.warn("WASM backend load failed:", e);
             }
-          }catch(e){
-            cocoModel = null;
-            updateCvStatus("cocoStatus", "COCO-SSD unavailable (continuing with face detection only)");
-            addCvLog("COCO-SSD unavailable (continuing with face detection only). " + (e?.message || e));
-          }
 
-          // Face-api nets (detector + landmarks + recognition)
-          await loadDetectorModel(settings.detectorMode || "tiny");
-          addCvLog("Face detector ready: " + (settings.detectorMode || "tiny"));
+            // Choose backend
+            const prefer = isLikelyIOS() ? ["wasm","webgl","cpu"] : ["webgl","wasm","cpu"];
+            let chosen = null;
+            for(const b of prefer){
+              try{
+                await window.tf.setBackend(b);
+                if(window.tf.ready) await window.tf.ready();
+                chosen = b;
+                break;
+              }catch(e){
+                // continue
+              }
+            }
+            if(!chosen){
+              await window.tf.setBackend("cpu");
+              if(window.tf.ready) await window.tf.ready();
+            }
 
-          try{
+            // COCO-SSD loader
+            if(!window.cocoSsd){
+              await loadScriptAny(COCO_URLS, { timeoutMs: 25000 });
+            }
+            if(!window.cocoSsd){
+              throw new Error("COCO-SSD failed to load.");
+            }
+            cocoModel = await window.cocoSsd.load({ base: "lite_mobilenet_v2" });
+
+            // Face-api nets
+            await faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODEL_URL);
+            await faceapi.nets.faceLandmark68TinyNet.loadFromUri(FACE_MODEL_URL);
             await faceapi.nets.faceRecognitionNet.loadFromUri(FACE_MODEL_URL);
-            addCvLog("Face recognition model loaded.");
-          }catch(e){
-            addCvLog("Face recognition model failed (ok): " + (e?.message || e));
-          }
 
-          cvReady = true;
-          rebuildFaceMatcher();
-          updateCvStatus("faceModels", "Ready (" + (settings.detectorMode || "tiny") + ")");
-          toast("AI models ready ✅");
-          return true;
+            cvReady = true;
+            rebuildFaceMatcher();
+            toast("AI models ready ✅");
+            return true;
+          }catch(err){
+            console.error(err);
+            cvReady = false;
+            cvInitPromise = null;
+            toast("AI model load failed ❌ (check network/CSP).");
+            throw err;
+          }
         })();
 
         return cvInitPromise;
-      }
-
-      async function loadDetectorModel(mode){
-        if(!window.faceapi) return;
-        if(mode === "ssd"){
-          if(!faceapi.nets.ssdMobilenetv1.params){
-            await faceapi.nets.ssdMobilenetv1.loadFromUri(FACE_MODEL_URL);
-          }
-          if(!faceapi.nets.faceLandmark68Net.params){
-            await faceapi.nets.faceLandmark68Net.loadFromUri(FACE_MODEL_URL);
-          }
-        }else{
-          if(!faceapi.nets.tinyFaceDetector.params){
-            await faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODEL_URL);
-          }
-          if(!faceapi.nets.faceLandmark68TinyNet.params){
-            await faceapi.nets.faceLandmark68TinyNet.loadFromUri(FACE_MODEL_URL);
-          }
-        }
       }
 
       function normalizeKnownFaces(obj){
@@ -1349,9 +1171,6 @@
         if(fpsCap){
           fpsCap.value = String(settings.fpsCap || 12);
           if(fpsVal) fpsVal.textContent = String(fpsCap.value);
-        }
-        if(detectorMode){
-          detectorMode.value = settings.detectorMode || "tiny";
         }
 
         setRecUI(recognitionMode);
@@ -1487,7 +1306,7 @@
             </div>
 
             <div class="cam-body">
-              <video id="vid_${i}" autoplay playsinline muted></video>
+              <video id="vid_${i}" playsinline muted></video>
               <canvas class="overlay" id="ov_${i}"></canvas>
             </div>
 
@@ -1515,7 +1334,6 @@
 
           camGrid.appendChild(card);
           setCamStatus(i, false);
-          updateCameraStatus(i, "off");
         }
       }
 
@@ -1529,7 +1347,6 @@
       function setGlobalPerm(ok, txt){
         permDot.className = "dot " + (ok ? "ok" : "bad");
         permText.textContent = txt;
-        updateCvStatus("permission", txt);
       }
 
       function setRecUI(on){
@@ -1553,21 +1370,9 @@
         }
         settings.selectedSlots = want;
         saveSettings();
-        addCvLog("Starting cameras: " + (want.length ? want.join(", ") : "none"));
 
         if(isLikelyIOS() && want.length > 1){
-          // iOS-specific: limit to one active stream by default
-          const keep = want[0];
-          for(let i=0;i<MAX_CAM_UI;i++){
-            const cb = el("camChk_"+i);
-            if(cb) cb.checked = (i === keep);
-          }
-          want.length = 0;
-          want.push(keep);
-          settings.selectedSlots = want;
-          saveSettings();
-          toast("iOS typically allows one camera at a time. Starting Camera 0 only.");
-          addCvLog("iOS limit: only one camera stream allowed. Camera " + keep + " started.");
+          toast("iOS typically allows one camera at a time. Starting sequentially.");
         }
 
         // stop not wanted
@@ -1599,11 +1404,8 @@
             toast("Camera not supported in this browser.");
             setCamStatus(slotIdx, false);
             setGlobalPerm(false, "Camera: Unsupported");
-            updateCameraStatus(slotIdx, "unsupported");
             return false;
           }
-
-          updateCameraStatus(slotIdx, "requesting");
 
           const pick = (camBindings[slotIdx] || "__default__");
           const fps = Number(settings.fpsCap || 12);
@@ -1626,12 +1428,8 @@
           const v = el("vid_"+slotIdx);
           v.srcObject = stream;
           v.muted = true;
-          v.autoplay = true;
-          v.playsInline = true;
           v.setAttribute("playsinline", "");
           v.setAttribute("autoplay", "");
-          v.setAttribute("muted", "");
-          // iOS-specific: video.play() must happen from a user gesture handler
           await v.play();
 
           // refresh devices to get labels after permission
@@ -1641,15 +1439,12 @@
           resizeOverlayToVideo(v, ov);
 
           setCamStatus(slotIdx, true);
-          updateCameraStatus(slotIdx, "running");
           renderLoop(slotIdx);
           return true;
         }catch(err){
           console.warn("Camera start failed:", err);
           setCamStatus(slotIdx, false);
           setGlobalPerm(false, "Camera: Permission blocked");
-          updateCameraStatus(slotIdx, "failed");
-          addCvLog("Camera " + slotIdx + " failed to start: " + (err?.message || err));
           toast("Camera permission blocked/unavailable (or device already in use).");
           return false;
         }
@@ -1667,7 +1462,6 @@
         if(v){ v.srcObject = null; }
 
         setCamStatus(idx, false);
-        updateCameraStatus(idx, "stopped");
         el("camFps_"+idx).textContent = "—";
 
         const ov = el("ov_"+idx);
@@ -1704,19 +1498,12 @@
             demoDraw: null,
           },
           lastUnknownAt: 0,
-          lastErrorAt: 0,
         };
       }
 
       /***********************
        * Render + Vision loop
        ***********************/
-      function getInferenceIntervalMs(){
-        const fps = Number(settings.fpsCap || 12);
-        if(!fps || Number.isNaN(fps)) return 1000 / 12;
-        return 1000 / fps;
-      }
-
       function renderLoop(idx){
         const v = el("vid_"+idx);
         const ov = el("ov_"+idx);
@@ -1739,7 +1526,7 @@
             if(demoMode){
               // Throttle demo updates using detectionIntervalMs
               const now = performance.now();
-              if(state && (now - state.lastDetectAt > getInferenceIntervalMs())){
+              if(state && (now - state.lastDetectAt > settings.detectionIntervalMs)){
                 state.lastDetectAt = now;
 
                 // Generate + log demo detections
@@ -1756,7 +1543,7 @@
             }else{
               // Live CV mode
               const now = performance.now();
-              if(state && cvReady && !state.detecting && (now - state.lastDetectAt > getInferenceIntervalMs())){
+              if(state && cvReady && !state.detecting && (now - state.lastDetectAt > settings.detectionIntervalMs)){
                 state.detecting = true;
                 runVision(idx).finally(()=>{
                   const s = camStates.get(idx);
@@ -1802,82 +1589,74 @@
         const v = el("vid_"+idx);
         if(!state || !v || v.readyState < 2) return;
 
-        if(!cvReady) return;
+        if(!cvReady){
+          await ensureCvReady();
+        }
+        if(!cocoModel) return;
 
         const ts = Date.now();
-        const mode = settings.detectorMode || "tiny";
 
-        // 1) Face detection (always attempt)
-        let faces = [];
+        // 1) Object detection
+        let preds = [];
         try{
-          const opts = (mode === "ssd")
-            ? new faceapi.SsdMobilenetv1Options({ minConfidence: settings.faceScoreThreshold })
-            : new faceapi.TinyFaceDetectorOptions({
-                inputSize: settings.faceInputSize,
-                scoreThreshold: settings.faceScoreThreshold
-              });
-
-          const faceTask = faceapi.detectAllFaces(v, opts).withFaceLandmarks(true);
-          const useDescriptors = !!faceapi.nets.faceRecognitionNet?.params;
-          const dets = useDescriptors ? await faceTask.withFaceDescriptors() : await faceTask;
-
-          faces = dets.map(d => {
-            const b = d.detection.box;
-            const descriptor = d.descriptor;
-            let name = "Unknown";
-            let distance = null;
-
-            if(faceMatcher && descriptor){
-              const m = faceMatcher.findBestMatch(descriptor);
-              distance = m.distance;
-              if(m.label !== "unknown"){
-                name = m.label;
-              }
-            }
-
-            return {
-              name,
-              distance,
-              descriptor: descriptor ? Array.from(descriptor) : [],
-              box: { x: b.x, y: b.y, w: b.width, h: b.height },
-            };
-          });
+          preds = await cocoModel.detect(v);
         }catch(e){
-          if(state.lastErrorAt == null) state.lastErrorAt = 0;
-          const now = performance.now();
-          if(now - state.lastErrorAt > 2000){
-            state.lastErrorAt = now;
-            addCvLog("Face detection failed: " + (e?.message || e));
-          }
+          console.warn("coco-ssd detect failed:", e);
+          return;
         }
 
-        // 2) Object detection (optional)
-        let objects = [];
-        let persons = [];
-        let nonPersons = [];
-        if(cocoModel){
+        const objects = preds
+          .filter(p => p.score >= settings.objScoreThreshold)
+          .map(p => ({
+            cls: p.class,
+            score: p.score,
+            box: boxFromBbox(p.bbox),
+          }));
+
+        const persons = objects.filter(o => o.cls === "person");
+        const nonPersons = objects.filter(o => o.cls !== "person");
+
+        // 2) Face detection (if any person)
+        let faces = [];
+        if(persons.length){
           try{
-            const preds = await cocoModel.detect(v);
-            objects = preds
-              .filter(p => p.score >= settings.objScoreThreshold)
-              .map(p => ({
-                cls: p.class,
-                score: p.score,
-                box: boxFromBbox(p.bbox),
-              }));
-            persons = objects.filter(o => o.cls === "person");
-            nonPersons = objects.filter(o => o.cls !== "person");
+            const opts = new faceapi.TinyFaceDetectorOptions({
+              inputSize: settings.faceInputSize,
+              scoreThreshold: settings.faceScoreThreshold
+            });
+
+            const dets = await faceapi
+              .detectAllFaces(v, opts)
+              .withFaceLandmarks(true)
+              .withFaceDescriptors();
+
+            faces = dets.map(d => {
+              const b = d.detection.box;
+              const descriptor = d.descriptor; // Float32Array
+              let name = "Unknown";
+              let distance = null;
+
+              if(faceMatcher){
+                const m = faceMatcher.findBestMatch(descriptor);
+                distance = m.distance;
+                if(m.label !== "unknown"){
+                  name = m.label;
+                }
+              }
+
+              return {
+                name,
+                distance,
+                descriptor: Array.from(descriptor),
+                box: { x: b.x, y: b.y, w: b.width, h: b.height },
+              };
+            });
           }catch(e){
-            if(state.lastErrorAt == null) state.lastErrorAt = 0;
-            const now = performance.now();
-            if(now - state.lastErrorAt > 2000){
-              state.lastErrorAt = now;
-              addCvLog("COCO-SSD detect failed (continuing face-only).");
-            }
+            console.warn("face detect failed:", e);
           }
         }
 
-        // 3) Assign face->person by containment (if persons exist)
+        // 3) Assign face->person by containment
         const people = persons.map(p => {
           const pbox = p.box;
           const faceInside = faces
@@ -2111,20 +1890,6 @@
       function drawOverlays(ctx, latest){
         if(!latest) return;
 
-        // Faces
-        for(const f of (latest.faces || [])){
-          const b = f.box;
-          ctx.lineWidth = 2;
-          ctx.strokeStyle = "rgba(255,59,48,.85)";
-          ctx.fillStyle = "rgba(255,59,48,.12)";
-          roundRect(ctx, b.x, b.y, b.w, b.h, 10);
-          ctx.stroke();
-          ctx.fill();
-          ctx.font = "700 12px ui-monospace, Menlo, monospace";
-          ctx.fillStyle = "rgba(255,239,237,.95)";
-          ctx.fillText(`face: ${f.name || "Unknown"}`, b.x + 8, b.y + 18);
-        }
-
         // People
         for(const p of (latest.people || [])){
           const b = p.box;
@@ -2176,7 +1941,7 @@
 
         // de-dupe using descriptor distance
         for(const u of unknownFacesQueue){
-          if(u && Array.isArray(u.descriptor) && Array.isArray(face.descriptor) && u.descriptor.length && face.descriptor.length){
+          if(u && Array.isArray(u.descriptor) && face.descriptor){
             const d = euclid(face.descriptor, u.descriptor);
             if(d < 0.42) return;
           }
@@ -2809,7 +2574,7 @@
       // If user starts in Live + Recognition, preload models
       (async ()=>{
         if(recognitionMode && !demoMode){
-          try{ await ensureCvReadySafe(); }catch(e){}
+          try{ await ensureCvReady(); }catch(e){}
         }
       })();
 
