@@ -86,6 +86,11 @@ function getStorageChoice(defaultMode) {
   return checked?.value || defaultMode || 'local';
 }
 
+function getDefaultStorageMode() {
+  const checked = document.querySelector('input[name="defaultStorage"]:checked');
+  return checked?.value || 'local';
+}
+
 function getAuthHeader() {
   const token = (el('adminToken')?.value || '').trim();
   if (!token) return null;
@@ -231,8 +236,8 @@ async function refreshFaceList() {
 }
 
 async function handleSaveFace() {
-  const storageStatus = el('storageStatus');
-  const defaultMode = el('globalServerToggle')?.checked ? 'server' : 'local';
+  const storageFeedback = el('storageFeedback');
+  const defaultMode = getDefaultStorageMode();
   const storage = getStorageChoice(defaultMode);
   const name = (el('faceNameStorage')?.value || '').trim();
   let consentChecked = Boolean(el('consentCheckbox')?.checked);
@@ -273,7 +278,10 @@ async function handleSaveFace() {
 
   if (storage === 'local') {
     await saveLocalFace(record);
-    storageStatus.textContent = 'Saved locally';
+    if (storageFeedback) {
+      storageFeedback.textContent = 'Saved locally.';
+      storageFeedback.className = 'storage-feedback good';
+    }
     await refreshFaceList();
     return;
   }
@@ -286,10 +294,17 @@ async function handleSaveFace() {
     record.committed_to_github = Boolean(response.committed_to_github);
     record.github_commit_sha = response.github_commit_sha || null;
     await saveLocalFace(record);
-    storageStatus.textContent = 'Saved on server';
+    if (storageFeedback) {
+      storageFeedback.textContent = 'Saved to cloud.';
+      storageFeedback.className = 'storage-feedback good';
+    }
     await refreshFaceList();
   } catch (error) {
     console.error(error);
+    if (storageFeedback) {
+      storageFeedback.textContent = 'Cloud upload failed.';
+      storageFeedback.className = 'storage-feedback warn';
+    }
     alert(error.message || 'Failed to upload face.');
   }
 }
@@ -363,15 +378,33 @@ export async function syncLocalToServer() {
 
 function updateStorageStatus() {
   const status = el('storageStatus');
+  const statusText = status?.querySelector('.status-text');
+  const storageAlert = el('storageAlert');
   if (!status) return;
-  status.textContent = el('globalServerToggle')?.checked ? 'Default: server' : 'Default: local';
+  const mode = getDefaultStorageMode();
+  status.classList.toggle('cloud', mode === 'server');
+  status.classList.toggle('local', mode !== 'server');
+  if (statusText) {
+    statusText.textContent = mode === 'server' ? 'Cloud active' : 'Local active';
+  }
+  if (storageAlert) {
+    const consentChecked = Boolean(el('consentCheckbox')?.checked);
+    storageAlert.textContent =
+      mode === 'server' && !consentChecked
+        ? 'Consent is required before server uploads.'
+        : '';
+  }
 }
 
 function loadInitialUiState() {
   const settings = readSettings();
   el('serverUrl').value = settings.serverUrl || DEFAULT_SERVER_URL;
   el('adminToken').value = settings.adminToken || '';
-  el('globalServerToggle').checked = Boolean(settings.useServer);
+  const defaultMode = settings.defaultMode || (settings.useServer ? 'server' : 'local');
+  const defaultChoice = document.querySelector(
+    `input[name="defaultStorage"][value="${defaultMode}"]`
+  );
+  if (defaultChoice) defaultChoice.checked = true;
   el('consentCheckbox').checked = Boolean(settings.consent);
   updateStorageStatus();
 }
@@ -382,8 +415,15 @@ function wireUi() {
   el('btnListFaces')?.addEventListener('click', refreshFaceList);
   el('btnSyncFaces')?.addEventListener('click', syncLocalToServer);
 
-  el('globalServerToggle')?.addEventListener('change', (event) => {
-    writeSettings({ useServer: event.target.checked });
+  document.querySelectorAll('input[name="defaultStorage"]').forEach((input) => {
+    input.addEventListener('change', (event) => {
+      writeSettings({ defaultMode: event.target.value, useServer: event.target.value === 'server' });
+      updateStorageStatus();
+    });
+  });
+
+  el('consentCheckbox')?.addEventListener('change', (event) => {
+    writeSettings({ consent: event.target.checked });
     updateStorageStatus();
   });
 
@@ -393,10 +433,6 @@ function wireUi() {
 
   el('adminToken')?.addEventListener('change', (event) => {
     writeSettings({ adminToken: event.target.value.trim() });
-  });
-
-  el('consentCheckbox')?.addEventListener('change', (event) => {
-    writeSettings({ consent: event.target.checked });
   });
 }
 
