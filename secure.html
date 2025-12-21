@@ -699,6 +699,31 @@
     .cam-actions .left, .cam-actions .right{
       display:flex; gap:8px; flex-wrap:wrap; align-items:center;
     }
+    .cam-log{
+      display:grid;
+      gap:4px;
+      padding:6px 8px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.03);
+      min-width:140px;
+    }
+    .cam-log-line{
+      display:flex;
+      justify-content:space-between;
+      gap:8px;
+      font-size:11px;
+      color:var(--muted);
+    }
+    .cam-log-line b{
+      color:var(--text);
+      font-weight:600;
+      font-family:var(--mono);
+      max-width:140px;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
 
     .toggle{
       display:flex; align-items:center; gap:10px;
@@ -1387,6 +1412,7 @@
 
       // Camera + render state
       const MAX_CAM_UI = isLikelyMobile() ? 2 : 4;
+      let camLatestLog = Array.from({ length: MAX_CAM_UI }, () => null);
       let camStreams = new Map();  // slotIdx -> MediaStream
       let camStates  = new Map();  // slotIdx -> state
       let devices = [];            // videoinput list
@@ -2303,6 +2329,10 @@
                 <button type="button" class="ghost mini" data-act="pop">🗔 Open</button>
               </div>
               <div class="right">
+                <div class="cam-log" id="camLog_${i}">
+                  <div class="cam-log-line"><span>Item</span><b id="camLogItem_${i}">—</b></div>
+                  <div class="cam-log-line"><span>Person</span><b id="camLogPerson_${i}">—</b></div>
+                </div>
                 <button type="button" class="ghost mini" data-act="snap">⬇ Snapshot</button>
               </div>
             </div>
@@ -2918,6 +2948,50 @@
       /***********************
        * Record Event (shared)
        ***********************/
+      function resetCameraLog(idx){
+        const itemEl = el(`camLogItem_${idx}`);
+        const personEl = el(`camLogPerson_${idx}`);
+        if(itemEl) itemEl.textContent = "—";
+        if(personEl) personEl.textContent = "—";
+      }
+
+      function updateCameraLog(camIdx, label, evt){
+        if(camIdx == null || Number.isNaN(camIdx)) return;
+        const itemEl = el(`camLogItem_${camIdx}`);
+        const personEl = el(`camLogPerson_${camIdx}`);
+        if(!itemEl || !personEl) return;
+
+        itemEl.textContent = label ? getDisplayName(label) : "—";
+        personEl.textContent = evt && evt.person ? evt.person : "No one";
+        camLatestLog[camIdx] = { label, evt };
+      }
+
+      function refreshCameraLogs(){
+        camLatestLog = Array.from({ length: MAX_CAM_UI }, () => null);
+        for(let i=0;i<MAX_CAM_UI;i++){
+          resetCameraLog(i);
+        }
+
+        for(const [label, events] of Object.entries(objectMemory)){
+          for(const evt of (events || [])){
+            if(!evt || evt.cam == null) continue;
+            const idx = evt.cam;
+            if(idx < 0 || idx >= MAX_CAM_UI) continue;
+            const prev = camLatestLog[idx];
+            if(!prev || (evt.time || 0) > (prev.evt?.time || 0)){
+              camLatestLog[idx] = { label, evt };
+            }
+          }
+        }
+
+        for(let i=0;i<MAX_CAM_UI;i++){
+          const entry = camLatestLog[i];
+          if(entry){
+            updateCameraLog(i, entry.label, entry.evt);
+          }
+        }
+      }
+
       function recordEvent(label, status, box, person=null, held_duration=null, score=null, cam=null){
         const evt = {
           time: Date.now(),
@@ -2937,6 +3011,7 @@
         appendLogRow(label, evt);
         renderTracked();
         updateObjectDropdown();
+        updateCameraLog(cam, label, evt);
       }
 
       /***********************
@@ -3509,6 +3584,7 @@
         renderLogTable();
         renderTracked();
         renderUnknownFace();
+        refreshCameraLogs();
         scheduleSaveAll();
       }
 
