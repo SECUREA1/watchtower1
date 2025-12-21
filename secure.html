@@ -961,16 +961,16 @@
 
     <div class="security-layout">
       <section class="hero hero-panel tab-pane active" data-tab="controls">
-        <h2>Security Camera &amp; Interaction Logging Overview</h2>
+        <h2>RedNode Secure: Camera Intelligence Overview</h2>
         <p>
-          Anchored in the header, this overview mirrors the RedNode recognition console with multi-camera overlays,
-          unknown face queues, object memory, and exportable logs. It runs locally via <span class="kbd">getUserMedia()</span>
-          and keeps data in <span class="kbd">localStorage</span> for fast, on-device workflows.
+          Anchored in the header, this overview mirrors the RedNode Secure console with multi-camera overlays,
+          unknown face queues, object memory, and export-ready logs. It runs locally via <span class="kbd">getUserMedia()</span>
+          and keeps data in <span class="kbd">localStorage</span> for fast, on-device response cycles.
         </p>
         <details class="accordion" open>
           <summary>Usage notes</summary>
           <div class="accordion-body">
-            <div class="hint">For Live CV, serve over <b>https</b> (or <b>localhost</b>). The first model load may take a moment.</div>
+            <div class="hint">RedNode Secure is designed for on-device workflows. Run on <b>https</b> (or <b>localhost</b>) for Live CV, and expect a short warm-up on first model load.</div>
             <div class="badge-row">
               <span class="badge"><b>Mode:</b> <span id="modeBadge">Demo</span></span>
               <span class="badge"><b>Recognition:</b> <span id="recBadge">Off</span></span>
@@ -1189,11 +1189,16 @@
                   <label class="small" for="selectedLabelInput">Label / name</label>
                   <input id="selectedLabelInput" type="text" placeholder="Rename annotation" />
                 </div>
+                <div>
+                  <label class="small" for="existingObjectSelect">Save into existing object</label>
+                  <select id="existingObjectSelect" disabled></select>
+                </div>
                 <div class="row">
                   <button id="btnSelectedSaveLabel" class="good" type="button">✅ Save Label</button>
                   <button id="btnSelectedReject" class="danger" type="button">✖ Reject</button>
                   <button id="btnSelectedRecall" type="button">📌 Recall Location</button>
                   <button id="btnSelectedNewObject" class="ghost" type="button">🆕 Save as Object</button>
+                  <button id="btnSelectedSaveExisting" class="ghost" type="button">🔁 Save as Existing</button>
                   <button id="btnSelectedCopy" class="ghost" type="button">📋 Copy</button>
                 </div>
               </div>
@@ -1574,6 +1579,7 @@
 
       const objectSelect = el("objectSelect");
       const historyBox = el("historyBox");
+      const existingObjectSelect = el("existingObjectSelect");
 
       const trackedList = el("trackedList");
       const unknownCount = el("unknownCount");
@@ -1589,6 +1595,7 @@
       const btnSelectedReject = el("btnSelectedReject");
       const btnSelectedRecall = el("btnSelectedRecall");
       const btnSelectedNewObject = el("btnSelectedNewObject");
+      const btnSelectedSaveExisting = el("btnSelectedSaveExisting");
       const btnSelectedCopy = el("btnSelectedCopy");
       const logToggleButtons = Array.from(document.querySelectorAll(".log-toggle-btn"));
 
@@ -1658,6 +1665,9 @@
           selectedLogType.textContent = "No selection";
           selectedMeta.textContent = "Select a log row, tracked object, or unknown face to view details.";
           selectedLabelInput.value = "";
+          if(existingObjectSelect){
+            existingObjectSelect.disabled = true;
+          }
           if(selectedPreview){
             selectedPreview.classList.remove("has-image");
           }
@@ -1673,6 +1683,9 @@
           lines.push(formatMetaLine("Captured", captured));
           lines.push(formatMetaLine("Camera", payload.camIdx != null ? payload.camIdx : "—"));
           selectedLabelInput.value = "";
+          if(existingObjectSelect){
+            existingObjectSelect.disabled = true;
+          }
         }else if(payload.type === "person"){
           selectedLogType.textContent = "Person Movement";
           lines.push(formatMetaLine("Time", payload.evt ? fmtTime(payload.evt.time) : "—"));
@@ -1687,6 +1700,9 @@
             lines.push(formatMetaLine("Object", getDisplayName(payload.evt.objectLabel)));
           }
           selectedLabelInput.value = payload.label || "";
+          if(existingObjectSelect){
+            existingObjectSelect.disabled = true;
+          }
         }else{
           selectedLogType.textContent = "Log Event";
           lines.push(formatMetaLine("Time", payload.evt ? fmtTime(payload.evt.time) : "—"));
@@ -1699,6 +1715,12 @@
             lines.push(formatMetaLine("BBox", `x=${round2(b.x)} y=${round2(b.y)} w=${round2(b.w)} h=${round2(b.h)}`));
           }
           selectedLabelInput.value = customLabels[payload.label] || getDisplayName(payload.label || "");
+          if(existingObjectSelect){
+            existingObjectSelect.disabled = false;
+            if(payload.label){
+              existingObjectSelect.value = payload.label;
+            }
+          }
         }
 
         selectedMeta.innerHTML = lines.join("");
@@ -1708,6 +1730,35 @@
           if(selectedPreviewImg) selectedPreviewImg.src = hasImage ? payload.imgDataUrl : "";
           if(selectedPlaceholder) selectedPlaceholder.style.display = hasImage ? "none" : "block";
         }
+      }
+
+      function moveEventToExistingObject(sourceLabel, targetLabel, evt){
+        if(!sourceLabel || !targetLabel || !evt) return null;
+        const sourceEvents = objectMemory[sourceLabel] || [];
+        let movedEvt = evt;
+        let idx = sourceEvents.indexOf(evt);
+        if(idx === -1){
+          idx = sourceEvents.findIndex((item)=>item
+            && item.time === evt.time
+            && item.status === evt.status
+            && item.cam === evt.cam);
+        }
+        if(idx >= 0){
+          movedEvt = sourceEvents.splice(idx, 1)[0];
+        }
+
+        if(!objectMemory[targetLabel]) objectMemory[targetLabel] = [];
+        if(movedEvt){
+          movedEvt.sourceLabel = movedEvt.sourceLabel || sourceLabel;
+          objectMemory[targetLabel].push(movedEvt);
+        }
+
+        if(sourceLabel !== targetLabel && sourceEvents.length === 0){
+          delete objectMemory[sourceLabel];
+          trackedObjects.delete(sourceLabel);
+        }
+        trackedObjects.add(targetLabel);
+        return movedEvt;
       }
 
       /***********************
@@ -2068,6 +2119,38 @@
           if(!name) return;
           createAnnotatedObject(name.trim(), preview, selectedLog.evt?.box || null, selectedLog.evt?.cam || null, selectedLog.label || null);
           toast(`Saved new object: ${name}`);
+        });
+      }
+
+      if(btnSelectedSaveExisting){
+        btnSelectedSaveExisting.addEventListener("click", ()=>{
+          if(!selectedLog || selectedLog.type !== "object"){ toast("Select a log item to save."); return; }
+          const targetLabel = existingObjectSelect ? existingObjectSelect.value : objectSelect.value;
+          if(!targetLabel || targetLabel === "__none__"){ toast("Select an existing object first."); return; }
+          if(targetLabel === selectedLog.label){ toast("Already saved under this object."); return; }
+          const movedEvt = moveEventToExistingObject(selectedLog.label, targetLabel, selectedLog.evt);
+          if(!movedEvt){ toast("Unable to move this log entry."); return; }
+
+          if(selectedLogRow){
+            selectedLogRow.classList.remove("log-selected");
+            selectedLogRow = null;
+          }
+
+          refreshAll();
+          if(objectSelect){
+            objectSelect.value = targetLabel;
+            historyBox.value = formatHistory(targetLabel);
+          }
+          if(existingObjectSelect){
+            existingObjectSelect.value = targetLabel;
+          }
+          setSelectedDetails({
+            type: "object",
+            label: targetLabel,
+            evt: movedEvt,
+            imgDataUrl: getEventPreview(movedEvt),
+          });
+          toast(`Saved into existing object: ${getDisplayName(targetLabel)}`);
         });
       }
 
@@ -3620,12 +3703,18 @@
       function updateObjectDropdown(){
         const keys = Object.keys(objectMemory);
         objectSelect.innerHTML = "";
+        if(existingObjectSelect){
+          existingObjectSelect.innerHTML = "";
+        }
 
         if(keys.length === 0){
           const opt = document.createElement("option");
           opt.value = "__none__";
           opt.textContent = "No objects logged";
           objectSelect.appendChild(opt);
+          if(existingObjectSelect){
+            existingObjectSelect.appendChild(opt.cloneNode(true));
+          }
           historyBox.value = "";
           return;
         }
@@ -3638,10 +3727,16 @@
           const disp = getDisplayName(k);
           opt.textContent = (disp !== k) ? `${disp}  (${k})` : k;
           objectSelect.appendChild(opt);
+          if(existingObjectSelect){
+            existingObjectSelect.appendChild(opt.cloneNode(true));
+          }
         });
 
         if(!keys.includes(objectSelect.value)){
           objectSelect.value = keys[0];
+        }
+        if(existingObjectSelect && !keys.includes(existingObjectSelect.value)){
+          existingObjectSelect.value = keys[0];
         }
       }
 
