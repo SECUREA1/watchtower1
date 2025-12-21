@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>OmConsole Background Runtime</title>
+  </head>
+  <body>
+    <script>
+      (function () {
+        const allowedOrigin = window.location.origin;
+        let cursorState = { x: 0, y: 0, visible: true };
+        let ws = null;
+        let wsUrl = null;
+        let reconnectTimer = null;
+        let reconnectDelayMs = 1000;
+        const MAX_RECONNECT_DELAY_MS = 10000;
+
+        function sendToParent(message) {
+          window.parent.postMessage(message, allowedOrigin);
+        }
+
+        function updateCursorState(newState) {
+          cursorState = Object.assign({}, cursorState, newState);
+          sendToParent({ type: 'cursor', payload: cursorState });
+        }
+
+        function scheduleReconnect() {
+          if (!wsUrl || reconnectTimer) {
+            return;
+          }
+          reconnectTimer = setTimeout(() => {
+            reconnectTimer = null;
+            reconnectDelayMs = Math.min(reconnectDelayMs * 2, MAX_RECONNECT_DELAY_MS);
+            ensureWebSocket(wsUrl);
+          }, reconnectDelayMs);
+        }
+
+        function resetReconnectDelay() {
+          reconnectDelayMs = 1000;
+        }
+
+        function closeWebSocket() {
+          if (ws) {
+            ws.close();
+            ws = null;
+          }
+          wsUrl = null;
+          if (reconnectTimer) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+          }
+          resetReconnectDelay();
+        }
+
+        function ensureWebSocket(url) {
+          if (!url) {
+            return;
+          }
+          if (ws && wsUrl === url && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+            return;
+          }
+          closeWebSocket();
+          wsUrl = url;
+          try {
+            ws = new WebSocket(url);
+          } catch (error) {
+            scheduleReconnect();
+            return;
+          }
+
+          ws.addEventListener('open', () => {
+            resetReconnectDelay();
+          });
+
+          ws.addEventListener('message', (event) => {
+            try {
+              const data = JSON.parse(event.data);
+              if (data && data.cursor) {
+                updateCursorState(data.cursor);
+              }
+            } catch (error) {
+              // Ignore malformed WebSocket payloads.
+            }
+          });
+
+          ws.addEventListener('close', () => {
+            scheduleReconnect();
+          });
+
+          ws.addEventListener('error', () => {
+            scheduleReconnect();
+          });
+        }
+
+        window.addEventListener('message', (event) => {
+          if (event.origin !== allowedOrigin) {
+            return;
+          }
+          const message = event.data || {};
+          switch (message.type) {
+            case 'pin': {
+              const payload = message.payload || {};
+              if (payload.wsUrl) {
+                ensureWebSocket(payload.wsUrl);
+              }
+              sendToParent({ type: 'pinned', payload: { pinned: true } });
+              break;
+            }
+            case 'unpin': {
+              closeWebSocket();
+              sendToParent({ type: 'pinned', payload: { pinned: false } });
+              break;
+            }
+            case 'cursor_update': {
+              if (message.payload) {
+                updateCursorState(message.payload);
+              }
+              break;
+            }
+            case 'request_state': {
+              sendToParent({ type: 'cursor', payload: cursorState });
+              break;
+            }
+            default:
+              break;
+          }
+        });
+
+        sendToParent({ type: 'bg_ready' });
+      })();
+    </script>
+  </body>
+</html>
