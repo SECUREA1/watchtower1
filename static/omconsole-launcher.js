@@ -15,6 +15,8 @@
   let pinned = false;
   let overlay = null;
   let button = null;
+  let hostCursor = null;
+  let toggleButton = null;
 
   const applyStyles = (el, styles) => Object.assign(el.style, styles);
 
@@ -32,6 +34,89 @@
     if (overlay) {
       overlay.remove();
       overlay = null;
+    }
+  }
+
+  function ensureHostCursor() {
+    if (hostCursor) return hostCursor;
+    const cursor = document.createElement('div');
+    applyStyles(cursor, {
+      position: 'fixed',
+      top: '0',
+      left: '0',
+      width: '24px',
+      height: '24px',
+      borderRadius: '50%',
+      border: '2px solid rgba(255,255,255,0.95)',
+      boxShadow: '0 0 0 4px rgba(255,159,10,0.35), 0 10px 24px rgba(0,0,0,0.45)',
+      transform: 'translate(-9999px, -9999px)',
+      pointerEvents: 'none',
+      zIndex: '99999',
+      transition: 'transform 0.04s linear'
+    });
+    document.body.appendChild(cursor);
+    hostCursor = cursor;
+    return cursor;
+  }
+
+  function updateHostCursor(payload) {
+    if (!pinned) return;
+    if (!payload || typeof payload.x !== 'number' || typeof payload.y !== 'number') return;
+
+    const srcW = payload.width || window.innerWidth;
+    const srcH = payload.height || window.innerHeight;
+    const scaleX = window.innerWidth / srcW;
+    const scaleY = window.innerHeight / srcH;
+    const x = payload.x * scaleX;
+    const y = payload.y * scaleY;
+
+    const cursor = ensureHostCursor();
+    cursor.style.transform = `translate(${x - 12}px, ${y - 12}px)`;
+    cursor.style.boxShadow = payload.click
+      ? '0 0 0 6px rgba(255,255,255,0.35), 0 0 0 12px rgba(255,159,10,0.22)'
+      : '0 0 0 4px rgba(255,159,10,0.35), 0 10px 24px rgba(0,0,0,0.45)';
+
+    if (payload.clickEdge) {
+      const target = document.elementFromPoint(x, y);
+      if (!target) return;
+      if (overlay && overlay.contains(target)) return;
+      if (cursor.contains(target)) return;
+      try {
+        target.click();
+      } catch (err) {
+        // ignore click errors
+      }
+    }
+  }
+
+  function applyOverlayLayout() {
+    if (!overlay) return;
+    const compact = window.innerWidth < 980 || window.innerHeight < 720;
+    if (compact) {
+      applyStyles(overlay, {
+        top: '0',
+        left: '0',
+        right: '0',
+        bottom: '0',
+        width: '100vw',
+        height: '100vh',
+        borderRadius: '0'
+      });
+      overlay.dataset.mode = 'full';
+    } else {
+      applyStyles(overlay, {
+        top: 'auto',
+        left: 'auto',
+        right: '16px',
+        bottom: '16px',
+        width: '420px',
+        height: '720px',
+        borderRadius: '18px'
+      });
+      overlay.dataset.mode = 'dock';
+    }
+    if (toggleButton) {
+      toggleButton.textContent = overlay.dataset.mode === 'dock' ? 'Full' : 'Dock';
     }
   }
 
@@ -56,6 +141,7 @@
       overflow: 'hidden',
       zIndex: '99998'
     });
+    applyOverlayLayout();
 
     const bar = document.createElement('div');
     applyStyles(bar, {
@@ -80,6 +166,51 @@
       alignItems: 'center',
       gap: '8px'
     });
+
+    const toggleSize = document.createElement('button');
+    toggleSize.type = 'button';
+    toggleSize.textContent = overlay.dataset.mode === 'dock' ? 'Full' : 'Dock';
+    applyStyles(toggleSize, {
+      background: 'rgba(255,255,255,0.1)',
+      color: '#fff',
+      border: '1px solid rgba(255,255,255,0.22)',
+      borderRadius: '10px',
+      padding: '8px 10px',
+      fontSize: '12px',
+      fontWeight: '600',
+      letterSpacing: '.2px',
+      cursor: 'pointer'
+    });
+    toggleSize.addEventListener('click', () => {
+      if (!overlay) return;
+      if (overlay.dataset.mode === 'dock') {
+        applyStyles(overlay, {
+          top: '0',
+          left: '0',
+          right: '0',
+          bottom: '0',
+          width: '100vw',
+          height: '100vh',
+          borderRadius: '0'
+        });
+        overlay.dataset.mode = 'full';
+        toggleSize.textContent = 'Dock';
+      } else {
+        applyStyles(overlay, {
+          top: 'auto',
+          left: 'auto',
+          right: '16px',
+          bottom: '16px',
+          width: '420px',
+          height: '720px',
+          borderRadius: '18px'
+        });
+        overlay.dataset.mode = 'dock';
+        toggleSize.textContent = 'Full';
+      }
+    });
+    actions.appendChild(toggleSize);
+    toggleButton = toggleSize;
 
     const openFull = document.createElement('a');
     openFull.href = FRAME_URL;
@@ -148,6 +279,10 @@
       }
     } else {
       removeOverlay();
+      if (hostCursor) {
+        hostCursor.remove();
+        hostCursor = null;
+      }
     }
     updateButton();
   }
@@ -249,6 +384,15 @@
       if (e.key === PIN_KEY) {
         syncFromStorage();
       }
+    });
+
+    window.addEventListener('message', (event) => {
+      if (!event.data || event.data.type !== 'omconsole:cursor') return;
+      updateHostCursor(event.data);
+    });
+
+    window.addEventListener('resize', () => {
+      applyOverlayLayout();
     });
 
     window.omconsoleLauncher = {
