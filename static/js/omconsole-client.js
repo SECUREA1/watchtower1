@@ -17,6 +17,11 @@
   let overlayEl = null;
   let rafScheduled = false;
 
+  function isPinned() {
+    const value = localStorage.getItem(PINNED_KEY);
+    return value === '1' || value === 'true';
+  }
+
   function supportsSharedWorker() {
     return typeof SharedWorker !== 'undefined';
   }
@@ -170,14 +175,14 @@
   }
 
   function pinOmConsole(wsUrl) {
-    localStorage.setItem(PINNED_KEY, 'true');
+    localStorage.setItem(PINNED_KEY, '1');
     return connectBackground().then(() => {
       postToBackground({ type: 'pin', payload: { wsUrl } });
     });
   }
 
   function unpinOmConsole() {
-    localStorage.removeItem(PINNED_KEY);
+    localStorage.setItem(PINNED_KEY, '0');
     postToBackground({ type: 'unpin' });
   }
 
@@ -189,7 +194,7 @@
   }
 
   function autoInit() {
-    if (localStorage.getItem(PINNED_KEY) === 'true') {
+    if (isPinned()) {
       connectBackground().then(() => {
         postToBackground({ type: 'request_state' });
       });
