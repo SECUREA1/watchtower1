@@ -275,6 +275,37 @@
     .tracked-controls select{
       min-width:140px;
     }
+    .mobile-log-tabs{
+      display:none;
+      gap:10px;
+      margin:6px 0 12px;
+      position:sticky;
+      top:130px;
+      z-index:15;
+      background:rgba(6,4,10,.8);
+      padding:10px;
+      border:1px solid var(--border);
+      border-radius:16px;
+      backdrop-filter: blur(12px);
+    }
+    .mobile-log-tab{
+      flex:1;
+      min-height:44px;
+      text-align:center;
+      border-radius:12px;
+      font-weight:700;
+      border:1px solid rgba(255,255,255,.12);
+      background:rgba(255,255,255,.04);
+      color:var(--muted);
+      cursor:pointer;
+    }
+    .mobile-log-tab.active{
+      color:var(--text);
+      border-color:rgba(255,59,48,.35);
+      background:linear-gradient(180deg, rgba(255,59,48,.18), rgba(255,59,48,.08));
+      box-shadow: var(--glow);
+    }
+    .mobile-log-pane{display:block}
     .storage-status{
       display:inline-flex;
       align-items:center;
@@ -589,6 +620,9 @@
       .mobile-tabs{display:flex}
       .tab-pane{display:none}
       .tab-pane.active{display:block}
+      .mobile-log-tabs{display:flex}
+      .mobile-log-pane{display:none}
+      .mobile-log-pane.active{display:block}
       .storage-grid{grid-template-columns:1fr}
       .storage-mode-top{flex-direction:column; align-items:flex-start}
       .row, .controls-row{flex-direction:column; align-items:stretch}
@@ -1329,7 +1363,12 @@
           </div>
         </section>
 
-        <section class="card tracked-panel tab-pane" data-tab="logs">
+        <div class="mobile-log-tabs" role="tablist" aria-label="Log panels">
+          <button class="mobile-log-tab active" type="button" data-log-panel-button="tracked">Tracked Objects</button>
+          <button class="mobile-log-tab" type="button" data-log-panel-button="logs">Interaction Logs</button>
+        </div>
+
+        <section class="card tracked-panel tab-pane mobile-log-pane active" data-tab="logs" data-log-panel="tracked">
           <div class="card-h">
             <div>
               <div class="title"><span aria-hidden="true">📍</span> Tracked Objects</div>
@@ -1360,7 +1399,7 @@
           </div>
         </section>
 
-        <section class="card logs-panel tab-pane" data-tab="logs">
+        <section class="card logs-panel tab-pane mobile-log-pane" data-tab="logs" data-log-panel="logs">
           <div class="card-h">
             <div>
               <div class="title" id="logTitle"><span aria-hidden="true">🧾</span> Object Interaction Logs</div>
@@ -1371,7 +1410,18 @@
                 <button class="log-toggle-btn" type="button" data-log-view="objects">Objects</button>
                 <button class="log-toggle-btn" type="button" data-log-view="people">People</button>
               </div>
-              <input id="logSearch" type="text" placeholder="Search logs (object, person, event…)" style="max-width:360px" />
+              <div class="tracked-controls">
+                <select id="logSort" aria-label="Log sort order">
+                  <option value="alpha">A → Z</option>
+                  <option value="alpha-desc">Z → A</option>
+                  <option value="newest">Newest</option>
+                  <option value="oldest">Oldest</option>
+                  <option value="most">Most events</option>
+                  <option value="least">Least events</option>
+                </select>
+                <input id="logSearch" type="text" placeholder="Search logs (object, person, event…)" aria-label="Search log list" />
+                <button id="btnLogSearch" class="ghost" type="button">🔎 Search</button>
+              </div>
             </div>
           </div>
           <div class="card-b">
@@ -1458,6 +1508,7 @@
         fpsCap: isLikelyMobile() ? 12 : 24,
         detectorMode: "tiny",
         trackedSort: "alpha",
+        logSort: "newest",
       };
 
       // Load settings (merge defaults)
@@ -1593,6 +1644,8 @@
 
       const logBody = el("logBody");
       const logSearch = el("logSearch");
+      const logSort = el("logSort");
+      const btnLogSearch = el("btnLogSearch");
       const logTitle = el("logTitle");
       const logSubtitle = el("logSubtitle");
       const logHeaderPrimary = el("logHeaderPrimary");
@@ -1623,6 +1676,8 @@
       const btnSelectedSaveExisting = el("btnSelectedSaveExisting");
       const btnSelectedCopy = el("btnSelectedCopy");
       const logToggleButtons = Array.from(document.querySelectorAll(".log-toggle-btn"));
+      const mobileLogTrackedBtn = document.querySelector("[data-log-panel-button=\"tracked\"]");
+      const mobileLogLogsBtn = document.querySelector("[data-log-panel-button=\"logs\"]");
 
       el("year").textContent = new Date().getFullYear();
 
@@ -1633,6 +1688,7 @@
        * Boot UI
        ***********************/
       initMobileTabs();
+      initMobileLogTabs();
       buildCameraCards();
       buildCameraSelectors();
       applySettingsToUI();
@@ -1668,6 +1724,27 @@
         });
 
         setActiveTab("controls");
+      }
+
+      function initMobileLogTabs(){
+        const tabButtons = Array.from(document.querySelectorAll("[data-log-panel-button]"));
+        const panes = Array.from(document.querySelectorAll(".mobile-log-pane"));
+        if(tabButtons.length === 0 || panes.length === 0) return;
+
+        const setActivePanel = (panelName)=>{
+          tabButtons.forEach(btn => {
+            btn.classList.toggle("active", btn.dataset.logPanelButton === panelName);
+          });
+          panes.forEach(pane => {
+            pane.classList.toggle("active", pane.dataset.logPanel === panelName);
+          });
+        };
+
+        tabButtons.forEach(btn => {
+          btn.addEventListener("click", ()=>setActivePanel(btn.dataset.logPanelButton));
+        });
+
+        setActivePanel("tracked");
       }
 
       /***********************
@@ -1982,7 +2059,26 @@
         toast("Cleared all data.");
       });
 
-      logSearch.addEventListener("input", ()=>renderLogTable());
+      if(logSearch){
+        logSearch.addEventListener("input", ()=>renderLogTable());
+        logSearch.addEventListener("keydown", (event)=>{
+          if(event.key === "Enter"){
+            event.preventDefault();
+            renderLogTable();
+          }
+        });
+      }
+
+      if(logSort){
+        logSort.addEventListener("change", ()=>{
+          settings.logSort = logSort.value;
+          saveSettings();
+          renderLogTable();
+        });
+      }
+      if(btnLogSearch){
+        btnLogSearch.addEventListener("click", ()=>renderLogTable());
+      }
 
       if(trackedSort){
         trackedSort.addEventListener("change", ()=>{
@@ -2403,6 +2499,7 @@
         if(mobileFacing) mobileFacing.value = settings.mobileFacing || "environment";
         if(detectorMode) detectorMode.value = settings.detectorMode || "tiny";
         if(trackedSort) trackedSort.value = settings.trackedSort || "alpha";
+        if(logSort) logSort.value = settings.logSort || "newest";
         if(fpsCap){
           fpsCap.value = String(settings.fpsCap || 12);
           if(fpsVal) fpsVal.textContent = String(fpsCap.value);
@@ -3613,6 +3710,16 @@
             ? '<span aria-hidden="true">🧾</span> People Interaction Logs'
             : '<span aria-hidden="true">🧾</span> Object Interaction Logs';
         }
+        if(mobileLogTrackedBtn){
+          mobileLogTrackedBtn.textContent = logViewMode === "people"
+            ? "Tracked People"
+            : "Tracked Objects";
+        }
+        if(mobileLogLogsBtn){
+          mobileLogLogsBtn.textContent = logViewMode === "people"
+            ? "People Logs"
+            : "Interaction Logs";
+        }
         if(trackedSubtitle){
           trackedSubtitle.textContent = logViewMode === "people"
             ? "People seen in logs (click to load history)"
@@ -3716,7 +3823,8 @@
       }
 
       function renderLogTable(){
-        const q = logSearch.value.trim().toLowerCase();
+        const q = logSearch ? logSearch.value.trim().toLowerCase() : "";
+        const sortMode = logSort ? logSort.value : "newest";
         const rows = [];
 
         if(logViewMode === "people"){
@@ -3726,7 +3834,13 @@
               const objLabel = evt.objectLabel ? getDisplayName(evt.objectLabel) : "";
               const line = `${personName} ${evt.objectLabel || ""} ${objLabel} ${evt.status} ${buildDetailsString(evt)}`.toLowerCase();
               if(q && !line.includes(q)) continue;
-              rows.push({label: evt.objectLabel || null, evt, personName});
+              rows.push({
+                label: evt.objectLabel || null,
+                evt,
+                personName,
+                primaryKey: personName,
+                primaryLabel: personName
+              });
             }
           }
         }else{
@@ -3734,12 +3848,50 @@
             for(const evt of events){
               const line = `${label} ${getDisplayName(label)} ${evt.status} ${(evt.person||"")} ${buildDetailsString(evt)}`.toLowerCase();
               if(q && !line.includes(q)) continue;
-              rows.push({label, evt});
+              rows.push({
+                label,
+                evt,
+                personName: null,
+                primaryKey: label,
+                primaryLabel: getDisplayName(label)
+              });
             }
           }
         }
 
-        rows.sort((a,b)=>b.evt.time - a.evt.time);
+        const counts = new Map();
+        if(sortMode === "most" || sortMode === "least"){
+          for(const row of rows){
+            const key = row.primaryKey || "unknown";
+            counts.set(key, (counts.get(key) || 0) + 1);
+          }
+        }
+
+        rows.sort((a,b)=>{
+          switch(sortMode){
+            case "alpha":
+              return a.primaryLabel.localeCompare(b.primaryLabel);
+            case "alpha-desc":
+              return b.primaryLabel.localeCompare(a.primaryLabel);
+            case "oldest":
+              return a.evt.time - b.evt.time;
+            case "most": {
+              const countA = counts.get(a.primaryKey || "unknown") || 0;
+              const countB = counts.get(b.primaryKey || "unknown") || 0;
+              if(countA !== countB) return countB - countA;
+              return b.evt.time - a.evt.time;
+            }
+            case "least": {
+              const countA = counts.get(a.primaryKey || "unknown") || 0;
+              const countB = counts.get(b.primaryKey || "unknown") || 0;
+              if(countA !== countB) return countA - countB;
+              return b.evt.time - a.evt.time;
+            }
+            case "newest":
+            default:
+              return b.evt.time - a.evt.time;
+          }
+        });
 
         logBody.innerHTML = "";
         for(const r of rows.slice(0, 800)){
