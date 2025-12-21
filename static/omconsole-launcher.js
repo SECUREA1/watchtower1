@@ -4,6 +4,7 @@
 
   const PIN_KEY = 'omconsole_pinned';
   const OVERLAY_ID = 'omconsole-overlay';
+  const HIDE_KEY = 'omconsole_hide_overlay';
   const BTN_ID = 'omconsole-launch-btn';
   const WRAP_ID = 'omconsole-launch-wrap';
   const MARTINI_ID = 'omconsole-martini-link';
@@ -91,6 +92,7 @@
 
   function applyOverlayLayout() {
     if (!overlay) return;
+    if (overlay.dataset.hidden === 'true') return;
     const compact = window.innerWidth < 980 || window.innerHeight < 720;
     if (compact) {
       applyStyles(overlay, {
@@ -125,6 +127,7 @@
 
     overlay = document.createElement('div');
     overlay.id = OVERLAY_ID;
+    overlay.dataset.hidden = 'false';
     applyStyles(overlay, {
       position: 'fixed',
       top: '0',
@@ -268,19 +271,45 @@
     return overlay;
   }
 
+  function setOverlayHidden(hidden) {
+    if (!overlay) return;
+    overlay.dataset.hidden = hidden ? 'true' : 'false';
+    if (hidden) {
+      applyStyles(overlay, {
+        top: '-9999px',
+        left: '-9999px',
+        right: 'auto',
+        bottom: 'auto',
+        width: '1px',
+        height: '1px',
+        borderRadius: '0',
+        opacity: '0',
+        pointerEvents: 'none'
+      });
+      return;
+    }
+    applyStyles(overlay, {
+      opacity: '1',
+      pointerEvents: 'auto'
+    });
+    applyOverlayLayout();
+  }
+
   function setPinned(next, skipSave = false, options = {}) {
     const { keepOverlay = true } = options;
     pinned = !!next;
     if (!skipSave) {
       localStorage.setItem(PIN_KEY, pinned ? '1' : '0');
+      if (pinned && !keepOverlay) {
+        localStorage.setItem(HIDE_KEY, '1');
+      } else {
+        localStorage.removeItem(HIDE_KEY);
+      }
     }
     if (pinned) {
       if (!isConsolePage) {
-        if (keepOverlay) {
-          buildOverlay();
-        } else {
-          removeOverlay();
-        }
+        buildOverlay();
+        setOverlayHidden(!keepOverlay);
       }
     } else {
       removeOverlay();
@@ -294,7 +323,8 @@
 
   function syncFromStorage() {
     const next = localStorage.getItem(PIN_KEY) === '1';
-    setPinned(next, true);
+    const hidden = localStorage.getItem(HIDE_KEY) === '1';
+    setPinned(next, true, { keepOverlay: !hidden });
   }
 
   function buildButton() {
@@ -386,7 +416,7 @@
     syncFromStorage();
 
     window.addEventListener('storage', (e) => {
-      if (e.key === PIN_KEY) {
+      if (e.key === PIN_KEY || e.key === HIDE_KEY) {
         syncFromStorage();
       }
     });
