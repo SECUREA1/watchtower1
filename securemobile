@@ -250,7 +250,6 @@ let faceapi = null;
 let cocoModel = null;
 let cvReady = false;
 let cvInitPromise = null; // <-- fixes double-init + "cvInitPromise" stack issues
-let backendFallbackAttempted = false;
 
 // Prefer jsDelivr, fallback to unpkg
 const FACEAPI_URLS = [
@@ -270,35 +269,6 @@ const COCO_URLS = [
 
 // Models hosted on GitHub Pages (works on mobile). If you host locally, replace with "./model/"
 const FACE_MODEL_URL_PRIMARY = "https://vladmandic.github.io/face-api/model/";
-
-function isWebglContextError(err) {
-  const msg = (err && err.message) ? err.message : String(err || "");
-  return /webgl|canvas context/i.test(msg);
-}
-
-async function fallbackTfBackend(err) {
-  if (!window.tf || backendFallbackAttempted) return false;
-
-  backendFallbackAttempted = true;
-  const current = window.tf.getBackend ? window.tf.getBackend() : "unknown";
-  const candidates = isLikelyIOS() ? ["wasm", "cpu"] : ["wasm", "cpu"];
-  const reason = (err && err.message) ? err.message : String(err || "WebGL failure");
-
-  for (const b of candidates) {
-    if (b === current) continue;
-    try {
-      await window.tf.setBackend(b);
-      await window.tf.ready();
-      addMsg("System", `WebGL backend failed ("${reason}"). Switched TF backend to ${b}.`);
-      return true;
-    } catch (switchErr) {
-      addMsg("System", `TF backend switch to ${b} failed: ${(switchErr && switchErr.message) || switchErr}`);
-    }
-  }
-
-  addMsg("System", `TF backend fallback failed; staying on ${current}.`);
-  return false;
-}
 
 async function ensureCVReadySafe() {
   try {
@@ -648,45 +618,37 @@ function drawLabelBox(ctx, x, y, w, h, label) {
 async function runInference(cam) {
   if (!faceapi || !cam.video?.videoWidth) return;
 
-  try {
-    const mode = UI.detectorMode.value;
-    // Ensure selected detector net is available if user switched modes
-    await loadDetectorModel(mode);
+  const mode = UI.detectorMode.value;
+  // Ensure selected detector net is available if user switched modes
+  await loadDetectorModel(mode);
 
-    // Face detection options
-    let faceResults = [];
-    if (mode === "tiny") {
-      const opts = new faceapi.TinyFaceDetectorOptions({
-        inputSize: 224, // good balance for mobile
-        scoreThreshold: 0.5
-      });
-      faceResults = await faceapi.detectAllFaces(cam.video, opts);
-    } else {
-      const opts = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 });
-      faceResults = await faceapi.detectAllFaces(cam.video, opts);
-    }
+  // Face detection options
+  let faceResults = [];
+  if (mode === "tiny") {
+    const opts = new faceapi.TinyFaceDetectorOptions({
+      inputSize: 224, // good balance for mobile
+      scoreThreshold: 0.5
+    });
+    faceResults = await faceapi.detectAllFaces(cam.video, opts);
+  } else {
+    const opts = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 });
+    faceResults = await faceapi.detectAllFaces(cam.video, opts);
+  }
 
-    // Draw faces
-    for (const r of faceResults) {
-      const b = r.box;
-      drawLabelBox(cam.ctx, b.x, b.y, b.width, b.height, "Face");
-    }
+  // Draw faces
+  for (const r of faceResults) {
+    const b = r.box;
+    drawLabelBox(cam.ctx, b.x, b.y, b.width, b.height, "Face");
+  }
 
-    // Object detection (optional)
-    if (cocoModel) {
-      const preds = await cocoModel.detect(cam.video);
-      for (const p of preds) {
-        if (!p || p.score < 0.55) continue;
-        const [x, y, w, h] = p.bbox;
-        drawLabelBox(cam.ctx, x, y, w, h, `${p.class} ${(p.score*100).toFixed(0)}%`);
-      }
+  // Object detection (optional)
+  if (cocoModel) {
+    const preds = await cocoModel.detect(cam.video);
+    for (const p of preds) {
+      if (!p || p.score < 0.55) continue;
+      const [x, y, w, h] = p.bbox;
+      drawLabelBox(cam.ctx, x, y, w, h, `${p.class} ${(p.score*100).toFixed(0)}%`);
     }
-  } catch (e) {
-    if (isWebglContextError(e)) {
-      const switched = await fallbackTfBackend(e);
-      if (switched) return;
-    }
-    throw e;
   }
 }
 
