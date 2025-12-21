@@ -240,6 +240,32 @@
       background:#4ade80;
       box-shadow:0 0 0 4px rgba(74,222,128,.18);
     }
+    .log-toggle{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      padding:4px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.12);
+      background:rgba(255,255,255,.04);
+    }
+    .log-toggle button{
+      border:1px solid transparent;
+      border-radius:999px;
+      padding:6px 12px;
+      font-size:12px;
+      font-weight:700;
+      color:var(--muted);
+      background:transparent;
+      cursor:pointer;
+      transition:.15s ease;
+    }
+    .log-toggle button.active{
+      color:var(--text);
+      background:linear-gradient(180deg, rgba(255,59,48,.16), rgba(255,59,48,.08));
+      border-color:rgba(255,59,48,.28);
+      box-shadow:0 0 0 1px rgba(255,59,48,.12) inset;
+    }
     .storage-status{
       display:inline-flex;
       align-items:center;
@@ -1167,6 +1193,7 @@
                   <button id="btnSelectedSaveLabel" class="good" type="button">✅ Save Label</button>
                   <button id="btnSelectedReject" class="danger" type="button">✖ Reject</button>
                   <button id="btnSelectedRecall" type="button">📌 Recall Location</button>
+                  <button id="btnSelectedNewObject" class="ghost" type="button">🆕 Save as Object</button>
                   <button id="btnSelectedCopy" class="ghost" type="button">📋 Copy</button>
                 </div>
               </div>
@@ -1292,9 +1319,13 @@
           <div class="card-h">
             <div>
               <div class="title"><span aria-hidden="true">📍</span> Tracked Objects</div>
-              <div class="subtitle">Objects seen in logs (click to load history)</div>
+              <div class="subtitle" id="trackedSubtitle">Objects seen in logs (click to load history)</div>
             </div>
             <div class="row">
+              <div class="log-toggle" role="group" aria-label="Tracked log mode">
+                <button class="log-toggle-btn" type="button" data-log-view="objects">Objects</button>
+                <button class="log-toggle-btn" type="button" data-log-view="people">People</button>
+              </div>
               <button id="btnRefreshTracked" class="ghost" type="button">↻ Refresh</button>
             </div>
           </div>
@@ -1306,10 +1337,14 @@
         <section class="card logs-panel tab-pane" data-tab="logs">
           <div class="card-h">
             <div>
-              <div class="title"><span aria-hidden="true">🧾</span> Object Interaction Logs</div>
-              <div class="subtitle">Time • Object • Event • Person • Held Duration • Details</div>
+              <div class="title" id="logTitle"><span aria-hidden="true">🧾</span> Object Interaction Logs</div>
+              <div class="subtitle" id="logSubtitle">Time • Object • Event • Person • Held Duration • Details</div>
             </div>
             <div class="row">
+              <div class="log-toggle" role="group" aria-label="Log view mode">
+                <button class="log-toggle-btn" type="button" data-log-view="objects">Objects</button>
+                <button class="log-toggle-btn" type="button" data-log-view="people">People</button>
+              </div>
               <input id="logSearch" type="text" placeholder="Search logs (object, person, event…)" style="max-width:360px" />
             </div>
           </div>
@@ -1319,9 +1354,9 @@
                 <thead>
                   <tr>
                     <th style="min-width:160px">Time</th>
-                    <th style="min-width:140px">Object</th>
+                    <th id="logHeaderPrimary" style="min-width:140px">Object</th>
                     <th style="min-width:120px">Event</th>
-                    <th style="min-width:140px">Person</th>
+                    <th id="logHeaderSecondary" style="min-width:140px">Person</th>
                     <th style="min-width:120px">Held</th>
                     <th>Details</th>
                   </tr>
@@ -1376,6 +1411,7 @@
         cameraDisplayOn: true,
         minimizeDetails: true,
         selectedSlots: [0],
+        logViewMode: "objects",
 
         // Live CV tuning
         detectionIntervalMs: isLikelyMobile() ? 450 : 300,
@@ -1420,6 +1456,7 @@
       let cameraDisplayOn = !!settings.cameraDisplayOn;
       let recognitionMode = !!settings.recognitionMode;
       let demoMode = !!settings.demoMode;
+      let logViewMode = settings.logViewMode || "objects";
 
       // Demo-only labels (kept)
       const DEMO_CLASSES = ["person","backpack","bottle","laptop","cell phone","book","chair","knife","cup","handbag","keyboard","remote"];
@@ -1524,6 +1561,11 @@
 
       const logBody = el("logBody");
       const logSearch = el("logSearch");
+      const logTitle = el("logTitle");
+      const logSubtitle = el("logSubtitle");
+      const logHeaderPrimary = el("logHeaderPrimary");
+      const logHeaderSecondary = el("logHeaderSecondary");
+      const trackedSubtitle = el("trackedSubtitle");
 
       const objectSelect = el("objectSelect");
       const historyBox = el("historyBox");
@@ -1541,7 +1583,9 @@
       const btnSelectedSaveLabel = el("btnSelectedSaveLabel");
       const btnSelectedReject = el("btnSelectedReject");
       const btnSelectedRecall = el("btnSelectedRecall");
+      const btnSelectedNewObject = el("btnSelectedNewObject");
       const btnSelectedCopy = el("btnSelectedCopy");
+      const logToggleButtons = Array.from(document.querySelectorAll(".log-toggle-btn"));
 
       el("year").textContent = new Date().getFullYear();
 
@@ -1555,6 +1599,7 @@
       buildCameraCards();
       buildCameraSelectors();
       applySettingsToUI();
+      setLogViewMode(logViewMode, false);
       refreshAll();
 
       // Try device list (labels may be blank until permission)
@@ -1593,6 +1638,11 @@
        ***********************/
       function formatMetaLine(label, value){
         return `<div><b>${label}:</b> ${escapeHtml(value)}</div>`;
+      }
+
+      function getEventPreview(evt){
+        if(!evt) return null;
+        return evt.imgDataUrl || evt.image || null;
       }
 
       function setSelectedDetails(payload){
@@ -1837,6 +1887,13 @@
 
       logSearch.addEventListener("input", ()=>renderLogTable());
 
+      logToggleButtons.forEach(btn => {
+        btn.addEventListener("click", ()=>{
+          const mode = btn.dataset.logView;
+          if(mode) setLogViewMode(mode, true);
+        });
+      });
+
       el("btnShowHistory").addEventListener("click", ()=>{
         const obj = objectSelect.value;
         historyBox.value = formatHistory(obj);
@@ -1877,6 +1934,21 @@
         toast(`New label created: ${name}`);
       });
 
+      function storeFaceSample(name, item){
+        if(!knownFaces[name]){
+          knownFaces[name] = { createdAt: Date.now(), descriptors: [], samples: [] };
+        }
+        if(item && item.descriptor && Array.isArray(item.descriptor) && item.descriptor.length){
+          knownFaces[name].descriptors.push(item.descriptor);
+        }
+        if(item && item.imgDataUrl){
+          knownFaces[name].samples.push({
+            imgDataUrl: item.imgDataUrl,
+            capturedAt: item.capturedAt || Date.now()
+          });
+        }
+      }
+
       el("btnSaveFace").addEventListener("click", ()=>{
         if(unknownFacesQueue.length === 0){ toast("No unknown faces in queue."); return; }
         const name = faceName.value.trim();
@@ -1884,14 +1956,7 @@
 
         const item = unknownFacesQueue.shift();
 
-        if(!knownFaces[name]){
-          knownFaces[name] = { createdAt: Date.now(), descriptors: [] };
-        }
-
-        // Add descriptor sample if available
-        if(item && item.descriptor && Array.isArray(item.descriptor) && item.descriptor.length){
-          knownFaces[name].descriptors.push(item.descriptor);
-        }
+        storeFaceSample(name, item);
 
         faceName.value = "";
         rebuildFaceMatcher();
@@ -1935,12 +2000,7 @@
           if(selectedLog.type === "unknown"){
             if(unknownFacesQueue.length === 0){ toast("No unknown faces in queue."); return; }
             const item = unknownFacesQueue.shift();
-            if(!knownFaces[value]){
-              knownFaces[value] = { createdAt: Date.now(), descriptors: [] };
-            }
-            if(item && item.descriptor && Array.isArray(item.descriptor) && item.descriptor.length){
-              knownFaces[value].descriptors.push(item.descriptor);
-            }
+            storeFaceSample(value, item);
             rebuildFaceMatcher();
             scheduleSaveAll();
             renderUnknownFace();
@@ -1974,6 +2034,19 @@
           objectSelect.value = selectedLog.label;
           historyBox.value = formatHistory(selectedLog.label);
           toast("Recall loaded for selected object.");
+        });
+      }
+
+      if(btnSelectedNewObject){
+        btnSelectedNewObject.addEventListener("click", ()=>{
+          if(!selectedLog || selectedLog.type !== "object"){ toast("Select a log item to save."); return; }
+          const preview = selectedLog.imgDataUrl || getEventPreview(selectedLog.evt);
+          if(!preview){ toast("No preview image available for this log."); return; }
+          const suggested = selectedLabelInput.value.trim() || getDisplayName(selectedLog.label || "");
+          const name = prompt("Name the new object:", suggested);
+          if(!name) return;
+          createAnnotatedObject(name.trim(), preview, selectedLog.evt?.box || null, selectedLog.evt?.cam || null, selectedLog.label || null);
+          toast(`Saved new object: ${name}`);
         });
       }
 
@@ -2141,12 +2214,13 @@
         const out = {};
         for(const [name, data] of Object.entries(obj || {})){
           if(!data || typeof data !== "object"){
-            out[name] = { createdAt: Date.now(), descriptors: [] };
+            out[name] = { createdAt: Date.now(), descriptors: [], samples: [] };
             continue;
           }
           out[name] = {
             createdAt: data.createdAt || Date.now(),
-            descriptors: Array.isArray(data.descriptors) ? data.descriptors : []
+            descriptors: Array.isArray(data.descriptors) ? data.descriptors : [],
+            samples: Array.isArray(data.samples) ? data.samples : []
           };
         }
         return out;
@@ -2771,7 +2845,7 @@
         }
 
         // 5) Track objects + log
-        updateTracksFromDetections(state, nonPersons, people, ts);
+        updateTracksFromDetections(state, nonPersons, people, ts, v);
 
         // 6) Build overlay view
         const activeTracks = Array.from(state.tracks.values())
@@ -2801,7 +2875,7 @@
       /***********************
        * Tracking + Logging (LIVE)
        ***********************/
-      function updateTracksFromDetections(state, detections, people, ts){
+      function updateTracksFromDetections(state, detections, people, ts, video){
         const tracks = Array.from(state.tracks.values());
         const usedTrackIds = new Set();
 
@@ -2827,7 +2901,7 @@
             const prevBox = best.box;
             best.box = det.box;
 
-            updateTrackEvents(best, prevBox, people, ts);
+            updateTrackEvents(best, prevBox, people, ts, video);
 
             usedTrackIds.add(best.id);
           }else{
@@ -2860,11 +2934,15 @@
               tr.lastPerson = person;
               tr.status = "Picked Up";
               tr.lastLogAt = ts;
-              recordEvent(key, "Picked Up", det.box, person, null, det.score, tr.camIdx);
+              recordEvent(key, "Picked Up", det.box, person, null, det.score, tr.camIdx, {
+                imgDataUrl: captureEventImage(video, det.box)
+              });
             }else{
               tr.status = "Placed";
               tr.lastLogAt = ts;
-              recordEvent(key, "Placed", det.box, null, null, det.score, tr.camIdx);
+              recordEvent(key, "Placed", det.box, null, null, det.score, tr.camIdx, {
+                imgDataUrl: captureEventImage(video, det.box)
+              });
             }
 
             state.tracks.set(id, tr);
@@ -2880,7 +2958,7 @@
         }
       }
 
-      function updateTrackEvents(track, prevBox, people, ts){
+      function updateTrackEvents(track, prevBox, people, ts, video){
         const personNow = associatePerson(track.box, people);
         const moved = centerDistancePx(prevBox, track.box) >= settings.movePxThreshold;
 
@@ -2891,7 +2969,9 @@
           track.lastPerson = personNow;
           track.status = "Picked Up";
           track.lastLogAt = ts;
-          recordEvent(track.key, "Picked Up", track.box, personNow, null, track.score, track.camIdx);
+          recordEvent(track.key, "Picked Up", track.box, personNow, null, track.score, track.camIdx, {
+            imgDataUrl: captureEventImage(video, track.box)
+          });
           return;
         }
 
@@ -2906,7 +2986,9 @@
 
           track.status = "Placed";
           track.lastLogAt = ts;
-          recordEvent(track.key, "Placed", track.box, who, heldSec, track.score, track.camIdx);
+          recordEvent(track.key, "Placed", track.box, who, heldSec, track.score, track.camIdx, {
+            imgDataUrl: captureEventImage(video, track.box)
+          });
           return;
         }
 
@@ -2917,7 +2999,9 @@
           const heldSec = (track.isHeld && track.holdStart) ? ((ts - track.holdStart)/1000) : null;
           track.status = evt;
           track.lastLogAt = ts;
-          recordEvent(track.key, evt, track.box, personNow || track.lastPerson, heldSec, track.score, track.camIdx);
+          recordEvent(track.key, evt, track.box, personNow || track.lastPerson, heldSec, track.score, track.camIdx, {
+            imgDataUrl: captureEventImage(video, track.box)
+          });
         }
       }
 
@@ -3091,7 +3175,7 @@
         }
       }
 
-      function recordEvent(label, status, box, person=null, held_duration=null, score=null, cam=null){
+      function recordEvent(label, status, box, person=null, held_duration=null, score=null, cam=null, opts={}){
         const evt = {
           time: Date.now(),
           box,
@@ -3099,7 +3183,9 @@
           person,
           held_duration,
           score,
-          cam
+          cam,
+          imgDataUrl: opts.imgDataUrl || null,
+          sourceLabel: opts.sourceLabel || null
         };
 
         if(!objectMemory[label]) objectMemory[label] = [];
@@ -3233,6 +3319,33 @@
         }
       }
 
+      function captureEventImage(video, box){
+        if(!video || !box) return null;
+        return cropFromVideo(video, box, 256, 256, 0.18);
+      }
+
+      function makeDemoPreview(label, status){
+        const c = document.createElement("canvas");
+        c.width = 256; c.height = 256;
+        const g = c.getContext("2d");
+        const grad = g.createLinearGradient(0,0,256,256);
+        grad.addColorStop(0, "rgba(255,107,107,.25)");
+        grad.addColorStop(1, "rgba(255,59,48,.35)");
+        g.fillStyle = grad;
+        g.fillRect(0,0,256,256);
+
+        g.fillStyle = "rgba(0,0,0,.35)";
+        g.fillRect(18, 160, 220, 70);
+
+        g.fillStyle = "rgba(255,255,255,.95)";
+        g.font = "700 16px ui-monospace, Menlo, monospace";
+        g.fillText(label.slice(0, 18), 28, 190);
+        g.fillStyle = "rgba(251,191,36,.95)";
+        g.font = "700 12px ui-monospace, Menlo, monospace";
+        g.fillText(status, 28, 214);
+        return c.toDataURL("image/png");
+      }
+
       function renderUnknownFace(){
         unknownCount.textContent = "Unknown Faces: " + unknownFacesQueue.length;
 
@@ -3267,15 +3380,54 @@
       /***********************
        * Logs: minimized/expand buttons
        ***********************/
+      function setLogViewMode(mode, persist=true){
+        logViewMode = (mode === "people") ? "people" : "objects";
+        if(persist){
+          settings.logViewMode = logViewMode;
+          saveSettings();
+        }
+
+        logToggleButtons.forEach(btn => {
+          btn.classList.toggle("active", btn.dataset.logView === logViewMode);
+        });
+
+        if(logHeaderPrimary) logHeaderPrimary.textContent = logViewMode === "people" ? "Person" : "Object";
+        if(logHeaderSecondary) logHeaderSecondary.textContent = logViewMode === "people" ? "Object" : "Person";
+        if(logSubtitle){
+          logSubtitle.textContent = logViewMode === "people"
+            ? "Time • Person • Event • Object • Held Duration • Details"
+            : "Time • Object • Event • Person • Held Duration • Details";
+        }
+        if(logTitle){
+          logTitle.innerHTML = logViewMode === "people"
+            ? '<span aria-hidden="true">🧾</span> People Interaction Logs'
+            : '<span aria-hidden="true">🧾</span> Object Interaction Logs';
+        }
+        if(trackedSubtitle){
+          trackedSubtitle.textContent = logViewMode === "people"
+            ? "People seen in logs (click to load history)"
+            : "Objects seen in logs (click to load history)";
+        }
+        if(logSearch){
+          logSearch.placeholder = logViewMode === "people"
+            ? "Search logs (person, object, event…)"
+            : "Search logs (object, person, event…)";
+        }
+
+        renderLogTable();
+        renderTracked();
+      }
+
       function buildDetailsString(evt){
         const b = evt.box || {};
         const cam = (evt.cam == null) ? "-" : evt.cam;
         const score = (evt.score == null) ? "-" : (Math.round(evt.score*100) + "%");
-        return `cam=${cam} score=${score} box=${JSON.stringify({x:round2(b.x),y:round2(b.y),w:round2(b.w),h:round2(b.h)})}`;
+        const source = evt.sourceLabel ? ` source=${getDisplayName(evt.sourceLabel)}` : "";
+        return `cam=${cam} score=${score} box=${JSON.stringify({x:round2(b.x),y:round2(b.y),w:round2(b.w),h:round2(b.h)})}${source}`;
       }
 
       function appendLogRow(label, evt){
-        if(logSearch.value.trim()){
+        if(logViewMode === "people" || logSearch.value.trim()){
           renderLogTable();
           return;
         }
@@ -3283,8 +3435,12 @@
         logBody.prepend(tr);
       }
 
-      function buildLogTr(label, evt){
+      function buildLogTr(label, evt, personLabel=null){
         const tr = document.createElement("tr");
+        const primaryLabel = logViewMode === "people" ? (personLabel || "Unknown") : getDisplayName(label);
+        const secondaryLabel = logViewMode === "people"
+          ? getDisplayName(label)
+          : (evt.person || "No one");
 
         const detailsRaw = buildDetailsString(evt);
         const minimizedDefault = !!settings.minimizeDetails;
@@ -3317,9 +3473,9 @@
 
         tr.innerHTML = `
           <td>${fmtTime(evt.time)}</td>
-          <td>${escapeHtml(getDisplayName(label))}</td>
+          <td>${escapeHtml(primaryLabel)}</td>
           <td>${escapeHtml(evt.status)}</td>
-          <td>${escapeHtml(evt.person || "No one")}</td>
+          <td>${escapeHtml(secondaryLabel)}</td>
           <td>${evt.held_duration != null ? (evt.held_duration.toFixed(2)+"s") : "-"}</td>
         `;
         tr.appendChild(tdDetails);
@@ -3335,7 +3491,7 @@
             type: "object",
             label,
             evt,
-            imgDataUrl: evt.imgDataUrl || evt.image || null,
+            imgDataUrl: getEventPreview(evt),
           });
         });
 
@@ -3346,11 +3502,22 @@
         const q = logSearch.value.trim().toLowerCase();
         const rows = [];
 
-        for(const [label, events] of Object.entries(objectMemory)){
-          for(const evt of events){
-            const line = `${label} ${getDisplayName(label)} ${evt.status} ${(evt.person||"")} ${buildDetailsString(evt)}`.toLowerCase();
-            if(q && !line.includes(q)) continue;
-            rows.push({label, evt});
+        if(logViewMode === "people"){
+          const peopleMemory = buildPersonMemory();
+          for(const [personName, events] of Object.entries(peopleMemory)){
+            for(const evt of events){
+              const line = `${personName} ${evt.objectLabel} ${getDisplayName(evt.objectLabel)} ${evt.status} ${buildDetailsString(evt)}`.toLowerCase();
+              if(q && !line.includes(q)) continue;
+              rows.push({label: evt.objectLabel, evt, personName});
+            }
+          }
+        }else{
+          for(const [label, events] of Object.entries(objectMemory)){
+            for(const evt of events){
+              const line = `${label} ${getDisplayName(label)} ${evt.status} ${(evt.person||"")} ${buildDetailsString(evt)}`.toLowerCase();
+              if(q && !line.includes(q)) continue;
+              rows.push({label, evt});
+            }
           }
         }
 
@@ -3358,7 +3525,7 @@
 
         logBody.innerHTML = "";
         for(const r of rows.slice(0, 800)){
-          logBody.appendChild(buildLogTr(r.label, r.evt));
+          logBody.appendChild(buildLogTr(r.label, r.evt, r.personName));
         }
       }
 
@@ -3408,7 +3575,76 @@
         }).join("\n");
       }
 
+      function buildPersonMemory(){
+        const people = {};
+        for(const [label, events] of Object.entries(objectMemory)){
+          for(const evt of events || []){
+            if(!evt || !evt.person) continue;
+            const name = evt.person;
+            if(!people[name]) people[name] = [];
+            people[name].push(Object.assign({}, evt, { objectLabel: label }));
+          }
+        }
+        return people;
+      }
+
+      function formatPersonHistory(person, events){
+        if(!person) return "No history.";
+        const evts = (events || []).slice().sort((a,b)=>a.time - b.time);
+        if(evts.length === 0) return `No history for ${person}.`;
+
+        return evts.map(evt=>{
+          const b = evt.box || {};
+          const held = evt.held_duration != null ? `Held for ${evt.held_duration.toFixed(2)}s` : "";
+          const sc = (evt.score != null) ? `score=${Math.round(evt.score*100)}%` : "";
+          const cam = (evt.cam != null) ? `cam=${evt.cam}` : "";
+          return `${fmtTime(evt.time)}: ${person} ${evt.status} ${getDisplayName(evt.objectLabel)} at (x=${Math.round(b.x||0)}, y=${Math.round(b.y||0)}, w=${Math.round(b.w||0)}, h=${Math.round(b.h||0)}) ${held} ${cam} ${sc}`.trim();
+        }).join("\n");
+      }
+
       function renderTracked(){
+        if(logViewMode === "people"){
+          const peopleMemory = buildPersonMemory();
+          const people = Object.keys(peopleMemory).sort((a,b)=>a.localeCompare(b));
+          trackedList.innerHTML = "";
+          if(people.length === 0){
+            trackedList.innerHTML = `<div class="item"><span class="small">No tracked people yet.</span></div>`;
+            return;
+          }
+
+          for(const person of people){
+            const evts = peopleMemory[person] || [];
+            evts.sort((a,b)=>a.time - b.time);
+            const last = evts.length ? evts[evts.length-1] : null;
+            const div = document.createElement("div");
+            div.className = "item";
+            div.innerHTML = `
+              <div>
+                <div style="font-weight:800">${escapeHtml(person)}</div>
+                <div class="small">${last ? escapeHtml(last.status) + " • " + fmtTime(last.time) : "—"}</div>
+              </div>
+              <div class="pill-mini">${evts.length} events</div>
+            `;
+            div.addEventListener("click", ()=>{
+              historyBox.value = formatPersonHistory(person, evts);
+              if(selectedLogRow){
+                selectedLogRow.classList.remove("log-selected");
+                selectedLogRow = null;
+              }
+              if(last){
+                setSelectedDetails({
+                  type: "object",
+                  label: last.objectLabel,
+                  evt: last,
+                  imgDataUrl: getEventPreview(last),
+                });
+              }
+            });
+            trackedList.appendChild(div);
+          }
+          return;
+        }
+
         const arr = Array.from(trackedObjects).sort((a,b)=>getDisplayName(a).localeCompare(getDisplayName(b)));
         trackedList.innerHTML = "";
         if(arr.length === 0){
@@ -3441,7 +3677,7 @@
                 type: "object",
                 label: obj,
                 evt: last,
-                imgDataUrl: last.imgDataUrl || last.image || null,
+                imgDataUrl: getEventPreview(last),
               });
             }
           });
@@ -3452,6 +3688,20 @@
       /***********************
        * Camera actions
        ***********************/
+      function createAnnotatedObject(labelName, imgDataUrl, box, camIdx, sourceLabel){
+        const key = "userObj_" + Date.now();
+        customLabels[key] = labelName;
+        if(!objectMemory[key]) objectMemory[key] = [];
+        recordEvent(key, "Annotated", box, null, null, null, camIdx, {
+          imgDataUrl: imgDataUrl || null,
+          sourceLabel: sourceLabel || null
+        });
+        trackedObjects.add(key);
+        scheduleSaveAll();
+        refreshAll();
+        return key;
+      }
+
       function captureFrame(idx){
         const v = el("vid_"+idx);
         if(!v || !v.srcObject){ toast("Camera is off."); return; }
@@ -3492,13 +3742,19 @@
           // Demo fallback: create a custom object label entry
           const label = prompt("Enter new object label (demo):");
           if(!label) return;
-          const k = "userObj_" + Date.now();
-          customLabels[k] = label.trim();
-          if(!objectMemory[k]) objectMemory[k] = [];
-          trackedObjects.add(k);
-          scheduleSaveAll();
-          refreshAll();
-          toast(`New label assigned: ${label}`);
+          const createNew = confirm("Save as a new object entry? Click Cancel to relabel the current object.");
+          if(createNew){
+            createAnnotatedObject(label.trim(), makeDemoPreview(label.trim(), "Annotated"), null, idx, null);
+            toast(`New object saved: ${label}`);
+          }else{
+            const k = "userObj_" + Date.now();
+            customLabels[k] = label.trim();
+            if(!objectMemory[k]) objectMemory[k] = [];
+            trackedObjects.add(k);
+            scheduleSaveAll();
+            refreshAll();
+            toast(`New label assigned: ${label}`);
+          }
           return;
         }
 
@@ -3515,13 +3771,22 @@
           return;
         }
 
-        const label = prompt(`Set custom label for:\n${best.key}\n(current: ${getDisplayName(best.key)})`, "");
+        const label = prompt(`Set label for:\n${best.key}\n(current: ${getDisplayName(best.key)})`, "");
         if(!label) return;
+        const trimmed = label.trim();
+        const createNew = confirm("Save as a new object entry? Click Cancel to relabel the tracked object.");
+        if(createNew){
+          const v = el("vid_"+idx);
+          const imgDataUrl = captureEventImage(v, best.box);
+          createAnnotatedObject(trimmed, imgDataUrl, best.box, idx, best.key);
+          toast(`New object saved: ${trimmed}`);
+          return;
+        }
 
-        customLabels[best.key] = label.trim();
+        customLabels[best.key] = trimmed;
         scheduleSaveAll();
         refreshAll();
-        toast(`Label set: ${best.key} → ${label}`);
+        toast(`Label set: ${best.key} → ${trimmed}`);
       }
 
       function popoutCamera(idx){
@@ -3614,7 +3879,10 @@
         const last = lastEventByLabel.get(label) || (list.length ? list[list.length-1] : null);
 
         if(!last){
-          recordEvent(label, person ? "Picked Up" : "Placed", box, person, null, score, camIdx);
+          const status = person ? "Picked Up" : "Placed";
+          recordEvent(label, status, box, person, null, score, camIdx, {
+            imgDataUrl: makeDemoPreview(getDisplayName(label), status)
+          });
           lastEventByLabel.set(label, { time: now, box, status: person ? "Picked Up":"Placed", person });
           return;
         }
@@ -3626,21 +3894,29 @@
 
         if(dist > 25){
           if(person && last.status !== "Picked Up"){
-            recordEvent(label, "Picked Up", box, person, null, score, camIdx);
+            recordEvent(label, "Picked Up", box, person, null, score, camIdx, {
+              imgDataUrl: makeDemoPreview(getDisplayName(label), "Picked Up")
+            });
             lastEventByLabel.set(label, { time: now, box, status:"Picked Up", person });
           }else if(!person && (last.status === "Picked Up" || last.status === "Held")){
             const held = (now - last.time)/1000;
-            recordEvent(label, "Placed", box, last.person, held, score, camIdx);
+            recordEvent(label, "Placed", box, last.person, held, score, camIdx, {
+              imgDataUrl: makeDemoPreview(getDisplayName(label), "Placed")
+            });
             lastEventByLabel.set(label, { time: now, box, status:"Placed", person:last.person });
           }
         }else{
           if(person && last.status === "Picked Up"){
             const held = (now - last.time)/1000;
-            recordEvent(label, "Held", box, person, held, score, camIdx);
+            recordEvent(label, "Held", box, person, held, score, camIdx, {
+              imgDataUrl: makeDemoPreview(getDisplayName(label), "Held")
+            });
             lastEventByLabel.set(label, { time: now, box, status:"Held", person });
           }else if(!person && last.status === "Held"){
             const held = (now - last.time)/1000;
-            recordEvent(label, "Placed", box, last.person, held, score, camIdx);
+            recordEvent(label, "Placed", box, last.person, held, score, camIdx, {
+              imgDataUrl: makeDemoPreview(getDisplayName(label), "Placed")
+            });
             lastEventByLabel.set(label, { time: now, box, status:"Placed", person:last.person });
           }
         }
