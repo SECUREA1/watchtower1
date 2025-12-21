@@ -268,14 +268,19 @@
     return overlay;
   }
 
-  function setPinned(next, skipSave = false) {
+  function setPinned(next, skipSave = false, options = {}) {
+    const { keepOverlay = true } = options;
     pinned = !!next;
     if (!skipSave) {
       localStorage.setItem(PIN_KEY, pinned ? '1' : '0');
     }
     if (pinned) {
       if (!isConsolePage) {
-        buildOverlay();
+        if (keepOverlay) {
+          buildOverlay();
+        } else {
+          removeOverlay();
+        }
       }
     } else {
       removeOverlay();
@@ -387,8 +392,14 @@
     });
 
     window.addEventListener('message', (event) => {
-      if (!event.data || event.data.type !== 'omconsole:cursor') return;
-      updateHostCursor(event.data);
+      if (!event.data || !event.data.type) return;
+      if (event.data.type === 'omconsole:cursor') {
+        updateHostCursor(event.data);
+        return;
+      }
+      if (event.data.type === 'omconsole:pin') {
+        setPinned(true, false, { keepOverlay: false });
+      }
     });
 
     window.addEventListener('resize', () => {
