@@ -424,7 +424,7 @@
       }
       if (event.data.type === 'omconsole:pin') {
         const payload = event.data.payload || {};
-        setPinned(true, false, { keepOverlay: false });
+        setPinned(true, false, { keepOverlay: true });
         if (payload.returnTo && window.location.pathname !== payload.returnTo) {
           window.location.href = payload.returnTo;
         }
