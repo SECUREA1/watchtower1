@@ -473,6 +473,25 @@
         0 0 60px rgba(255,159,10,.18);
     }
 
+    /* Persistent shell content frame */
+    #omconsole-content-frame{
+      position:fixed;
+      inset:0;
+      width:100%;
+      height:100%;
+      border:0;
+      display:none;
+      z-index: 120;
+      background: #050509;
+    }
+    body.shell-content-active #omconsole-content-frame{
+      display:block;
+    }
+    body.shell-content-active .app{
+      opacity:0;
+      pointer-events:none;
+    }
+
     /* Modals */
     .modal{
       position:absolute; inset:0;
@@ -853,6 +872,7 @@
 </div>
 
 <div id="cursor"></div>
+<iframe id="omconsole-content-frame" title="RedNode shell content"></iframe>
 
 <script type="module">
 /**
@@ -1466,6 +1486,67 @@ const state = {
     targets: {}
   }
 };
+const cursorSubscribers = new Set();
+const frameSubscribers = new Set();
+
+function getCursorPayload(){
+  return {
+    x: state.cursor.x,
+    y: state.cursor.y,
+    click: state.cursor.click,
+    clickEdge: state.cursor.clickEdge,
+    visible: true
+  };
+}
+
+function broadcastCursorState(){
+  const payload = getCursorPayload();
+  cursorSubscribers.forEach((fn) => {
+    try{
+      fn(payload);
+    }catch(e){}
+  });
+  frameSubscribers.forEach((target) => {
+    try{
+      target.postMessage({ type: "OMCURSOR_TICK", cursor: payload }, location.origin);
+    }catch(e){}
+  });
+}
+
+function showShellContent(href){
+  if(contentFrame){
+    if(href) contentFrame.src = href;
+    document.body.classList.add("shell-content-active");
+  }
+}
+
+function hideShellContent(){
+  if(contentFrame){
+    document.body.classList.remove("shell-content-active");
+  }
+}
+
+function applySettingsPatch(settings){
+  if(!settings || typeof settings !== "object") return;
+  state.settings = deepMerge(structuredClone(defaultSettings), settings);
+  saveSettings();
+
+  state.runtime.hoverEnabled = !!state.settings.ui.hoverClick;
+  kvHover.textContent = state.runtime.hoverEnabled ? "ON":"OFF";
+  badgeControl.textContent = state.settings.active.cursorControl.toUpperCase();
+  kvCursor.textContent = state.settings.active.cursorControl.toUpperCase();
+
+  controlManager.enable("Gesture", state.settings.gesture.enabled);
+  controlManager.enable("Retina", state.settings.retina.enabled);
+  controlManager.enable("Tone", state.settings.tone.enabled);
+  controlManager.enable("EMG", state.settings.emg.enabled);
+  controlManager.enable("EEG", state.settings.eeg.enabled);
+
+  controllers.Gesture.xf.setWindowSize(state.settings.gesture.smoothing);
+  controllers.Gesture.yf.setWindowSize(state.settings.gesture.smoothing);
+  controllers.Retina.xf.setWindowSize(state.settings.retina.smoothing);
+  controllers.Retina.yf.setWindowSize(state.settings.retina.smoothing);
+}
 
 // -----------------------------
 // DOM references
@@ -1495,6 +1576,7 @@ const modalSave = $("#modalSave");
 const modalBody = $("#modalBody");
 
 const camVideo = $("#cam");
+const contentFrame = document.getElementById("omconsole-content-frame");
 
 // -----------------------------
 // Canvas / HiDPI
@@ -1597,6 +1679,7 @@ async function ensureCamera(){
     await camVideo.play();
     state.runtime.camReady = true;
     dotCam.classList.add("ok"); dotCam.classList.remove("bad");
+    if(window.__OMCURSOR__) window.__OMCURSOR__.stream = cameraStream;
     return cameraStream;
   }catch(e){
     console.warn("Camera permission denied / failed:", e);
@@ -4381,6 +4464,10 @@ function wireNav(){
   });
 
   function notifyCursorRuntime(settings){
+    if(window.__OMCURSOR__){
+      window.__OMCURSOR__.applySettings(settings);
+      return;
+    }
     try{
       if("SharedWorker" in window){
         const worker = new SharedWorker("/static/js/cursorWorker.js");
@@ -4402,20 +4489,88 @@ function wireNav(){
     }
   }
 
+  function requestShellNavigation(href){
+    if(window.parent && window.parent !== window && window.parent.postMessage){
+      window.parent.postMessage({ type: "OMCURSOR_NAVIGATE", href }, location.origin);
+      return;
+    }
+    showShellContent(href);
+  }
+
   const btnSaveReturn = $("#btnSaveReturn");
   if(btnSaveReturn){
     btnSaveReturn.addEventListener("click", ()=>{
       saveSettings();
       notifyCursorRuntime(state.settings);
-      const dashboard = "/start.html";
-      if(window.opener && !window.opener.closed){
-        window.opener.location.href = dashboard;
-        window.close();
-      }else{
-        window.location.href = dashboard;
-      }
+      requestShellNavigation("/start.html");
     });
   }
+
+  if(!window.__OMCURSOR__){
+    window.__OMCURSOR__ = {
+      started: false,
+      stream: cameraStream,
+      settings: state.settings,
+      start: async () => {
+        window.__OMCURSOR__.started = true;
+        try{
+          await controlManager.ensure(state.settings.active.cursorControl);
+        }catch(e){}
+      },
+      stop: () => {
+        window.__OMCURSOR__.started = false;
+        controlManager.enable("Gesture", false);
+        controlManager.enable("Retina", false);
+        controlManager.enable("Tone", false);
+        controlManager.enable("EMG", false);
+        controlManager.enable("EEG", false);
+        if(cameraStream){
+          cameraStream.getTracks().forEach((track) => track.stop());
+          cameraStream = null;
+          state.runtime.camReady = false;
+          dotCam.classList.add("bad"); dotCam.classList.remove("ok");
+        }
+      },
+      applySettings: (newSettings) => {
+        applySettingsPatch(newSettings);
+        window.__OMCURSOR__.settings = state.settings;
+      },
+      subscribe: (fn) => cursorSubscribers.add(fn),
+      unsubscribe: (fn) => cursorSubscribers.delete(fn)
+    };
+  }
+
+  window.addEventListener("message", (event) => {
+    if(event.origin !== location.origin) return;
+    const data = event.data || {};
+    if(!data.type) return;
+    switch(data.type){
+      case "OMCURSOR_SAVE_SETTINGS":
+        window.__OMCURSOR__.applySettings(data.settings);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state.settings));
+        event.source?.postMessage({ type: "OMCURSOR_SETTINGS_SAVED" }, location.origin);
+        break;
+      case "OMCURSOR_NAVIGATE":
+        if(data.href && data.href.includes("omconsole_render_single_games_ROUTING.html")){
+          hideShellContent();
+        }else if(data.href){
+          showShellContent(data.href);
+        }
+        break;
+      case "OMCURSOR_CONNECT":
+        if(event.source && event.source !== window){
+          frameSubscribers.add(event.source);
+          event.source.postMessage({
+            type: "OMCURSOR_STATE",
+            started: window.__OMCURSOR__.started,
+            settings: state.settings
+          }, location.origin);
+        }
+        break;
+      default:
+        break;
+    }
+  });
 
   // hotkeys
   window.addEventListener("keydown", (e)=>{
@@ -4761,6 +4916,11 @@ function tick(){
 
   // Update cursor overlay
   updateCursorUI();
+  if(window.__OMCURSOR__){
+    window.__OMCURSOR__.started = controlManager.active.size > 0;
+    window.__OMCURSOR__.settings = state.settings;
+  }
+  broadcastCursorState();
 
   // If the Control Selector modal is open, keep its Sim Bus panel live
   updateControlSelectorLive();
@@ -4822,6 +4982,10 @@ function boot(){
   // Start with dashboard telemetry
   setMode("dashboard");
   renderPanelTelemetry();
+
+  if(location.hash && location.hash.includes("start")){
+    showShellContent("/start.html");
+  }
 
   // Clock
   setInterval(()=>{

@@ -1,4 +1,5 @@
 (() => {
+  if (window.__OMCURSOR_IN_SHELL__) return;
   if (window.__omconsoleLauncherLoaded) return;
   window.__omconsoleLauncherLoaded = true;
 
