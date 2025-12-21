@@ -2331,7 +2331,9 @@
               <div class="right">
                 <div class="cam-log" id="camLog_${i}">
                   <div class="cam-log-line"><span>Item</span><b id="camLogItem_${i}">—</b></div>
+                  <div class="cam-log-line"><span>Item XYZ</span><b id="camLogItemXYZ_${i}">—</b></div>
                   <div class="cam-log-line"><span>Person</span><b id="camLogPerson_${i}">—</b></div>
+                  <div class="cam-log-line"><span>Person XYZ</span><b id="camLogPersonXYZ_${i}">—</b></div>
                 </div>
                 <button type="button" class="ghost mini" data-act="snap">⬇ Snapshot</button>
               </div>
@@ -2604,6 +2606,7 @@
 
                 // Generate + log demo detections
                 state.latest.demoDraw = demoGenerateDetections(ov.width, ov.height, idx);
+                updateCameraLiveLogFromDemo(idx, state.latest.demoDraw);
               }
 
               if(cameraDisplayOn && state){
@@ -2792,6 +2795,7 @@
           tracks: activeTracks,
           demoDraw: null,
         };
+        updateCameraLiveLog(idx, state.latest);
       }
 
       /***********************
@@ -2948,22 +2952,117 @@
       /***********************
        * Record Event (shared)
        ***********************/
+      function pickLargest(list, getBox){
+        if(!list || !list.length) return null;
+        let best = null;
+        let bestArea = 0;
+        for(const item of list){
+          const box = getBox(item);
+          if(!box) continue;
+          const area = (box.w || 0) * (box.h || 0);
+          if(area > bestArea){
+            bestArea = area;
+            best = item;
+          }
+        }
+        return best;
+      }
+
+      function formatXYZ(box){
+        if(!box) return "—";
+        const x = round2(box.x + box.w / 2);
+        const y = round2(box.y + box.h / 2);
+        const z = round2(Math.sqrt(Math.max(0, box.w * box.h)));
+        return `x=${x} y=${y} z=${z}`;
+      }
+
       function resetCameraLog(idx){
         const itemEl = el(`camLogItem_${idx}`);
+        const itemXyzEl = el(`camLogItemXYZ_${idx}`);
         const personEl = el(`camLogPerson_${idx}`);
+        const personXyzEl = el(`camLogPersonXYZ_${idx}`);
         if(itemEl) itemEl.textContent = "—";
+        if(itemXyzEl) itemXyzEl.textContent = "—";
         if(personEl) personEl.textContent = "—";
+        if(personXyzEl) personXyzEl.textContent = "—";
       }
 
       function updateCameraLog(camIdx, label, evt){
         if(camIdx == null || Number.isNaN(camIdx)) return;
         const itemEl = el(`camLogItem_${camIdx}`);
+        const itemXyzEl = el(`camLogItemXYZ_${camIdx}`);
         const personEl = el(`camLogPerson_${camIdx}`);
+        const personXyzEl = el(`camLogPersonXYZ_${camIdx}`);
         if(!itemEl || !personEl) return;
 
         itemEl.textContent = label ? getDisplayName(label) : "—";
         personEl.textContent = evt && evt.person ? evt.person : "No one";
+        if(itemXyzEl) itemXyzEl.textContent = formatXYZ(evt ? evt.box : null);
+        if(personXyzEl) personXyzEl.textContent = formatXYZ(evt ? evt.personBox : null);
         camLatestLog[camIdx] = { label, evt };
+      }
+
+      function updateCameraLiveLog(camIdx, latest){
+        if(camIdx == null || Number.isNaN(camIdx) || !latest) return;
+        const itemEl = el(`camLogItem_${camIdx}`);
+        const itemXyzEl = el(`camLogItemXYZ_${camIdx}`);
+        const personEl = el(`camLogPerson_${camIdx}`);
+        const personXyzEl = el(`camLogPersonXYZ_${camIdx}`);
+        if(!itemEl || !personEl) return;
+
+        const bestTrack = pickLargest(latest.tracks || [], (t)=>t.box);
+        const bestPerson = pickLargest(latest.people || [], (p)=>p.box);
+
+        if(bestTrack){
+          itemEl.textContent = getDisplayName(bestTrack.key || bestTrack.cls || "—");
+          if(itemXyzEl) itemXyzEl.textContent = formatXYZ(bestTrack.box);
+        }else{
+          itemEl.textContent = "—";
+          if(itemXyzEl) itemXyzEl.textContent = "—";
+        }
+
+        if(bestPerson){
+          personEl.textContent = bestPerson.name || "Unknown";
+          if(personXyzEl) personXyzEl.textContent = formatXYZ(bestPerson.box);
+        }else if(bestTrack && bestTrack.person){
+          personEl.textContent = bestTrack.person;
+          if(personXyzEl) personXyzEl.textContent = "—";
+        }else{
+          personEl.textContent = "No one";
+          if(personXyzEl) personXyzEl.textContent = "—";
+        }
+      }
+
+      function updateCameraLiveLogFromDemo(camIdx, draw){
+        if(camIdx == null || Number.isNaN(camIdx) || !draw) return;
+        const itemEl = el(`camLogItem_${camIdx}`);
+        const itemXyzEl = el(`camLogItemXYZ_${camIdx}`);
+        const personEl = el(`camLogPerson_${camIdx}`);
+        const personXyzEl = el(`camLogPersonXYZ_${camIdx}`);
+        if(!itemEl || !personEl) return;
+
+        const boxes = draw.boxes || [];
+        const bestItem = pickLargest(boxes.filter(b=>b.type === "object"), (b)=>b);
+        const bestPerson = pickLargest(boxes.filter(b=>b.type === "person"), (b)=>b);
+
+        if(bestItem){
+          itemEl.textContent = getDisplayName(bestItem.cls || "—");
+          if(itemXyzEl) itemXyzEl.textContent = formatXYZ(bestItem);
+        }else{
+          itemEl.textContent = "—";
+          if(itemXyzEl) itemXyzEl.textContent = "—";
+        }
+
+        if(bestPerson){
+          personEl.textContent = bestPerson.personName || "Unknown";
+          if(personXyzEl) personXyzEl.textContent = formatXYZ(bestPerson);
+        }else if(bestItem && bestItem.personName){
+          personEl.textContent = bestItem.personName;
+          if(personXyzEl) personXyzEl.textContent = "—";
+        }else{
+          personEl.textContent = "No one";
+          if(personXyzEl) personXyzEl.textContent = "—";
+        }
       }
 
       function refreshCameraLogs(){
