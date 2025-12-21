@@ -1438,6 +1438,7 @@
       let cocoModel = null;
       let cvReady = false;
       let cvInitPromise = null;
+      let backendFallbackAttempted = false;
       let faceMatcher = null;
       const FACE_MODEL_URL = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.15/model/";
       const FACEAPI_URLS = [
@@ -1452,6 +1453,35 @@
         "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@4.22.0/dist/tf-backend-wasm.min.js",
         "https://unpkg.com/@tensorflow/tfjs-backend-wasm@4.22.0/dist/tf-backend-wasm.min.js",
       ];
+
+      function isWebglContextError(err){
+        const msg = (err && err.message) ? err.message : String(err || "");
+        return /webgl|canvas context/i.test(msg);
+      }
+
+      async function fallbackTfBackend(err){
+        if(!window.tf || backendFallbackAttempted) return false;
+
+        backendFallbackAttempted = true;
+        const current = window.tf.getBackend ? window.tf.getBackend() : "unknown";
+        const candidates = ["wasm","cpu"];
+        const reason = (err && err.message) ? err.message : String(err || "WebGL failure");
+
+        for(const b of candidates){
+          if(b === current) continue;
+          try{
+            await window.tf.setBackend(b);
+            if(window.tf.ready) await window.tf.ready();
+            addCvLog(`WebGL backend failed ("${reason}"). Switched TF backend to ${b}.`, "warn");
+            return true;
+          }catch(switchErr){
+            addCvLog(`TF backend switch to ${b} failed: ${(switchErr && switchErr.message) || switchErr}`, "warn");
+          }
+        }
+
+        addCvLog(`TF backend fallback failed; staying on ${current}.`, "warn");
+        return false;
+      }
 
       // Debounced save
       let _saveTimer = null;
@@ -2680,6 +2710,10 @@
           try{
             preds = await cocoModel.detect(v);
           }catch(e){
+            if(isWebglContextError(e)){
+              const switched = await fallbackTfBackend(e);
+              if(switched) return;
+            }
             console.warn("coco-ssd detect failed:", e);
             addCvLog("COCO-SSD detect failed (continuing): " + (e?.message || e), "warn");
           }
@@ -2739,6 +2773,10 @@
               };
             });
           }catch(e){
+            if(isWebglContextError(e)){
+              const switched = await fallbackTfBackend(e);
+              if(switched) return;
+            }
             console.warn("face detect failed:", e);
             addCvLog("Face detection failed: " + (e?.message || e), "warn");
           }
