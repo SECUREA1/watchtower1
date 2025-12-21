@@ -5,7 +5,9 @@
 (function () {
   const SHARED_WORKER_URL = '/omconsole/shared-worker.js';
   const IFRAME_URL = '/omconsole/background.html';
+  const CURSOR_HOST_URL = '/static/cursor-host.html';
   const PINNED_KEY = 'omconsole_pinned';
+  const STORAGE_SETTINGS_KEY = 'omconsole.web.settings.v1';
   const DEFAULT_CURSOR_SIZE = 14;
 
   let workerPort = null;
@@ -20,6 +22,15 @@
   function isPinned() {
     const value = localStorage.getItem(PINNED_KEY);
     return value === '1' || value === 'true';
+  }
+
+  function loadSettings() {
+    try {
+      const raw = localStorage.getItem(STORAGE_SETTINGS_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch (error) {
+      return {};
+    }
   }
 
   function supportsSharedWorker() {
@@ -78,7 +89,7 @@
     if (!message || !message.type) {
       return;
     }
-    if (message.type === 'cursor') {
+    if (message.type === 'cursor' || message.type === 'cursorTick') {
       updateOverlayCursor(message.payload || {});
     }
   }
@@ -129,8 +140,10 @@
       iframeEl.src = IFRAME_URL;
       iframeEl.setAttribute('aria-hidden', 'true');
       iframeEl.style.position = 'fixed';
-      iframeEl.style.width = '0';
-      iframeEl.style.height = '0';
+      iframeEl.style.left = '-9999px';
+      iframeEl.style.top = '0';
+      iframeEl.style.width = '1px';
+      iframeEl.style.height = '1px';
       iframeEl.style.border = '0';
       iframeEl.style.opacity = '0';
       iframeEl.style.pointerEvents = 'none';
@@ -149,8 +162,41 @@
     });
   }
 
-  function connectBackground() {
+  function ensureCursorHost() {
+    if (document.getElementById('omconsole-cursor-host')) {
+      return;
+    }
+    const host = document.createElement('iframe');
+    host.id = 'omconsole-cursor-host';
+    host.src = CURSOR_HOST_URL;
+    host.setAttribute('aria-hidden', 'true');
+    host.style.position = 'fixed';
+    host.style.left = '-9999px';
+    host.style.top = '0';
+    host.style.width = '1px';
+    host.style.height = '1px';
+    host.style.border = '0';
+    host.style.opacity = '0';
+    host.style.pointerEvents = 'none';
+    document.body.appendChild(host);
+
+    window.addEventListener('message', (event) => {
+      if (event.origin !== window.location.origin) {
+        return;
+      }
+      const message = event.data || {};
+      if (message.type === 'cursorTick' || message.type === 'cursor') {
+        handleBackgroundMessage(message);
+      }
+    });
+  }
+
+  function connectBackground(options = {}) {
     if (connectionPromise) {
+      return connectionPromise;
+    }
+    if (options.forceIframe) {
+      connectionPromise = connectIframeFallback();
       return connectionPromise;
     }
     if (supportsSharedWorker()) {
@@ -171,19 +217,32 @@
     }
     if (backgroundType === 'iframe' && iframeEl && iframeEl.contentWindow) {
       iframeEl.contentWindow.postMessage(message, window.location.origin);
+      return;
+    }
+    const host = document.getElementById('omconsole-cursor-host');
+    if (host && host.contentWindow) {
+      host.contentWindow.postMessage(message, window.location.origin);
     }
   }
 
-  function pinOmConsole(wsUrl) {
+  function pinOmConsole(wsUrl, options = {}) {
     localStorage.setItem(PINNED_KEY, '1');
-    return connectBackground().then(() => {
+    const connectOptions = { forceIframe: !!(options.forceIframe || options.keepCamera) };
+    return connectBackground(connectOptions).then(() => {
       postToBackground({ type: 'pin', payload: { wsUrl } });
+      if (options.keepCamera) {
+        postToBackground({
+          type: 'start_camera',
+          payload: options.cameraConstraints || { video: true, audio: false },
+        });
+      }
     });
   }
 
   function unpinOmConsole() {
     localStorage.setItem(PINNED_KEY, '0');
     postToBackground({ type: 'unpin' });
+    postToBackground({ type: 'stop_camera' });
   }
 
   function updateCursor(x, y, visible) {
@@ -191,13 +250,25 @@
       type: 'cursor_update',
       payload: { x, y, visible },
     });
+    updateOverlayCursor({ x, y, visible });
   }
 
   function autoInit() {
-    if (isPinned()) {
-      connectBackground().then(() => {
-        postToBackground({ type: 'request_state' });
-      });
+    try {
+      if (isPinned()) {
+        ensureCursorHost();
+        connectBackground().then(() => {
+          postToBackground({ type: 'request_state' });
+        });
+        const settings = loadSettings();
+        if (settings) {
+          postToBackground({ type: 'updateSettings', payload: settings });
+        }
+      } else {
+        ensureOverlay();
+      }
+    } catch (error) {
+      console.warn('OmConsoleClient.autoInit error', error);
     }
   }
 
@@ -209,4 +280,10 @@
     updateCursor,
     autoInit,
   };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', ensureOverlay);
+  } else {
+    ensureOverlay();
+  }
 })();
