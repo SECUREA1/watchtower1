@@ -5,7 +5,9 @@
 (function () {
   const SHARED_WORKER_URL = '/omconsole/shared-worker.js';
   const IFRAME_URL = '/omconsole/background.html';
+  const CURSOR_HOST_URL = '/static/cursor-host.html';
   const PINNED_KEY = 'omconsole_pinned';
+  const STORAGE_SETTINGS_KEY = 'omconsole.web.settings.v1';
   const DEFAULT_CURSOR_SIZE = 14;
 
   let workerPort = null;
@@ -16,6 +18,7 @@
   let latestCursor = { x: 0, y: 0, visible: true };
   let overlayEl = null;
   let rafScheduled = false;
+  let cursorHostListenerBound = false;
 
   function isPinned() {
     const value = localStorage.getItem(PINNED_KEY);
@@ -38,8 +41,8 @@
     overlayEl.style.width = `${DEFAULT_CURSOR_SIZE}px`;
     overlayEl.style.height = `${DEFAULT_CURSOR_SIZE}px`;
     overlayEl.style.borderRadius = '50%';
-    overlayEl.style.background = 'rgba(0, 200, 255, 0.8)';
-    overlayEl.style.boxShadow = '0 0 8px rgba(0, 200, 255, 0.6)';
+    overlayEl.style.background = 'rgba(0, 200, 255, 0.9)';
+    overlayEl.style.boxShadow = '0 0 12px rgba(0, 200, 255, 0.6)';
     overlayEl.style.transform = 'translate(-9999px, -9999px)';
     overlayEl.style.pointerEvents = 'none';
     overlayEl.style.zIndex = '2147483647';
@@ -58,7 +61,8 @@
       return;
     }
     el.style.opacity = '1';
-    el.style.transform = `translate(${latestCursor.x - DEFAULT_CURSOR_SIZE / 2}px, ${latestCursor.y - DEFAULT_CURSOR_SIZE / 2}px)`;
+    const size = DEFAULT_CURSOR_SIZE;
+    el.style.transform = `translate(${latestCursor.x - size / 2}px, ${latestCursor.y - size / 2}px)`;
   }
 
   function scheduleDraw() {
@@ -78,7 +82,7 @@
     if (!message || !message.type) {
       return;
     }
-    if (message.type === 'cursor') {
+    if (message.type === 'cursor' || message.type === 'cursorTick') {
       updateOverlayCursor(message.payload || {});
     }
   }
@@ -129,8 +133,10 @@
       iframeEl.src = IFRAME_URL;
       iframeEl.setAttribute('aria-hidden', 'true');
       iframeEl.style.position = 'fixed';
-      iframeEl.style.width = '0';
-      iframeEl.style.height = '0';
+      iframeEl.style.left = '-9999px';
+      iframeEl.style.top = '0';
+      iframeEl.style.width = '1px';
+      iframeEl.style.height = '1px';
       iframeEl.style.border = '0';
       iframeEl.style.opacity = '0';
       iframeEl.style.pointerEvents = 'none';
@@ -149,8 +155,44 @@
     });
   }
 
-  function connectBackground() {
+  function ensureCursorHost() {
+    if (document.getElementById('omconsole-cursor-host')) {
+      return;
+    }
+    const frame = document.createElement('iframe');
+    frame.id = 'omconsole-cursor-host';
+    frame.src = CURSOR_HOST_URL;
+    frame.setAttribute('aria-hidden', 'true');
+    frame.style.position = 'fixed';
+    frame.style.left = '-9999px';
+    frame.style.top = '0';
+    frame.style.width = '1px';
+    frame.style.height = '1px';
+    frame.style.border = '0';
+    frame.style.opacity = '0';
+    frame.style.pointerEvents = 'none';
+    document.body.appendChild(frame);
+
+    if (!cursorHostListenerBound) {
+      window.addEventListener('message', (event) => {
+        if (event.origin !== window.location.origin) {
+          return;
+        }
+        const message = event.data || {};
+        if (message.type === 'cursorTick' || message.type === 'cursor') {
+          handleBackgroundMessage(message);
+        }
+      });
+      cursorHostListenerBound = true;
+    }
+  }
+
+  function connectBackground(options = {}) {
     if (connectionPromise) {
+      return connectionPromise;
+    }
+    if (options.forceIframe) {
+      connectionPromise = connectIframeFallback();
       return connectionPromise;
     }
     if (supportsSharedWorker()) {
@@ -171,19 +213,32 @@
     }
     if (backgroundType === 'iframe' && iframeEl && iframeEl.contentWindow) {
       iframeEl.contentWindow.postMessage(message, window.location.origin);
+      return;
+    }
+    const host = document.getElementById('omconsole-cursor-host');
+    if (host && host.contentWindow) {
+      host.contentWindow.postMessage(message, window.location.origin);
     }
   }
 
-  function pinOmConsole(wsUrl) {
+  function pinOmConsole(wsUrl, options = {}) {
     localStorage.setItem(PINNED_KEY, '1');
-    return connectBackground().then(() => {
+    const connectOptions = { forceIframe: Boolean(options.forceIframe || options.keepCamera) };
+    return connectBackground(connectOptions).then(() => {
       postToBackground({ type: 'pin', payload: { wsUrl } });
+      if (options.keepCamera) {
+        postToBackground({
+          type: 'start_camera',
+          payload: options.cameraConstraints || { video: true, audio: false },
+        });
+      }
     });
   }
 
   function unpinOmConsole() {
     localStorage.setItem(PINNED_KEY, '0');
     postToBackground({ type: 'unpin' });
+    postToBackground({ type: 'stop_camera' });
   }
 
   function updateCursor(x, y, visible) {
@@ -191,13 +246,21 @@
       type: 'cursor_update',
       payload: { x, y, visible },
     });
+    updateOverlayCursor({ x, y, visible });
   }
 
   function autoInit() {
-    if (isPinned()) {
-      connectBackground().then(() => {
-        postToBackground({ type: 'request_state' });
-      });
+    try {
+      if (isPinned()) {
+        ensureCursorHost();
+        connectBackground().then(() => {
+          postToBackground({ type: 'request_state' });
+        });
+      } else {
+        ensureOverlay();
+      }
+    } catch (error) {
+      console.warn('OmConsoleClient.autoInit error', error);
     }
   }
 
@@ -209,4 +272,21 @@
     updateCursor,
     autoInit,
   };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', ensureOverlay);
+  } else {
+    ensureOverlay();
+  }
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('storage', (event) => {
+      if (event.key !== STORAGE_SETTINGS_KEY) {
+        return;
+      }
+      if (isPinned()) {
+        ensureCursorHost();
+      }
+    });
+  }
 })();
