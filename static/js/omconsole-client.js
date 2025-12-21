@@ -18,6 +18,7 @@
   let latestCursor = { x: 0, y: 0, visible: true };
   let overlayEl = null;
   let rafScheduled = false;
+  let cursorHostListenerBound = false;
 
   function isPinned() {
     const value = localStorage.getItem(PINNED_KEY);
@@ -49,8 +50,8 @@
     overlayEl.style.width = `${DEFAULT_CURSOR_SIZE}px`;
     overlayEl.style.height = `${DEFAULT_CURSOR_SIZE}px`;
     overlayEl.style.borderRadius = '50%';
-    overlayEl.style.background = 'rgba(0, 200, 255, 0.8)';
-    overlayEl.style.boxShadow = '0 0 8px rgba(0, 200, 255, 0.6)';
+    overlayEl.style.background = 'rgba(0, 200, 255, 0.9)';
+    overlayEl.style.boxShadow = '0 0 12px rgba(0, 200, 255, 0.6)';
     overlayEl.style.transform = 'translate(-9999px, -9999px)';
     overlayEl.style.pointerEvents = 'none';
     overlayEl.style.zIndex = '2147483647';
@@ -69,7 +70,8 @@
       return;
     }
     el.style.opacity = '1';
-    el.style.transform = `translate(${latestCursor.x - DEFAULT_CURSOR_SIZE / 2}px, ${latestCursor.y - DEFAULT_CURSOR_SIZE / 2}px)`;
+    const size = DEFAULT_CURSOR_SIZE;
+    el.style.transform = `translate(${latestCursor.x - size / 2}px, ${latestCursor.y - size / 2}px)`;
   }
 
   function scheduleDraw() {
@@ -189,6 +191,32 @@
         handleBackgroundMessage(message);
       }
     });
+    const frame = document.createElement('iframe');
+    frame.id = 'omconsole-cursor-host';
+    frame.src = CURSOR_HOST_URL;
+    frame.setAttribute('aria-hidden', 'true');
+    frame.style.position = 'fixed';
+    frame.style.left = '-9999px';
+    frame.style.top = '0';
+    frame.style.width = '1px';
+    frame.style.height = '1px';
+    frame.style.border = '0';
+    frame.style.opacity = '0';
+    frame.style.pointerEvents = 'none';
+    document.body.appendChild(frame);
+
+    if (!cursorHostListenerBound) {
+      window.addEventListener('message', (event) => {
+        if (event.origin !== window.location.origin) {
+          return;
+        }
+        const message = event.data || {};
+        if (message.type === 'cursorTick' || message.type === 'cursor') {
+          handleBackgroundMessage(message);
+        }
+      });
+      cursorHostListenerBound = true;
+    }
   }
 
   function connectBackground(options = {}) {
@@ -228,6 +256,7 @@
   function pinOmConsole(wsUrl, options = {}) {
     localStorage.setItem(PINNED_KEY, '1');
     const connectOptions = { forceIframe: !!(options.forceIframe || options.keepCamera) };
+    const connectOptions = { forceIframe: Boolean(options.forceIframe || options.keepCamera) };
     return connectBackground(connectOptions).then(() => {
       postToBackground({ type: 'pin', payload: { wsUrl } });
       if (options.keepCamera) {
@@ -260,10 +289,6 @@
         connectBackground().then(() => {
           postToBackground({ type: 'request_state' });
         });
-        const settings = loadSettings();
-        if (settings) {
-          postToBackground({ type: 'updateSettings', payload: settings });
-        }
       } else {
         ensureOverlay();
       }
@@ -285,5 +310,16 @@
     document.addEventListener('DOMContentLoaded', ensureOverlay);
   } else {
     ensureOverlay();
+  }
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('storage', (event) => {
+      if (event.key !== STORAGE_SETTINGS_KEY) {
+        return;
+      }
+      if (isPinned()) {
+        ensureCursorHost();
+      }
+    });
   }
 })();
