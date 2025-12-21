@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cursor Host</title>
+</head>
+<body>
+<script>
+  const STORAGE_KEY = "omconsole.web.settings.v1";
+  let settings = loadSettings();
+  let running = false;
+
+  function loadSettings() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch (error) {
+      return {};
+    }
+  }
+
+  function shouldRun(nextSettings) {
+    if (!nextSettings || typeof nextSettings !== "object") return false;
+    return Object.values(nextSettings).some((value) => value && value.enabled === true);
+  }
+
+  function startCursors() {
+    if (running) return;
+    running = true;
+    loop();
+  }
+
+  function stopCursors() {
+    running = false;
+  }
+
+  async function loop() {
+    while (running) {
+      try {
+        parent.postMessage({ type: "cursorTick", payload: { time: Date.now(), settings } }, location.origin);
+      } catch (error) {
+        // noop
+      }
+      await new Promise((resolve) => setTimeout(resolve, 16));
+    }
+  }
+
+  function applySettings(nextSettings) {
+    settings = { ...settings, ...(nextSettings || {}) };
+    if (shouldRun(settings)) startCursors();
+    else stopCursors();
+  }
+
+  if (shouldRun(settings)) startCursors();
+
+  window.addEventListener("message", (event) => {
+    if (event.origin !== location.origin) return;
+    const { type, payload } = event.data || {};
+    if (type === "updateSettings") {
+      applySettings(payload);
+    }
+  });
+
+  window.addEventListener("storage", (event) => {
+    if (event.key !== STORAGE_KEY) return;
+    applySettings(loadSettings());
+  });
+</script>
+</body>
+</html>

@@ -1973,6 +1973,102 @@
       hydrate();
     })();
   </script>
+  <script>
+    (() => {
+      const STORAGE_KEY = 'omconsole.web.settings.v1';
+      let workerPort = null;
+      let fallbackFrame = null;
+
+      const readSettings = () => {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          return raw ? JSON.parse(raw) : null;
+        } catch (error) {
+          return null;
+        }
+      };
+
+      const shouldRun = (settings) => {
+        if (!settings || typeof settings !== 'object') return false;
+        return Object.values(settings).some((value) => value && value.enabled === true);
+      };
+
+      const ensureFallbackFrame = () => {
+        if (fallbackFrame) return fallbackFrame;
+        const frame = document.createElement('iframe');
+        frame.src = '/static/cursor-host.html';
+        frame.title = 'Cursor Host';
+        frame.tabIndex = -1;
+        frame.setAttribute('aria-hidden', 'true');
+        frame.style.cssText = 'display:none;width:0;height:0;border:0;';
+        document.body.appendChild(frame);
+        fallbackFrame = frame;
+        return frame;
+      };
+
+      const postToWorker = (message) => {
+        if (!workerPort) return;
+        try {
+          workerPort.postMessage(message);
+        } catch (error) {
+          // noop
+        }
+      };
+
+      const startWorker = () => {
+        if (!('SharedWorker' in window)) {
+          ensureFallbackFrame();
+          return;
+        }
+        const worker = new SharedWorker('/static/js/cursorWorker.js');
+        workerPort = worker.port;
+        workerPort.start();
+        workerPort.onmessage = () => {};
+        const settings = readSettings();
+        if (settings) {
+          postToWorker({ type: 'updateSettings', payload: settings });
+          if (shouldRun(settings)) {
+            postToWorker({ type: 'start', payload: settings });
+          }
+        }
+      };
+
+      const syncSettings = (settings) => {
+        if (settings) {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+        }
+        postToWorker({ type: 'updateSettings', payload: settings });
+        if (settings && shouldRun(settings)) {
+          postToWorker({ type: 'start', payload: settings });
+        }
+        if (!('SharedWorker' in window)) {
+          ensureFallbackFrame();
+          fallbackFrame?.contentWindow?.postMessage({ type: 'updateSettings', payload: settings }, location.origin);
+        }
+      };
+
+      document.addEventListener('DOMContentLoaded', startWorker);
+
+      window.addEventListener('message', (event) => {
+        if (event.origin !== location.origin) return;
+        const { type, payload } = event.data || {};
+        if (type === 'updateSettings') {
+          syncSettings(payload);
+        }
+      });
+
+      window.addEventListener('storage', (event) => {
+        if (event.key !== STORAGE_KEY) return;
+        const settings = readSettings();
+        if (settings) syncSettings(settings);
+      });
+
+      window.omconsoleCursorRuntime = {
+        updateSettings: syncSettings,
+        getSettings: readSettings
+      };
+    })();
+  </script>
   <script src="static/omconsole-launcher.js"></script>
 </body>
 </html>
