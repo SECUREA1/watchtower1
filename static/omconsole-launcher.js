@@ -15,6 +15,24 @@
   let pinned = false;
   let overlay = null;
   let button = null;
+  let clientReady = false;
+
+  function loadClient() {
+    if (clientReady || window.OmConsoleClient) {
+      clientReady = true;
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      const script = document.createElement('script');
+      script.src = '/static/js/omconsole-client.js';
+      script.async = true;
+      script.onload = () => {
+        clientReady = true;
+        resolve();
+      };
+      document.head.appendChild(script);
+    });
+  }
 
   const applyStyles = (el, styles) => Object.assign(el.style, styles);
 
@@ -146,8 +164,16 @@
       if (!isConsolePage) {
         buildOverlay();
       }
+      loadClient().then(() => {
+        if (window.OmConsoleClient) {
+          window.OmConsoleClient.pinOmConsole();
+        }
+      });
     } else {
       removeOverlay();
+      if (window.OmConsoleClient) {
+        window.OmConsoleClient.unpinOmConsole();
+      }
     }
     updateButton();
   }
@@ -244,6 +270,11 @@
   document.addEventListener('DOMContentLoaded', () => {
     buildButton();
     syncFromStorage();
+    loadClient().then(() => {
+      if (window.OmConsoleClient) {
+        window.OmConsoleClient.autoInit();
+      }
+    });
 
     window.addEventListener('storage', (e) => {
       if (e.key === PIN_KEY) {
