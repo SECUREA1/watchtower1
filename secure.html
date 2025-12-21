@@ -266,6 +266,15 @@
       border-color:rgba(255,59,48,.28);
       box-shadow:0 0 0 1px rgba(255,59,48,.12) inset;
     }
+    .tracked-controls{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+    .tracked-controls select{
+      min-width:140px;
+    }
     .storage-status{
       display:inline-flex;
       align-items:center;
@@ -1331,6 +1340,18 @@
                 <button class="log-toggle-btn" type="button" data-log-view="objects">Objects</button>
                 <button class="log-toggle-btn" type="button" data-log-view="people">People</button>
               </div>
+              <div class="tracked-controls">
+                <select id="trackedSort" aria-label="Tracked sort order">
+                  <option value="alpha">A → Z</option>
+                  <option value="alpha-desc">Z → A</option>
+                  <option value="newest">Newest</option>
+                  <option value="oldest">Oldest</option>
+                  <option value="most">Most events</option>
+                  <option value="least">Least events</option>
+                </select>
+                <input id="trackedSearch" type="text" placeholder="Search tracked..." aria-label="Search tracked list" />
+                <button id="btnTrackedSearch" class="ghost" type="button">🔎 Search</button>
+              </div>
               <button id="btnRefreshTracked" class="ghost" type="button">↻ Refresh</button>
             </div>
           </div>
@@ -1436,6 +1457,7 @@
         mobileFacing: "environment",
         fpsCap: isLikelyMobile() ? 12 : 24,
         detectorMode: "tiny",
+        trackedSort: "alpha",
       };
 
       // Load settings (merge defaults)
@@ -1576,6 +1598,9 @@
       const logHeaderPrimary = el("logHeaderPrimary");
       const logHeaderSecondary = el("logHeaderSecondary");
       const trackedSubtitle = el("trackedSubtitle");
+      const trackedSort = el("trackedSort");
+      const trackedSearch = el("trackedSearch");
+      const btnTrackedSearch = el("btnTrackedSearch");
 
       const objectSelect = el("objectSelect");
       const historyBox = el("historyBox");
@@ -1958,6 +1983,25 @@
       });
 
       logSearch.addEventListener("input", ()=>renderLogTable());
+
+      if(trackedSort){
+        trackedSort.addEventListener("change", ()=>{
+          settings.trackedSort = trackedSort.value;
+          saveSettings();
+          renderTracked();
+        });
+      }
+      if(btnTrackedSearch){
+        btnTrackedSearch.addEventListener("click", ()=>renderTracked());
+      }
+      if(trackedSearch){
+        trackedSearch.addEventListener("keydown", (event)=>{
+          if(event.key === "Enter"){
+            event.preventDefault();
+            renderTracked();
+          }
+        });
+      }
 
       logToggleButtons.forEach(btn => {
         btn.addEventListener("click", ()=>{
@@ -2358,6 +2402,7 @@
         el("chkMinDetails").checked = !!settings.minimizeDetails;
         if(mobileFacing) mobileFacing.value = settings.mobileFacing || "environment";
         if(detectorMode) detectorMode.value = settings.detectorMode || "tiny";
+        if(trackedSort) trackedSort.value = settings.trackedSort || "alpha";
         if(fpsCap){
           fpsCap.value = String(settings.fpsCap || 12);
           if(fpsVal) fpsVal.textContent = String(fpsCap.value);
@@ -3573,6 +3618,11 @@
             ? "People seen in logs (click to load history)"
             : "Objects seen in logs (click to load history)";
         }
+        if(trackedSearch){
+          trackedSearch.placeholder = logViewMode === "people"
+            ? "Search tracked people..."
+            : "Search tracked objects...";
+        }
         if(logSearch){
           logSearch.placeholder = logViewMode === "people"
             ? "Search logs (person, object, event…)"
@@ -3795,18 +3845,46 @@
       }
 
       function renderTracked(){
+        const query = (trackedSearch && trackedSearch.value || "").trim().toLowerCase();
+        const sortMode = trackedSort ? trackedSort.value : "alpha";
         if(logViewMode === "people"){
           const peopleMemory = buildPersonMemory();
-          const people = Object.keys(peopleMemory).sort((a,b)=>a.localeCompare(b));
+          let people = Object.keys(peopleMemory);
+          if(query){
+            people = people.filter(person => person.toLowerCase().includes(query));
+          }
+          const peopleMeta = people.map(person => {
+            const evts = (peopleMemory[person] || []).slice().sort((a,b)=>a.time - b.time);
+            const first = evts[0]?.time || 0;
+            const last = evts.length ? evts[evts.length - 1].time : 0;
+            return { person, evts, first, last, count: evts.length };
+          });
+          peopleMeta.sort((a,b)=>{
+            switch(sortMode){
+              case "alpha-desc":
+                return b.person.localeCompare(a.person);
+              case "newest":
+                return b.last - a.last || b.person.localeCompare(a.person);
+              case "oldest":
+                return a.first - b.first || a.person.localeCompare(b.person);
+              case "most":
+                return b.count - a.count || a.person.localeCompare(b.person);
+              case "least":
+                return a.count - b.count || a.person.localeCompare(b.person);
+              case "alpha":
+              default:
+                return a.person.localeCompare(b.person);
+            }
+          });
           trackedList.innerHTML = "";
-          if(people.length === 0){
+          if(peopleMeta.length === 0){
             trackedList.innerHTML = `<div class="item"><span class="small">No tracked people yet.</span></div>`;
             return;
           }
 
-          for(const person of people){
-            const evts = peopleMemory[person] || [];
-            evts.sort((a,b)=>a.time - b.time);
+          for(const entry of peopleMeta){
+            const person = entry.person;
+            const evts = entry.evts;
             const last = evts.length ? evts[evts.length-1] : null;
             const camLabel = last && last.cam != null ? `cam ${last.cam}` : "cam —";
             const xyzLabel = last ? formatXYZ(last.box) : "x=— y=— z=—";
@@ -3840,15 +3918,49 @@
           return;
         }
 
-        const arr = Array.from(trackedObjects).sort((a,b)=>getDisplayName(a).localeCompare(getDisplayName(b)));
+        let arr = Array.from(trackedObjects);
+        if(query){
+          arr = arr.filter(label => getDisplayName(label).toLowerCase().includes(query));
+        }
+        const trackedMeta = arr.map(label => {
+          const evts = objectMemory[label] || [];
+          const first = evts[0]?.time || 0;
+          const last = evts.length ? evts[evts.length - 1].time : 0;
+          return {
+            label,
+            evts,
+            first,
+            last,
+            count: evts.length,
+            name: getDisplayName(label)
+          };
+        });
+        trackedMeta.sort((a,b)=>{
+          switch(sortMode){
+            case "alpha-desc":
+              return b.name.localeCompare(a.name);
+            case "newest":
+              return b.last - a.last || b.name.localeCompare(a.name);
+            case "oldest":
+              return a.first - b.first || a.name.localeCompare(b.name);
+            case "most":
+              return b.count - a.count || a.name.localeCompare(b.name);
+            case "least":
+              return a.count - b.count || a.name.localeCompare(b.name);
+            case "alpha":
+            default:
+              return a.name.localeCompare(b.name);
+          }
+        });
         trackedList.innerHTML = "";
-        if(arr.length === 0){
+        if(trackedMeta.length === 0){
           trackedList.innerHTML = `<div class="item"><span class="small">No tracked objects yet.</span></div>`;
           return;
         }
 
-        for(const obj of arr){
-          const evts = objectMemory[obj] || [];
+        for(const entry of trackedMeta){
+          const obj = entry.label;
+          const evts = entry.evts;
           const last = evts.length ? evts[evts.length-1] : null;
 
           const div = document.createElement("div");
