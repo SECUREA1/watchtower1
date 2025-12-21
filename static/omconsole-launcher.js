@@ -428,7 +428,11 @@
         return;
       }
       if (event.data.type === 'omconsole:pin') {
+        const payload = event.data.payload || {};
         setPinned(true, false, { keepOverlay: false });
+        if (payload.returnTo && window.location.pathname !== payload.returnTo) {
+          window.location.href = payload.returnTo;
+        }
       }
     });
 
