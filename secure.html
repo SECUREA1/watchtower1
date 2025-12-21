@@ -1393,6 +1393,7 @@
        ***********************/
       const LS_KEYS = {
         objectMemory:  "rednode.security.objectMemory.v1",
+        peopleMemory:  "rednode.security.peopleMemory.v1",
         customLabels:  "rednode.security.customLabels.v1",
         knownFaces:    "rednode.security.knownFaces.v1",
         unknownFaces:  "rednode.security.unknownFaces.v1",
@@ -1438,6 +1439,10 @@
 
       // Persistent DBs
       let objectMemory = loadJSON(LS_KEYS.objectMemory, {});
+      let peopleMovementMemory = loadJSON(LS_KEYS.peopleMemory, {});
+      if(!peopleMovementMemory || typeof peopleMovementMemory !== "object"){
+        peopleMovementMemory = {};
+      }
       let customLabels = loadJSON(LS_KEYS.customLabels, {});
       let knownFaces   = normalizeKnownFaces(loadJSON(LS_KEYS.knownFaces, {}));
       let unknownFacesQueue = loadJSON(LS_KEYS.unknownFaces, []);
@@ -1857,6 +1862,7 @@
           exportedAt: new Date().toISOString(),
           settings,
           objectMemory,
+          peopleMovementMemory,
           customLabels,
           knownFaces,
           unknownFacesQueue,
@@ -1869,6 +1875,7 @@
         if(!confirm("Clear all logs, faces, labels, and memory?")) return;
 
         objectMemory = {};
+        peopleMovementMemory = {};
         customLabels = {};
         knownFaces = {};
         unknownFacesQueue = [];
@@ -2636,6 +2643,7 @@
         return {
           camIdx: idx,
           tracks: new Map(), // id -> track
+          personTracks: new Map(), // person name -> track
           lastDetectAt: 0,
           detecting: false,
           latest: {
@@ -2844,10 +2852,13 @@
           }
         }
 
-        // 5) Track objects + log
+        // 5) Track people + log movement (known only)
+        updatePeopleTracks(state, people, ts);
+
+        // 6) Track objects + log
         updateTracksFromDetections(state, nonPersons, people, ts, v);
 
-        // 6) Build overlay view
+        // 7) Build overlay view
         const activeTracks = Array.from(state.tracks.values())
           .filter(t => (ts - t.lastSeen) <= settings.trackForgetMs)
           .map(t => ({
@@ -3002,6 +3013,41 @@
           recordEvent(track.key, evt, track.box, personNow || track.lastPerson, heldSec, track.score, track.camIdx, {
             imgDataUrl: captureEventImage(video, track.box)
           });
+        }
+      }
+
+      function updatePeopleTracks(state, people, ts){
+        if(!state || !state.personTracks) return;
+        const tracks = state.personTracks;
+
+        for(const person of (people || [])){
+          const name = person.name || "Unknown";
+          if(name === "Unknown") continue;
+
+          const prev = tracks.get(name);
+          if(prev){
+            const moved = centerDistancePx(prev.box, person.box) >= settings.movePxThreshold;
+            const canLogMove = (ts - prev.lastLogAt) >= settings.moveLogCooldownMs;
+            prev.box = person.box;
+            prev.lastSeen = ts;
+            if(moved && canLogMove){
+              prev.lastLogAt = ts;
+              recordPersonEvent(name, "Moved", person.box, person.score, state.camIdx);
+            }
+          }else{
+            tracks.set(name, {
+              box: person.box,
+              lastSeen: ts,
+              lastLogAt: ts,
+            });
+            recordPersonEvent(name, "Live", person.box, person.score, state.camIdx);
+          }
+        }
+
+        for(const [name, tr] of tracks.entries()){
+          if((ts - tr.lastSeen) > settings.trackForgetMs){
+            tracks.delete(name);
+          }
         }
       }
 
@@ -3197,6 +3243,28 @@
         renderTracked();
         updateObjectDropdown();
         updateCameraLog(cam, label, evt);
+      }
+
+      function recordPersonEvent(personName, status, box, score=null, cam=null, opts={}){
+        if(!personName || personName === "Unknown") return;
+        const evt = {
+          time: Date.now(),
+          box,
+          status,
+          person: personName,
+          score,
+          cam,
+          imgDataUrl: opts.imgDataUrl || null,
+        };
+
+        if(!peopleMovementMemory[personName]) peopleMovementMemory[personName] = [];
+        peopleMovementMemory[personName].push(evt);
+
+        scheduleSaveAll();
+        if(logViewMode === "people" || logSearch.value.trim()){
+          renderLogTable();
+        }
+        renderTracked();
       }
 
       /***********************
@@ -3437,9 +3505,11 @@
 
       function buildLogTr(label, evt, personLabel=null){
         const tr = document.createElement("tr");
-        const primaryLabel = logViewMode === "people" ? (personLabel || "Unknown") : getDisplayName(label);
+        const primaryLabel = logViewMode === "people"
+          ? (personLabel || "Unknown")
+          : getDisplayName(label);
         const secondaryLabel = logViewMode === "people"
-          ? getDisplayName(label)
+          ? (label ? getDisplayName(label) : "—")
           : (evt.person || "No one");
 
         const detailsRaw = buildDetailsString(evt);
@@ -3506,9 +3576,10 @@
           const peopleMemory = buildPersonMemory();
           for(const [personName, events] of Object.entries(peopleMemory)){
             for(const evt of events){
-              const line = `${personName} ${evt.objectLabel} ${getDisplayName(evt.objectLabel)} ${evt.status} ${buildDetailsString(evt)}`.toLowerCase();
+              const objLabel = evt.objectLabel ? getDisplayName(evt.objectLabel) : "";
+              const line = `${personName} ${evt.objectLabel || ""} ${objLabel} ${evt.status} ${buildDetailsString(evt)}`.toLowerCase();
               if(q && !line.includes(q)) continue;
-              rows.push({label: evt.objectLabel, evt, personName});
+              rows.push({label: evt.objectLabel || null, evt, personName});
             }
           }
         }else{
@@ -3585,6 +3656,16 @@
             people[name].push(Object.assign({}, evt, { objectLabel: label }));
           }
         }
+        for(const [personName, events] of Object.entries(peopleMovementMemory)){
+          for(const evt of events || []){
+            if(!evt) continue;
+            if(!people[personName]) people[personName] = [];
+            people[personName].push(Object.assign({}, evt, {
+              objectLabel: evt.objectLabel || null,
+              person: evt.person || personName
+            }));
+          }
+        }
         return people;
       }
 
@@ -3598,7 +3679,8 @@
           const held = evt.held_duration != null ? `Held for ${evt.held_duration.toFixed(2)}s` : "";
           const sc = (evt.score != null) ? `score=${Math.round(evt.score*100)}%` : "";
           const cam = (evt.cam != null) ? `cam=${evt.cam}` : "";
-          return `${fmtTime(evt.time)}: ${person} ${evt.status} ${getDisplayName(evt.objectLabel)} at (x=${Math.round(b.x||0)}, y=${Math.round(b.y||0)}, w=${Math.round(b.w||0)}, h=${Math.round(b.h||0)}) ${held} ${cam} ${sc}`.trim();
+          const objLabel = evt.objectLabel ? getDisplayName(evt.objectLabel) : "—";
+          return `${fmtTime(evt.time)}: ${person} ${evt.status} ${objLabel} at (x=${Math.round(b.x||0)}, y=${Math.round(b.y||0)}, w=${Math.round(b.w||0)}, h=${Math.round(b.h||0)}) ${held} ${cam} ${sc}`.trim();
         }).join("\n");
       }
 
@@ -3965,6 +4047,7 @@
 
       function saveAll(){
         saveJSON(LS_KEYS.objectMemory, objectMemory);
+        saveJSON(LS_KEYS.peopleMemory, peopleMovementMemory);
         saveJSON(LS_KEYS.customLabels, customLabels);
         saveJSON(LS_KEYS.knownFaces, knownFaces);
         saveJSON(LS_KEYS.unknownFaces, unknownFacesQueue);
@@ -4133,6 +4216,15 @@
           for(const evt of (events || [])){
             entries.push({
               label,
+              ...evt
+            });
+          }
+        }
+        for(const [personName, events] of Object.entries(peopleMovementMemory || {})){
+          for(const evt of (events || [])){
+            entries.push({
+              label: null,
+              person: personName,
               ...evt
             });
           }
