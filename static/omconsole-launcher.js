@@ -14,6 +14,7 @@
 
   let pinned = false;
   let overlay = null;
+  let backgroundFrame = null;
   let button = null;
   let clientReady = false;
 
@@ -50,6 +51,13 @@
     if (overlay) {
       overlay.remove();
       overlay = null;
+    }
+  }
+
+  function removeBackgroundFrame() {
+    if (backgroundFrame) {
+      backgroundFrame.remove();
+      backgroundFrame = null;
     }
   }
 
@@ -155,6 +163,32 @@
     return overlay;
   }
 
+  function buildBackgroundFrame() {
+    if (backgroundFrame) return backgroundFrame;
+
+    const iframe = document.createElement('iframe');
+    iframe.src = FRAME_URL;
+    iframe.title = 'OMConsole Background Runtime';
+    iframe.allow = 'camera; microphone; fullscreen; clipboard-read; clipboard-write';
+    iframe.setAttribute('aria-hidden', 'true');
+    iframe.setAttribute('tabindex', '-1');
+    applyStyles(iframe, {
+      position: 'fixed',
+      width: '1px',
+      height: '1px',
+      opacity: '0',
+      pointerEvents: 'none',
+      border: '0',
+      left: '0',
+      bottom: '0',
+      zIndex: '1'
+    });
+
+    document.body.appendChild(iframe);
+    backgroundFrame = iframe;
+    return iframe;
+  }
+
   function setPinned(next, skipSave = false) {
     pinned = !!next;
     if (!skipSave) {
@@ -162,7 +196,8 @@
     }
     if (pinned) {
       if (!isConsolePage) {
-        buildOverlay();
+        removeOverlay();
+        buildBackgroundFrame();
       }
       loadClient().then(() => {
         if (window.OmConsoleClient) {
@@ -171,6 +206,7 @@
       });
     } else {
       removeOverlay();
+      removeBackgroundFrame();
       if (window.OmConsoleClient) {
         window.OmConsoleClient.unpinOmConsole();
       }
