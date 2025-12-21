@@ -276,21 +276,16 @@
     overlay.dataset.hidden = hidden ? 'true' : 'false';
     if (hidden) {
       applyStyles(overlay, {
-        top: '-9999px',
-        left: '-9999px',
-        right: 'auto',
-        bottom: 'auto',
-        width: '1px',
-        height: '1px',
-        borderRadius: '0',
         opacity: '0',
-        pointerEvents: 'none'
+        pointerEvents: 'none',
+        visibility: 'hidden'
       });
       return;
     }
     applyStyles(overlay, {
       opacity: '1',
-      pointerEvents: 'auto'
+      pointerEvents: 'auto',
+      visibility: 'visible'
     });
     applyOverlayLayout();
   }
