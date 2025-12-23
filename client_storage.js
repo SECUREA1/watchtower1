@@ -11,10 +11,15 @@ const STORE = 'faces';
 const SETTINGS_KEY = 'rednode.storage.settings.v1';
 const DEVICE_KEY = 'rednode.storage.device-id.v1';
 const DEFAULT_SERVER_URL = 'http://localhost:8000';
+const HEALTH_PATHS = ['/healthz', '/health'];
 
 const MAX_LOCAL_PREVIEW_BYTES = 2 * 1024 * 1024; // 2MB for local operations
 
 const el = (id) => document.getElementById(id);
+const runtimeStatus = {
+  serverOk: false,
+  serverMessage: '',
+};
 
 function uuid() {
   return crypto.randomUUID();
@@ -235,6 +240,38 @@ async function refreshFaceList() {
   await renderFaceList({ localFaces, serverFaces, serverUrl });
 }
 
+async function checkServerAvailability() {
+  const storageFeedback = el('storageFeedback');
+  const serverUrl = normalizeServerUrl(el('serverUrl')?.value || DEFAULT_SERVER_URL);
+  runtimeStatus.serverOk = false;
+  runtimeStatus.serverMessage = 'Checking server...';
+  if (storageFeedback) {
+    storageFeedback.textContent = runtimeStatus.serverMessage;
+    storageFeedback.className = 'storage-feedback';
+  }
+
+  for (const path of HEALTH_PATHS) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 5000);
+      const response = await fetch(`${serverUrl}${path}`, { signal: controller.signal });
+      clearTimeout(timer);
+      if (response.ok) {
+        runtimeStatus.serverOk = true;
+        runtimeStatus.serverMessage = 'Server reachable. Cloud uploads will commit to GitHub when enabled.';
+        updateStorageStatus();
+        return true;
+      }
+    } catch (error) {
+      // try next path
+    }
+  }
+
+  runtimeStatus.serverMessage = 'Server unreachable. Check URL or stay in Local mode.';
+  updateStorageStatus();
+  return false;
+}
+
 async function handleSaveFace() {
   const storageFeedback = el('storageFeedback');
   const defaultMode = getDefaultStorageMode();
@@ -254,6 +291,14 @@ async function handleSaveFace() {
   }
 
   if (storage === 'server' && !ensureConsent(consentChecked)) {
+    return;
+  }
+  if (storage === 'server' && !runtimeStatus.serverOk) {
+    if (storageFeedback) {
+      storageFeedback.textContent = 'Cloud not reachable. Keeping face local.';
+      storageFeedback.className = 'storage-feedback warn';
+    }
+    alert('Server is not reachable. Please verify the Server URL before uploading.');
     return;
   }
   consentChecked = Boolean(el('consentCheckbox')?.checked);
@@ -354,6 +399,10 @@ export async function syncLocalToServer() {
 
   const consentChecked = Boolean(el('consentCheckbox')?.checked);
   if (!ensureConsent(consentChecked)) return;
+  if (!runtimeStatus.serverOk) {
+    alert('Server is not reachable. Update the Server URL or stay in Local mode.');
+    return;
+  }
 
   for (const face of pending) {
     try {
@@ -385,14 +434,29 @@ function updateStorageStatus() {
   status.classList.toggle('cloud', mode === 'server');
   status.classList.toggle('local', mode !== 'server');
   if (statusText) {
-    statusText.textContent = mode === 'server' ? 'Cloud active' : 'Local active';
+    if (mode === 'server') {
+      statusText.textContent = runtimeStatus.serverOk ? 'Cloud active' : 'Cloud unavailable';
+    } else {
+      statusText.textContent = 'Local active';
+    }
   }
   if (storageAlert) {
     const consentChecked = Boolean(el('consentCheckbox')?.checked);
-    storageAlert.textContent =
-      mode === 'server' && !consentChecked
-        ? 'Consent is required before server uploads.'
-        : '';
+    const consentMsg =
+      mode === 'server' && !consentChecked ? 'Consent is required before server uploads.' : '';
+    const serverMsg =
+      mode === 'server' && !runtimeStatus.serverOk ? 'Server unreachable. Staying local.' : '';
+    storageAlert.textContent = consentMsg || serverMsg;
+  }
+  const storageFeedback = el('storageFeedback');
+  if (storageFeedback && runtimeStatus.serverMessage) {
+    storageFeedback.textContent = runtimeStatus.serverMessage;
+    storageFeedback.className =
+      runtimeStatus.serverOk && mode === 'server'
+        ? 'storage-feedback good'
+        : mode === 'server'
+          ? 'storage-feedback warn'
+          : 'storage-feedback';
   }
 }
 
@@ -405,6 +469,10 @@ function loadInitialUiState() {
     `input[name="defaultStorage"][value="${defaultMode}"]`
   );
   if (defaultChoice) defaultChoice.checked = true;
+  const perUploadChoice = document.querySelector(
+    `input[name="storageChoice"][value="${defaultMode}"]`
+  );
+  if (perUploadChoice) perUploadChoice.checked = true;
   el('consentCheckbox').checked = Boolean(settings.consent);
   updateStorageStatus();
 }
@@ -418,7 +486,14 @@ function wireUi() {
   document.querySelectorAll('input[name="defaultStorage"]').forEach((input) => {
     input.addEventListener('change', (event) => {
       writeSettings({ defaultMode: event.target.value, useServer: event.target.value === 'server' });
+      const perUploadChoice = document.querySelector(
+        `input[name="storageChoice"][value="${event.target.value}"]`
+      );
+      if (perUploadChoice) perUploadChoice.checked = true;
       updateStorageStatus();
+      if (event.target.value === 'server') {
+        checkServerAvailability();
+      }
     });
   });
 
@@ -429,6 +504,7 @@ function wireUi() {
 
   el('serverUrl')?.addEventListener('change', (event) => {
     writeSettings({ serverUrl: normalizeServerUrl(event.target.value) });
+    checkServerAvailability();
   });
 
   el('adminToken')?.addEventListener('change', (event) => {
@@ -439,6 +515,7 @@ function wireUi() {
 async function init() {
   loadInitialUiState();
   wireUi();
+  await checkServerAvailability();
   await refreshFaceList();
 }
 
