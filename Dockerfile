@@ -83,50 +83,10 @@ RUN apk add --no-cache curl
 
 EXPOSE 80
 
-# Healthcheck uses PORT env fallback to 80 (the shell expansion will work in HEALTHCHECK)
+# Healthcheck uses PORT env fallback to 80 (shell expression allowed here)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
   CMD sh -c 'curl -fsS --connect-timeout 2 "http://127.0.0.1:${PORT:-80}/healthz" || exit 1'
 
 # Start: set default PORT if unset, render the template and launch nginx in foreground.
 # The shell sets PORT variable to ${PORT:-80} before envsubst replacement.
 CMD ["sh", "-c", "PORT=${PORT:-80}; export PORT; envsubst '${PORT}' < /etc/nginx/conf.d/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
-
-    location ^~ /dashboard/ {
-        try_files $uri $uri/ $uri.html =404;
-    }
-
-    # Live folder - try files first then fallback to index
-    location ^~ /live/ {
-        try_files $uri $uri/ $uri.html /index.html;
-    }
-
-    # SPA fallback for other routes
-    location / {
-        try_files $uri $uri/ $uri.html /index.html;
-    }
-
-    # Static assets caching
-    location ~* \.(?:css|js|png|jpg|jpeg|gif|ico|svg|woff2?|ttf|eot)$ {
-        expires 7d;
-        add_header Cache-Control "public";
-    }
-
-    # Optional: deny access to dotfiles
-    location ~ /\. {
-        deny all;
-    }
-}
-EOF_CONF
-
-# Install curl so HEALTHCHECK can probe /healthz
-RUN apk add --no-cache curl
-
-EXPOSE 80
-
-# Healthcheck uses PORT env fallback to 80
-HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD sh -c 'curl -fsS --connect-timeout 2 "http://127.0.0.1:${PORT:-80}/healthz" || exit 1'
-
-# Start: render the template and launch nginx in foreground.
-# This substitutes the ${PORT} env var if provided by Render.
-CMD ["sh", "-c", "envsubst '$$PORT' < /etc/nginx/conf.d/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
