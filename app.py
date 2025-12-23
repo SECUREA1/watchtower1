@@ -12,7 +12,8 @@ from uuid import uuid4
 import requests
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 # -------------------------------------------------------------------------
@@ -24,6 +25,7 @@ IMAGES_DIR = FACES_DIR / "images"
 META_DIR = FACES_DIR / "meta"
 INDEX_PATH = FACES_DIR / "index.json"
 LOGS_DIR = DATA_DIR / "logs"
+STATIC_DIR = Path(os.getenv("STATIC_DIR", "/app/site")).resolve()
 
 MAX_UPLOAD_BYTES = int(
     os.getenv("MAX_UPLOAD_BYTES", os.getenv("MAX_IMAGE_SIZE_BYTES", str(2 * 1024 * 1024)))
@@ -543,4 +545,32 @@ async def healthz():
 async def health():
     return {"ok": True}
 
+if STATIC_DIR.exists():
+    app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
+else:
 
+    @app.get("/", response_class=HTMLResponse)
+    def index_missing():
+        return "<html><body><h1>RedNode UI not found</h1></body></html>"
+
+
+@app.get("/{full_path:path}", response_class=HTMLResponse)
+async def spa_fallback(full_path: str):
+    fallback = STATIC_DIR / "rednode.html"
+    if fallback.exists():
+        return FileResponse(str(fallback))
+    fallback2 = STATIC_DIR / "index.html"
+    if fallback2.exists():
+        return FileResponse(str(fallback2))
+    raise HTTPException(status_code=404, detail="Not found")
+
+
+@app.exception_handler(404)
+async def spa_fallback_handler(request: Request, exc: HTTPException):
+    path = request.url.path
+    if path.startswith("/api") or path in {"/healthz", "/health"}:
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    try:
+        return await spa_fallback(path.lstrip("/"))
+    except HTTPException as inner_exc:
+        return JSONResponse(status_code=inner_exc.status_code, content={"detail": inner_exc.detail})
