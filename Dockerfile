@@ -5,29 +5,29 @@ LABEL maintainer="RedNode <ops@rednode.ai>"
 
 WORKDIR /usr/share/nginx/html
 
-# Copy site files (explicit for clarity)
-COPY start.html                                    /usr/share/nginx/html/index.html
-COPY start.html                                    /usr/share/nginx/html/start.html
-COPY rednode.html                                  /usr/share/nginx/html/rednode.html
-COPY secure.html                                   /usr/share/nginx/html/secure.html
-COPY dashboard1.html                               /usr/share/nginx/html/dashboard1.html
-COPY dashboard.html                                /usr/share/nginx/html/dashboard.html
-COPY home.html                                     /usr/share/nginx/html/home.html
-COPY sensor2.html                                  /usr/share/nginx/html/sensor2.html
-COPY omconsole_render_single.html                  /usr/share/nginx/html/omconsole_render_single.html
-COPY omconsole_render_single_games_ROUTING.html    /usr/share/nginx/html/omconsole_render_single_games_ROUTING.html
+# Copy site files from /site (explicit for clarity)
+COPY site/start.html                                    /usr/share/nginx/html/index.html
+COPY site/start.html                                    /usr/share/nginx/html/start.html
+COPY site/rednode.html                                  /usr/share/nginx/html/rednode.html
+COPY site/secure.html                                   /usr/share/nginx/html/secure.html
+COPY site/dashboard1.html                               /usr/share/nginx/html/dashboard1.html
+COPY site/dashboard.html                                /usr/share/nginx/html/dashboard.html
+COPY site/home.html                                     /usr/share/nginx/html/home.html
+COPY site/sensor2.html                                  /usr/share/nginx/html/sensor2.html
+COPY site/omconsole_render_single.html                  /usr/share/nginx/html/omconsole_render_single.html
+COPY site/omconsole_render_single_games_ROUTING.html    /usr/share/nginx/html/omconsole_render_single_games_ROUTING.html
 
 # New pages (optional)
-COPY marketplace.html      /usr/share/nginx/html/marketplace.html
-COPY chainmarket.html      /usr/share/nginx/html/chainmarket.html
+COPY site/marketplace.html      /usr/share/nginx/html/marketplace.html
+COPY site/chainmarket.html      /usr/share/nginx/html/chainmarket.html
 
 # Dashboard folder + telematics page
 RUN mkdir -p /usr/share/nginx/html/dashboard
-COPY dashboard/            /usr/share/nginx/html/dashboard/
+COPY site/dashboard/            /usr/share/nginx/html/dashboard/
 
 # Static directories
-COPY live/                 /usr/share/nginx/html/live/
-COPY static/               /usr/share/nginx/html/static/
+COPY site/live/                 /usr/share/nginx/html/live/
+COPY site/static/               /usr/share/nginx/html/static/
 
 # Ensure correct ownership/permissions (nginx runs as nginx user)
 RUN chown -R nginx:nginx /usr/share/nginx/html \
