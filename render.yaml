@@ -1,23 +1,5 @@
-# render.yaml - multi-service for RedNode (static frontend, node ws, python API)
+# render.yaml - unified Docker deployment for RedNode API + UI
 services:
-  - type: web
-    name: rednode-excavation-site
-    runtime: static
-    repo: https://github.com/SECUREA1/REDNODE.git
-    branch: main
-    buildCommand: ""
-    staticPublishPath: .
-    previews:
-      generation: automatic
-    plan: starter
-    autoDeploy: true
-    # Optional envs for the static site (not secrets)
-    envVars:
-      - key: RN_SITE_NAME
-        value: "RedNode"
-      - key: RN_API_HINT
-        value: "Set API Base in UI (Settings → API Base)"
-
   - type: web
     name: rednode-excavation-ws
     runtime: node
@@ -30,51 +12,38 @@ services:
     healthCheckPath: /healthz
     autoDeploy: true
     envVars:
-      # Add any runtime configuration here
       - key: NODE_ENV
         value: "production"
 
   - type: web
     name: rednode-api
-    runtime: python
+    env: docker
     repo: https://github.com/SECUREA1/REDNODE.git
     branch: main
     rootDir: .
     plan: starter
-    # Build: install dependencies from requirements.txt
-    buildCommand: pip install -r requirements.txt
-    # Use PORT env provided by Render at runtime
-    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT --workers 1
+    buildCommand: docker build -t rednode-api:latest -f Dockerfile.api .
+    startCommand: sh -c "uvicorn app:app --host 0.0.0.0 --port $PORT --workers 1"
     healthCheckPath: /healthz
     autoDeploy: true
-
-    # Persistent disk for DATA_DIR -> /opt/rednode/data (attach in UI)
     disk:
       mountPath: /opt/rednode/data
       sizeGB: 20
-
     envVars:
-      # storage & runtime
       - key: DATA_DIR
         value: "/opt/rednode/data"
+      - key: STATIC_DIR
+        value: "/app/site"
       - key: MAX_UPLOAD_BYTES
-        value: "2097152"               # 2 MB limit
-      - key: MAX_IMAGE_SIZE_BYTES
-        value: "2097152"               # alternate name for compatibility
+        value: "2097152"
       - key: STORAGE_BACKEND
-        value: "local"                 # GitHub-only flow stores images locally and commits them
+        value: "local"
       - key: ALLOW_PUBLIC_INGEST
         value: "0"
       - key: ALLOWED_ORIGINS
         value: "https://rednode-excavation-site.onrender.com"
       - key: LOG_LEVEL
         value: "INFO"
-      - key: HOST
-        value: "0.0.0.0"
-      - key: PORT
-        value: "8000"
-
-      # GitHub integration (non-secret)
       - key: GITHUB_ENABLED
         value: "1"
       - key: GITHUB_OWNER
@@ -84,22 +53,10 @@ services:
       - key: GITHUB_BRANCH
         value: "main"
       - key: GITHUB_PR_FLOW
-        value: "1"                     # RECOMMENDED: create branch + PR for review
-
-      # Optional production security / monitoring
-      - key: SENTRY_DSN
-        value: ""                      # set in Render as secure if you use Sentry
-      - key: JWT_ISSUER
-        value: ""                      # optional if you migrate to JWT auth
-
-      # Secrets (set in Render UI as secure values — leave value blank here)
+        value: "1"
       - key: GITHUB_TOKEN
         secure: true
         value: ""
       - key: ADMIN_TOKEN
         secure: true
         value: ""
-
-      # Optional: feature flags / operational toggles
-      - key: RATE_LIMIT_REQUESTS_PER_MINUTE
-        value: "1000"

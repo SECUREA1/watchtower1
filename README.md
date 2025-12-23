@@ -69,6 +69,14 @@ Check health:
 curl http://localhost:8000/healthz
 ```
 
+### Static UI bundle
+
+All frontend assets now live in the repo-level `site/` directory and are served by the FastAPI app via `StaticFiles`. Set `STATIC_DIR` if you need to point to an alternate location inside a container or host.
+
+### Legacy nginx image
+
+The root-level `Dockerfile` builds the former nginx-only static site. Deployment now relies on the combined FastAPI container (see `Dockerfile.api`), but the nginx Dockerfile is retained for reference or bespoke builds.
+
 ---
 
 ## Client Usage
