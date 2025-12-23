@@ -11,6 +11,12 @@ services:
       generation: automatic
     plan: starter
     autoDeploy: true
+    # Optional envs for the static site (not secrets)
+    envVars:
+      - key: RN_SITE_NAME
+        value: "RedNode"
+      - key: RN_API_HINT
+        value: "Set API Base in UI (Settings → API Base)"
 
   - type: web
     name: rednode-excavation-ws
@@ -23,6 +29,10 @@ services:
     startCommand: node server.js
     healthCheckPath: /healthz
     autoDeploy: true
+    envVars:
+      # Add any runtime configuration here
+      - key: NODE_ENV
+        value: "production"
 
   - type: web
     name: rednode-api
@@ -31,28 +41,38 @@ services:
     branch: main
     rootDir: .
     plan: starter
+    # Build: install dependencies from requirements.txt
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app:app --host 0.0.0.0 --port 8000 --workers 1
+    # Use PORT env provided by Render at runtime
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT --workers 1
     healthCheckPath: /healthz
     autoDeploy: true
-    # Persistent disk for DATA_DIR -> /opt/rednode/data
+
+    # Persistent disk for DATA_DIR -> /opt/rednode/data (ensure you attach in UI)
     disk:
       mountPath: /opt/rednode/data
       sizeGB: 20
+
     envVars:
       # storage & runtime
       - key: DATA_DIR
         value: "/opt/rednode/data"
       - key: MAX_UPLOAD_BYTES
-        value: "2097152"
+        value: "2097152"               # 2 MB limit (app expects MAX_UPLOAD_BYTES)
+      - key: MAX_IMAGE_SIZE_BYTES
+        value: "2097152"               # accepted alternate name for compatibility
       - key: STORAGE_BACKEND
-        value: "local"
+        value: "local"                 # set to "s3" for production object storage
       - key: ALLOW_PUBLIC_INGEST
         value: "0"
       - key: ALLOWED_ORIGINS
-        value: "https://rednode-excavation-site.onrender.com"
+        value: "https://rednode-excavation-site.onrender.com,https://rednode-excavation-site.onrender.com/" # comma separated
       - key: LOG_LEVEL
         value: "INFO"
+      - key: HOST
+        value: "0.0.0.0"
+      - key: PORT
+        value: "8000"
 
       # GitHub integration (non-secret)
       - key: GITHUB_ENABLED
@@ -66,7 +86,13 @@ services:
       - key: GITHUB_PR_FLOW
         value: "0"
 
-      # Secrets (set in Render UI as secure values)
+      # Optional production security / monitoring
+      - key: SENTRY_DSN
+        value: ""                      # set in Render as secure if you use Sentry
+      - key: JWT_ISSUER
+        value: ""                      # optional if you migrate to JWT auth
+
+      # Secrets (set in Render UI as secure values — leave value blank here)
       - key: GITHUB_TOKEN
         secure: true
         value: ""
@@ -74,7 +100,7 @@ services:
         secure: true
         value: ""
 
-      # Optional S3 (only if STORAGE_BACKEND=s3)
+      # Optional S3 (only if STORAGE_BACKEND=s3) - mark secure in Render
       - key: AWS_ACCESS_KEY_ID
         secure: true
         value: ""
@@ -85,4 +111,9 @@ services:
         value: "us-east-1"
       - key: S3_BUCKET
         value: ""
+
+      # Optional: feature flags / operational toggles
+      - key: RATE_LIMIT_REQUESTS_PER_MINUTE
+        value: "1000"
+
 
