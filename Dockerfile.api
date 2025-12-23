@@ -1,0 +1,32 @@
+# Dockerfile.api - FastAPI backend image for RedNode
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Minimal system deps for wheels/builds
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends build-essential gcc \
+ && rm -rf /var/lib/apt/lists/*
+
+# Install python deps
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+# Copy app code
+COPY . /app
+
+# Create runtime user & data dir, give ownership
+RUN useradd -r -s /bin/false rednode || true \
+ && mkdir -p /opt/rednode/data \
+ && chown -R rednode:rednode /opt/rednode \
+ && chown -R rednode:rednode /app
+
+USER rednode
+
+EXPOSE 8000
+
+# Run with uvicorn (use 1 worker to be safe inside small container; adjust for scale)
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
