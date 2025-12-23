@@ -1,3 +1,4 @@
+# app.py (updated)
 import base64
 import json
 import logging
@@ -9,11 +10,14 @@ from typing import Dict, List, Optional
 from uuid import uuid4
 
 import requests
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
+# -------------------------------------------------------------------------
+# Paths & Environment
+# -------------------------------------------------------------------------
 DATA_DIR = Path(os.getenv("DATA_DIR", "./data")).resolve()
 FACES_DIR = DATA_DIR / "faces"
 IMAGES_DIR = FACES_DIR / "images"
@@ -21,7 +25,10 @@ META_DIR = FACES_DIR / "meta"
 INDEX_PATH = FACES_DIR / "index.json"
 LOGS_DIR = DATA_DIR / "logs"
 
-MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(2 * 1024 * 1024)))
+# Support both names for backward compatibility
+MAX_UPLOAD_BYTES = int(
+    os.getenv("MAX_UPLOAD_BYTES", os.getenv("MAX_IMAGE_SIZE_BYTES", str(2 * 1024 * 1024)))
+)
 ALLOWED_MIME = {"image/jpeg", "image/png", "image/webp"}
 
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
@@ -36,20 +43,34 @@ GITHUB_PR_FLOW = os.getenv("GITHUB_PR_FLOW", "0").lower() in {"1", "true", "yes"
 
 INDEX_LOCK = threading.Lock()
 
-logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
+# -------------------------------------------------------------------------
+# Logging & FastAPI app
+# -------------------------------------------------------------------------
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO), format="[%(levelname)s] %(message)s")
 logger = logging.getLogger("rednode")
 
 app = FastAPI(title="RedNode Storage API")
 
+# Read ALLOWED_ORIGINS env and configure CORS (do NOT use '*')
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "")
+if ALLOWED_ORIGINS:
+    allow_origins_list = [o.strip() for o in ALLOWED_ORIGINS.split(",") if o.strip()]
+else:
+    # safe default for local/dev
+    allow_origins_list = ["http://localhost:8000"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allow_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
+# -------------------------------------------------------------------------
+# Pydantic response models
+# -------------------------------------------------------------------------
 class FaceAddResponse(BaseModel):
     ok: bool
     face_id: str
@@ -75,26 +96,50 @@ class LogsPayload(BaseModel):
     source_device_id: Optional[str] = None
     captured_at: Optional[str] = None
 
-
+# -------------------------------------------------------------------------
+# Filesystem helpers
+# -------------------------------------------------------------------------
 def ensure_dirs() -> None:
     IMAGES_DIR.mkdir(parents=True, exist_ok=True)
     META_DIR.mkdir(parents=True, exist_ok=True)
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        IMAGES_DIR.chmod(0o700)
+        META_DIR.chmod(0o700)
+        LOGS_DIR.chmod(0o700)
+    except PermissionError:
+        # Running in environments where chmod isn't permitted; ignore
+        pass
 
 
 def load_index() -> List[dict]:
     if not INDEX_PATH.exists():
         return []
     try:
-        return json.loads(INDEX_PATH.read_text())
+        return json.loads(INDEX_PATH.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
+        logger.exception("Index JSON corrupted; returning empty index")
         return []
 
 
 def save_index(index: List[dict]) -> None:
-    INDEX_PATH.write_text(json.dumps(index, indent=2))
+    # atomic write to avoid partial/corrupt index
+    INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = INDEX_PATH.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(index, indent=2, ensure_ascii=False), encoding="utf-8")
+    try:
+        tmp.replace(INDEX_PATH)
+    except Exception:
+        # fallback
+        INDEX_PATH.write_text(json.dumps(index, indent=2, ensure_ascii=False), encoding="utf-8")
+    try:
+        INDEX_PATH.chmod(0o600)
+    except PermissionError:
+        pass
 
-
+# -------------------------------------------------------------------------
+# Auth & validation helpers
+# -------------------------------------------------------------------------
 def parse_token(request: Request) -> str:
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Bearer "):
@@ -135,8 +180,12 @@ def build_image_path(face_id: str, content_type: str) -> Path:
         ext = "webp"
     return IMAGES_DIR / f"{face_id}.{ext}"
 
-
+# -------------------------------------------------------------------------
+# GitHub helpers
+# -------------------------------------------------------------------------
 def github_headers() -> Dict[str, str]:
+    if not GITHUB_TOKEN:
+        logger.error("GITHUB_TOKEN is not set")
     return {
         "Authorization": f"token {GITHUB_TOKEN}",
         "Accept": "application/vnd.github+json",
@@ -220,12 +269,16 @@ def update_ref(branch: str, sha: str) -> None:
 
 
 def create_branch(branch_name: str, base_sha: str) -> None:
+    # Attempt to create a branch; if the branch already exists, continue.
     response = requests.post(
         github_api(f"/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/refs"),
         headers=github_headers(),
         json={"ref": f"refs/heads/{branch_name}", "sha": base_sha},
         timeout=20,
     )
+    if response.status_code == 422 and "Reference already exists" in response.text:
+        logger.warning("Branch %s already exists; continuing.", branch_name)
+        return
     if response.status_code >= 300:
         raise HTTPException(status_code=502, detail=f"GitHub create branch error: {response.text}")
 
@@ -267,7 +320,9 @@ def raw_github_url(path: str, branch: Optional[str] = None) -> str:
     branch = branch or GITHUB_BRANCH
     return f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/{branch}/{path}"
 
-
+# -------------------------------------------------------------------------
+# Index helpers & ingestion
+# -------------------------------------------------------------------------
 def prepare_index_record(
     metadata: dict,
     image_path: Path,
@@ -307,7 +362,13 @@ def ingest_file(content: bytes, content_type: str, metadata: dict) -> dict:
     meta_path = META_DIR / f"{face_id}.json"
 
     image_path.write_bytes(content)
-    meta_path.write_text(json.dumps(metadata, indent=2))
+    meta_path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False))
+
+    try:
+        image_path.chmod(0o600)
+        meta_path.chmod(0o600)
+    except PermissionError:
+        pass
 
     return {
         "face_id": face_id,
@@ -375,7 +436,9 @@ def commit_to_github(files: Dict[str, bytes], face_id: str) -> Dict[str, Optiona
     commit_sha = commit_files_to_github(files, message)
     return {"committed": True, "sha": commit_sha, "pr_url": None, "branch": GITHUB_BRANCH}
 
-
+# -------------------------------------------------------------------------
+# Routes
+# -------------------------------------------------------------------------
 @app.post("/api/faces/add", response_model=FaceAddResponse)
 async def add_face(
     request: Request,
@@ -453,7 +516,6 @@ async def add_face(
         pr_url=pr_url,
         message="Face stored successfully.",
     )
-
 
 @app.post("/api/faces/sync")
 async def sync_faces(request: Request, images: Optional[List[UploadFile]] = File(None), metadata: Optional[str] = Form(None)):
@@ -588,9 +650,10 @@ async def add_logs(payload: LogsPayload, request: Request):
 
 @app.get("/healthz")
 async def healthz():
-    return {"status": "ok"}
+    return {"ok": True}
 
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {"ok": True}
+
