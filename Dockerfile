@@ -1,9 +1,12 @@
-# Use nginx
+# Dockerfile (nginx static site)
+# Uses nginx on alpine and serves a static site with a small health endpoint.
 FROM nginx:alpine
+
+LABEL maintainer="RedNode <ops@rednode.ai>"
 
 WORKDIR /usr/share/nginx/html
 
-# Copy site files
+# Copy site files (explicit for clarity)
 COPY start.html                                    /usr/share/nginx/html/index.html
 COPY start.html                                    /usr/share/nginx/html/start.html
 COPY rednode.html                                  /usr/share/nginx/html/rednode.html
@@ -15,40 +18,46 @@ COPY sensor2.html                                  /usr/share/nginx/html/sensor2
 COPY omconsole_render_single.html                  /usr/share/nginx/html/omconsole_render_single.html
 COPY omconsole_render_single_games_ROUTING.html    /usr/share/nginx/html/omconsole_render_single_games_ROUTING.html
 
-# New pages: make sure these files exist in your build context
+# New pages (optional)
 COPY marketplace.html      /usr/share/nginx/html/marketplace.html
 COPY chainmarket.html      /usr/share/nginx/html/chainmarket.html
 
-# Dashboard folder + new telematics page
+# Dashboard folder + telematics page
 RUN mkdir -p /usr/share/nginx/html/dashboard
-
-# Copy the dashboard directory (includes rednodetelmatics.html)
 COPY dashboard/            /usr/share/nginx/html/dashboard/
 
 # Static directories
 COPY live/                 /usr/share/nginx/html/live/
 COPY static/               /usr/share/nginx/html/static/
 
-# If you have additional assets for marketplace/chainmarket, copy them too:
-# (optional — uncomment if you have a marketplace/ or chainmarket/ asset folder)
-# COPY marketplace/        /usr/share/nginx/html/marketplace/
-# COPY chainmarket/        /usr/share/nginx/html/chainmarket/
+# Ensure correct ownership/permissions (nginx runs as nginx user)
+RUN chown -R nginx:nginx /usr/share/nginx/html \
+ && find /usr/share/nginx/html -type d -exec chmod 755 {} \; \
+ && find /usr/share/nginx/html -type f -exec chmod 644 {} \;
 
 # Create nginx config template at build-time
 RUN cat > /etc/nginx/conf.d/default.conf.template <<'EOF_CONF'
 server {
-    listen 80;
+    listen ${PORT:-80};
     server_name _;
 
     root /usr/share/nginx/html;
     index index.html;
 
+    # Health endpoint (returns JSON)
+    location = /healthz {
+        default_type application/json;
+        return 200 '{"ok": true}';
+    }
+
     # Serve dashboard files directly (avoid SPA fallback)
-    # This ensures requests like /dashboard/rednodetelmatics.html
-    # return the actual file instead of falling back to index.html.
     location ^~ /dashboard/ {
-        # root is already set globally; try the file, directory, or the .html variant, otherwise 404
         try_files $uri $uri/ $uri.html =404;
+    }
+
+    # Live folder - try files first then fallback to index
+    location ^~ /live/ {
+        try_files $uri $uri/ $uri.html /index.html;
     }
 
     # SPA fallback for other routes
@@ -62,14 +71,22 @@ server {
         add_header Cache-Control "public";
     }
 
-    location /live/ {
-        try_files $uri $uri/ $uri.html /index.html;
+    # Optional: deny access to dotfiles
+    location ~ /\. {
+        deny all;
     }
 }
 EOF_CONF
 
-# Expose documentation only; Render provides actual PORT via env
+# Install curl so HEALTHCHECK can probe /healthz
+RUN apk add --no-cache curl
+
 EXPOSE 80
 
-# Provide a safe default if PORT isn't set (uses 80)
-CMD ["sh", "-c", "sed -e \"s/listen 80;/listen ${PORT:-80};/g\" /etc/nginx/conf.d/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
+# Healthcheck uses PORT env fallback to 80
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD sh -c 'curl -fsS --connect-timeout 2 "http://127.0.0.1:${PORT:-80}/healthz" || exit 1'
+
+# Start: render the template and launch nginx in foreground.
+# This substitutes the ${PORT} env var if provided by Render.
+CMD ["sh", "-c", "envsubst '$$PORT' < /etc/nginx/conf.d/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
