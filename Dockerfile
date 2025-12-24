@@ -5,32 +5,11 @@ LABEL maintainer="RedNode <ops@rednode.ai>"
 
 WORKDIR /usr/share/nginx/html
 
-# Copy site files from /site (explicit for clarity)
-COPY site/start.html                                    /usr/share/nginx/html/index.html
-COPY site/start.html                                    /usr/share/nginx/html/start.html
-COPY site/rednode.html                                  /usr/share/nginx/html/rednode.html
-COPY site/secure.html                                   /usr/share/nginx/html/secure.html
-COPY site/dashboard1.html                               /usr/share/nginx/html/dashboard1.html
-COPY site/dashboard.html                                /usr/share/nginx/html/dashboard.html
-COPY site/home.html                                     /usr/share/nginx/html/home.html
-COPY site/sensor2.html                                  /usr/share/nginx/html/sensor2.html
-COPY site/omconsole_render_single.html                  /usr/share/nginx/html/omconsole_render_single.html
-COPY site/omconsole_render_single_games_ROUTING.html    /usr/share/nginx/html/omconsole_render_single_games_ROUTING.html
-COPY site/client_storage.js                             /usr/share/nginx/html/client_storage.js
-COPY site/detection.js                                  /usr/share/nginx/html/detection.js
-COPY site/battery.svg                                   /usr/share/nginx/html/battery.svg
+# Copy all site assets (HTML, JS, SVG, and folders) to the web root
+COPY site/ /usr/share/nginx/html/
 
-# New pages (optional)
-COPY site/marketplace.html      /usr/share/nginx/html/marketplace.html
-COPY site/chainmarket.html      /usr/share/nginx/html/chainmarket.html
-
-# Dashboard folder + telematics page
-RUN mkdir -p /usr/share/nginx/html/dashboard
-COPY site/dashboard/            /usr/share/nginx/html/dashboard/
-
-# Static directories
-COPY site/live/                 /usr/share/nginx/html/live/
-COPY site/static/               /usr/share/nginx/html/static/
+# Duplicate start page for the root index route
+RUN cp /usr/share/nginx/html/start.html /usr/share/nginx/html/index.html
 
 # Ensure correct ownership/permissions (nginx runs as nginx user)
 RUN chown -R nginx:nginx /usr/share/nginx/html \
