@@ -19,13 +19,24 @@ from pydantic import BaseModel, Field
 # -------------------------------------------------------------------------
 # Paths & Environment
 # -------------------------------------------------------------------------
+REPO_ROOT = Path(__file__).resolve().parent
+
 DATA_DIR = Path(os.getenv("DATA_DIR", "/opt/rednode/data")).resolve()
 FACES_DIR = DATA_DIR / "faces"
 IMAGES_DIR = FACES_DIR / "images"
 META_DIR = FACES_DIR / "meta"
 INDEX_PATH = FACES_DIR / "index.json"
 LOGS_DIR = DATA_DIR / "logs"
-STATIC_DIR = Path(os.getenv("STATIC_DIR", "/app/site")).resolve()
+
+# Prefer an explicit STATIC_DIR, then the repo's bundled site/, and finally
+# the container-friendly /app/site location. This avoids "UI not found" when
+# running locally without a mounted site directory.
+STATIC_DIR_ENV = os.getenv("STATIC_DIR")
+STATIC_DIR = (Path(STATIC_DIR_ENV) if STATIC_DIR_ENV else REPO_ROOT / "site").resolve()
+if not STATIC_DIR.exists():
+    alt_static = Path("/app/site").resolve()
+    if alt_static.exists():
+        STATIC_DIR = alt_static
 
 MAX_UPLOAD_BYTES = int(
     os.getenv("MAX_UPLOAD_BYTES", os.getenv("MAX_IMAGE_SIZE_BYTES", str(2 * 1024 * 1024)))
