@@ -538,6 +538,18 @@
       display:grid;
       gap:10px;
     }
+    .tune-grid{
+      display:grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap:10px;
+      align-items:end;
+    }
+    .tune-status{
+      font-size:12px;
+      color:var(--muted2);
+    }
+    .tune-status.good{color:#86efac}
+    .tune-status.warn{color:#fbbf24}
     .unknown-grid{
       display:grid;
       grid-template-columns: 96px 1fr;
@@ -1284,6 +1296,59 @@
               </div>
 
               <div class="panel-section">
+                <div class="title"><span aria-hidden="true">🎚️</span> Tune Panel — Buzz Alerts</div>
+                <div class="subtitle">Trigger an internal buzz when tuned conditions are met.</div>
+                <div class="row" style="align-items:center">
+                  <label class="storage-pill">
+                    <input id="tuneEnable" type="checkbox" />
+                    Enable buzz alert
+                  </label>
+                  <span class="pill-mini" id="tuneConditionBadge">Idle</span>
+                </div>
+                <div class="choice-toggle">
+                  <label class="choice-option">
+                    <input type="radio" name="tuneTargetType" value="person" checked />
+                    <span>Person</span>
+                  </label>
+                  <label class="choice-option">
+                    <input type="radio" name="tuneTargetType" value="object" />
+                    <span>Object</span>
+                  </label>
+                </div>
+                <div class="tune-grid">
+                  <div>
+                    <label class="small" for="tuneTargetInput"><b>Target name / label</b></label>
+                    <input id="tuneTargetInput" type="text" list="tuneTargetSuggestions" placeholder="e.g., Mia or laptop" />
+                  </div>
+                  <div>
+                    <label class="small" for="tuneCondition"><b>Condition</b></label>
+                    <select id="tuneCondition">
+                      <option value="duration">Seen for at least</option>
+                      <option value="holding">Holding object</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="small" for="tuneSeconds"><b>Seconds required</b></label>
+                    <input id="tuneSeconds" type="number" min="0.5" step="0.5" value="2" />
+                  </div>
+                </div>
+                <div class="tune-grid" id="tuneHeldRow">
+                  <div>
+                    <label class="small" for="tuneHeldInput"><b>Object held (for holding condition)</b></label>
+                    <input id="tuneHeldInput" type="text" list="tuneHeldSuggestions" placeholder="e.g., laptop or badge" />
+                  </div>
+                </div>
+                <datalist id="tuneTargetSuggestions"></datalist>
+                <datalist id="tuneHeldSuggestions"></datalist>
+                <div class="row" style="margin-top:6px">
+                  <button id="btnSaveTune" class="good" type="button">💾 Save tuned alert</button>
+                  <button id="btnTestBuzz" class="ghost" type="button">🧪 Test buzz</button>
+                  <button id="btnClearTune" class="danger" type="button">✖ Clear</button>
+                </div>
+                <div class="hint tune-status" id="tuneStatus">No tuned alert configured.</div>
+              </div>
+
+              <div class="panel-section">
                 <div class="title"><span aria-hidden="true">🧠</span> Object Recall &amp; History</div>
                 <div class="subtitle">Select object to recall its event history</div>
                 <label class="small" for="objectSelect">Object</label>
@@ -1589,6 +1654,7 @@
         settings:      "rednode.security.settings.v2",
         trackCounter:  "rednode.security.trackCounter.v1",
         camBindings:   "rednode.security.camBindings.v1",
+        tunedAlert:    "rednode.security.tunedAlert.v1",
       };
 
       const isLikelyIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent)
@@ -1641,6 +1707,25 @@
 
       let camBindings = loadJSON(LS_KEYS.camBindings, {});
       let trackedObjects = new Set(Object.keys(objectMemory));
+
+      const tunedAlertDefaults = {
+        enabled: false,
+        targetType: "person",
+        targetLabel: "",
+        condition: "duration",
+        seconds: 2,
+        heldObject: "",
+        cooldownMs: 4200,
+      };
+      let tunedAlertConfig = loadJSON(LS_KEYS.tunedAlert, tunedAlertDefaults);
+      tunedAlertConfig = Object.assign({}, tunedAlertDefaults, tunedAlertConfig || {});
+      if(tunedAlertConfig.targetType !== "object") tunedAlertConfig.targetType = "person";
+      if(!["duration","holding"].includes(tunedAlertConfig.condition)) tunedAlertConfig.condition = "duration";
+      tunedAlertConfig.seconds = Math.max(0.5, Number(tunedAlertConfig.seconds) || tunedAlertDefaults.seconds);
+      tunedAlertConfig.cooldownMs = Math.max(1200, Number(tunedAlertConfig.cooldownMs) || tunedAlertDefaults.cooldownMs);
+      const tunedPresence = new Map();
+      const tunedAlertState = { lastBuzzAt: 0 };
+      let tunedAudioCtx = null;
 
       // Camera + render state
       const MAX_CAM_UI = isLikelyMobile() ? 2 : 4;
@@ -1791,6 +1876,20 @@
       const logToggleButtons = Array.from(document.querySelectorAll(".log-toggle-btn"));
       const mobileLogTrackedBtn = document.querySelector("[data-log-panel-button=\"tracked\"]");
       const mobileLogLogsBtn = document.querySelector("[data-log-panel-button=\"logs\"]");
+      const tuneEnable = el("tuneEnable");
+      const tuneCondition = el("tuneCondition");
+      const tuneSeconds = el("tuneSeconds");
+      const tuneHeldInput = el("tuneHeldInput");
+      const tuneTargetInput = el("tuneTargetInput");
+      const tuneStatus = el("tuneStatus");
+      const tuneConditionBadge = el("tuneConditionBadge");
+      const tuneHeldRow = el("tuneHeldRow");
+      const tuneTargetSuggestions = el("tuneTargetSuggestions");
+      const tuneHeldSuggestions = el("tuneHeldSuggestions");
+      const btnSaveTune = el("btnSaveTune");
+      const btnTestBuzz = el("btnTestBuzz");
+      const btnClearTune = el("btnClearTune");
+      const tuneTargetTypeRadios = Array.from(document.querySelectorAll("input[name=\"tuneTargetType\"]"));
 
       el("year").textContent = new Date().getFullYear();
 
@@ -1805,6 +1904,8 @@
       buildCameraCards();
       buildCameraSelectors();
       applySettingsToUI();
+      applyTuneConfigToUI();
+      refreshTuneSuggestions();
       setLogViewMode(logViewMode, false);
       refreshAll();
 
@@ -1977,6 +2078,80 @@
       }
 
       /***********************
+       * Tuned alert UI helpers
+       ***********************/
+      function getTuneTargetType(){
+        const picked = tuneTargetTypeRadios.find(r => r.checked);
+        return (picked && picked.value === "object") ? "object" : "person";
+      }
+
+      function updateTuneInputsVisibility(){
+        if(!tuneHeldRow || !tuneCondition) return;
+        const isHolding = (tuneCondition.value === "holding");
+        tuneHeldRow.style.display = isHolding ? "grid" : "none";
+      }
+
+      function updateTuneStatus(extra=""){
+        if(!tuneStatus) return;
+        if(!tunedAlertConfig.enabled){
+          tuneStatus.textContent = extra ? `Buzz alert disabled — ${extra}` : "Buzz alert disabled.";
+          tuneStatus.classList.remove("good");
+          tuneStatus.classList.add("warn");
+          if(tuneConditionBadge) tuneConditionBadge.textContent = "Disabled";
+          return;
+        }
+        if(!tunedAlertConfig.targetLabel){
+          tuneStatus.textContent = "Add a person or object label to arm the buzz alert.";
+          tuneStatus.classList.remove("good");
+          tuneStatus.classList.add("warn");
+          if(tuneConditionBadge) tuneConditionBadge.textContent = "Need label";
+          return;
+        }
+        const condLabel = tunedAlertConfig.condition === "holding"
+          ? `Holding ${tunedAlertConfig.heldObject || "object"}`
+          : `Seen ${tunedAlertConfig.seconds}s+`;
+        const targetLabel = tunedAlertConfig.targetLabel || "—";
+        const summary = `${tunedAlertConfig.targetType === "object" ? "Object" : "Person"} ${targetLabel} • ${condLabel}`;
+        tuneStatus.textContent = extra ? `${summary} — ${extra}` : summary;
+        tuneStatus.classList.add("good");
+        tuneStatus.classList.remove("warn");
+        if(tuneConditionBadge) tuneConditionBadge.textContent = "Armed";
+      }
+
+      function applyTuneConfigToUI(){
+        if(tuneEnable) tuneEnable.checked = !!tunedAlertConfig.enabled;
+        if(tuneCondition) tuneCondition.value = tunedAlertConfig.condition || "duration";
+        if(tuneSeconds) tuneSeconds.value = tunedAlertConfig.seconds;
+        if(tuneTargetInput) tuneTargetInput.value = tunedAlertConfig.targetLabel || "";
+        if(tuneHeldInput) tuneHeldInput.value = tunedAlertConfig.heldObject || "";
+        tuneTargetTypeRadios.forEach(r => {
+          r.checked = (r.value === tunedAlertConfig.targetType);
+        });
+        updateTuneInputsVisibility();
+        updateTuneStatus();
+      }
+
+      function fillDataList(listEl, values){
+        if(!listEl) return;
+        listEl.innerHTML = "";
+        values.forEach(val => {
+          const opt = document.createElement("option");
+          opt.value = val;
+          listEl.appendChild(opt);
+        });
+      }
+
+      function refreshTuneSuggestions(){
+        if(!tuneTargetSuggestions || !tuneHeldSuggestions) return;
+        const names = new Set();
+        Object.keys(objectMemory || {}).forEach(k => names.add(getDisplayName(k)));
+        Object.keys(peopleMovementMemory || {}).forEach(p => names.add(p));
+        DEMO_PEOPLE.forEach(p => names.add(p));
+        fillDataList(tuneTargetSuggestions, names);
+        fillDataList(tuneHeldSuggestions, names);
+      }
+
+      /***********************
        * UI wiring
        ***********************/
       el("chkDemoMode").addEventListener("change", async (e)=>{
@@ -2058,6 +2233,74 @@
               addCvLog("Detector switch failed: " + (err?.message || err), "bad");
             }
           }
+        });
+      }
+
+      const persistTuneConfig = (msg="")=>{
+        saveJSON(LS_KEYS.tunedAlert, tunedAlertConfig);
+        updateTuneStatus(msg);
+      };
+
+      if(tuneCondition){
+        tuneCondition.addEventListener("change", ()=>{
+          tunedAlertConfig.condition = tuneCondition.value || "duration";
+          updateTuneInputsVisibility();
+          persistTuneConfig();
+        });
+      }
+
+      if(tuneSeconds){
+        tuneSeconds.addEventListener("change", ()=>{
+          tunedAlertConfig.seconds = Math.max(0.5, Number(tuneSeconds.value) || tunedAlertDefaults.seconds);
+          persistTuneConfig();
+        });
+      }
+
+      if(tuneEnable){
+        tuneEnable.addEventListener("change", ()=>{
+          tunedAlertConfig.enabled = !!tuneEnable.checked;
+          persistTuneConfig(tunedAlertConfig.enabled ? "Armed" : "Disabled");
+        });
+      }
+
+      if(btnSaveTune){
+        btnSaveTune.addEventListener("click", ()=>{
+          tunedAlertConfig.enabled = tuneEnable ? !!tuneEnable.checked : tunedAlertConfig.enabled;
+          tunedAlertConfig.targetType = getTuneTargetType();
+          tunedAlertConfig.targetLabel = (tuneTargetInput?.value || "").trim();
+          tunedAlertConfig.heldObject = (tuneHeldInput?.value || "").trim();
+          tunedAlertConfig.condition = tuneCondition ? (tuneCondition.value || "duration") : "duration";
+          tunedAlertConfig.seconds = Math.max(0.5, Number(tuneSeconds?.value) || tunedAlertDefaults.seconds);
+          tunedPresence.clear();
+          tunedAlertState.lastBuzzAt = 0;
+          persistTuneConfig("Saved");
+        });
+      }
+
+      if(btnClearTune){
+        btnClearTune.addEventListener("click", ()=>{
+          tunedAlertConfig = Object.assign({}, tunedAlertDefaults);
+          tunedPresence.clear();
+          tunedAlertState.lastBuzzAt = 0;
+          applyTuneConfigToUI();
+          persistTuneConfig("Cleared");
+        });
+      }
+
+      if(btnTestBuzz){
+        btnTestBuzz.addEventListener("click", async ()=>{
+          await ensureAudioContextReady();
+          playBuzz();
+          updateTuneStatus("Test buzz played");
+        });
+      }
+
+      if(tuneTargetTypeRadios.length){
+        tuneTargetTypeRadios.forEach(radio => {
+          radio.addEventListener("change", ()=>{
+            tunedAlertConfig.targetType = getTuneTargetType();
+            persistTuneConfig();
+          });
         });
       }
 
@@ -3477,6 +3720,162 @@
       /***********************
        * Record Event (shared)
        ***********************/
+      function normalizeLabelInput(val){
+        return (val || "").toString().trim().toLowerCase();
+      }
+
+      function labelMatchesInput(value, target){
+        if(!target) return false;
+        const normTarget = normalizeLabelInput(target);
+        const raw = normalizeLabelInput(value);
+        if(raw && raw === normTarget) return true;
+        const disp = normalizeLabelInput(getDisplayName(value || ""));
+        return disp === normTarget;
+      }
+
+      function pruneTunedPresence(now){
+        const staleMs = Math.max(settings.trackForgetMs || 2200, 2200) * 2;
+        for(const [key, entry] of tunedPresence.entries()){
+          if(now - entry.lastSeen > staleMs){
+            tunedPresence.delete(key);
+          }
+        }
+      }
+
+      function updateTunedPresence(key, now, overrideSeconds=null){
+        const staleMs = Math.max(settings.trackForgetMs || 2200, 2200) * 2;
+        let entry = tunedPresence.get(key);
+        if(!entry || (now - entry.lastSeen) > staleMs){
+          entry = { startedAt: now, lastSeen: now };
+        }else{
+          entry.lastSeen = now;
+        }
+        if(overrideSeconds != null && !Number.isNaN(overrideSeconds)){
+          entry.startedAt = now - (Number(overrideSeconds) * 1000);
+        }
+        tunedPresence.set(key, entry);
+        return (now - entry.startedAt) / 1000;
+      }
+
+      function ensureAudioContextReady(){
+        if(!tunedAudioCtx){
+          const Ctx = window.AudioContext || window.webkitAudioContext;
+          if(!Ctx) return null;
+          tunedAudioCtx = new Ctx();
+        }
+        if(tunedAudioCtx && tunedAudioCtx.state === "suspended"){
+          tunedAudioCtx.resume().catch(()=>{});
+        }
+        return tunedAudioCtx;
+      }
+
+      function playBuzz(durationMs=520){
+        try{
+          const ctx = ensureAudioContextReady();
+          if(!ctx) return;
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          const now = ctx.currentTime;
+          const dur = Math.max(0.12, durationMs/1000);
+
+          osc.type = "square";
+          osc.frequency.value = 520;
+          gain.gain.setValueAtTime(0.0001, now);
+          gain.gain.exponentialRampToValueAtTime(0.24, now + 0.05);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+
+          osc.connect(gain).connect(ctx.destination);
+          osc.start(now);
+          osc.stop(now + dur + 0.05);
+        }catch(e){ /* ignore */ }
+      }
+
+      function triggerBuzz(reason){
+        const now = Date.now();
+        const cooldown = tunedAlertConfig.cooldownMs || tunedAlertDefaults.cooldownMs;
+        if(now - tunedAlertState.lastBuzzAt < cooldown) return;
+        tunedAlertState.lastBuzzAt = now;
+        playBuzz();
+        updateTuneStatus(reason || "Buzz triggered");
+      }
+
+      function evaluateTunedAlertForObject(label, evt){
+        if(!tunedAlertConfig.enabled) return;
+        const target = normalizeLabelInput(tunedAlertConfig.targetLabel);
+        if(!target) return;
+        const now = evt?.time || Date.now();
+        pruneTunedPresence(now);
+
+        const minSeconds = Math.max(0.5, Number(tunedAlertConfig.seconds) || tunedAlertDefaults.seconds);
+        const heldTarget = normalizeLabelInput(tunedAlertConfig.heldObject);
+        const targetType = tunedAlertConfig.targetType === "object" ? "object" : "person";
+        const condition = tunedAlertConfig.condition === "holding" ? "holding" : "duration";
+
+        const objectMatch = targetType === "object" && labelMatchesInput(label, target);
+        const personMatch = evt && evt.person ? labelMatchesInput(evt.person, target) : false;
+
+        if(condition === "duration"){
+          if(objectMatch){
+            const elapsed = updateTunedPresence(`obj:${target}`, now, evt?.held_duration != null ? Number(evt.held_duration) : null);
+            if(elapsed >= minSeconds){
+              triggerBuzz(`Object ${getDisplayName(label)} seen ${elapsed.toFixed(1)}s`);
+            }
+          }
+          if(targetType === "person" && personMatch){
+            const elapsed = updateTunedPresence(`person:${target}`, now);
+            if(elapsed >= minSeconds){
+              triggerBuzz(`Person ${evt.person} present ${elapsed.toFixed(1)}s`);
+            }
+          }
+          return;
+        }
+
+        if(condition === "holding"){
+          if(targetType === "person"){
+            if(!personMatch || !heldTarget) return;
+            if(!labelMatchesInput(label, heldTarget)) return;
+            const elapsed = updateTunedPresence(`hold:${target}:${heldTarget}`, now, evt?.held_duration != null ? Number(evt.held_duration) : null);
+            if(elapsed >= minSeconds){
+              triggerBuzz(`${evt.person} holding ${getDisplayName(label)}`);
+            }
+          }else if(targetType === "object"){
+            if(!objectMatch) return;
+            if(heldTarget && (!evt.person || !labelMatchesInput(evt.person, heldTarget))) return;
+            const elapsed = updateTunedPresence(`hold:${target}:${normalizeLabelInput(evt.person || "any")}`, now, evt?.held_duration != null ? Number(evt.held_duration) : null);
+            if(elapsed >= minSeconds){
+              const who = evt.person || "person";
+              triggerBuzz(`${getDisplayName(label)} held by ${who}`);
+            }
+          }
+        }
+      }
+
+      function evaluateTunedAlertFromPerson(personName, evt){
+        if(!tunedAlertConfig.enabled) return;
+        const target = normalizeLabelInput(tunedAlertConfig.targetLabel);
+        if(!target || tunedAlertConfig.targetType !== "person") return;
+        if(!labelMatchesInput(personName, target)) return;
+        const now = evt?.time || Date.now();
+        pruneTunedPresence(now);
+        const minSeconds = Math.max(0.5, Number(tunedAlertConfig.seconds) || tunedAlertDefaults.seconds);
+        if(tunedAlertConfig.condition === "duration"){
+          const elapsed = updateTunedPresence(`person:${target}`, now);
+          if(elapsed >= minSeconds){
+            triggerBuzz(`Person ${personName} present ${elapsed.toFixed(1)}s`);
+          }
+        }else if(tunedAlertConfig.condition === "holding"){
+          const heldTarget = normalizeLabelInput(tunedAlertConfig.heldObject);
+          if(!heldTarget) return;
+          const objLabel = evt?.objectLabel;
+          if(objLabel && labelMatchesInput(objLabel, heldTarget)){
+            const elapsed = updateTunedPresence(`hold:${target}:${heldTarget}`, now, evt?.held_duration != null ? Number(evt.held_duration) : null);
+            if(elapsed >= minSeconds){
+              triggerBuzz(`${personName} holding ${getDisplayName(objLabel)}`);
+            }
+          }
+        }
+      }
+
       function pickLargest(list, getBox){
         if(!list || !list.length) return null;
         let best = null;
@@ -3638,6 +4037,7 @@
         renderTracked();
         updateObjectDropdown();
         updateCameraLog(cam, label, evt);
+        evaluateTunedAlertForObject(label, evt);
       }
 
       function recordPersonEvent(personName, status, box, score=null, cam=null, opts={}){
@@ -3654,6 +4054,7 @@
 
         if(!peopleMovementMemory[personName]) peopleMovementMemory[personName] = [];
         peopleMovementMemory[personName].push(evt);
+        evaluateTunedAlertFromPerson(personName, evt);
 
         scheduleSaveAll();
         if(logViewMode === "people" || logSearch.value.trim()){
@@ -4153,6 +4554,7 @@
       }
 
       function renderTracked(){
+        refreshTuneSuggestions();
         const query = (trackedSearch && trackedSearch.value || "").trim().toLowerCase();
         const sortMode = trackedSort ? trackedSort.value : "alpha";
         if(logViewMode === "people"){
@@ -4586,6 +4988,7 @@
         saveJSON(LS_KEYS.unknownFaces, unknownFacesQueue);
         saveJSON(LS_KEYS.settings, settings);
         saveJSON(LS_KEYS.camBindings, camBindings);
+        saveJSON(LS_KEYS.tunedAlert, tunedAlertConfig);
         trackedObjects = new Set(Object.keys(objectMemory));
       }
 
