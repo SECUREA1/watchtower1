@@ -3,7 +3,9 @@ import base64
 import json
 import logging
 import os
+import random
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -27,6 +29,7 @@ IMAGES_DIR = FACES_DIR / "images"
 META_DIR = FACES_DIR / "meta"
 INDEX_PATH = FACES_DIR / "index.json"
 LOGS_DIR = DATA_DIR / "logs"
+PENDING_DIR = DATA_DIR / "pending_commits"
 
 # Prefer an explicit STATIC_DIR, then the repo's bundled site/, and finally
 # the container-friendly /app/site location. This avoids "UI not found" when
@@ -100,6 +103,7 @@ class FaceSyncResult(BaseModel):
     committed_to_github: Optional[bool] = None
     github_commit_sha: Optional[str] = None
     pr_url: Optional[str] = None
+    message: Optional[str] = None
 
 
 class LogsPayload(BaseModel):
@@ -114,12 +118,18 @@ def ensure_dirs() -> None:
     IMAGES_DIR.mkdir(parents=True, exist_ok=True)
     META_DIR.mkdir(parents=True, exist_ok=True)
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    PENDING_DIR.mkdir(parents=True, exist_ok=True)
     try:
         IMAGES_DIR.chmod(0o700)
         META_DIR.chmod(0o700)
         LOGS_DIR.chmod(0o700)
+        PENDING_DIR.chmod(0o700)
     except PermissionError:
         pass
+
+
+# Ensure filesystem structure exists at startup
+ensure_dirs()
 
 
 def load_index() -> List[dict]:
@@ -144,6 +154,16 @@ def save_index(index: List[dict]) -> None:
         INDEX_PATH.chmod(0o600)
     except PermissionError:
         pass
+
+# -------------------------------------------------------------------------
+# Encoding helpers
+# -------------------------------------------------------------------------
+def b64_encode_bytes(data: bytes) -> str:
+    return base64.b64encode(data).decode("utf-8")
+
+
+def b64_decode_bytes(data: str) -> bytes:
+    return base64.b64decode(data.encode("utf-8"))
 
 # -------------------------------------------------------------------------
 # Auth & validation helpers
@@ -213,7 +233,7 @@ def create_blob(content: bytes) -> str:
         timeout=20,
     )
     if response.status_code >= 300:
-        raise HTTPException(status_code=502, detail=f"GitHub blob error: {response.text}")
+        raise HTTPException(status_code=response.status_code, detail=f"GitHub blob error: {response.text}")
     return response.json()["sha"]
 
 
@@ -221,7 +241,7 @@ def get_ref_sha(branch: str) -> str:
     response = requests.get(github_api(f"/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/ref/heads/{branch}"),
                             headers=github_headers(), timeout=20)
     if response.status_code >= 300:
-        raise HTTPException(status_code=502, detail=f"GitHub ref error: {response.text}")
+        raise HTTPException(status_code=response.status_code, detail=f"GitHub ref error: {response.text}")
     return response.json()["object"]["sha"]
 
 
@@ -229,7 +249,7 @@ def get_commit_tree(sha: str) -> str:
     response = requests.get(github_api(f"/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/commits/{sha}"),
                             headers=github_headers(), timeout=20)
     if response.status_code >= 300:
-        raise HTTPException(status_code=502, detail=f"GitHub commit error: {response.text}")
+        raise HTTPException(status_code=response.status_code, detail=f"GitHub commit error: {response.text}")
     return response.json()["tree"]["sha"]
 
 
@@ -237,7 +257,7 @@ def create_tree(base_tree: str, items: List[dict]) -> str:
     response = requests.post(github_api(f"/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/trees"),
                              headers=github_headers(), json={"base_tree": base_tree, "tree": items}, timeout=20)
     if response.status_code >= 300:
-        raise HTTPException(status_code=502, detail=f"GitHub tree error: {response.text}")
+        raise HTTPException(status_code=response.status_code, detail=f"GitHub tree error: {response.text}")
     return response.json()["sha"]
 
 
@@ -246,7 +266,7 @@ def create_commit(message: str, tree_sha: str, parents: List[str]) -> str:
                              headers=github_headers(), json={"message": message, "tree": tree_sha, "parents": parents},
                              timeout=20)
     if response.status_code >= 300:
-        raise HTTPException(status_code=502, detail=f"GitHub commit error: {response.text}")
+        raise HTTPException(status_code=response.status_code, detail=f"GitHub commit error: {response.text}")
     return response.json()["sha"]
 
 
@@ -254,7 +274,7 @@ def update_ref(branch: str, sha: str) -> None:
     response = requests.patch(github_api(f"/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/refs/heads/{branch}"),
                               headers=github_headers(), json={"sha": sha, "force": False}, timeout=20)
     if response.status_code >= 300:
-        raise HTTPException(status_code=502, detail=f"GitHub update ref error: {response.text}")
+        raise HTTPException(status_code=response.status_code, detail=f"GitHub update ref error: {response.text}")
 
 
 def create_branch(branch_name: str, base_sha: str) -> None:
@@ -281,23 +301,107 @@ def commit_files_to_github(files: Dict[str, bytes], message: str, branch: Option
     if not GITHUB_ENABLED:
         raise HTTPException(status_code=400, detail="GitHub integration disabled.")
     if not (GITHUB_TOKEN and GITHUB_OWNER and GITHUB_REPO):
-        raise HTTPException(status_code=500, detail="GitHub configuration missing.")
+        raise HTTPException(status_code=503, detail="GitHub configuration missing.")
     branch = branch or GITHUB_BRANCH
-    base_sha = get_ref_sha(branch)
-    base_tree = get_commit_tree(base_sha)
-    tree_items = []
-    for path, content in files.items():
-        blob_sha = create_blob(content)
-        tree_items.append({"path": path, "mode": "100644", "type": "blob", "sha": blob_sha})
-    new_tree = create_tree(base_tree, tree_items)
-    commit_sha = create_commit(message, new_tree, [base_sha])
-    update_ref(branch, commit_sha)
-    return commit_sha
+    last_exc: Optional[HTTPException] = None
+    for attempt in range(1, 5):
+        try:
+            base_sha = get_ref_sha(branch)
+            base_tree = get_commit_tree(base_sha)
+            tree_items = []
+            for path, content in files.items():
+                blob_sha = create_blob(content)
+                tree_items.append({"path": path, "mode": "100644", "type": "blob", "sha": blob_sha})
+            new_tree = create_tree(base_tree, tree_items)
+            commit_sha = create_commit(message, new_tree, [base_sha])
+            update_ref(branch, commit_sha)
+            if attempt > 1:
+                logger.info("GitHub commit succeeded after retry (attempt %s)", attempt)
+            return commit_sha
+        except HTTPException as exc:
+            last_exc = exc
+            status = exc.status_code or 500
+            transient = status == 429 or status >= 500 or status in (409, 422)
+            if not transient or attempt == 4:
+                logger.error("Commit attempt %s failed with status %s: %s", attempt, status, exc.detail)
+                raise exc
+            sleep_time = min(2 ** attempt, 8) + random.uniform(0, 0.5)
+            logger.warning("Commit attempt %s failed with status %s (%s); retrying after %.2fs", attempt, status, exc.detail, sleep_time)
+            time.sleep(sleep_time)
+            continue
+    if last_exc:
+        raise last_exc
+    raise HTTPException(status_code=500, detail="Unknown commit failure.")
 
 
 def raw_github_url(path: str, branch: Optional[str] = None) -> str:
     branch = branch or GITHUB_BRANCH
     return f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/{branch}/{path}"
+
+
+def process_pending_commits_loop() -> None:
+    backoff = 5.0
+    while True:
+        try:
+            if not GITHUB_ENABLED:
+                time.sleep(20)
+                continue
+            pending_files = list(PENDING_DIR.glob("pending-*.json"))
+            if not pending_files:
+                time.sleep(random.uniform(10, 30))
+                continue
+            pending_entries = []
+            for pending_path in pending_files:
+                data = None
+                try:
+                    data = json.loads(pending_path.read_text(encoding="utf-8"))
+                except Exception as exc:
+                    logger.error("Failed to read pending commit file %s: %s", pending_path, exc)
+                if data is None:
+                    continue
+                created_at = data.get("created_at")
+                try:
+                    created_at_dt = datetime.fromisoformat(created_at) if created_at else None
+                except Exception:
+                    created_at_dt = None
+                pending_entries.append((created_at_dt or datetime.utcnow(), pending_path, data))
+            for _, pending_path, data in sorted(pending_entries, key=lambda item: item[0]):
+                pending_id = data.get("id") or pending_path.stem
+                files_payload = data.get("files") or {}
+                files_bytes = {path: b64_decode_bytes(content) for path, content in files_payload.items()}
+                message = data.get("message") or "Pending commit"
+                branch = data.get("branch") or GITHUB_BRANCH
+                face_ids = data.get("face_ids") or []
+                try:
+                    commit_sha = commit_files_to_github(files_bytes, message, branch=branch)
+                    pr_url = None
+                    if branch != GITHUB_BRANCH and (GITHUB_PR_FLOW or branch != GITHUB_BRANCH):
+                        try:
+                            pr_url = open_pull_request(branch, title=message, body="Automated face ingestion from RedNode pending queue.")
+                        except HTTPException as pr_exc:
+                            logger.warning("Pending commit %s: PR creation failed (%s)", pending_id, pr_exc.detail)
+                    for face_id in face_ids:
+                        image_path = next((p for p in files_payload.keys() if p.startswith("data/faces/images/") and Path(p).stem == face_id), None)
+                        github_url = raw_github_url(image_path, branch=branch) if image_path else None
+                        update_index_commit_info(face_id, True, commit_sha, github_url, pr_url)
+                    pending_path.unlink(missing_ok=True)
+                    logger.info("Processed pending commit %s (faces: %s)", pending_id, face_ids)
+                    backoff = 5.0
+                except HTTPException as exc:
+                    status = exc.status_code or 500
+                    if status == 429 or status >= 500 or status in (409, 422):
+                        logger.warning("Pending commit %s transient failure (%s); will retry later", pending_id, status)
+                        time.sleep(min(30, backoff))
+                        backoff = min(60.0, backoff * 1.5)
+                        continue
+                    logger.error("Pending commit %s failed irrecoverably: %s", pending_id, exc.detail)
+        except Exception as loop_exc:
+            logger.error("Pending commit loop error: %s", loop_exc)
+            time.sleep(5)
+
+
+# Start background worker at import time
+threading.Thread(target=process_pending_commits_loop, daemon=True).start()
 
 # -------------------------------------------------------------------------
 # Index helpers & ingestion
@@ -372,20 +476,52 @@ def face_exists(face_id: str) -> Optional[dict]:
     return next((item for item in index if item.get("id") == face_id), None)
 
 
-def commit_to_github(files: Dict[str, bytes], face_id: str, prefer_pr: bool = False) -> Dict[str, Optional[str]]:
+def enqueue_pending_commit(files: Dict[str, bytes], message: str, branch: Optional[str], face_ids: List[str]) -> None:
+    ensure_dirs()
+    pending_id = str(uuid4())
+    created_at = datetime.utcnow().isoformat()
+    payload = {
+        "id": pending_id,
+        "created_at": created_at,
+        "message": message,
+        "branch": branch,
+        "face_ids": face_ids,
+        "files": {path: b64_encode_bytes(content) for path, content in files.items()},
+    }
+    filename = f"pending-{int(time.time())}-{pending_id}.json"
+    pending_path = PENDING_DIR / filename
+    pending_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    try:
+        pending_path.chmod(0o600)
+    except PermissionError:
+        pass
+    logger.info("Enqueued pending commit %s for faces: %s", pending_id, face_ids)
+
+
+def commit_to_github(files: Dict[str, bytes], face_id: str, prefer_pr: bool = False, face_ids: Optional[List[str]] = None, branch: Optional[str] = None) -> Dict[str, Optional[str]]:
     if not GITHUB_ENABLED:
-        return {"committed": False, "sha": None, "pr_url": None, "branch": None}
+        return {"committed": False, "sha": None, "pr_url": None, "branch": branch or GITHUB_BRANCH, "message": "GitHub disabled"}
+    face_ids_list = face_ids if face_ids is not None else [face_id]
     use_pr = GITHUB_PR_FLOW or prefer_pr
-    message = f"Add face {face_id}"
-    if use_pr:
-        branch_name = f"add-face-{face_id}-{int(datetime.utcnow().timestamp())}"
-        base_sha = get_ref_sha(GITHUB_BRANCH)
-        create_branch(branch_name, base_sha)
+    message = f"Add face {face_ids_list[0]}"
+    branch_name = branch or (f"add-face-{face_ids_list[0]}-{int(datetime.utcnow().timestamp())}" if use_pr else GITHUB_BRANCH)
+    if not (GITHUB_TOKEN and GITHUB_OWNER and GITHUB_REPO):
+        logger.warning("GitHub not configured; enqueued commit for later delivery.")
+        enqueue_pending_commit(files, message, branch_name, face_ids_list)
+        return {"committed": False, "sha": None, "pr_url": None, "branch": branch_name, "message": "Stored locally; commit queued"}
+    try:
+        if use_pr:
+            base_sha = get_ref_sha(GITHUB_BRANCH)
+            create_branch(branch_name, base_sha)
+            commit_sha = commit_files_to_github(files, message, branch=branch_name)
+            pr_url = open_pull_request(branch_name, title=f"Add face {face_ids_list[0]}", body="Automated face ingestion from RedNode sync.")
+            return {"committed": True, "sha": commit_sha, "pr_url": pr_url, "branch": branch_name, "message": None}
         commit_sha = commit_files_to_github(files, message, branch=branch_name)
-        pr_url = open_pull_request(branch_name, title=f"Add face {face_id}", body="Automated face ingestion from RedNode sync.")
-        return {"committed": True, "sha": commit_sha, "pr_url": pr_url, "branch": branch_name}
-    commit_sha = commit_files_to_github(files, message)
-    return {"committed": True, "sha": commit_sha, "pr_url": None, "branch": GITHUB_BRANCH}
+        return {"committed": True, "sha": commit_sha, "pr_url": None, "branch": branch_name, "message": None}
+    except HTTPException as exc:
+        logger.error("GitHub commit failed: %s", exc.detail)
+        enqueue_pending_commit(files, message, branch_name, face_ids_list)
+        return {"committed": False, "sha": None, "pr_url": None, "branch": branch_name, "message": "Commit queued"}
 
 # -------------------------------------------------------------------------
 # Routes
@@ -421,21 +557,22 @@ async def add_face(request: Request, image: UploadFile = File(...), metadata: st
     github_commit_sha = None
     pr_url = None
     github_url = None
+    response_message = "Face stored successfully."
     prefer_pr = (upload_storage == "server_review")
     if GITHUB_ENABLED:
-        try:
-            commit_info = commit_to_github(files_to_commit, record["face_id"], prefer_pr=prefer_pr)
-            committed_to_github = commit_info["committed"]
-            github_commit_sha = commit_info["sha"]
-            pr_url = commit_info["pr_url"]
+        commit_info = commit_to_github(files_to_commit, record["face_id"], prefer_pr=prefer_pr)
+        committed_to_github = commit_info["committed"]
+        github_commit_sha = commit_info["sha"]
+        pr_url = commit_info["pr_url"]
+        response_message = commit_info.get("message") or response_message
+        if committed_to_github:
             github_url = raw_github_url(f"data/faces/images/{record['image_path'].name}", branch=commit_info["branch"] or GITHUB_BRANCH)
             update_index_commit_info(record["face_id"], committed_to_github, github_commit_sha, github_url, pr_url)
             logger.info("Committed face %s to GitHub", record["face_id"])
-        except HTTPException as exc:
-            logger.error("GitHub commit failed: %s", exc.detail)
-            raise
+        else:
+            logger.info("Face %s stored locally; commit queued.", record["face_id"])
     image_url = github_url or index_record.get("server_url")
-    return FaceAddResponse(ok=True, face_id=record["face_id"], image_path=str(record["image_path"].relative_to(DATA_DIR)), image_url=image_url, committed_to_github=committed_to_github, github_commit_sha=github_commit_sha, pr_url=pr_url, message="Face stored successfully.")
+    return FaceAddResponse(ok=True, face_id=record["face_id"], image_path=str(record["image_path"].relative_to(DATA_DIR)), image_url=image_url, committed_to_github=committed_to_github, github_commit_sha=github_commit_sha, pr_url=pr_url, message=response_message)
 
 @app.post("/api/faces/sync")
 async def sync_faces(request: Request, images: Optional[List[UploadFile]] = File(None), metadata: Optional[str] = Form(None)):
@@ -501,20 +638,20 @@ async def sync_faces(request: Request, images: Optional[List[UploadFile]] = File
             image_name_map[record["face_id"]] = record["image_path"].name
     if files_to_commit and GITHUB_ENABLED:
         files_to_commit["data/faces/index.json"] = INDEX_PATH.read_bytes()
-        try:
-            # prefer PR if global PR flow or if metadata requested review
-            prefer_pr = GITHUB_PR_FLOW
-            commit_info = commit_to_github(files_to_commit, created_face_ids[0], prefer_pr=prefer_pr)
-            for face_id in created_face_ids:
-                github_url = raw_github_url(f"data/faces/images/{image_name_map.get(face_id, f'{face_id}.jpg')}", branch=commit_info["branch"] or GITHUB_BRANCH)
+        # prefer PR if global PR flow or if metadata requested review
+        prefer_pr = GITHUB_PR_FLOW
+        commit_info = commit_to_github(files_to_commit, created_face_ids[0], prefer_pr=prefer_pr, face_ids=created_face_ids)
+        for face_id in created_face_ids:
+            image_key = image_name_map.get(face_id, f"{face_id}.jpg")
+            if commit_info["committed"]:
+                github_url = raw_github_url(f"data/faces/images/{image_key}", branch=commit_info["branch"] or GITHUB_BRANCH)
                 update_index_commit_info(face_id, commit_info["committed"], commit_info["sha"], github_url, commit_info["pr_url"])
-            for result in results:
-                result.committed_to_github = commit_info["committed"]
-                result.github_commit_sha = commit_info["sha"]
-                result.pr_url = commit_info["pr_url"]
-        except HTTPException as exc:
-            logger.error("GitHub commit failed during sync: %s", exc.detail)
-            raise
+        for result in results:
+            result.committed_to_github = commit_info["committed"]
+            result.github_commit_sha = commit_info["sha"]
+            result.pr_url = commit_info["pr_url"]
+            if not commit_info["committed"]:
+                result.message = commit_info.get("message") or "Commit queued"
     return {"ok": True, "synced": [result.dict() for result in results]}
 
 @app.get("/api/faces/list")
