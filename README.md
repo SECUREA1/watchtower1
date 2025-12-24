@@ -26,8 +26,8 @@ pip install -r requirements.txt
 | --- | --- | --- |
 | `DATA_DIR` | Root folder for stored files/logs | `./data` |
 | `MAX_UPLOAD_BYTES` | Upload size cap (bytes) | `2097152` |
-| `ADMIN_TOKEN` | API auth token (required unless public ingest) | unset |
-| `ALLOW_PUBLIC_INGEST` | Allow unauthenticated uploads (still requires consent) | `0` |
+| `ADMIN_TOKEN` | Optional API auth token (skipped when `ALLOW_PUBLIC_INGEST=1`) | unset |
+| `ALLOW_PUBLIC_INGEST` | Allow unauthenticated uploads (consent assumed on ingest) | `1` |
 | `GITHUB_ENABLED` | Enable GitHub ingestion | `0` |
 | `GITHUB_TOKEN` | GitHub token (server-only secret) | unset |
 | `GITHUB_OWNER` | GitHub org/user | unset |
@@ -122,5 +122,7 @@ DATA_DIR/
 - Set `ALLOW_PUBLIC_INGEST=0` for production.
 - Use proper authentication (JWT/session) for uploads.
 - Consider object storage (S3/GCS) for images.
+
+> **Important:** The API now defaults to `ALLOW_PUBLIC_INGEST=1` for frictionless demos. Set `ALLOW_PUBLIC_INGEST=0` and configure `ADMIN_TOKEN` in any production deployment.
 
 See [SECURITY_NOTES.md](SECURITY_NOTES.md) for detailed recommendations.
