@@ -345,6 +345,19 @@
       background:#4ade80;
       box-shadow:0 0 0 4px rgba(74,222,128,.2);
     }
+    .storage-status.ws-connecting .status-dot{
+      background:#fbbf24;
+      box-shadow:0 0 0 4px rgba(251,191,36,.18);
+    }
+    .storage-status.ws-connected .status-dot{
+      background:#4ade80;
+      box-shadow:0 0 0 4px rgba(74,222,128,.2);
+    }
+    .storage-status.ws-disconnected .status-dot,
+    .storage-status.ws-error .status-dot{
+      background:#f87171;
+      box-shadow:0 0 0 4px rgba(248,113,113,.18);
+    }
     .storage-feedback{
       font-size:12px;
       color:var(--muted2);
@@ -1359,6 +1372,13 @@
                     <div class="summary-item">
                       <div class="small">Activation</div>
                       <span id="serverActivationBadge" class="pill-mini">Not checked</span>
+                    </div>
+                    <div class="summary-item">
+                      <div class="small">WS status</div>
+                      <div class="storage-status ws-connecting" id="wsStatus">
+                        <span class="status-dot" id="wsStatusDot"></span>
+                        <span class="status-text" id="wsStatusText">Connecting…</span>
+                      </div>
                     </div>
                     <div class="summary-item">
                       <div class="small">Feedback</div>
@@ -4730,152 +4750,7 @@
 
     })();
   </script>
+  <script src="ws_client.js"></script>
   <script type="module" src="client_storage.js"></script>
 </body>
 </html>
-<!-- Insert near bottom of secure.html, before </body> -->
-<script>
-(() => {
-  const $ = id => document.getElementById(id);
-
-  function normalizeServerUrl(url) {
-    if (!url) return '';
-    const trimmed = url.trim();
-    return trimmed.endsWith('/') ? trimmed.slice(0, -1) : trimmed;
-  }
-
-  // Build websocket url from server URL or page origin
-  function wsUrlFromServer(server) {
-    if (!server) {
-      // use same origin
-      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      return `${proto}://${location.host}/ws`;
-    }
-    let s = normalizeServerUrl(server);
-
-    // If user gave ws:// or wss://, use as base (append /ws if not present)
-    if (s.startsWith('ws://') || s.startsWith('wss://')) {
-      return s.endsWith('/ws') ? s : `${s}/ws`;
-    }
-
-    // If user gave http(s):// convert to ws(s)
-    if (s.startsWith('http://') || s.startsWith('https://')) {
-      try {
-        const u = new URL(s);
-        const proto = u.protocol === 'https:' ? 'wss' : 'ws';
-        return `${proto}://${u.host}/ws`;
-      } catch (e) {
-        // fallthrough
-      }
-    }
-
-    // otherwise assume host[:port] form
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    return `${proto}://${s}/ws`;
-  }
-
-  // small UI helpers
-  function setStatusDot(ok) {
-    const dot = $('serverDot');
-    if (!dot) return;
-    dot.className = ok ? 'dot ok' : 'dot bad';
-  }
-  function setStorageFeedback(text, cls) {
-    const el = $('storageFeedback');
-    if (!el) return;
-    el.textContent = text;
-    el.className = cls ? `storage-feedback ${cls}` : 'storage-feedback';
-  }
-
-  // WS connection + reconnect
-  let ws = null;
-  let reconnectDelay = 1000;
-  const MAX_DELAY = 60000;
-
-  function connectWebSocket() {
-    const serverInput = $('serverUrl');
-    const serverVal = serverInput ? serverInput.value : '';
-    const url = wsUrlFromServer(serverVal);
-    console.info('Connecting websocket to', url);
-
-    try {
-      ws = new WebSocket(url);
-
-      ws.addEventListener('open', () => {
-        console.info('WS open', url);
-        reconnectDelay = 1000;
-        setStatusDot(true);
-        setStorageFeedback('Connected to server', 'good');
-
-        // Optionally announce a join (server expects {type: "join", user: ...})
-        const username = document.getElementById('username')?.value || 'web-client';
-        try { ws.send(JSON.stringify({ type: 'join', user: username })); } catch (e) { /* ignore */ }
-      });
-
-      ws.addEventListener('message', (evt) => {
-        try {
-          const data = JSON.parse(evt.data);
-          // handle messages of interest (update UI)
-          if (data?.type === 'system' && data.text) {
-            setStorageFeedback(data.text, '');
-          }
-          // extend here: history, users, thumb, etc. as needed.
-          // console.log('WS message', data);
-        } catch(e) {
-          console.debug('Non-JSON message', evt.data);
-        }
-      });
-
-      ws.addEventListener('close', () => {
-        console.warn('WS closed, will reconnect in', reconnectDelay);
-        setStatusDot(false);
-        setStorageFeedback('Disconnected from server — reconnecting...', 'warn');
-        scheduleReconnect();
-      });
-
-      ws.addEventListener('error', (e) => {
-        console.error('WS error', e);
-        try { ws.close(); } catch(e) {}
-      });
-
-    } catch (err) {
-      console.error('WS connection failed', err);
-      setStatusDot(false);
-      setStorageFeedback('Connection failed: ' + (err.message || err), 'error');
-      scheduleReconnect();
-    }
-  }
-
-  function scheduleReconnect() {
-    setTimeout(() => {
-      reconnectDelay = Math.min(MAX_DELAY, reconnectDelay * 1.8);
-      connectWebSocket();
-    }, reconnectDelay);
-  }
-
-  // reconnect when serverUrl changes
-  const serverInput = $('serverUrl');
-  if (serverInput) {
-    serverInput.addEventListener('change', () => {
-      if (ws) try { ws.close(); } catch (e) {}
-      // small UX: mark unreachable until check passes
-      setStatusDot(false);
-      setStorageFeedback('Server changed — attempting to connect...', 'loading');
-      setTimeout(connectWebSocket, 250);
-    });
-  }
-
-  // start on load
-  window.addEventListener('load', () => {
-    // small delay to allow other scripts (client_storage.js) to run
-    setTimeout(connectWebSocket, 200);
-  });
-
-  // expose for debugging
-  window.rednodeWS = {
-    connect: connectWebSocket,
-    close: () => { if (ws) ws.close(); },
-    wsRef: () => ws
-  };
-})();
-</script>
