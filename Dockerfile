@@ -16,6 +16,9 @@ COPY site/home.html                                     /usr/share/nginx/html/ho
 COPY site/sensor2.html                                  /usr/share/nginx/html/sensor2.html
 COPY site/omconsole_render_single.html                  /usr/share/nginx/html/omconsole_render_single.html
 COPY site/omconsole_render_single_games_ROUTING.html    /usr/share/nginx/html/omconsole_render_single_games_ROUTING.html
+COPY site/client_storage.js                             /usr/share/nginx/html/client_storage.js
+COPY site/detection.js                                  /usr/share/nginx/html/detection.js
+COPY site/battery.svg                                   /usr/share/nginx/html/battery.svg
 
 # New pages (optional)
 COPY site/marketplace.html      /usr/share/nginx/html/marketplace.html

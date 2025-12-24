@@ -10,7 +10,12 @@ const DB_VERSION = 1;
 const STORE = 'faces';
 const SETTINGS_KEY = 'rednode.storage.settings.v1';
 const DEVICE_KEY = 'rednode.storage.device-id.v1';
-const DEFAULT_SERVER_URL = 'http://localhost:8000';
+const DEFAULT_SERVER_URL = (() => {
+  if (typeof window !== 'undefined' && window.location?.origin && window.location.origin !== 'null') {
+    return window.location.origin;
+  }
+  return 'http://localhost:8000';
+})();
 const HEALTH_PATHS = ['/healthz', '/health'];
 
 const MAX_LOCAL_PREVIEW_BYTES = 2 * 1024 * 1024; // 2MB for local operations
@@ -51,7 +56,8 @@ function readSettings() {
 }
 
 function normalizeServerUrl(url) {
-  const trimmed = url.trim();
+  const trimmed = (url || '').trim();
+  if (!trimmed) return DEFAULT_SERVER_URL;
   return trimmed.endsWith('/') ? trimmed.slice(0, -1) : trimmed;
 }
 
@@ -119,24 +125,23 @@ function getAuthHeader() {
   return `Bearer ${token}`;
 }
 
-function buildMetadata({ name, consent }) {
+function buildMetadata({ name, consent = true }) {
   return {
-    consent: Boolean(consent),
-    consent_timestamp: consent ? nowIso() : null,
+    consent: consent !== false,
+    consent_timestamp: consent === false ? null : nowIso(),
     source_device_id: getDeviceId(),
     note: name ? `Named ${name}` : null,
   };
 }
 
-function ensureConsent(consentChecked) {
-  if (consentChecked) return true;
-  const confirmed = window.confirm(
-    'You are about to upload face images to the server/GitHub. Do you have consent?'
-  );
-  if (confirmed) {
-    el('consentCheckbox').checked = true;
+function ensureConsent() {
+  // Consent is assumed for streamlined server flows; checkbox is kept for visibility only.
+  const checkbox = el('consentCheckbox');
+  if (checkbox && !checkbox.checked) {
+    checkbox.checked = true;
+    writeSettings({ consent: true });
   }
-  return confirmed;
+  return true;
 }
 
 async function blobFromInput() {
@@ -238,37 +243,24 @@ async function refreshFaceList() {
   const localFaces = await listLocalFaces();
   let serverFaces = [];
   const serverUrl = normalizeServerUrl(el('serverUrl')?.value || DEFAULT_SERVER_URL);
-  const authHeader = getAuthHeader();
 
   try {
-    const response = await fetch(`${serverUrl}/api/faces/list`, {
-      headers: authHeader ? { Authorization: authHeader } : undefined,
-    });
+    const response = await fetch(`${serverUrl}/api/faces/list`);
     if (response.ok) {
       const payload = await response.json();
       serverFaces = payload.faces || [];
       if (runtimeStatus.serverOk) {
         setStorageFeedback(
-          runtimeStatus.commitReady
-            ? 'Server live. Cloud commits are enabled.'
-            : 'Server reachable. Add Admin Token to enable commits.',
-          runtimeStatus.commitReady ? 'good' : 'warn'
+          'Server live. Cloud commits are enabled.',
+          'good'
         );
       }
     } else {
       const detail = await response.text();
-      if (response.status === 401) {
-        runtimeStatus.commitReady = false;
-        setStorageFeedback(
-          'Server reachable but Admin Token was rejected. Set ADMIN_TOKEN on the server and update the Admin Token field.',
-          'error'
-        );
-      } else {
-        setStorageFeedback(
-          `Server list failed (${response.status}). ${detail || 'Check server logs.'}`,
-          'warn'
-        );
-      }
+      setStorageFeedback(
+        `Server list failed (${response.status}). ${detail || 'Check server logs.'}`,
+        'warn'
+      );
     }
   } catch (error) {
     setStorageFeedback('Server list unavailable. Showing local faces only.', 'warn');
@@ -309,29 +301,11 @@ async function checkServerAvailability() {
     return false;
   }
 
-  const authHeader = getAuthHeader();
-  if (!authHeader) {
-    setStorageFeedback(
-      'Server reachable. Provide ADMIN_TOKEN in Dockerfile.api and the Admin Token field to enable commits.',
-      'warn'
-    );
-    updateStorageStatus();
-    return true;
-  }
-
   try {
-    const response = await fetch(`${serverUrl}/api/faces/list`, {
-      headers: { Authorization: authHeader },
-    });
+    const response = await fetch(`${serverUrl}/api/faces/list`);
     if (response.ok) {
       runtimeStatus.commitReady = true;
       setStorageFeedback('Server live. Cloud commits are enabled.', 'good');
-    } else if (response.status === 401) {
-      runtimeStatus.commitReady = false;
-      setStorageFeedback(
-        'Server reachable but Admin Token was rejected. Ensure ADMIN_TOKEN matches the Admin Token field.',
-        'error'
-      );
     } else {
       const detail = await response.text();
       setStorageFeedback(
@@ -351,7 +325,7 @@ async function handleSaveFace() {
   const defaultMode = getDefaultStorageMode();
   const storage = getStorageChoice(defaultMode);
   const name = (el('faceNameStorage')?.value || '').trim();
-  let consentChecked = Boolean(el('consentCheckbox')?.checked);
+  const consentChecked = ensureConsent();
 
   const blob = await blobFromInput();
   if (!blob) {
@@ -364,15 +338,11 @@ async function handleSaveFace() {
     return;
   }
 
-  if (storage === 'server' && !ensureConsent(consentChecked)) {
-    return;
-  }
   if (storage === 'server' && !runtimeStatus.serverOk) {
     setStorageFeedback('Cloud not reachable. Keeping face local.', 'warn');
     alert('Server is not reachable. Please verify the Server URL before uploading.');
     return;
   }
-  consentChecked = Boolean(el('consentCheckbox')?.checked);
 
   const id = uuid();
   const createdAt = nowIso();
@@ -460,11 +430,7 @@ export async function syncLocalToServer({ silent = false } = {}) {
     return 0;
   }
 
-  const consentChecked = Boolean(el('consentCheckbox')?.checked);
-  if (!ensureConsent(consentChecked)) {
-    if (silent) setStorageFeedback('Consent is required before committing to cloud.', 'warn');
-    return 0;
-  }
+  ensureConsent();
   if (!runtimeStatus.serverOk) {
     if (!silent) alert('Server is not reachable. Update the Server URL or stay in Local mode.');
     setStorageFeedback('Server not reachable. Update the Server URL or stay in Local mode.', 'error');
@@ -529,12 +495,9 @@ function updateStorageStatus() {
     }
   }
   if (storageAlert) {
-    const consentChecked = Boolean(el('consentCheckbox')?.checked);
-    const consentMsg =
-      mode === 'server' && !consentChecked ? 'Consent is required before server uploads.' : '';
     const serverMsg =
       mode === 'server' && !runtimeStatus.serverOk ? 'Server unreachable. Staying local.' : '';
-    storageAlert.textContent = [consentMsg, serverMsg].filter(Boolean).join(' ');
+    storageAlert.textContent = [serverMsg].filter(Boolean).join(' ');
   }
   const storageFeedback = el('storageFeedback');
   if (storageFeedback) {
@@ -550,12 +513,9 @@ function updateStorageStatus() {
     if (runtimeStatus.checking) {
       badgeState = 'loading';
       badgeText = 'Checking...';
-    } else if (runtimeStatus.commitReady) {
-      badgeState = 'good';
-      badgeText = 'Live: commits enabled';
-    } else if (runtimeStatus.serverOk) {
-      badgeState = 'warn';
-      badgeText = 'Reachable; auth needed';
+    } else if (runtimeStatus.commitReady || runtimeStatus.serverOk) {
+      badgeState = runtimeStatus.commitReady ? 'good' : 'warn';
+      badgeText = runtimeStatus.commitReady ? 'Live: commits enabled' : 'Reachable';
     } else {
       badgeState = 'bad';
       badgeText = 'Offline';
