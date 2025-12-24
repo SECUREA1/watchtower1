@@ -37,8 +37,16 @@
     const defaultProto = window.location.protocol === 'https:' ? 'wss' : 'ws';
     const defaultUrl = `${defaultProto}://${window.location.host}/ws`;
 
-    if (overrideRaw && /^wss?:\/\//i.test(overrideRaw)) {
-      return appendWsPath(overrideRaw);
+    if (overrideRaw) {
+      if (/^wss?:\/\//i.test(overrideRaw)) {
+        return appendWsPath(overrideRaw);
+      }
+      if (/^https?:\/\//i.test(overrideRaw)) {
+        const proto = overrideRaw.toLowerCase().startsWith('https:') ? 'wss' : 'ws';
+        const trimmed = overrideRaw.replace(/\/+$/, '');
+        const hostAndPath = trimmed.replace(/^https?:\/\//i, '');
+        return appendWsPath(`${proto}://${hostAndPath}`);
+      }
     }
 
     return defaultUrl;
