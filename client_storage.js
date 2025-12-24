@@ -18,7 +18,10 @@ const MAX_LOCAL_PREVIEW_BYTES = 2 * 1024 * 1024; // 2MB for local operations
 const el = (id) => document.getElementById(id);
 const runtimeStatus = {
   serverOk: false,
+  commitReady: false,
+  checking: false,
   serverMessage: '',
+  feedbackState: '',
 };
 
 function uuid() {
@@ -57,6 +60,18 @@ function writeSettings(partial) {
   const next = { ...current, ...partial };
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
   return next;
+}
+
+function setStorageFeedback(message, variant = '') {
+  const storageFeedback = el('storageFeedback');
+  if (storageFeedback) {
+    const classes = ['storage-feedback'];
+    if (variant) classes.push(variant);
+    storageFeedback.className = classes.join(' ');
+    storageFeedback.textContent = message;
+  }
+  runtimeStatus.serverMessage = message;
+  runtimeStatus.feedbackState = variant;
 }
 
 async function getDb() {
@@ -232,23 +247,43 @@ async function refreshFaceList() {
     if (response.ok) {
       const payload = await response.json();
       serverFaces = payload.faces || [];
+      if (runtimeStatus.serverOk) {
+        setStorageFeedback(
+          runtimeStatus.commitReady
+            ? 'Server live. Cloud commits are enabled.'
+            : 'Server reachable. Add Admin Token to enable commits.',
+          runtimeStatus.commitReady ? 'good' : 'warn'
+        );
+      }
+    } else {
+      const detail = await response.text();
+      if (response.status === 401) {
+        runtimeStatus.commitReady = false;
+        setStorageFeedback(
+          'Server reachable but Admin Token was rejected. Set ADMIN_TOKEN on the server and update the Admin Token field.',
+          'error'
+        );
+      } else {
+        setStorageFeedback(
+          `Server list failed (${response.status}). ${detail || 'Check server logs.'}`,
+          'warn'
+        );
+      }
     }
   } catch (error) {
-    // Ignore server list failures; local list is still useful.
+    setStorageFeedback('Server list unavailable. Showing local faces only.', 'warn');
   }
 
   await renderFaceList({ localFaces, serverFaces, serverUrl });
 }
 
 async function checkServerAvailability() {
-  const storageFeedback = el('storageFeedback');
   const serverUrl = normalizeServerUrl(el('serverUrl')?.value || DEFAULT_SERVER_URL);
+  runtimeStatus.checking = true;
   runtimeStatus.serverOk = false;
-  runtimeStatus.serverMessage = 'Checking server...';
-  if (storageFeedback) {
-    storageFeedback.textContent = runtimeStatus.serverMessage;
-    storageFeedback.className = 'storage-feedback';
-  }
+  runtimeStatus.commitReady = false;
+  setStorageFeedback('Checking server...', 'loading');
+  updateStorageStatus();
 
   for (const path of HEALTH_PATHS) {
     try {
@@ -258,22 +293,61 @@ async function checkServerAvailability() {
       clearTimeout(timer);
       if (response.ok) {
         runtimeStatus.serverOk = true;
-        runtimeStatus.serverMessage = 'Server reachable. Cloud uploads will commit to GitHub when enabled.';
-        updateStorageStatus();
-        return true;
+        break;
       }
     } catch (error) {
       // try next path
     }
   }
 
-  runtimeStatus.serverMessage = 'Server unreachable. Check URL or stay in Local mode.';
+  runtimeStatus.checking = false;
+
+  if (!runtimeStatus.serverOk) {
+    runtimeStatus.commitReady = false;
+    setStorageFeedback('Server unreachable. Check URL or stay in Local mode.', 'error');
+    updateStorageStatus();
+    return false;
+  }
+
+  const authHeader = getAuthHeader();
+  if (!authHeader) {
+    setStorageFeedback(
+      'Server reachable. Provide ADMIN_TOKEN in Dockerfile.api and the Admin Token field to enable commits.',
+      'warn'
+    );
+    updateStorageStatus();
+    return true;
+  }
+
+  try {
+    const response = await fetch(`${serverUrl}/api/faces/list`, {
+      headers: { Authorization: authHeader },
+    });
+    if (response.ok) {
+      runtimeStatus.commitReady = true;
+      setStorageFeedback('Server live. Cloud commits are enabled.', 'good');
+    } else if (response.status === 401) {
+      runtimeStatus.commitReady = false;
+      setStorageFeedback(
+        'Server reachable but Admin Token was rejected. Ensure ADMIN_TOKEN matches the Admin Token field.',
+        'error'
+      );
+    } else {
+      const detail = await response.text();
+      setStorageFeedback(
+        `Server reachable but verification failed (${response.status}). ${detail || 'Check server logs.'}`,
+        'warn'
+      );
+    }
+  } catch (error) {
+    setStorageFeedback(`Server reachable but verification failed: ${error.message}`, 'warn');
+  }
+
   updateStorageStatus();
-  return false;
+  return runtimeStatus.commitReady || runtimeStatus.serverOk;
 }
 
 async function handleSaveFace() {
-  const storageFeedback = el('storageFeedback');
   const defaultMode = getDefaultStorageMode();
   const storage = getStorageChoice(defaultMode);
   const name = (el('faceNameStorage')?.value || '').trim();
@@ -294,10 +368,7 @@ async function handleSaveFace() {
     return;
   }
   if (storage === 'server' && !runtimeStatus.serverOk) {
-    if (storageFeedback) {
-      storageFeedback.textContent = 'Cloud not reachable. Keeping face local.';
-      storageFeedback.className = 'storage-feedback warn';
-    }
+    setStorageFeedback('Cloud not reachable. Keeping face local.', 'warn');
     alert('Server is not reachable. Please verify the Server URL before uploading.');
     return;
   }
@@ -323,10 +394,7 @@ async function handleSaveFace() {
 
   if (storage === 'local') {
     await saveLocalFace(record);
-    if (storageFeedback) {
-      storageFeedback.textContent = 'Saved locally.';
-      storageFeedback.className = 'storage-feedback good';
-    }
+    setStorageFeedback('Saved locally.', 'good');
     await refreshFaceList();
     return;
   }
@@ -339,17 +407,11 @@ async function handleSaveFace() {
     record.committed_to_github = Boolean(response.committed_to_github);
     record.github_commit_sha = response.github_commit_sha || null;
     await saveLocalFace(record);
-    if (storageFeedback) {
-      storageFeedback.textContent = 'Saved to cloud.';
-      storageFeedback.className = 'storage-feedback good';
-    }
+    setStorageFeedback('Saved to cloud.', 'good');
     await refreshFaceList();
   } catch (error) {
     console.error(error);
-    if (storageFeedback) {
-      storageFeedback.textContent = 'Cloud upload failed.';
-      storageFeedback.className = 'storage-feedback warn';
-    }
+    setStorageFeedback('Cloud upload failed.', 'warn');
     alert(error.message || 'Failed to upload face.');
   }
 }
@@ -388,22 +450,29 @@ async function handleSaveLogs() {
   alert('Logs uploaded successfully.');
 }
 
-export async function syncLocalToServer() {
+export async function syncLocalToServer({ silent = false } = {}) {
   const serverUrl = normalizeServerUrl(el('serverUrl')?.value || DEFAULT_SERVER_URL);
   const localFaces = await listLocalFaces();
   const pending = localFaces.filter((face) => face.storage === 'local');
   if (!pending.length) {
-    alert('No local faces to sync.');
-    return;
+    if (!silent) alert('No local faces to sync.');
+    setStorageFeedback('No local faces to sync.', 'warn');
+    return 0;
   }
 
   const consentChecked = Boolean(el('consentCheckbox')?.checked);
-  if (!ensureConsent(consentChecked)) return;
+  if (!ensureConsent(consentChecked)) {
+    if (silent) setStorageFeedback('Consent is required before committing to cloud.', 'warn');
+    return 0;
+  }
   if (!runtimeStatus.serverOk) {
-    alert('Server is not reachable. Update the Server URL or stay in Local mode.');
-    return;
+    if (!silent) alert('Server is not reachable. Update the Server URL or stay in Local mode.');
+    setStorageFeedback('Server not reachable. Update the Server URL or stay in Local mode.', 'error');
+    return 0;
   }
 
+  setStorageFeedback('Committing pending faces to cloud...', 'loading');
+  let synced = 0;
   for (const face of pending) {
     try {
       face.metadata = face.metadata || {};
@@ -415,27 +484,46 @@ export async function syncLocalToServer() {
       face.committed_to_github = Boolean(response.committed_to_github);
       face.github_commit_sha = response.github_commit_sha || null;
       await saveLocalFace(face);
+      synced += 1;
     } catch (error) {
       console.error(error);
-      alert(`Failed to sync ${face.name || face.id}: ${error.message}`);
+      setStorageFeedback(
+        `Failed to sync ${face.name || face.id}: ${error.message || 'Unknown error'}`,
+        'warn'
+      );
+      if (!silent) alert(`Failed to sync ${face.name || face.id}: ${error.message}`);
       break;
     }
   }
 
   await refreshFaceList();
+  if (synced) {
+    setStorageFeedback(`Committed ${synced} face(s) to cloud.`, 'good');
+  }
+  updateStorageStatus();
+  return synced;
 }
 
 function updateStorageStatus() {
   const status = el('storageStatus');
   const statusText = status?.querySelector('.status-text');
   const storageAlert = el('storageAlert');
+  const activationBadge = el('serverActivationBadge');
   if (!status) return;
   const mode = getDefaultStorageMode();
   status.classList.toggle('cloud', mode === 'server');
   status.classList.toggle('local', mode !== 'server');
   if (statusText) {
     if (mode === 'server') {
-      statusText.textContent = runtimeStatus.serverOk ? 'Cloud active' : 'Cloud unavailable';
+      if (runtimeStatus.checking) {
+        statusText.textContent = 'Checking...';
+      } else if (runtimeStatus.commitReady) {
+        statusText.textContent = 'Cloud live';
+      } else if (runtimeStatus.serverOk) {
+        statusText.textContent = 'Cloud reachable';
+      } else {
+        statusText.textContent = 'Cloud unavailable';
+      }
     } else {
       statusText.textContent = 'Local active';
     }
@@ -446,17 +534,41 @@ function updateStorageStatus() {
       mode === 'server' && !consentChecked ? 'Consent is required before server uploads.' : '';
     const serverMsg =
       mode === 'server' && !runtimeStatus.serverOk ? 'Server unreachable. Staying local.' : '';
-    storageAlert.textContent = consentMsg || serverMsg;
+    storageAlert.textContent = [consentMsg, serverMsg].filter(Boolean).join(' ');
   }
   const storageFeedback = el('storageFeedback');
-  if (storageFeedback && runtimeStatus.serverMessage) {
-    storageFeedback.textContent = runtimeStatus.serverMessage;
-    storageFeedback.className =
-      runtimeStatus.serverOk && mode === 'server'
-        ? 'storage-feedback good'
-        : mode === 'server'
-          ? 'storage-feedback warn'
-          : 'storage-feedback';
+  if (storageFeedback) {
+    const classes = ['storage-feedback'];
+    if (runtimeStatus.feedbackState) classes.push(runtimeStatus.feedbackState);
+    storageFeedback.className = classes.join(' ');
+    const fallback = mode === 'server' ? 'Awaiting server check.' : 'Ready to save.';
+    storageFeedback.textContent = runtimeStatus.serverMessage || fallback;
+  }
+  if (activationBadge) {
+    let badgeState = 'warn';
+    let badgeText = 'Not checked';
+    if (runtimeStatus.checking) {
+      badgeState = 'loading';
+      badgeText = 'Checking...';
+    } else if (runtimeStatus.commitReady) {
+      badgeState = 'good';
+      badgeText = 'Live: commits enabled';
+    } else if (runtimeStatus.serverOk) {
+      badgeState = 'warn';
+      badgeText = 'Reachable; auth needed';
+    } else {
+      badgeState = 'bad';
+      badgeText = 'Offline';
+    }
+    activationBadge.className = `pill-mini ${badgeState}`;
+    activationBadge.textContent = badgeText;
+  }
+}
+
+async function activateServer({ commitAfter = false } = {}) {
+  await checkServerAvailability();
+  if (commitAfter && runtimeStatus.serverOk) {
+    await syncLocalToServer({ silent: true });
   }
 }
 
@@ -474,6 +586,7 @@ function loadInitialUiState() {
   );
   if (perUploadChoice) perUploadChoice.checked = true;
   el('consentCheckbox').checked = Boolean(settings.consent);
+  setStorageFeedback('Ready to save.');
   updateStorageStatus();
 }
 
@@ -481,7 +594,9 @@ function wireUi() {
   el('btnSaveFaceStorage')?.addEventListener('click', handleSaveFace);
   el('btnSaveLogs')?.addEventListener('click', handleSaveLogs);
   el('btnListFaces')?.addEventListener('click', refreshFaceList);
-  el('btnSyncFaces')?.addEventListener('click', syncLocalToServer);
+  el('btnSyncFaces')?.addEventListener('click', () => syncLocalToServer());
+  el('btnActivateServer')?.addEventListener('click', () => activateServer());
+  el('btnCommitPending')?.addEventListener('click', () => activateServer({ commitAfter: true }));
 
   document.querySelectorAll('input[name="defaultStorage"]').forEach((input) => {
     input.addEventListener('change', (event) => {
