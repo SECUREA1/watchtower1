@@ -433,6 +433,8 @@ function buildCamUI() {
       inferBusy: false,
       lastErrorAt: 0,
     };
+
+    cameras[slot.id].deviceSel.addEventListener('change', () => applyDeviceSelection(slot.id));
   }
 }
 buildCamUI();
@@ -505,6 +507,35 @@ async function waitVideoReady(video, timeoutMs = 8000) {
     const t = setTimeout(() => reject(new Error("Video metadata timeout")), timeoutMs);
     video.onloadedmetadata = () => { clearTimeout(t); resolve(); };
   });
+}
+
+async function applyDeviceSelection(camId) {
+  const cam = cameras[camId];
+  if (!cam) return;
+
+  const deviceId = cam.deviceSel.value || "";
+  const facingMode = deviceId ? "" : (camId === "cam1" ? UI.mobileFacing.value : "");
+  const wasRunning = cam.running;
+
+  if (!wasRunning) {
+    setStatus("Selection saved. Start cameras to apply.", "warn");
+    return;
+  }
+
+  setPill("Switching…", "warn");
+  setStatus(`Switching ${camId === "cam1" ? "Camera 1" : "Camera 2"} to selected device…`, "warn");
+
+  try {
+    await startOneCamera(camId, { deviceId, facingMode });
+    cam.ai = aiEnabled;
+    setPill("Running", "good");
+    setStatus(`${camId === "cam1" ? "Camera 1" : "Camera 2"} running with selected device.`, "good");
+  } catch (e) {
+    cam.metaEl.textContent = "failed";
+    setPill("Error", "bad");
+    setStatus(`${camId === "cam1" ? "Camera 1" : "Camera 2"} failed to start.`, "bad");
+    addMsg("Camera Error (" + camId + ")", (e && e.stack) ? e.stack : String(e));
+  }
 }
 
 async function startOneCamera(camId, { deviceId = "", facingMode = "" } = {}) {
