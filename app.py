@@ -1,4 +1,4 @@
-# app.py - GitHub-only RedNode API (complete)
+# app.py - GitHub-only RedNode API (complete) — updated UI serving logic
 import base64
 import json
 import logging
@@ -12,9 +12,10 @@ from typing import Dict, List, Optional
 from uuid import uuid4
 
 import requests
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 # -------------------------------------------------------------------------
@@ -39,11 +40,14 @@ if not STATIC_DIR.exists():
     alt_static = Path("/app/site").resolve()
     if alt_static.exists():
         STATIC_DIR = alt_static
+
+# Build list of serve roots in order of preference.
 SERVE_ROOTS: List[Path] = []
 if STATIC_DIR.exists():
     SERVE_ROOTS.append(STATIC_DIR)
 # Always include the repo root so newly added HTML pages in the repository root are served.
 SERVE_ROOTS.append(REPO_ROOT)
+# Normalize
 SERVE_ROOTS = [root.resolve() for root in SERVE_ROOTS]
 
 MAX_UPLOAD_BYTES = int(
@@ -212,6 +216,7 @@ def validate_upload(content_type: str, data: bytes) -> None:
 # -------------------------------------------------------------------------
 # Static asset helpers (serve repo-root and site/ HTML files)
 # -------------------------------------------------------------------------
+# Friendly route aliases for long filenames (request paths with or without trailing slash)
 HTML_ALIASES = {
     "/slots": "RedNode Slots.html",
     "/blackjack": "RedNode Blackjack — Secure Login.html",
@@ -340,7 +345,7 @@ def create_commit(message: str, tree_sha: str, parents: List[str]) -> str:
                              headers=github_headers(), json={"message": message, "tree": tree_sha, "parents": parents},
                              timeout=20)
     if response.status_code >= 300:
-        raise HTTPException(status_code=response.status_code, detail=f"GitHub commit error: {response.text}")
+        raise HTTPException(status_code=502, detail=f"GitHub commit error: {response.text}")
     return response.json()["sha"]
 
 
@@ -348,7 +353,7 @@ def update_ref(branch: str, sha: str) -> None:
     response = requests.patch(github_api(f"/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/refs/heads/{branch}"),
                               headers=github_headers(), json={"sha": sha, "force": False}, timeout=20)
     if response.status_code >= 300:
-        raise HTTPException(status_code=response.status_code, detail=f"GitHub update ref error: {response.text}")
+        raise HTTPException(status_code=502, detail=f"GitHub update ref error: {response.text}")
 
 
 def create_branch(branch_name: str, base_sha: str) -> None:
@@ -598,7 +603,7 @@ def commit_to_github(files: Dict[str, bytes], face_id: str, prefer_pr: bool = Fa
         return {"committed": False, "sha": None, "pr_url": None, "branch": branch_name, "message": "Commit queued"}
 
 # -------------------------------------------------------------------------
-# Routes
+# Routes (API)
 # -------------------------------------------------------------------------
 @app.post("/api/faces/add", response_model=FaceAddResponse)
 async def add_face(request: Request, image: UploadFile = File(...), metadata: str = Form(...)):
@@ -771,6 +776,18 @@ async def healthz():
 async def health():
     return {"ok": True}
 
+# -------------------------------------------------------------------------
+# Optional static mount for site/static (improves performance for common assets)
+# If your build places assets at site/static/ then this mount will serve them.
+# We still keep the dynamic fallback route below so repo-root HTMLs and other
+# special aliases are resolved correctly.
+# -------------------------------------------------------------------------
+if STATIC_DIR.exists():
+    static_assets_dir = STATIC_DIR / "static"
+    if static_assets_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(static_assets_dir)), name="static_assets")
+
+
 def _fallback_ui() -> Optional[FileResponse]:
     """Return a usable UI when the requested path is missing."""
     for candidate in ("rednode.html", "start.html", "index.html"):
@@ -786,8 +803,8 @@ async def serve_frontend(full_path: str, request: Request):
     if request.method not in {"GET", "HEAD"}:
         raise HTTPException(status_code=404, detail="Not found")
 
+    # Prefer a modern landing page
     if url_path in {"/", "/index.html"}:
-        # Prefer redirect to the modern landing page when it exists.
         if serve_file("start.html"):
             return RedirectResponse(url="/start.html", status_code=302)
 
@@ -796,6 +813,7 @@ async def serve_frontend(full_path: str, request: Request):
         if response:
             return response
 
+    # Short-hand, friendly routes
     if url_path in HOME_PATHS:
         response = serve_file("home.html")
         if response:
@@ -826,10 +844,12 @@ async def serve_frontend(full_path: str, request: Request):
         if response:
             return response
 
+    # Alias handling for friendly extensionless routes (e.g. /ar-dashboard)
     alias_resp = alias_response(url_path)
     if alias_resp:
         return alias_resp
 
+    # Serve repo-root and site files directly when possible.
     if full_path:
         direct_response = serve_file(full_path)
         if direct_response:
@@ -840,6 +860,7 @@ async def serve_frontend(full_path: str, request: Request):
             if html_response:
                 return html_response
 
+    # If nothing matched, fall back to a usable UI if available (spa/index/rednode)
     fallback = _fallback_ui()
     if fallback:
         return fallback
