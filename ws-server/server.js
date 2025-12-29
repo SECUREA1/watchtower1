@@ -11,6 +11,8 @@ const PORT = process.env.PORT || 10000; // Render provides PORT
 // Locate repo root to serve the client HTML
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
+const SITE_ROOT = path.join(ROOT, "site");
+const SERVE_ROOTS = [ROOT, SITE_ROOT];
 
 const DB_PATH = process.env.DB_PATH || path.join(ROOT, "app.db");
 const db = new Database(DB_PATH);
@@ -97,25 +99,29 @@ const MIME_TYPES = {
 };
 
 async function tryServeFile(res, relativePath, method) {
-  const normalized = path.normalize(path.join(ROOT, relativePath));
-  if (!normalized.startsWith(ROOT)) return false;
+  for (const base of SERVE_ROOTS) {
+    const normalized = path.normalize(path.join(base, relativePath));
+    if (!normalized.startsWith(base)) continue;
 
-  try {
-    const info = await stat(normalized);
-    if (!info.isFile()) return false;
-    const ext = path.extname(normalized).toLowerCase();
-    if (method === "GET") {
-      const data = await readFile(normalized);
-      res.writeHead(200, { "Content-Type": MIME_TYPES[ext] || "application/octet-stream" });
-      res.end(data);
-    } else {
-      res.writeHead(200, { "Content-Type": MIME_TYPES[ext] || "application/octet-stream" });
-      res.end();
+    try {
+      const info = await stat(normalized);
+      if (!info.isFile()) continue;
+      const ext = path.extname(normalized).toLowerCase();
+      const headers = { "Content-Type": MIME_TYPES[ext] || "application/octet-stream" };
+      res.writeHead(200, headers);
+
+      if (method === "GET") {
+        const data = await readFile(normalized);
+        res.end(data);
+      } else {
+        res.end();
+      }
+      return true;
+    } catch {
+      // try next base
     }
-    return true;
-  } catch {
-    return false;
   }
+  return false;
 }
 
 const server = http.createServer(async (req, res) => {
@@ -191,6 +197,21 @@ const server = http.createServer(async (req, res) => {
   const dashboardPaths = new Set(["/dashboard", "/dashboard.html", "/dashboard1", "/dashboard1.html"]);
   if ((req.method === "GET" || req.method === "HEAD") && dashboardPaths.has(urlPath)) {
     const served = await tryServeFile(res, "dashboard1.html", req.method);
+    if (!served) {
+      res.writeHead(404);
+      res.end("Not found");
+    }
+    return;
+  }
+
+  const arDashboardPaths = new Set([
+    "/ar-dashboard",
+    "/ar-dashboard.html",
+    "/rednode-dashboard",
+    "/rednode-dashboard.html",
+  ]);
+  if ((req.method === "GET" || req.method === "HEAD") && arDashboardPaths.has(urlPath)) {
+    const served = await tryServeFile(res, "RedNode Dashboard — Full Demo.html", req.method);
     if (!served) {
       res.writeHead(404);
       res.end("Not found");
