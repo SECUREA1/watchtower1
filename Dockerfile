@@ -7,6 +7,10 @@ WORKDIR /usr/share/nginx/html
 
 # Copy all site assets (HTML, JS, SVG, and folders) to the web root
 COPY site/ /usr/share/nginx/html/
+# Include root-level HTML dashboards (e.g., /ar-dashboard) that live outside site/
+COPY *.html /usr/share/nginx/html/
+# Include supporting experience folders that aren't nested under site/
+COPY CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll/ /usr/share/nginx/html/CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll/
 
 # Duplicate start page for the root index route
 RUN cp /usr/share/nginx/html/start.html /usr/share/nginx/html/index.html
