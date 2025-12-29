@@ -98,6 +98,28 @@ const MIME_TYPES = {
   ".html": "text/html",
 };
 
+// Friendly route aliases for long filenames (request paths with or without trailing slash)
+const htmlAliases = new Map([
+  ["/slots", "RedNode Slots.html"],
+  ["/blackjack", "RedNode Blackjack — Secure Login.html"],
+  ["/chess", "RedNode Chess — Secure Login.html"],
+  ["/eye-pro", "RedNode — Eye Pro (Fleet XR Console).html"],
+  ["/node-eye", "RedNode — Node Eye Console.html"],
+  ["/abyss", "RedNode.ai — Abyss Pilot (Submarine Viewport HUD).html"],
+  ["/redar", "RedAR + IonEye — Multi-Cam + Face_Object + Sentinel + WebXR.html"],
+  ["/drone-dig", "DRONE DIG + SCOOP — DUAL HAND ISO CONTROLS.html"],
+  ["/gesture-sim", "Rednode Excavation — Gesture Controlled Sim.html"],
+  ["/sentinel-side", "Rednode Sentinel — Drone Dig + Pile + Boom Side View.html"],
+  ["/sentinel-side-full", "Rednode Sentinel — Drone Dig + Pile + Boom Side View (Hands Full Control).html"],
+  ["/excavator-job", "Excavator Job Site — Gesture Driven.html"],
+  ["/excavator-trainer", "Excavator — Terrain Map + Hand-Training Startup Calibration + Micro-Movement Tuner.html"],
+  ["/locked-views", "RedNode — Locked Views Excavator (2-Hand ISO Controls + Sensitivity Tuners).html"],
+  ["/indoor-ops", "RedNode Dashboard — Indoor Ops · Sentinel · Demo.html"],
+  ["/dadda", "dadda - Copy - Copy.html"],
+  ["/market", "market.html"],
+  ["/rednode-dashboard-demo", "RedNode Dashboard — Full Demo.html"],
+]);
+
 async function tryServeFile(res, relativePath, method) {
   for (const base of SERVE_ROOTS) {
     const normalized = path.normalize(path.join(base, relativePath));
@@ -247,6 +269,16 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  const aliasKey = urlPath.endsWith("/") && urlPath !== "/" ? urlPath.slice(0, -1) : urlPath;
+  if ((req.method === "GET" || req.method === "HEAD") && htmlAliases.has(aliasKey)) {
+    const served = await tryServeFile(res, htmlAliases.get(aliasKey), req.method);
+    if (!served) {
+      res.writeHead(404);
+      res.end("Not found");
+    }
+    return;
+  }
+
   // Serve static assets
   if ((req.method === "GET" || req.method === "HEAD") && urlPath.startsWith("/static/")) {
     const served = await tryServeFile(res, urlPath.slice(1), req.method);
@@ -260,8 +292,14 @@ const server = http.createServer(async (req, res) => {
   if ((req.method === "GET" || req.method === "HEAD") && urlPath !== "/") {
     const relative = urlPath.replace(/^\/+/, "");
     if (relative) {
-      const served = await tryServeFile(res, relative, req.method);
+      let served = await tryServeFile(res, relative, req.method);
       if (served) return;
+
+      // Allow extensionless routes to resolve to .html files (new experiences)
+      if (!path.extname(relative)) {
+        served = await tryServeFile(res, `${relative}.html`, req.method);
+        if (served) return;
+      }
     }
   }
 
