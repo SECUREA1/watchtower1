@@ -1,0 +1,3710 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>RedNode — Secure Chess (Gesture + Best-of-3 Match)</title>
+  <meta name="description" content="RedNode Chess with secure login (gesture or cursor signature) + pinch-to-click hand control + best-of-3 match."/>
+
+  <style>
+    :root{
+      /* RedNode core */
+      --rn-red:#d32f2f;
+      --rn-red2:#ff4d4d;
+      --rn-green:#0b6b3a;
+      --rn-green2:#27c06a;
+      --rn-cyan:#8cdcff;
+
+      --bg0:#050b10;
+      --bg1:#06141c;
+      --bg2:#041d17;
+
+      --muted:#cfe9d7;
+      --uiText: rgba(255,255,255,.92);
+
+      --panel: rgba(255,255,255,0.06);
+      --panel2: rgba(0,0,0,0.22);
+      --border: rgba(255,255,255,0.12);
+
+      --light:#f0d9b5;
+      --dark:#b58863;
+
+      --shadow: 0 22px 60px rgba(0,0,0,0.60);
+      --shadow2: 0 12px 28px rgba(0,0,0,0.45);
+
+      /* Board sizing (JS updates --board-size) */
+      --board-size: 660px;
+      --cell-size: calc(var(--board-size) / 8);
+      --piece-size: calc(var(--cell-size) * 0.62);
+    }
+
+    html,body{
+      height:100%;
+      margin:0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+      background:
+        radial-gradient(1200px 900px at 10% 10%, rgba(211,47,47,.12), transparent 60%),
+        radial-gradient(900px 700px at 88% 16%, rgba(39,192,106,.10), transparent 55%),
+        radial-gradient(1000px 800px at 50% 110%, rgba(140,220,255,.08), transparent 60%),
+        linear-gradient(180deg, var(--bg0), var(--bg1) 55%, var(--bg2));
+      color:var(--muted);
+      -webkit-font-smoothing:antialiased;
+      overflow-x:hidden;
+    }
+
+    /* subtle “tech grain” */
+    body:before{
+      content:"";
+      position:fixed; inset:0;
+      pointer-events:none;
+      background:
+        radial-gradient(circle at 20% 30%, rgba(255,255,255,.05), transparent 35%),
+        radial-gradient(circle at 70% 20%, rgba(255,255,255,.03), transparent 40%),
+        radial-gradient(circle at 60% 80%, rgba(255,255,255,.03), transparent 45%),
+        repeating-linear-gradient(0deg, rgba(255,255,255,.018), rgba(255,255,255,.018) 1px, transparent 1px, transparent 6px);
+      opacity:.28;
+      mix-blend-mode: overlay;
+      z-index:-1;
+    }
+
+    header{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding:14px 22px;
+      border-bottom:1px solid rgba(255,255,255,0.06);
+      gap: 14px;
+      position:sticky;
+      top:0;
+      z-index:100;
+      backdrop-filter: blur(10px);
+      background: linear-gradient(180deg, rgba(6,12,16,.78), rgba(6,12,16,.45));
+    }
+
+    .branding{display:flex;align-items:center;gap:14px}
+    .branding h1{margin:0;color:#fff;font-size:18px;letter-spacing:.2px}
+    .branding .subtitle{font-size:12px;color:#a9c8b4}
+
+    .controls-right{display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+
+    .btn{
+      background:
+        radial-gradient(120% 120% at 20% 10%, rgba(255,255,255,.12), rgba(255,255,255,.02)),
+        linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
+      padding:8px 12px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,0.10);
+      color:rgba(255,255,255,.90);
+      font-weight:950;
+      cursor:pointer;
+      user-select:none;
+      box-shadow: 0 10px 20px rgba(0,0,0,.25);
+      transition: transform .08s ease, border-color .12s ease, background .12s ease, box-shadow .12s ease;
+    }
+    .btn:hover{
+      border-color: rgba(255,255,255,0.18);
+      box-shadow: 0 12px 26px rgba(0,0,0,.30);
+      transform: translateY(-1px);
+    }
+    .btn:active{ transform: translateY(0px) scale(0.99); }
+    .btn.primary{
+      background:
+        radial-gradient(100% 140% at 10% 0%, rgba(255,255,255,.18), rgba(255,255,255,0)),
+        linear-gradient(90deg,var(--rn-green),#1b8d50);
+      color:#fff;border:1px solid rgba(90,255,160,.18);
+      box-shadow: 0 16px 30px rgba(11,107,58,.22);
+    }
+    .btn.ghost{
+      background: rgba(0,0,0,.14);
+      border:1px solid rgba(140,220,255,.16);
+      box-shadow: 0 12px 24px rgba(0,0,0,.22);
+    }
+    .btn:disabled, .btn.disabled{opacity:.45; cursor:not-allowed; pointer-events:none; filter:saturate(.6);}
+
+    .layout{
+      display:grid;
+      grid-template-columns: 320px 1fr 340px;
+      gap:18px;
+      max-width:1560px;
+      margin:22px auto;
+      padding:0 12px;
+      align-items:start;
+    }
+    @media (max-width:1100px){
+      .layout{grid-template-columns:1fr; padding:12px}
+      aside.logs{order:3}
+    }
+
+    /* Focus mode: board takes full width, side panels hidden */
+    body.focus .layout{ grid-template-columns: 1fr; max-width: 1400px; }
+    body.focus aside.panel{ display:none; }
+    body.focus footer{ opacity:.92; }
+
+    aside.panel{
+      background:
+        radial-gradient(100% 140% at 10% 0%, rgba(255,255,255,.08), rgba(255,255,255,.02)),
+        linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+      padding:16px;
+      border-radius:16px;
+      border:1px solid rgba(255,255,255,0.08);
+      box-shadow: var(--shadow2);
+    }
+    .stat{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      padding:10px;
+      border-radius:12px;
+      background:rgba(255,255,255,0.03);
+      border:1px solid rgba(255,255,255,0.05);
+      font-weight:950;
+      margin-bottom:10px;
+      color: rgba(255,255,255,.92);
+    }
+    .small-note{font-size:12px;color:#a9c8b4;line-height:1.42}
+    .pill{
+      display:inline-flex;
+      gap:8px;
+      align-items:center;
+      padding:8px 10px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.14);
+      background: rgba(0,0,0,.18);
+      font-variant-numeric: tabular-nums;
+      color: rgba(255,255,255,.90);
+    }
+    .pill.ok{ border-color: rgba(90,255,160,.30); background: rgba(90,255,160,.14); }
+    .pill.bad{ border-color: rgba(255,120,120,.25); background: rgba(255,120,120,.10); }
+
+    /* Chess board area */
+    .table-wrap{
+      border-radius:18px;
+      background:
+        radial-gradient(1000px 600px at 20% 0%, rgba(140,220,255,.10), rgba(255,255,255,0.00)),
+        rgba(255,255,255,0.02);
+      border:1px solid rgba(255,255,255,0.10);
+      box-shadow: var(--shadow);
+      overflow:hidden;
+    }
+    .table-inner{
+      padding:16px;
+      background:
+        radial-gradient(circle at 20% 20%, rgba(255,255,255,0.02), transparent 8%),
+        linear-gradient(180deg, rgba(11,107,58,0.10), rgba(0,0,0,0));
+    }
+
+    /* Match HUD */
+    #matchHud{
+      width: min(var(--board-size), 100%);
+      margin: 0 auto 10px;
+      padding: 10px 12px;
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,.12);
+      background:
+        radial-gradient(120% 140% at 10% 0%, rgba(255,77,77,.10), rgba(255,255,255,0.02)),
+        radial-gradient(110% 120% at 90% 0%, rgba(39,192,106,.10), rgba(255,255,255,0.00)),
+        rgba(0,0,0,.18);
+      box-shadow: 0 18px 40px rgba(0,0,0,.25);
+      display:flex;
+      gap:12px;
+      align-items:flex-end;
+      justify-content:space-between;
+      flex-wrap:wrap;
+    }
+    #matchHud .hudTitle{
+      color:#fff;
+      font-weight:950;
+      letter-spacing:.2px;
+      font-size: 14px;
+    }
+    #matchHud .hudMeta{
+      margin-top: 2px;
+      font-size:12px;
+      color: rgba(255,255,255,.80);
+      line-height:1.25;
+    }
+    #matchHud .hudRight{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+      align-items:center;
+    }
+    .scorePill{
+      display:inline-flex;
+      gap:8px;
+      align-items:center;
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(0,0,0,.18);
+      color: rgba(255,255,255,.92);
+      font-weight:950;
+      font-variant-numeric: tabular-nums;
+    }
+    .scorePill strong{ font-weight:950; }
+    #seriesDots{
+      width: min(var(--board-size), 100%);
+      margin: 0 auto 12px;
+      display:flex;
+      gap:8px;
+      align-items:center;
+      justify-content:space-between;
+    }
+    .gameDot{
+      flex: 1 1 0;
+      display:flex;
+      gap:10px;
+      align-items:center;
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(0,0,0,.14);
+      color: rgba(255,255,255,.86);
+      font-weight:900;
+      min-width: 0;
+    }
+    .gameDot b{ color:#fff; }
+    .dot{
+      width: 12px;
+      height: 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.18);
+      background: rgba(255,255,255,.14);
+      box-shadow: 0 0 0 1px rgba(0,0,0,.12) inset;
+      flex: 0 0 auto;
+    }
+    .dot.win{ background: rgba(90,255,160,.92); border-color: rgba(90,255,160,.35); }
+    .dot.loss{ background: rgba(255,120,120,.92); border-color: rgba(255,120,120,.35); }
+    .dot.draw{ background: rgba(255,210,120,.95); border-color: rgba(255,210,120,.35); }
+    .dot.pending{ background: rgba(255,255,255,.14); border-color: rgba(255,255,255,.14); opacity:.75; }
+
+    /* Board shell (RedNode skin) */
+    #boardShell{
+      width: min(var(--board-size), 100%);
+      height: auto;
+      margin: 0 auto;
+      padding: 2px;
+      border-radius: 18px;
+      background: linear-gradient(135deg, rgba(255,77,77,.80), rgba(140,220,255,.52), rgba(39,192,106,.74));
+      box-shadow: 0 22px 54px rgba(0,0,0,.55);
+    }
+    #board{
+      width: 100%;
+      height: 100%;
+      border-radius: 16px;
+      overflow:hidden;
+      background: rgba(0,0,0,0.20);
+      border: 2px solid rgba(0,0,0,0.55);
+      box-shadow: 0 18px 44px rgba(0,0,0,0.60);
+      position:relative;
+    }
+    #board:after{
+      content:"";
+      position:absolute; inset:0;
+      pointer-events:none;
+      background:
+        radial-gradient(120% 120% at 50% 0%, rgba(140,220,255,.06), transparent 55%),
+        radial-gradient(120% 120% at 30% 90%, rgba(255,77,77,.05), transparent 60%);
+      mix-blend-mode: overlay;
+      opacity:.9;
+      z-index:1;
+    }
+    #board table{
+      border-collapse: collapse;
+      width:100%;
+      height:100%;
+      table-layout: fixed;
+      position:relative;
+      z-index:2;
+    }
+    #board td{
+      width: 12.5%;
+      height: var(--cell-size);
+      text-align:center;
+      vertical-align:middle;
+      font-size: var(--piece-size);
+      cursor:pointer;
+      user-select:none;
+      position:relative;
+      transition: filter .08s ease, transform .08s ease;
+    }
+    #board td:hover{ filter: brightness(1.06) saturate(1.06); }
+
+    .light{
+      background-color: var(--light);
+      background-image: linear-gradient(135deg, rgba(255,255,255,.10), rgba(0,0,0,0));
+    }
+    .dark{
+      background-color: var(--dark);
+      background-image: linear-gradient(135deg, rgba(0,0,0,.08), rgba(255,255,255,.06));
+    }
+
+    .selected{ outline: 3px solid rgba(255,80,80,.95); outline-offset: -3px; }
+    .hintMove{ box-shadow: inset 0 0 0 3px rgba(90,255,160,.75); }
+    .hintCapture{ box-shadow: inset 0 0 0 3px rgba(255,210,120,.92); }
+    .lastFrom{ box-shadow: inset 0 0 0 3px rgba(140,220,255,.60); }
+    .lastTo{ box-shadow: inset 0 0 0 3px rgba(140,220,255,.90); }
+    .inCheck{
+      box-shadow:
+        inset 0 0 0 4px rgba(255,80,80,.92),
+        0 0 0 2px rgba(0,0,0,.10);
+    }
+
+    #status{
+      width: min(var(--board-size), 100%);
+      margin: 12px auto 0;
+      font-size: 15px;
+      font-weight: 950;
+      color: rgba(255,255,255,.92);
+      background: rgba(0,0,0,.22);
+      border: 1px solid rgba(255,255,255,.10);
+      padding: 10px 12px;
+      border-radius: 14px;
+      box-shadow: 0 12px 22px rgba(0,0,0,.20);
+    }
+
+    #controlsRow{
+      width: min(var(--board-size), 100%);
+      margin: 12px auto 0;
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+      justify-content:space-between;
+      align-items:center;
+    }
+    #controlsRow .leftCtl, #controlsRow .rightCtl{
+      display:flex; gap:10px; flex-wrap:wrap; align-items:center;
+    }
+
+    /* Menu modal */
+    #menu-modal{
+      display:none;
+      position:fixed;
+      inset:0;
+      align-items:center;
+      justify-content:center;
+      background:rgba(0,0,0,0.62);
+      z-index:2000;
+      padding:12px;
+      backdrop-filter: blur(10px);
+    }
+
+    /* =========================
+       Login + Gesture Tuner UI
+       ========================= */
+    #overlay{
+      position:fixed; inset:0;
+      display:flex; align-items:center; justify-content:center;
+      padding: 14px;
+      background: radial-gradient(1200px 800px at 50% 25%, rgba(160,210,255,.12), rgba(0,0,0,.72));
+      backdrop-filter: blur(12px);
+      z-index: 5000;
+      overflow:auto;
+    }
+    #cardAuth{
+      width: min(980px, 96vw);
+      max-height: calc(100dvh - 28px);
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.14);
+      border-radius: 20px;
+      box-shadow: 0 34px 90px rgba(0,0,0,.48);
+      color: rgba(255,255,255,.92);
+      display:flex;
+      flex-direction:column;
+      overflow:hidden;
+      position:relative;
+    }
+    #cardAuth:before{
+      content:"";
+      position:absolute; inset:-2px;
+      pointer-events:none;
+      background:
+        radial-gradient(900px 260px at 15% 0%, rgba(255,77,77,.12), transparent 60%),
+        radial-gradient(900px 260px at 85% 0%, rgba(39,192,106,.10), transparent 60%);
+      opacity:.9;
+    }
+    #cardHeaderAuth, #cardBodyAuth, #cardFooterAuth{ position:relative; z-index:1; }
+
+    #cardHeaderAuth{
+      padding: 14px 14px 10px;
+      border-bottom: 1px solid rgba(255,255,255,.10);
+      background: rgba(0,0,0,.20);
+    }
+    #titleRowAuth{
+      display:flex; align-items:flex-start; justify-content:space-between; gap: 12px;
+    }
+    #titleRowAuth h2{
+      margin: 0;
+      font: 950 18px/1.15 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      letter-spacing: .2px;
+      color: #fff;
+    }
+    #subtitleAuth{ opacity:.86; margin-top: 6px; max-width: 92ch; font-size: 13px; }
+
+    #authSteps{
+      margin-top:10px;
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      align-items:center;
+    }
+    .stepChip{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:7px 10px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.14);
+      background: rgba(0,0,0,.16);
+      font-size:12px;
+      font-weight:950;
+      color: rgba(255,255,255,.92);
+    }
+    .stepChip i{
+      width:18px; height:18px;
+      display:inline-grid; place-items:center;
+      border-radius:999px;
+      background: rgba(140,220,255,.14);
+      border:1px solid rgba(140,220,255,.18);
+      font-style:normal;
+      font-size:12px;
+    }
+
+    .modeRow{ display:flex; flex-wrap:wrap; gap:10px; margin-top: 12px; }
+    .modeBtn{
+      flex: 1 1 260px;
+      padding: 14px 12px;
+      border-radius: 16px;
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.14);
+      color: rgba(255,255,255,.92);
+      cursor:pointer;
+      text-align:left;
+      box-shadow: 0 16px 30px rgba(0,0,0,.20);
+      transition: transform .10s ease, border-color .14s ease, background .14s ease;
+    }
+    .modeBtn:hover{ transform: translateY(-1px); border-color: rgba(255,255,255,.20); }
+    .modeBtn strong{ display:block; font-size: 14px; margin-bottom: 2px; letter-spacing:.2px; }
+    .modeBtn span{ opacity:.85; display:block; font-size: 12px; }
+    .modeBtn.selected{
+      border-color: rgba(140,220,255,.42);
+      background: rgba(140,220,255,.12);
+      box-shadow: 0 16px 32px rgba(140,220,255,.08);
+    }
+
+    #cardBodyAuth{
+      padding: 12px 14px 12px;
+      overflow:auto;
+      -webkit-overflow-scrolling: touch;
+      min-height: 0;
+    }
+    .gridAuth{
+      display:grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr);
+      gap: 12px;
+    }
+    @media (max-width: 980px){ .gridAuth{ grid-template-columns: 1fr; } }
+
+    .panelAuth{
+      background: rgba(0,0,0,.22);
+      border: 1px solid rgba(255,255,255,.10);
+      border-radius: 16px;
+      padding: 10px 10px 8px;
+      min-width: 0;
+      box-shadow: 0 18px 34px rgba(0,0,0,.22);
+    }
+    .panelAuth h3{
+      margin: 2px 0 8px;
+      font: 950 13px/1.15 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      letter-spacing:.15px;
+      color: #fff;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .row{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      margin: 7px 0;
+      min-width: 0;
+    }
+    .row label{ flex: 0 0 240px; opacity:.95; min-width: 0; }
+    .row input[type="range"]{ width:100%; min-width: 0; }
+    .row .v{
+      width: 140px;
+      text-align:right;
+      opacity:.90;
+      font-variant-numeric: tabular-nums;
+      flex: 0 0 auto;
+      color: rgba(255,255,255,.90);
+    }
+    .row input[type="checkbox"]{ transform: scale(1.05); }
+
+    @media (max-width: 560px){
+      #cardHeaderAuth{ padding: 12px 12px 10px; }
+      #cardBodyAuth{ padding: 10px 12px 12px; }
+      .row{ flex-direction:column; align-items:stretch; gap:6px; }
+      .row label{ flex: 0 0 auto; width:100%; }
+      .row .v{ width:100%; text-align:right; }
+      .modeBtn{ flex: 1 1 100%; }
+    }
+    .hint{ opacity:.84; font-size: 12px; margin-top: 6px; color: rgba(255,255,255,.86); }
+
+    #cardFooterAuth{
+      padding: 12px 14px 14px;
+      border-top: 1px solid rgba(255,255,255,.10);
+      background: rgba(0,0,0,.18);
+    }
+    .actionsAuth{ display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap; }
+    .actionBtn{
+      padding: 12px 14px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.18);
+      background: rgba(255,255,255,.10);
+      color: rgba(255,255,255,.92);
+      cursor:pointer;
+      font: 950 13px/1 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      box-shadow: 0 14px 26px rgba(0,0,0,.18);
+      transition: transform .08s ease, border-color .12s ease;
+    }
+    .actionBtn:hover{ transform: translateY(-1px); border-color: rgba(255,255,255,.26); }
+    .actionBtn.primary{
+      background: rgba(90,255,160,.22);
+      border-color: rgba(90,255,160,.26);
+    }
+    .actionBtn:disabled{ opacity:.45; cursor:not-allowed; }
+
+    /* Cursor pattern pad */
+    #patternPad{
+      width: 100%;
+      height: 240px;
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,.14);
+      background: radial-gradient(700px 240px at 50% 50%, rgba(140,220,255,.08), rgba(0,0,0,.18));
+      position: relative;
+      overflow:hidden;
+      touch-action:none;
+    }
+    #patternPad canvas{ width:100%; height:100%; display:block; }
+
+    /* Startup scan overlay (gesture) */
+    #startup{
+      position:fixed; inset:0;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding: 14px;
+      background: radial-gradient(1100px 700px at 50% 35%, rgba(255,140,140,.10), rgba(0,0,0,.78));
+      backdrop-filter: blur(12px);
+      z-index: 6000;
+      color: rgba(255,255,255,.92);
+      overflow:auto;
+    }
+    #startupCard{
+      width: min(820px, 96vw);
+      max-height: calc(100dvh - 28px);
+      border-radius: 20px;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.08);
+      box-shadow: 0 34px 90px rgba(0,0,0,.48);
+      padding: 14px 14px 12px;
+      overflow:auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    #startupTop{ display:flex; align-items:flex-start; justify-content:space-between; gap: 12px; margin-bottom: 10px; }
+    #startupTop h3{ margin:0; font: 950 16px/1.15 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; letter-spacing:.2px; color:#fff; }
+    #startupMsg{ opacity:.86; margin-top: 6px; }
+    #startupCount{ font: 950 56px/1 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; opacity:.95; min-width: 80px; text-align:right; }
+    #startupBars{ display:flex; gap:10px; margin-top: 12px; align-items:center; flex-wrap:wrap; }
+    .pbar{
+      flex: 1 1 240px;
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.12);
+      overflow:hidden;
+      border: 1px solid rgba(255,255,255,.10);
+    }
+    .pbar > i{ display:block; height:100%; width:0%; background: rgba(140,220,255,.95); }
+
+    /* Live tuner (gesture) */
+    #liveTuner{
+      position:fixed;
+      top: 76px;
+      right: 14px;
+      width: min(420px, 92vw);
+      max-height: calc(100dvh - 120px);
+      background: rgba(10,14,20,.80);
+      border: 1px solid rgba(255,255,255,.14);
+      border-radius: 18px;
+      backdrop-filter: blur(12px);
+      z-index: 2500;
+      display:none;
+      overflow:hidden;
+      box-shadow: 0 28px 70px rgba(0,0,0,.52);
+    }
+    #liveTunerHeader{
+      padding: 10px 10px 8px;
+      border-bottom: 1px solid rgba(255,255,255,.10);
+      display:flex;
+      gap:10px;
+      align-items:center;
+      justify-content:space-between;
+      color: rgba(255,255,255,.92);
+      font: 950 13px/1 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+    #liveTunerHeader small{ font-weight:800; opacity:.82; }
+    #liveTunerBody{
+      padding: 10px 10px 12px;
+      overflow:auto;
+      -webkit-overflow-scrolling: touch;
+      color: rgba(255,255,255,.90);
+      font: 13px/1.35 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+    .miniBtn{
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.16);
+      background: rgba(255,255,255,.10);
+      color: rgba(255,255,255,.92);
+      cursor:pointer;
+      font: 950 12px/1 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+    .miniBtn:hover{ border-color: rgba(255,255,255,.26); }
+    #liveReadout{
+      margin-top: 8px;
+      opacity:.84;
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+      word-break: break-word;
+    }
+
+    /* Gesture cursor overlay (improved) */
+    #gestureCursor{
+      position:fixed;
+      width: 20px;
+      height: 20px;
+      border-radius: 999px;
+      border: 2px solid rgba(255,255,255,.88);
+      box-shadow: 0 0 22px rgba(140,220,255,.16);
+      transform: translate(-50%, -50%);
+      pointer-events:none;
+      z-index: 2600;
+      display:none;
+    }
+    #gestureCursor:before{
+      content:"";
+      position:absolute; inset:5px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.42);
+      opacity:.65;
+    }
+    #gestureCursor:after{
+      content:"";
+      position:absolute;
+      left:50%; top:50%;
+      width:4px; height:4px;
+      border-radius:999px;
+      transform: translate(-50%, -50%);
+      background: rgba(140,220,255,.85);
+      box-shadow: 0 0 14px rgba(140,220,255,.40);
+    }
+    #gestureCursor.pinch{
+      border-color: rgba(90,255,160,.92);
+      box-shadow: 0 0 34px rgba(90,255,160,.32);
+    }
+    #gestureCursor.pinch:after{
+      background: rgba(90,255,160,.92);
+      box-shadow: 0 0 16px rgba(90,255,160,.44);
+    }
+
+    /* hidden webcam element */
+    #video{
+      position:fixed;
+      left:-9999px;
+      top:-9999px;
+      width: 640px;
+      height: 480px;
+      opacity:0;
+      pointer-events:none;
+    }
+
+    /* Promotion modal */
+    #promoModal{
+      position:fixed;
+      inset:0;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding:14px;
+      background: rgba(0,0,0,.62);
+      z-index: 4200;
+      backdrop-filter: blur(10px);
+    }
+    #promoCard{
+      width:min(520px, 94vw);
+      border-radius:18px;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.08);
+      box-shadow: 0 34px 90px rgba(0,0,0,.48);
+      padding:14px;
+      color: rgba(255,255,255,.92);
+    }
+    #promoCard h3{
+      margin:0 0 6px;
+      font: 950 16px/1.15 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      color:#fff;
+    }
+    #promoCard .hint{ margin-top:0; opacity:.85; }
+    .promoRow{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-top:12px;
+      justify-content:flex-end;
+    }
+    .promoPick{
+      flex: 1 1 100px;
+      padding:12px 12px;
+      border-radius:14px;
+      border: 1px solid rgba(255,255,255,.16);
+      background: rgba(0,0,0,.18);
+      cursor:pointer;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      font-weight:950;
+      color: rgba(255,255,255,.92);
+    }
+    .promoPick:hover{ border-color: rgba(140,220,255,.28); background: rgba(140,220,255,.10); }
+
+    /* Match modal */
+    #matchModal{
+      position:fixed;
+      inset:0;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding:14px;
+      background: rgba(0,0,0,.62);
+      z-index: 4300;
+      backdrop-filter: blur(10px);
+    }
+    #matchCard{
+      width:min(760px, 96vw);
+      border-radius:20px;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.08);
+      box-shadow: 0 34px 90px rgba(0,0,0,.50);
+      padding:14px;
+      color: rgba(255,255,255,.92);
+    }
+    #matchCard h3{
+      margin:0;
+      font: 950 18px/1.15 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      color:#fff;
+      letter-spacing:.2px;
+    }
+    #matchCard .sub{
+      margin-top:6px;
+      opacity:.86;
+      font-size:13px;
+      line-height:1.35;
+    }
+    #matchCard .line{
+      margin-top:10px;
+      padding:10px 12px;
+      border-radius:14px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(0,0,0,.18);
+      font-weight:950;
+      color: rgba(255,255,255,.92);
+    }
+    #matchSeriesList{
+      margin-top:10px;
+      display:grid;
+      gap:8px;
+    }
+    .seriesItem{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      justify-content:space-between;
+      padding:10px 12px;
+      border-radius:14px;
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(0,0,0,.14);
+      color: rgba(255,255,255,.86);
+      font-weight:900;
+    }
+    .seriesItem .left{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      min-width: 0;
+    }
+    .seriesItem .right{
+      opacity:.86;
+      font-variant-numeric: tabular-nums;
+      flex: 0 0 auto;
+    }
+    #matchActions{
+      margin-top:12px;
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+
+    footer{
+      text-align:center;
+      color:#94b9a2;
+      padding:16px 0 18px;
+      font-size:13px;
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <div class="branding">
+      <!-- RedNode SVG (high design) -->
+      <svg width="84" height="46" viewBox="0 0 210 56" aria-hidden="true">
+        <defs>
+          <linearGradient id="rnG" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#ff4d4d"/>
+            <stop offset="0.55" stop-color="#d32f2f"/>
+            <stop offset="1" stop-color="#8f1b1b"/>
+          </linearGradient>
+          <linearGradient id="rnH" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stop-color="#27c06a"/>
+            <stop offset="1" stop-color="#0b6b3a"/>
+          </linearGradient>
+          <radialGradient id="rnGlow" cx="35%" cy="30%" r="70%">
+            <stop offset="0" stop-color="rgba(140,220,255,.35)"/>
+            <stop offset="1" stop-color="rgba(140,220,255,0)"/>
+          </radialGradient>
+          <filter id="softShadow" x="-20%" y="-40%" width="140%" height="200%">
+            <feGaussianBlur stdDeviation="3" result="blur"/>
+            <feColorMatrix in="blur" type="matrix"
+              values="0 0 0 0 0
+                      0 0 0 0 0
+                      0 0 0 0 0
+                      0 0 0 .55 0" result="shadow"/>
+            <feMerge>
+              <feMergeNode in="shadow"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+        </defs>
+
+        <rect rx="10" width="210" height="56" fill="rgba(15,28,24,.65)" stroke="rgba(255,255,255,.10)"/>
+        <rect rx="10" x="2" y="2" width="206" height="52" fill="rgba(0,0,0,.10)"/>
+        <circle cx="46" cy="28" r="22" fill="url(#rnGlow)"/>
+
+        <!-- Node emblem -->
+        <g filter="url(#softShadow)" transform="translate(14,9)">
+          <circle cx="28" cy="19" r="14" fill="url(#rnG)"/>
+          <g opacity=".92" stroke="rgba(255,255,255,.65)" stroke-width="1.2">
+            <line x1="28" y1="19" x2="6" y2="7"/>
+            <line x1="28" y1="19" x2="46" y2="5"/>
+            <line x1="28" y1="19" x2="48" y2="30"/>
+            <line x1="28" y1="19" x2="8" y2="32"/>
+          </g>
+          <g fill="rgba(255,255,255,.90)">
+            <circle cx="6" cy="7" r="2.6"/>
+            <circle cx="46" cy="5" r="2.6"/>
+            <circle cx="48" cy="30" r="2.6"/>
+            <circle cx="8" cy="32" r="2.6"/>
+          </g>
+        </g>
+
+        <!-- Label bar -->
+        <g filter="url(#softShadow)" transform="translate(76,11)">
+          <rect x="0" y="0" width="118" height="34" rx="10" fill="rgba(7,16,23,.82)" stroke="rgba(255,255,255,.10)"/>
+          <rect x="8" y="8" width="8" height="18" rx="4" fill="url(#rnH)" opacity=".95"/>
+          <text x="22" y="21" fill="#f1f1f1" font-size="14" font-weight="800">RedNode</text>
+          <text x="22" y="33" fill="rgba(190,220,205,.90)" font-size="10" font-weight="700">Secure Chess</text>
+        </g>
+      </svg>
+
+      <div>
+        <h1>RedNode — Secure Chess</h1>
+        <div class="subtitle">Secure login • Full-screen gesture cursor • RedNode skin • Best-of-3 match</div>
+      </div>
+    </div>
+
+    <div class="controls-right">
+      <div style="text-align:right; min-width: 220px">
+        <div style="font-weight:950;color:rgba(255,255,255,.92)">Controller</div>
+        <div style="font-size:12px;color:#bdbdbd">Status: <span id="controller-pill" style="color:#ffbdbd;font-weight:950">Locked</span></div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+        <button id="menu-open" class="btn">Menu</button>
+        <button id="tuner-open" class="btn ghost">Tuner</button>
+        <button id="lock-open" class="btn">Login</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="panel" aria-label="Info">
+      <div class="stat"><div>Your Side</div><div id="sideStat">White</div></div>
+      <div class="stat"><div>Match</div><div>Best of 3 (first to 2 pts)</div></div>
+      <div class="stat"><div>Rules</div><div>Full (castle + en-passant + promo)</div></div>
+      <div class="small-note">
+        <b>Gesture mode:</b> full-screen cursor appears. <b>Pinch</b> = click.
+        <br/><br/>
+        <b>Camera note:</b> Gesture login requires <b>HTTPS</b> or <b>localhost</b>.
+      </div>
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <span class="pill" id="authSeenMini">Hand: —</span>
+        <span class="pill" id="authProfileMini">Profile: —</span>
+      </div>
+    </aside>
+
+    <section class="table-wrap" aria-label="Chess table">
+      <div class="table-inner">
+        <!-- Match HUD -->
+        <div id="matchHud" aria-label="Match HUD">
+          <div>
+            <div class="hudTitle">Match — Best of 3</div>
+            <div class="hudMeta" id="hudMeta">Game 1 of 3 • You: White</div>
+          </div>
+          <div class="hudRight">
+            <div class="scorePill">You <strong id="scoreYou">0.0</strong></div>
+            <div class="scorePill">AI <strong id="scoreAI">0.0</strong></div>
+          </div>
+        </div>
+
+        <div id="seriesDots" aria-label="Series Progress">
+          <div class="gameDot"><span class="dot pending" id="dot1"></span><div style="min-width:0"><b>Game 1</b><div style="font-size:12px;opacity:.82" id="dot1txt">Pending</div></div></div>
+          <div class="gameDot"><span class="dot pending" id="dot2"></span><div style="min-width:0"><b>Game 2</b><div style="font-size:12px;opacity:.82" id="dot2txt">Pending</div></div></div>
+          <div class="gameDot"><span class="dot pending" id="dot3"></span><div style="min-width:0"><b>Game 3</b><div style="font-size:12px;opacity:.82" id="dot3txt">Pending</div></div></div>
+        </div>
+
+        <!-- Board -->
+        <div id="boardShell">
+          <div id="board"></div>
+        </div>
+
+        <div id="status">Loading…</div>
+
+        <div id="controlsRow">
+          <div class="leftCtl">
+            <button id="restart" class="btn primary">Restart Game</button>
+            <button id="resign" class="btn">Resign</button>
+          </div>
+          <div class="rightCtl">
+            <button id="flip" class="btn ghost">Flip Board</button>
+            <button id="focusBtn" class="btn ghost">Focus</button>
+          </div>
+        </div>
+
+        <div class="small-note" style="margin-top:10px; width:min(var(--board-size),100%); margin-left:auto; margin-right:auto;">
+          Tip: Click a piece to see legal moves (green). Captures show as amber. Castling and en-passant are enabled. Promotion lets you choose.
+        </div>
+      </div>
+    </section>
+
+    <aside class="panel logs" aria-label="System">
+      <div style="font-weight:950;color:#fff;margin-bottom:8px">How it’s locked</div>
+      <div class="small-note" style="margin-bottom:10px">
+        The board is disabled until you complete <b>Login</b>. Profiles and tuners are stored in <b>localStorage</b>.
+      </div>
+
+      <div style="font-weight:950;color:#fff;margin-bottom:8px">Quick keys</div>
+      <div class="small-note">
+        <b>R</b> Restart • <b>F</b> Flip • <b>L</b> Login • <b>Esc</b> Close overlays
+      </div>
+
+      <div style="margin-top:14px">
+        <div style="font-weight:950;color:#fff;margin-bottom:8px">Gesture flow tips</div>
+        <div class="small-note">
+          If the cursor feels “tight”: increase <b>Sensitivity</b> or enable <b>Full-screen mapping</b> in the tuner.
+          If it jitters: increase <b>Smoothing</b> or run <b>Startup Scan</b>.
+        </div>
+      </div>
+
+      <div style="margin-top:14px">
+        <div style="font-weight:950;color:#fff;margin-bottom:8px">Match rules</div>
+        <div class="small-note">
+          Best of 3 with chess points: <b>Win = 1</b>, <b>Draw = 0.5</b>.
+          First to <b>2.0</b> points wins the match (or after Game 3, higher score wins).
+          Colors alternate each game (Game 1 you’re White, Game 2 you’re Black, etc.).
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <footer>RedNode — Secure Chess • Gesture + cursor login • Full-screen gesture cursor • Best-of-3 match</footer>
+
+  <!-- Menu modal -->
+  <div id="menu-modal" aria-label="Menu">
+    <div style="background:#071a10;color:var(--muted);max-width:900px;width:min(900px,96vw);margin:auto;padding:18px;border-radius:16px;border:1px solid rgba(255,255,255,0.10); box-shadow: var(--shadow)">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+        <h3 style="margin:0;color:#fff;font-weight:950">Menu</h3>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end">
+          <button id="restartMatchBtnMenu" class="btn ghost">Restart Match</button>
+          <button id="close-menu" class="btn">Close</button>
+        </div>
+      </div>
+
+      <div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div style="background:rgba(255,255,255,0.02);padding:12px;border-radius:12px;border:1px solid rgba(255,255,255,0.06)">
+          <h4 style="margin:6px 0;color:#fff">Mouse / Touch</h4>
+          <ul style="margin:8px 0 0 18px">
+            <li>Select a piece, then click a destination square</li>
+            <li>Green = legal move, Amber = capture</li>
+            <li>Castling is allowed by moving the king two squares</li>
+            <li>En-passant works when available</li>
+          </ul>
+        </div>
+        <div style="background:rgba(255,255,255,0.02);padding:12px;border-radius:12px;border:1px solid rgba(255,255,255,0.06)">
+          <h4 style="margin:6px 0;color:#fff">Gesture Mode</h4>
+          <ul style="margin:8px 0 0 18px">
+            <li><b>Pinch</b> = click anywhere on screen</li>
+            <li>Use <b>Tuner</b> after Gesture Login to adjust mapping</li>
+            <li>Run <b>Startup Scan</b> to stabilize your neutral hand pose</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Gesture cursor + hidden camera -->
+  <div id="gestureCursor" aria-hidden="true"></div>
+  <video id="video" playsinline></video>
+
+  <!-- LIVE TUNER (IN-GAME) -->
+  <div id="liveTuner">
+    <div id="liveTunerHeader">
+      <div>
+        Gesture Tuner <small id="liveTunerMode">(cursor mapping)</small>
+      </div>
+      <div style="display:flex; gap:8px; align-items:center;flex-wrap:wrap;justify-content:flex-end">
+        <button id="recenterBtn" class="miniBtn">Recenter</button>
+        <button id="recalBtn" class="miniBtn">Startup Scan</button>
+        <button id="closeLiveBtn" class="miniBtn">Close</button>
+      </div>
+    </div>
+    <div id="liveTunerBody">
+      <div class="panelAuth">
+        <h3>Micro Mapping</h3>
+
+        <div class="row">
+          <label>Full-screen mapping (absolute)</label>
+          <input id="absMapLive" type="checkbox">
+          <div class="v"></div>
+        </div>
+
+        <div class="row">
+          <label>Movement Range (inches)</label>
+          <input id="microInLive" type="range" min="0.25" max="3.00" step="0.05" value="2.00">
+          <div class="v" id="microInLiveV">2.00 in</div>
+        </div>
+
+        <div class="row">
+          <label>Movement Sensitivity (×)</label>
+          <input id="sensLive" type="range" min="0.05" max="2.50" step="0.01" value="0.35">
+          <div class="v" id="sensLiveV">0.35×</div>
+        </div>
+
+        <div class="row">
+          <label>Cursor Smoothing</label>
+          <input id="smoothLive" type="range" min="0.00" max="0.92" step="0.01" value="0.22">
+          <div class="v" id="smoothLiveV">0.22</div>
+        </div>
+
+        <div class="row">
+          <label>Startup Smoothing Boost (×)</label>
+          <input id="startupBoostLive" type="range" min="1" max="6" step="0.1" value="3.0">
+          <div class="v" id="startupBoostLiveV">3.0×</div>
+        </div>
+
+        <div class="row">
+          <label>Deadzone (px)</label>
+          <input id="deadLive" type="range" min="0" max="160" step="1" value="14">
+          <div class="v" id="deadLiveV">14</div>
+        </div>
+
+        <div class="row">
+          <label>Pinch Threshold</label>
+          <input id="pinchTLive" type="range" min="0.18" max="0.52" step="0.01" value="0.30">
+          <div class="v" id="pinchTLiveV">0.30</div>
+        </div>
+
+        <div class="row">
+          <label>Mirror X (Selfie)</label>
+          <input id="mirrorXLive" type="checkbox" checked>
+          <div class="v"></div>
+        </div>
+
+        <div class="row">
+          <label>Invert X</label>
+          <input id="invXLive" type="checkbox">
+          <div class="v"></div>
+        </div>
+
+        <div class="row">
+          <label>Invert Y</label>
+          <input id="invYLive" type="checkbox">
+          <div class="v"></div>
+        </div>
+
+        <div class="row">
+          <label>Offset X (px)</label>
+          <input id="offXLive" type="range" min="-700" max="700" step="1" value="0">
+          <div class="v" id="offXLiveV">0</div>
+        </div>
+
+        <div class="row">
+          <label>Offset Y (px)</label>
+          <input id="offYLive" type="range" min="-700" max="700" step="1" value="0">
+          <div class="v" id="offYLiveV">0</div>
+        </div>
+
+        <div class="row">
+          <label>Gesture Match Strictness</label>
+          <input id="gStrictLive" type="range" min="0.80" max="0.98" step="0.01" value="0.92">
+          <div class="v" id="gStrictLiveV">0.92</div>
+        </div>
+
+        <div class="row" style="justify-content:flex-end;">
+          <button id="defaultsLive" class="actionBtn">Defaults</button>
+        </div>
+
+        <div id="liveReadout">—</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PROMOTION MODAL -->
+  <div id="promoModal" aria-label="Promotion">
+    <div id="promoCard">
+      <h3>Promotion</h3>
+      <div class="hint">Choose what your pawn becomes.</div>
+      <div class="promoRow">
+        <button class="promoPick" data-piece="q"><span>Queen</span><span>♕</span></button>
+        <button class="promoPick" data-piece="r"><span>Rook</span><span>♖</span></button>
+        <button class="promoPick" data-piece="b"><span>Bishop</span><span>♗</span></button>
+        <button class="promoPick" data-piece="n"><span>Knight</span><span>♘</span></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MATCH MODAL -->
+  <div id="matchModal" aria-label="Match Result">
+    <div id="matchCard">
+      <h3 id="matchTitle">Game Over</h3>
+      <div class="sub" id="matchSub">—</div>
+      <div class="line" id="matchScoreLine">Match Score — You 0.0 : AI 0.0</div>
+
+      <div id="matchSeriesList"></div>
+
+      <div id="matchActions">
+        <button id="nextGameBtn" class="actionBtn primary">Next Game</button>
+        <button id="restartMatchBtn" class="actionBtn">Restart Match</button>
+        <button id="closeMatchBtn" class="actionBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- LOGIN + TUNERS -->
+  <div id="overlay" aria-label="Login Overlay">
+    <div id="cardAuth">
+      <div id="cardHeaderAuth">
+        <div id="titleRowAuth">
+          <div>
+            <h2>RedNode Chess — Secure Login</h2>
+            <div id="subtitleAuth">
+              Pick a mode, then do a one-time <b>Enroll</b>. After that, hit <b>Login</b> to unlock the match.
+              <span style="opacity:.9">Profiles + tuners are stored locally in your browser.</span>
+            </div>
+
+            <div id="authSteps">
+              <span class="stepChip"><i>1</i> Choose Mode</span>
+              <span class="stepChip"><i>2</i> (Optional) Startup Scan</span>
+              <span class="stepChip"><i>3</i> Enroll</span>
+              <span class="stepChip"><i>4</i> Login</span>
+            </div>
+          </div>
+          <div style="opacity:.78; font-size:12px; text-align:right;">
+            Match locked until verified
+          </div>
+        </div>
+
+        <div class="modeRow">
+          <button id="pickGesture" class="modeBtn">
+            <strong>Gesture Login</strong>
+            <span>Camera required. Hold steady → capture → compare. Tuner controls cursor mapping + strictness.</span>
+          </button>
+          <button id="pickCursor" class="modeBtn">
+            <strong>Cursor Login</strong>
+            <span>Draw a short signature pattern in the pad. Repeat to verify.</span>
+          </button>
+        </div>
+
+        <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <span class="pill" id="authSeenPill">Hand: —</span>
+          <span class="pill" id="authProfilePill">Profile: —</span>
+          <span class="pill" id="authStatusPill">Status: Locked</span>
+        </div>
+      </div>
+
+      <div id="cardBodyAuth">
+        <div class="gridAuth">
+          <div class="panelAuth" id="gesturePanel">
+            <h3>
+              Gesture Tuners (cursor mapping)
+              <span class="pill" id="gestureLivePill" style="padding:6px 9px; font-size:12px; opacity:.95;">Live: —</span>
+            </h3>
+
+            <div class="row">
+              <label>Full-screen mapping (absolute)</label>
+              <input id="absMap" type="checkbox">
+              <div class="v"></div>
+            </div>
+
+            <div class="row">
+              <label>Movement Range (inches → full travel)</label>
+              <input id="microIn" type="range" min="0.25" max="3.00" step="0.05" value="2.00">
+              <div class="v" id="microInV">2.00 in</div>
+            </div>
+
+            <div class="row">
+              <label>Movement Sensitivity (×)</label>
+              <input id="sens" type="range" min="0.05" max="2.50" step="0.01" value="0.35">
+              <div class="v" id="sensV">0.35×</div>
+            </div>
+
+            <div class="row">
+              <label>Cursor Smoothing</label>
+              <input id="smooth" type="range" min="0.00" max="0.92" step="0.01" value="0.22">
+              <div class="v" id="smoothV">0.22</div>
+            </div>
+
+            <div class="row">
+              <label>Startup Smoothing Boost (×)</label>
+              <input id="startupBoost" type="range" min="1" max="6" step="0.1" value="3.0">
+              <div class="v" id="startupBoostV">3.0×</div>
+            </div>
+
+            <div class="row">
+              <label>Deadzone (raw px)</label>
+              <input id="dead" type="range" min="0" max="160" step="1" value="14">
+              <div class="v" id="deadV">14</div>
+            </div>
+
+            <div class="row">
+              <label>Pinch Threshold</label>
+              <input id="pinchT" type="range" min="0.18" max="0.52" step="0.01" value="0.30">
+              <div class="v" id="pinchTV">0.30</div>
+            </div>
+
+            <div class="row">
+              <label>Mirror X (Selfie)</label>
+              <input id="mirrorX" type="checkbox" checked>
+              <div class="v"></div>
+            </div>
+            <div class="row">
+              <label>Invert X</label>
+              <input id="invX" type="checkbox">
+              <div class="v"></div>
+            </div>
+            <div class="row">
+              <label>Invert Y</label>
+              <input id="invY" type="checkbox">
+              <div class="v"></div>
+            </div>
+
+            <div class="row">
+              <label>Offset X (px)</label>
+              <input id="offX" type="range" min="-700" max="700" step="1" value="0">
+              <div class="v" id="offXV">0</div>
+            </div>
+            <div class="row">
+              <label>Offset Y (px)</label>
+              <input id="offY" type="range" min="-700" max="700" step="1" value="0">
+              <div class="v" id="offYV">0</div>
+            </div>
+
+            <div class="row">
+              <label>Gesture Match Strictness</label>
+              <input id="gStrict" type="range" min="0.80" max="0.98" step="0.01" value="0.92">
+              <div class="v" id="gStrictV">0.92</div>
+            </div>
+
+            <div class="hint">
+              <b>Clarity:</b> Strictness controls how similar your live hand pose must be to your enrolled pose.
+              If denied often: run <b>Startup Scan</b>, then lower strictness slightly (e.g. 0.92 → 0.90).
+              <div id="gestureLiveHint" style="margin-top:6px; opacity:.9;">—</div>
+            </div>
+          </div>
+
+          <div class="panelAuth" id="cursorPanel">
+            <h3>Cursor Signature Pad</h3>
+            <div class="hint" style="margin-bottom:8px">
+              Hold click (or touch) and draw a short pattern in the pad. Enroll once; then repeat to login.
+            </div>
+
+            <div id="patternPad">
+              <canvas id="patternCanvas"></canvas>
+            </div>
+
+            <div class="row" style="margin-top:10px">
+              <label>Pattern Strictness</label>
+              <input id="pStrict" type="range" min="0.05" max="0.30" step="0.01" value="0.12">
+              <div class="v" id="pStrictV">0.12</div>
+            </div>
+
+            <div class="hint">
+              Higher number = more forgiving. Recommended 0.10–0.16.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="cardFooterAuth">
+        <div class="actionsAuth">
+          <button id="resetAuth" class="actionBtn">Reset Profiles</button>
+          <button id="startupScanAuth" class="actionBtn">Startup Scan</button>
+          <button id="enrollBtn" class="actionBtn">Enroll</button>
+          <button id="loginBtn" class="actionBtn primary" disabled>Login</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STARTUP CALIBRATION (gesture neutral) -->
+  <div id="startup" aria-label="Startup Scan">
+    <div id="startupCard">
+      <div id="startupTop">
+        <div>
+          <h3>Startup Scan — Neutral + Steady Cursor</h3>
+          <div id="startupMsg">Raise your hand. Hold steady for 3-2-1.</div>
+        </div>
+        <div id="startupCount"></div>
+      </div>
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+        <div id="chipHand" class="pill bad">Hand: not seen</div>
+        <div id="chipZ" class="pill">Z: —</div>
+        <div id="chipMicro" class="pill">Micro: —</div>
+      </div>
+
+      <div id="startupBars">
+        <div class="pbar"><i id="bar1"></i></div>
+        <div class="pbar"><i id="bar2"></i></div>
+      </div>
+
+      <div class="small-note" style="margin-top:10px">
+        Step 1: hold steady to set neutral. <br/>
+        Step 2: tiny move (optional) to confirm micro range.
+      </div>
+
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap">
+        <button id="skipStartup" class="actionBtn">Skip</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MediaPipe Hands (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+  <script>
+    /* =========================================================
+       RedNode Secure Chess — Expanded + Best-of-3
+       - Full rules: castling + en-passant + promotion choice
+       - Draws: insufficient material, threefold repetition, fifty-move rule
+       - Best-of-3 match (chess points): Win=1, Draw=0.5. Target=2.0.
+       - Colors alternate each game (G1 you White, G2 you Black, G3 you White).
+       - Secure login: gesture (camera) or cursor signature
+       - Gesture control: full-screen cursor + pinch-to-click
+       ========================================================= */
+
+    /* ===========================
+       Small utils
+       =========================== */
+    const clamp = (v,a,b)=> Math.max(a, Math.min(b, v));
+    const wait = (ms)=> new Promise(r=>setTimeout(r, ms));
+
+    function sideName(c){ return c==='w' ? 'White' : 'Black'; }
+
+    /* ===========================
+       Chess engine (full rules)
+       - legal moves + check enforcement
+       - castling + en-passant
+       - promotion (q/r/b/n)
+       - draw: insufficient material, repetition, fifty-move
+       =========================== */
+    const PIECE_VALUES = { p:1, n:3, b:3, r:5, q:9, k:100 };
+
+    function Chess(fen){
+      const DEFAULT_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+      fen = (fen || DEFAULT_FEN).trim();
+
+      let turn = 'w';
+      let board = []; // [r][f], r=0 top (rank 8)
+      let castling = { w:{K:false,Q:false}, b:{K:false,Q:false} };
+      let epSquare = null; // "e3" etc
+      let halfmove = 0; // for 50-move rule (100 ply)
+      let fullmove = 1;
+
+      const rep = new Map();
+
+      function inBounds(r,f){ return r>=0 && r<8 && f>=0 && f<8; }
+
+      function squareToIndices(square){
+        const file = square.charCodeAt(0) - 97;
+        const rank = 8 - parseInt(square[1],10);
+        return { r: rank, f: file };
+      }
+      function indicesToSquare(r,f){
+        return String.fromCharCode(97+f) + String(8-r);
+      }
+
+      function cloneBoard(b){
+        return b.map(row => row.map(p => p ? ({type:p.type, color:p.color}) : null));
+      }
+
+      function castlingString(){
+        let s = "";
+        if (castling.w.K) s += "K";
+        if (castling.w.Q) s += "Q";
+        if (castling.b.K) s += "k";
+        if (castling.b.Q) s += "q";
+        return s || "-";
+      }
+
+      function parseFEN(f){
+        const parts = f.split(/\s+/);
+        const placement = parts[0] || DEFAULT_FEN.split(" ")[0];
+        const side = parts[1] || "w";
+        const cast = parts[2] ?? "KQkq";
+        const ep = parts[3] ?? "-";
+        const hm = parts[4] ?? "0";
+        const fm = parts[5] ?? "1";
+
+        turn = (side === 'b') ? 'b' : 'w';
+
+        castling = { w:{K:false,Q:false}, b:{K:false,Q:false} };
+        if (cast && cast !== "-"){
+          castling.w.K = cast.includes("K");
+          castling.w.Q = cast.includes("Q");
+          castling.b.K = cast.includes("k");
+          castling.b.Q = cast.includes("q");
+        }
+
+        epSquare = (ep && ep !== "-" && /^[a-h][36]$/.test(ep)) ? ep : null;
+        halfmove = Math.max(0, parseInt(hm,10) || 0);
+        fullmove = Math.max(1, parseInt(fm,10) || 1);
+
+        const rows = placement.split("/");
+        const b = [];
+        for (let r=0;r<8;r++){
+          const row = [];
+          for (const ch of rows[r]){
+            if (/\d/.test(ch)){
+              const n = parseInt(ch,10);
+              for (let i=0;i<n;i++) row.push(null);
+            } else {
+              row.push({
+                type: ch.toLowerCase(),
+                color: (ch === ch.toLowerCase()) ? 'b' : 'w'
+              });
+            }
+          }
+          b.push(row);
+        }
+        board = b;
+      }
+
+      function fenOut(){
+        let placement = "";
+        for (let r=0;r<8;r++){
+          let empty = 0;
+          for (let f=0;f<8;f++){
+            const p = board[r][f];
+            if (!p){ empty++; continue; }
+            if (empty){ placement += String(empty); empty = 0; }
+            placement += (p.color === 'w') ? p.type.toUpperCase() : p.type;
+          }
+          if (empty) placement += String(empty);
+          if (r<7) placement += "/";
+        }
+        const ep = epSquare ? epSquare : "-";
+        return `${placement} ${turn} ${castlingString()} ${ep} ${halfmove} ${fullmove}`;
+      }
+
+      function get(square){
+        const {r,f} = squareToIndices(square);
+        return board[r][f];
+      }
+
+      function findKing(color, b=board){
+        for (let r=0;r<8;r++){
+          for (let f=0;f<8;f++){
+            const p = b[r][f];
+            if (p && p.type==='k' && p.color===color) return {r,f};
+          }
+        }
+        return null;
+      }
+
+      function kingSquare(color){
+        const k = findKing(color);
+        return k ? indicesToSquare(k.r,k.f) : null;
+      }
+
+      function isSquareAttacked(square, byColor, b=board){
+        const {r:tr, f:tf} = squareToIndices(square);
+
+        function scanDirs(dirs, types){
+          for (const [dr,df] of dirs){
+            let r=tr+dr, f=tf+df;
+            while (inBounds(r,f)){
+              const p = b[r][f];
+              if (p){
+                if (p.color===byColor && types.includes(p.type)) return true;
+                break;
+              }
+              r+=dr; f+=df;
+            }
+          }
+          return false;
+        }
+
+        // pawns
+        const pawnDir = (byColor==='w') ? -1 : 1;
+        for (const df of [-1,1]){
+          const r = tr + pawnDir, f = tf + df;
+          if (inBounds(r,f)){
+            const p = b[r][f];
+            if (p && p.color===byColor && p.type==='p') return true;
+          }
+        }
+
+        // knights
+        const KN = [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]];
+        for (const [dr,df] of KN){
+          const r=tr+dr, f=tf+df;
+          if (!inBounds(r,f)) continue;
+          const p=b[r][f];
+          if (p && p.color===byColor && p.type==='n') return true;
+        }
+
+        // bishops/queens
+        const DIAG = [[-1,-1],[-1,1],[1,-1],[1,1]];
+        if (scanDirs(DIAG, ['b','q'])) return true;
+
+        // rooks/queens
+        const ORTH = [[-1,0],[1,0],[0,-1],[0,1]];
+        if (scanDirs(ORTH, ['r','q'])) return true;
+
+        // king adjacent
+        for (let dr=-1;dr<=1;dr++){
+          for (let df=-1;df<=1;df++){
+            if (dr===0 && df===0) continue;
+            const r=tr+dr, f=tf+df;
+            if (!inBounds(r,f)) continue;
+            const p=b[r][f];
+            if (p && p.color===byColor && p.type==='k') return true;
+          }
+        }
+        return false;
+      }
+
+      function in_check(color = turn){
+        const kSq = kingSquare(color);
+        if (!kSq) return false;
+        const opp = (color==='w') ? 'b' : 'w';
+        return isSquareAttacked(kSq, opp);
+      }
+
+      function makeMoveOnBoard(b, fromSq, toSq, move){
+        const {r:fr,f:ff} = squareToIndices(fromSq);
+        const {r:tr,f:tf} = squareToIndices(toSq);
+        const p = b[fr][ff];
+        let captured = b[tr][tf];
+
+        // en-passant capture
+        if (move && move.flags && move.flags.includes('e')){
+          const capR = (p.color==='w') ? tr+1 : tr-1;
+          captured = b[capR][tf];
+          b[capR][tf] = null;
+        }
+
+        // move piece
+        b[tr][tf] = p;
+        b[fr][ff] = null;
+
+        // castling rook move
+        if (move && move.flags && (move.flags.includes('k') || move.flags.includes('q'))){
+          if (move.flags.includes('k')){
+            const rookFrom = indicesToSquare(tr, 7);
+            const rookTo   = indicesToSquare(tr, 5);
+            const {r:rrf,f:rf} = squareToIndices(rookFrom);
+            const {r:rrt,f:rt} = squareToIndices(rookTo);
+            b[rrt][rt] = b[rrf][rf];
+            b[rrf][rf] = null;
+          } else {
+            const rookFrom = indicesToSquare(tr, 0);
+            const rookTo   = indicesToSquare(tr, 3);
+            const {r:rrf,f:rf} = squareToIndices(rookFrom);
+            const {r:rrt,f:rt} = squareToIndices(rookTo);
+            b[rrt][rt] = b[rrf][rf];
+            b[rrf][rf] = null;
+          }
+        }
+
+        // promotion
+        if (p && p.type==='p' && (tr===0 || tr===7)){
+          p.type = (move && move.promotion) ? move.promotion : 'q';
+        }
+
+        return captured ? {type: captured.type, color: captured.color} : null;
+      }
+
+      function pseudoMovesFrom(square, b=board){
+        const {r,f} = squareToIndices(square);
+        const p = b[r][f];
+        if (!p) return [];
+
+        const moves = [];
+        const color = p.color;
+        const opp = (color==='w')?'b':'w';
+
+        function addMove(tr,tf, extra={}){
+          if (!inBounds(tr,tf)) return;
+          const dest = b[tr][tf];
+          if (dest && dest.color===color) return;
+          moves.push({
+            from: square,
+            to: indicesToSquare(tr,tf),
+            promotion: extra.promotion,
+            flags: extra.flags || "",
+            capture: !!dest || extra.capture || false,
+            captured: dest ? {type: dest.type, color: dest.color} : (extra.captured || null)
+          });
+        }
+
+        function slide(dirs){
+          for (const [dr,df] of dirs){
+            let tr=r+dr, tf=f+df;
+            while (inBounds(tr,tf)){
+              const dest = b[tr][tf];
+              if (!dest){
+                addMove(tr,tf);
+              } else {
+                if (dest.color===opp) addMove(tr,tf, { capture:true, captured:{type:dest.type,color:dest.color} });
+                break;
+              }
+              tr+=dr; tf+=df;
+            }
+          }
+        }
+
+        if (p.type==='p'){
+          const dir = (color==='w') ? -1 : 1;
+          const startRank = (color==='w') ? 6 : 1;
+          const promoteRank = (color==='w') ? 0 : 7;
+
+          // forward 1
+          if (inBounds(r+dir,f) && !b[r+dir][f]){
+            if ((r+dir)===promoteRank){
+              for (const promo of ['q','r','b','n']){
+                addMove(r+dir,f,{ promotion: promo });
+              }
+            } else {
+              addMove(r+dir,f);
+            }
+
+            // forward 2 from start
+            if (r===startRank && !b[r+2*dir][f]){
+              addMove(r+2*dir,f,{ flags:'d' });
+            }
+          }
+
+          // captures
+          for (const df of [-1,1]){
+            const tr=r+dir, tf=f+df;
+            if (!inBounds(tr,tf)) continue;
+            const dest = b[tr][tf];
+            if (dest && dest.color===opp){
+              if (tr===promoteRank){
+                for (const promo of ['q','r','b','n']){
+                  addMove(tr,tf,{ promotion: promo, capture:true, captured:{type:dest.type,color:dest.color} });
+                }
+              } else {
+                addMove(tr,tf,{ capture:true, captured:{type:dest.type,color:dest.color} });
+              }
+            }
+          }
+
+          // en-passant
+          if (epSquare){
+            const {r:er,f:ef} = squareToIndices(epSquare);
+            if (er === r+dir && Math.abs(ef - f) === 1){
+              const capR = (color==='w') ? er+1 : er-1;
+              if (inBounds(capR, ef)){
+                const capP = b[capR][ef];
+                if (capP && capP.type==='p' && capP.color===opp){
+                  moves.push({
+                    from: square,
+                    to: epSquare,
+                    promotion: undefined,
+                    flags: 'e',
+                    capture: true,
+                    captured: {type:'p', color: opp}
+                  });
+                }
+              }
+            }
+          }
+        }
+
+        if (p.type==='n'){
+          const KN = [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]];
+          for (const [dr,df] of KN) addMove(r+dr,f+df);
+        }
+
+        if (p.type==='b') slide([[-1,-1],[-1,1],[1,-1],[1,1]]);
+        if (p.type==='r') slide([[-1,0],[1,0],[0,-1],[0,1]]);
+        if (p.type==='q') slide([[-1,-1],[-1,1],[1,-1],[1,1],[-1,0],[1,0],[0,-1],[0,1]]);
+
+        if (p.type==='k'){
+          for (let dr=-1;dr<=1;dr++){
+            for (let df=-1;df<=1;df++){
+              if (dr===0 && df===0) continue;
+              addMove(r+dr,f+df);
+            }
+          }
+
+          // castling
+          if (color==='w' && square==='e1'){
+            if (castling.w.K && b[7][5]===null && b[7][6]===null){
+              const rook = b[7][7];
+              if (rook && rook.type==='r' && rook.color==='w'){
+                moves.push({ from:'e1', to:'g1', flags:'k', promotion:undefined, capture:false, captured:null });
+              }
+            }
+            if (castling.w.Q && b[7][1]===null && b[7][2]===null && b[7][3]===null){
+              const rook = b[7][0];
+              if (rook && rook.type==='r' && rook.color==='w'){
+                moves.push({ from:'e1', to:'c1', flags:'q', promotion:undefined, capture:false, captured:null });
+              }
+            }
+          }
+          if (color==='b' && square==='e8'){
+            if (castling.b.K && b[0][5]===null && b[0][6]===null){
+              const rook = b[0][7];
+              if (rook && rook.type==='r' && rook.color==='b'){
+                moves.push({ from:'e8', to:'g8', flags:'k', promotion:undefined, capture:false, captured:null });
+              }
+            }
+            if (castling.b.Q && b[0][1]===null && b[0][2]===null && b[0][3]===null){
+              const rook = b[0][0];
+              if (rook && rook.type==='r' && rook.color==='b'){
+                moves.push({ from:'e8', to:'c8', flags:'q', promotion:undefined, capture:false, captured:null });
+              }
+            }
+          }
+        }
+
+        return moves;
+      }
+
+      function isLegalMove(m){
+        const p = get(m.from);
+        if (!p || p.color !== turn) return false;
+
+        const pseudos = pseudoMovesFrom(m.from);
+        const found = pseudos.find(x =>
+          x.to === m.to &&
+          (x.promotion || undefined) === (m.promotion || undefined) &&
+          (x.flags || "") === (m.flags || "")
+        );
+        if (!found) return false;
+
+        // castling constraints: king not in check, squares passed not attacked
+        if (found.flags && (found.flags.includes('k') || found.flags.includes('q'))){
+          if (in_check(turn)) return false;
+          const color = turn;
+          const opp = (color==='w') ? 'b' : 'w';
+          if (color==='w' && found.from==='e1'){
+            if (found.to==='g1'){
+              if (isSquareAttacked('f1', opp) || isSquareAttacked('g1', opp)) return false;
+            } else if (found.to==='c1'){
+              if (isSquareAttacked('d1', opp) || isSquareAttacked('c1', opp)) return false;
+            }
+          }
+          if (color==='b' && found.from==='e8'){
+            if (found.to==='g8'){
+              if (isSquareAttacked('f8', opp) || isSquareAttacked('g8', opp)) return false;
+            } else if (found.to==='c8'){
+              if (isSquareAttacked('d8', opp) || isSquareAttacked('c8', opp)) return false;
+            }
+          }
+        }
+
+        // must not leave king in check after move
+        const b2 = cloneBoard(board);
+        makeMoveOnBoard(b2, found.from, found.to, found);
+
+        const me = turn;
+        const opp = (me==='w')?'b':'w';
+        const k = findKing(me, b2);
+        if (!k) return false;
+        const kSq = indicesToSquare(k.r,k.f);
+        if (isSquareAttacked(kSq, opp, b2)) return false;
+
+        return true;
+      }
+
+      function legalMovesFrom(square){
+        const p = get(square);
+        if (!p || p.color !== turn) return [];
+        const pseudos = pseudoMovesFrom(square);
+        const out = [];
+        for (const m of pseudos){
+          if (isLegalMove(m)) out.push(m);
+        }
+        return out;
+      }
+
+      function moves(){
+        const all = [];
+        for (let r=0;r<8;r++){
+          for (let f=0;f<8;f++){
+            const p = board[r][f];
+            if (!p || p.color!==turn) continue;
+            const fromSq = indicesToSquare(r,f);
+            all.push(...legalMovesFrom(fromSq));
+          }
+        }
+        return all;
+      }
+
+      function insufficientMaterial(){
+        const pieces = [];
+        const bishops = { w:[], b:[] };
+        for (let r=0;r<8;r++){
+          for (let f=0;f<8;f++){
+            const p = board[r][f];
+            if (!p) continue;
+            pieces.push({ ...p, r, f });
+            if (p.type==='b') bishops[p.color].push((r+f)%2);
+          }
+        }
+        const nonKings = pieces.filter(p=>p.type!=='k');
+        if (nonKings.length===0) return true;
+
+        if (nonKings.length===1){
+          const p = nonKings[0];
+          if (p.type==='b' || p.type==='n') return true;
+        }
+
+        if (nonKings.length===2){
+          if (nonKings.every(p=>p.type==='b')){
+            if (bishops.w.length===1 && bishops.b.length===1){
+              if (bishops.w[0] === bishops.b[0]) return true;
+            }
+          }
+        }
+
+        return false;
+      }
+
+      function positionKey(){
+        let placement = "";
+        for (let r=0;r<8;r++){
+          let empty = 0;
+          for (let f=0;f<8;f++){
+            const p = board[r][f];
+            if (!p){ empty++; continue; }
+            if (empty){ placement += String(empty); empty = 0; }
+            placement += (p.color === 'w') ? p.type.toUpperCase() : p.type;
+          }
+          if (empty) placement += String(empty);
+          if (r<7) placement += "/";
+        }
+        const ep = epSquare ? epSquare : "-";
+        return `${placement} ${turn} ${castlingString()} ${ep}`;
+      }
+
+      function bumpRep(){
+        const k = positionKey();
+        rep.set(k, (rep.get(k)||0) + 1);
+      }
+
+      function repetitionCount(){
+        const k = positionKey();
+        return rep.get(k) || 0;
+      }
+
+      function drawReason(){
+        if (insufficientMaterial()) return "Draw (insufficient material).";
+        if (halfmove >= 100) return "Draw (fifty-move rule).";
+        if (repetitionCount() >= 3) return "Draw (threefold repetition).";
+        return null;
+      }
+
+      function in_checkmate(){
+        return in_check(turn) && moves().length===0;
+      }
+      function in_stalemate(){
+        return !in_check(turn) && moves().length===0;
+      }
+      function in_draw(){
+        if (in_checkmate() || in_stalemate()) return false;
+        return !!drawReason();
+      }
+
+      function game_over(){
+        return in_checkmate() || in_stalemate() || in_draw();
+      }
+
+      function move(m){
+        if (!isLegalMove(m)) return null;
+
+        const from = m.from, to = m.to;
+        const {r:fr,f:ff} = squareToIndices(from);
+        const {r:tr,f:tf} = squareToIndices(to);
+        const p = board[fr][ff];
+        const color = p.color;
+        const opp = (color==='w') ? 'b' : 'w';
+
+        let captured = null;
+        if (m.flags && m.flags.includes('e')){
+          const capR = (color==='w') ? tr+1 : tr-1;
+          captured = board[capR][tf] ? {type: board[capR][tf].type, color: board[capR][tf].color} : {type:'p', color:opp};
+        } else if (board[tr][tf]){
+          captured = {type: board[tr][tf].type, color: board[tr][tf].color};
+        }
+
+        // halfmove
+        const isPawnMove = (p.type==='p');
+        const isCapture = !!captured;
+        halfmove = (isPawnMove || isCapture) ? 0 : (halfmove + 1);
+
+        // castling rights updates
+        if (p.type==='k'){
+          castling[color].K = false;
+          castling[color].Q = false;
+        }
+        if (p.type==='r'){
+          if (color==='w' && from==='h1') castling.w.K = false;
+          if (color==='w' && from==='a1') castling.w.Q = false;
+          if (color==='b' && from==='h8') castling.b.K = false;
+          if (color==='b' && from==='a8') castling.b.Q = false;
+        }
+        if (captured && captured.type==='r'){
+          if (opp==='w' && to==='h1') castling.w.K = false;
+          if (opp==='w' && to==='a1') castling.w.Q = false;
+          if (opp==='b' && to==='h8') castling.b.K = false;
+          if (opp==='b' && to==='a8') castling.b.Q = false;
+        }
+
+        // en-passant square
+        epSquare = null;
+        if (p.type==='p' && m.flags && m.flags.includes('d')){
+          const epR = (color==='w') ? tr+1 : tr-1;
+          epSquare = indicesToSquare(epR, tf);
+        }
+
+        // apply move
+        makeMoveOnBoard(board, from, to, m);
+
+        // fullmove/turn
+        if (turn === 'b') fullmove += 1;
+        turn = (turn==='w') ? 'b' : 'w';
+
+        bumpRep();
+
+        return { from, to, promotion: m.promotion, flags: m.flags || "", captured };
+      }
+
+      function boardCopy(){ return cloneBoard(board); }
+      function turnFn(){ return turn; }
+
+      parseFEN(fen);
+      bumpRep();
+
+      return {
+        move,
+        board: boardCopy,
+        get,
+        turn: turnFn,
+        moves,
+        legalMovesFrom,
+        in_check: ()=> in_check(turn),
+        in_checkmate,
+        in_stalemate,
+        in_draw,
+        drawReason,
+        game_over,
+        fen: fenOut,
+        kingSquare
+      };
+    }
+
+    /* ===========================
+       Match system (Best-of-3)
+       =========================== */
+    const match = {
+      maxGames: 3,
+      targetPoints: 2.0,
+      gameIndex: 1,
+      scoreYou: 0.0,
+      scoreAI: 0.0,
+      results: [] // {game, youColor, aiColor, youPts, aiPts, label}
+    };
+
+    let youColor = 'w';
+    let aiColor = 'b';
+
+    function isMatchOver(){
+      if (match.scoreYou >= match.targetPoints) return true;
+      if (match.scoreAI >= match.targetPoints) return true;
+      if (match.gameIndex >= match.maxGames && match.results.length >= match.maxGames) return true;
+      return false;
+    }
+
+    function matchOutcomeText(){
+      if (match.scoreYou > match.scoreAI) return "You win the match.";
+      if (match.scoreAI > match.scoreYou) return "AI wins the match.";
+      return "Match ends in a draw.";
+    }
+
+    function setColorsForGame(n){
+      youColor = (n % 2 === 1) ? 'w' : 'b';
+      aiColor = (youColor === 'w') ? 'b' : 'w';
+    }
+
+    function resetMatch(){
+      match.gameIndex = 1;
+      match.scoreYou = 0.0;
+      match.scoreAI = 0.0;
+      match.results = [];
+      setColorsForGame(1);
+      lastMove = null;
+      startGame(1, true);
+      updateMatchHud();
+      statusDiv.innerHTML = "Match reset. Game 1 ready.";
+    }
+
+    /* ===========================
+       UI rendering
+       =========================== */
+    const pieceSymbols = {
+      'wp': '♙', 'wn': '♘', 'wb': '♗', 'wr': '♖', 'wq': '♕', 'wk': '♔',
+      'bp': '♟', 'bn': '♞', 'bb': '♝', 'br': '♜', 'bq': '♛', 'bk': '♚'
+    };
+
+    let game = null;
+    let selectedSquare = null;
+    let legalTargets = [];
+    let flipped = false;
+
+    let lastMove = null; // {from,to}
+    let gameLocked = false;
+    let manualStatus = null;
+
+    const statusDiv = document.getElementById("status");
+    const boardDiv = document.getElementById("board");
+
+    function resizeBoardForViewport(){
+      try{
+        const header = document.querySelector('header');
+        const hud = document.getElementById('matchHud');
+        const controls = document.getElementById('controlsRow');
+
+        const headerH = header ? header.getBoundingClientRect().height : 0;
+        const hudH = hud ? hud.getBoundingClientRect().height : 0;
+        const statusH = statusDiv ? statusDiv.getBoundingClientRect().height : 0;
+        const controlsH = controls ? controls.getBoundingClientRect().height : 0;
+
+        const center = document.querySelector('.table-inner');
+        const availW = center ? (center.getBoundingClientRect().width - 32) : (window.innerWidth - 40);
+
+        const pad = 78;
+        const availH = Math.max(280, window.innerHeight - headerH - hudH - statusH - controlsH - pad);
+
+        const size = clamp(Math.min(availW, availH), 320, 980);
+        document.documentElement.style.setProperty('--board-size', `${Math.floor(size)}px`);
+      }catch{}
+    }
+
+    function clearHints(){
+      const cells = boardDiv.querySelectorAll('td');
+      cells.forEach(c => {
+        c.classList.remove('selected','hintMove','hintCapture','lastFrom','lastTo','inCheck');
+      });
+    }
+
+    function createBoard(){
+      boardDiv.innerHTML = "";
+      const table = document.createElement('table');
+
+      const ranks = flipped ? [1,2,3,4,5,6,7,8] : [8,7,6,5,4,3,2,1];
+      const files = flipped ? [7,6,5,4,3,2,1,0] : [0,1,2,3,4,5,6,7];
+
+      for (const rank of ranks){
+        const tr = document.createElement('tr');
+        for (const file of files){
+          const td = document.createElement('td');
+          const square = String.fromCharCode(97 + file) + rank;
+          td.id = square;
+          td.className = ((rank + file) % 2 === 0) ? "light" : "dark";
+          td.addEventListener("click", onSquareClick);
+          tr.appendChild(td);
+        }
+        table.appendChild(tr);
+      }
+      boardDiv.appendChild(table);
+    }
+
+    function updateBoard(){
+      clearHints();
+
+      for (let rank=1; rank<=8; rank++){
+        for (let file=0; file<8; file++){
+          const square = String.fromCharCode(97 + file) + rank;
+          const cell = document.getElementById(square);
+          if (!cell) continue;
+          cell.innerHTML = "";
+          const piece = game.get(square);
+          if (piece){
+            const key = piece.color + piece.type;
+            cell.innerHTML = pieceSymbols[key] || "";
+          }
+        }
+      }
+
+      // selection + legal targets
+      if (selectedSquare){
+        const sel = document.getElementById(selectedSquare);
+        if (sel) sel.classList.add("selected");
+        for (const m of legalTargets){
+          const cell = document.getElementById(m.to);
+          if (!cell) continue;
+          const isCap = !!m.capture || (m.flags && m.flags.includes('e'));
+          if (isCap) cell.classList.add('hintCapture');
+          else cell.classList.add('hintMove');
+        }
+      }
+
+      // last move highlight
+      if (lastMove){
+        const a = document.getElementById(lastMove.from);
+        const b = document.getElementById(lastMove.to);
+        if (a) a.classList.add('lastFrom');
+        if (b) b.classList.add('lastTo');
+      }
+
+      // in-check highlight: king of side to move
+      if (!gameLocked && game.in_check()){
+        const ksq = game.kingSquare(game.turn());
+        if (ksq){
+          const kCell = document.getElementById(ksq);
+          if (kCell) kCell.classList.add('inCheck');
+        }
+      }
+    }
+
+    function updateStatus(){
+      if (manualStatus){
+        statusDiv.innerHTML = manualStatus;
+        return;
+      }
+
+      if (gameLocked){
+        statusDiv.innerHTML = "Game over. See match result.";
+        return;
+      }
+
+      let status = "";
+      if (game.in_checkmate()){
+        const winnerColor = (game.turn()==="w") ? "b" : "w";
+        const winnerName = sideName(winnerColor);
+        status = `Checkmate! ${winnerName} wins.`;
+      } else if (game.in_stalemate()){
+        status = "Stalemate — Draw.";
+      } else if (game.in_draw()){
+        status = game.drawReason() || "Draw.";
+      } else {
+        const t = game.turn();
+        const who = (t === youColor) ? "You" : "AI";
+        status = `${sideName(t)} to move (${who}).`;
+        if (game.in_check()) status += " Check!";
+      }
+      statusDiv.innerHTML = status;
+    }
+
+    function updateMatchHud(){
+      document.getElementById('scoreYou').textContent = match.scoreYou.toFixed(1);
+      document.getElementById('scoreAI').textContent = match.scoreAI.toFixed(1);
+
+      const meta = `Game ${match.gameIndex} of ${match.maxGames} • You: ${sideName(youColor)} • AI: ${sideName(aiColor)}`;
+      document.getElementById('hudMeta').textContent = meta;
+
+      document.getElementById('sideStat').textContent = sideName(youColor);
+
+      // dots
+      const dots = [
+        {dot: document.getElementById('dot1'), txt: document.getElementById('dot1txt'), game:1},
+        {dot: document.getElementById('dot2'), txt: document.getElementById('dot2txt'), game:2},
+        {dot: document.getElementById('dot3'), txt: document.getElementById('dot3txt'), game:3},
+      ];
+
+      for (const d of dots){
+        const res = match.results.find(r => r.game === d.game);
+        d.dot.className = 'dot pending';
+        d.txt.textContent = 'Pending';
+
+        if (!res) continue;
+
+        const youPts = res.youPts;
+        const aiPts = res.aiPts;
+        if (youPts > aiPts){
+          d.dot.className = 'dot win';
+          d.txt.textContent = 'Win';
+        } else if (aiPts > youPts){
+          d.dot.className = 'dot loss';
+          d.txt.textContent = 'Loss';
+        } else {
+          d.dot.className = 'dot draw';
+          d.txt.textContent = 'Draw';
+        }
+      }
+
+      resizeBoardForViewport();
+    }
+
+    function initGame(){
+      game = new Chess();
+      selectedSquare = null;
+      legalTargets = [];
+      manualStatus = null;
+      gameLocked = false;
+      createBoard();
+      updateBoard();
+      updateStatus();
+      updateMatchHud();
+    }
+
+    function startGame(n, forceInit=false){
+      match.gameIndex = n;
+      setColorsForGame(n);
+
+      // auto-flip so your side is at the bottom
+      flipped = (youColor === 'b');
+      lastMove = null;
+
+      if (forceInit){
+        initGame();
+      } else {
+        // re-init board and engine for a new game
+        initGame();
+      }
+
+      // if AI plays White, let AI start
+      if (isLoggedIn && aiColor === 'w' && !gameLocked){
+        setTimeout(aiMove, 450);
+      }
+    }
+
+    function gameResultLabel(youPts, aiPts, reason){
+      if (youPts > aiPts) return `Win — ${reason}`;
+      if (aiPts > youPts) return `Loss — ${reason}`;
+      return `Draw — ${reason}`;
+    }
+
+    function renderSeriesList(){
+      const wrap = document.getElementById('matchSeriesList');
+      wrap.innerHTML = "";
+
+      for (let i=1;i<=match.maxGames;i++){
+        const res = match.results.find(r=>r.game===i);
+        const div = document.createElement('div');
+        div.className = 'seriesItem';
+        const left = document.createElement('div');
+        left.className = 'left';
+
+        const dot = document.createElement('span');
+        dot.className = 'dot ' + (!res ? 'pending' : (res.youPts>res.aiPts ? 'win' : res.aiPts>res.youPts ? 'loss' : 'draw'));
+
+        const txt = document.createElement('div');
+        txt.style.minWidth = '0';
+        txt.innerHTML = `<b>Game ${i}</b> <span style="opacity:.82">(${i%2===1?'You White':'You Black'})</span>`;
+
+        left.appendChild(dot);
+        left.appendChild(txt);
+
+        const right = document.createElement('div');
+        right.className = 'right';
+        right.textContent = res ? `${res.youPts.toFixed(1)}–${res.aiPts.toFixed(1)} • ${res.label}` : "—";
+
+        div.appendChild(left);
+        div.appendChild(right);
+        wrap.appendChild(div);
+      }
+    }
+
+    function showMatchModal(title, sub, matchOver){
+      const matchModal = document.getElementById('matchModal');
+      document.getElementById('matchTitle').textContent = title;
+      document.getElementById('matchSub').textContent = sub;
+      document.getElementById('matchScoreLine').textContent =
+        `Match Score — You ${match.scoreYou.toFixed(1)} : AI ${match.scoreAI.toFixed(1)} (target ${match.targetPoints.toFixed(1)})`;
+
+      renderSeriesList();
+
+      const nextBtn = document.getElementById('nextGameBtn');
+      nextBtn.style.display = matchOver ? 'none' : 'inline-flex';
+      nextBtn.textContent = `Next Game (${match.gameIndex + 1}/${match.maxGames})`;
+
+      matchModal.style.display = 'flex';
+    }
+
+    function closeMatchModal(){
+      document.getElementById('matchModal').style.display = 'none';
+    }
+
+    function finalizeGame(youPts, aiPts, reason){
+      gameLocked = true;
+
+      match.scoreYou += youPts;
+      match.scoreAI += aiPts;
+
+      const label = gameResultLabel(youPts, aiPts, reason);
+
+      match.results.push({
+        game: match.gameIndex,
+        youColor,
+        aiColor,
+        youPts,
+        aiPts,
+        label
+      });
+
+      updateMatchHud();
+
+      const over = isMatchOver() || (match.results.length >= match.maxGames);
+
+      if (over){
+        const title = "Match Complete";
+        const sub = `${matchOutcomeText()}  (Last: ${label})`;
+        showMatchModal(title, sub, true);
+      } else {
+        // game complete but match continues
+        const title = label.startsWith('Win') ? 'Game Won' : label.startsWith('Loss') ? 'Game Lost' : 'Game Drawn';
+        const sub = `${reason}  — Ready for Game ${match.gameIndex + 1}.`;
+        showMatchModal(title, sub, false);
+      }
+    }
+
+    function checkAndFinalizeFromEngine(){
+      if (gameLocked) return true;
+      if (!game.game_over()) return false;
+
+      if (game.in_checkmate()){
+        const winnerColor = (game.turn()==='w') ? 'b' : 'w';
+        const youWin = (winnerColor === youColor);
+        finalizeGame(youWin ? 1.0 : 0.0, youWin ? 0.0 : 1.0, "Checkmate");
+        return true;
+      }
+
+      if (game.in_stalemate()){
+        finalizeGame(0.5, 0.5, "Stalemate");
+        return true;
+      }
+
+      if (game.in_draw()){
+        const r = game.drawReason() || "Draw";
+        // Keep reason short in the match modal label
+        const reason = r.replace(/^Draw\s*\(|\)\.?$/g,'').replace(/^Draw\s*[:\-]?\s*/,'');
+        finalizeGame(0.5, 0.5, reason);
+        return true;
+      }
+
+      return false;
+    }
+
+    /* ===========================
+       AI move (random+)
+       =========================== */
+    function scoreMove(m){
+      let score = 0;
+
+      if (m.capture && m.captured) score += (PIECE_VALUES[m.captured.type] || 0) * 10;
+
+      if (m.promotion){
+        score += (m.promotion === 'q') ? 12 : 7;
+      }
+
+      const file = m.to.charCodeAt(0)-97;
+      const rank = parseInt(m.to[1],10);
+      score += (3 - Math.abs(file-3.5)) + (3 - Math.abs(rank-4.5));
+
+      score += Math.random()*0.8;
+      return score;
+    }
+
+    function cloneGameState(g){
+      return new Chess(g.fen());
+    }
+
+    function aiMove(){
+      if (!isLoggedIn || gameLocked || game.game_over()) return;
+      if (game.turn() !== aiColor) return;
+
+      const all = game.moves();
+      if (!all.length) return;
+
+      let best = [];
+      let bestScore = -1e9;
+
+      for (const m of all){
+        const base = scoreMove(m);
+
+        const sim = cloneGameState(game);
+        sim.move({from:m.from,to:m.to,promotion:m.promotion,flags:m.flags||""});
+        const s = base + (sim.in_check() ? 20 : 0);
+
+        if (s > bestScore + 1e-6){
+          bestScore = s;
+          best = [m];
+        } else if (Math.abs(s - bestScore) < 1.2){
+          best.push(m);
+        }
+      }
+
+      const pick = best[Math.floor(Math.random()*best.length)];
+      const moved = game.move({from:pick.from,to:pick.to,promotion:pick.promotion,flags:pick.flags||""});
+      if (!moved) return;
+
+      lastMove = {from: pick.from, to: pick.to};
+      selectedSquare = null;
+      legalTargets = [];
+      updateBoard();
+      updateStatus();
+
+      checkAndFinalizeFromEngine();
+    }
+
+    /* ===========================
+       Promotion UI (player)
+       =========================== */
+    const promoModal = document.getElementById('promoModal');
+    let promoPending = null; // {from,to,flags}
+
+    function openPromotion(from,to,flags){
+      promoPending = {from,to,flags: flags || ""};
+      promoModal.style.display = 'flex';
+    }
+    function closePromotion(){
+      promoPending = null;
+      promoModal.style.display = 'none';
+    }
+    promoModal.addEventListener('click', (e)=>{
+      if (e.target === promoModal) closePromotion();
+    });
+    document.querySelectorAll('.promoPick').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        if (!promoPending || gameLocked) return;
+        const piece = btn.getAttribute('data-piece') || 'q';
+        const m = { from: promoPending.from, to: promoPending.to, promotion: piece, flags: promoPending.flags || "" };
+        closePromotion();
+
+        const moved = game.move(m);
+        if (!moved) return;
+
+        lastMove = {from:m.from, to:m.to};
+        selectedSquare = null;
+        legalTargets = [];
+        updateBoard();
+        updateStatus();
+
+        if (checkAndFinalizeFromEngine()) return;
+
+        setTimeout(aiMove, 350);
+      });
+    });
+
+    /* ===========================
+       Board interaction
+       =========================== */
+    function onSquareClick(e){
+      if (!isLoggedIn){
+        overlay.style.display = 'flex';
+        return;
+      }
+      if (gameLocked) return;
+      if (promoModal.style.display === 'flex') return;
+      if (document.getElementById('matchModal').style.display === 'flex') return;
+
+      const square = e.currentTarget.id;
+
+      // only allow player to move on player's turn
+      if (game.turn() !== youColor) return;
+
+      if (!selectedSquare){
+        const piece = game.get(square);
+        if (piece && piece.color===youColor){
+          selectedSquare = square;
+          legalTargets = game.legalMovesFrom(square);
+          updateBoard();
+        }
+        return;
+      }
+
+      const candidates = legalTargets.filter(m => m.to === square);
+
+      if (!candidates.length){
+        const piece = game.get(square);
+        if (piece && piece.color===youColor){
+          selectedSquare = square;
+          legalTargets = game.legalMovesFrom(square);
+        } else {
+          selectedSquare = null;
+          legalTargets = [];
+        }
+        updateBoard();
+        return;
+      }
+
+      const promoMoves = candidates.filter(m => !!m.promotion);
+      if (promoMoves.length){
+        openPromotion(selectedSquare, square, promoMoves[0].flags || "");
+        return;
+      }
+
+      const pick = candidates[0];
+      const moved = game.move({from:pick.from,to:pick.to,promotion:pick.promotion,flags:pick.flags||""});
+      if (!moved){
+        selectedSquare = null;
+        legalTargets = [];
+        updateBoard();
+        return;
+      }
+
+      lastMove = {from: pick.from, to: pick.to};
+      selectedSquare = null;
+      legalTargets = [];
+      updateBoard();
+      updateStatus();
+
+      if (checkAndFinalizeFromEngine()) return;
+
+      setTimeout(aiMove, 350);
+    }
+
+    /* ===========================
+       Buttons + overlays
+       =========================== */
+    const menuModal = document.getElementById('menu-modal');
+    document.getElementById('menu-open').addEventListener('click', ()=> menuModal.style.display='flex');
+    document.getElementById('close-menu').addEventListener('click', ()=> menuModal.style.display='none');
+
+    document.getElementById('restartMatchBtnMenu').addEventListener('click', ()=>{
+      menuModal.style.display = 'none';
+      if (!confirm("Restart the entire match (Best of 3) and reset score?")) return;
+      resetMatch();
+    });
+
+    document.getElementById("restart").addEventListener("click", ()=>{
+      if (!isLoggedIn) return overlay.style.display='flex';
+      if (document.getElementById('matchModal').style.display === 'flex') return;
+      // Restart current game only (match score unchanged)
+      lastMove = null;
+      manualStatus = null;
+      gameLocked = false;
+      initGame();
+      // If AI is to move first, let it go
+      if (aiColor === 'w'){
+        setTimeout(aiMove, 450);
+      }
+      statusDiv.innerHTML = "Game restarted (match score unchanged).";
+    });
+
+    document.getElementById("resign").addEventListener("click", ()=>{
+      if (!isLoggedIn) return overlay.style.display='flex';
+      if (gameLocked) return;
+
+      if (!confirm("Resign this game? (Counts as a loss in the match)")) return;
+
+      manualStatus = "You resigned. AI wins this game.";
+      updateStatus();
+
+      // Resignation gives AI 1 point
+      finalizeGame(0.0, 1.0, "Resignation");
+    });
+
+    document.getElementById("flip").addEventListener("click", ()=>{
+      flipped = !flipped;
+      createBoard();
+      updateBoard();
+      resizeBoardForViewport();
+    });
+
+    document.getElementById("focusBtn").addEventListener("click", (e)=>{
+      document.body.classList.toggle('focus');
+      e.currentTarget.textContent = document.body.classList.contains('focus') ? 'Exit Focus' : 'Focus';
+      resizeBoardForViewport();
+    });
+
+    // Match modal buttons
+    document.getElementById('nextGameBtn').addEventListener('click', ()=>{
+      if (isMatchOver()) return;
+      closeMatchModal();
+      startGame(match.gameIndex + 1, true);
+    });
+    document.getElementById('restartMatchBtn').addEventListener('click', ()=>{
+      closeMatchModal();
+      if (!confirm("Restart the entire match and reset score?")) return;
+      resetMatch();
+    });
+    document.getElementById('closeMatchBtn').addEventListener('click', ()=> closeMatchModal());
+
+    // clicking outside match card closes (optional)
+    document.getElementById('matchModal').addEventListener('click', (e)=>{
+      if (e.target.id === 'matchModal') closeMatchModal();
+    });
+
+    document.addEventListener('keydown', (e)=>{
+      if (e.key === 'Escape'){
+        menuModal.style.display = 'none';
+        startup.style.display = 'none';
+        liveTuner.style.display = 'none';
+        closePromotion();
+        closeMatchModal();
+      }
+      if (e.key === 'r' || e.key === 'R') document.getElementById('restart').click();
+      if (e.key === 'f' || e.key === 'F') document.getElementById('flip').click();
+      if (e.key === 'l' || e.key === 'L') document.getElementById('lock-open').click();
+    });
+
+    /* ===========================
+       LOGIN + CONTROLLERS (gesture/cursor)
+       =========================== */
+    const overlay = document.getElementById('overlay');
+    const pickGesture = document.getElementById('pickGesture');
+    const pickCursor = document.getElementById('pickCursor');
+    const gesturePanel = document.getElementById('gesturePanel');
+    const cursorPanel = document.getElementById('cursorPanel');
+
+    const enrollBtn = document.getElementById('enrollBtn');
+    const loginBtn = document.getElementById('loginBtn');
+    const resetAuth = document.getElementById('resetAuth');
+    const startupScanAuth = document.getElementById('startupScanAuth');
+
+    const authSeenPill = document.getElementById('authSeenPill');
+    const authProfilePill = document.getElementById('authProfilePill');
+    const authStatusPill = document.getElementById('authStatusPill');
+
+    const authSeenMini = document.getElementById('authSeenMini');
+    const authProfileMini = document.getElementById('authProfileMini');
+
+    const controllerPill = document.getElementById('controller-pill');
+    const sideStat = document.getElementById('sideStat');
+
+    const gestureLivePill = document.getElementById('gestureLivePill');
+    const gestureLiveHint = document.getElementById('gestureLiveHint');
+
+    let isLoggedIn = false;
+    let controllerMode = null; // "gesture" | "cursor"
+
+    const MODE_KEY = 'rn_chess_login_mode_v2';
+    const G_PROFILE_KEY = 'rn_chess_gesture_profile_v2';
+    const C_PROFILE_KEY = 'rn_chess_cursor_profile_v2';
+    const GCFG_KEY = 'rn_chess_gesture_cfg_v2';
+
+    function hasProfileForMode(m){
+      if (m==='gesture') return !!localStorage.getItem(G_PROFILE_KEY);
+      if (m==='cursor') return !!localStorage.getItem(C_PROFILE_KEY);
+      return false;
+    }
+
+    function setControllerPill(){
+      if (!isLoggedIn){
+        controllerPill.textContent = 'Locked';
+        controllerPill.style.color = '#ffbdbd';
+        sideStat.textContent = sideName(youColor);
+        return;
+      }
+      controllerPill.textContent = controllerMode === 'gesture' ? 'Gesture Control' : 'Cursor Control';
+      controllerPill.style.color = '#d7f3db';
+      sideStat.textContent = sideName(youColor);
+    }
+
+    function setAuthSeen(ok){
+      authSeenPill.textContent = ok ? 'Hand: seen' : 'Hand: —';
+      authSeenPill.className = 'pill ' + (ok ? 'ok' : '');
+      authSeenMini.textContent = ok ? 'Hand: seen' : 'Hand: —';
+      authSeenMini.className = 'pill ' + (ok ? 'ok' : '');
+    }
+
+    function updateAuthProfilePill(){
+      const exists = hasProfileForMode(controllerMode);
+      authProfilePill.textContent = `Profile: ${exists ? 'Saved' : 'Not set'}`;
+      authProfilePill.className = 'pill ' + (exists ? 'ok' : 'bad');
+
+      authProfileMini.textContent = `Profile: ${exists ? 'Saved' : 'Not set'}`;
+      authProfileMini.className = 'pill ' + (exists ? 'ok' : 'bad');
+
+      loginBtn.disabled = !exists;
+      if (!exists){
+        authStatusPill.textContent = 'Status: Enroll required';
+        authStatusPill.className = 'pill bad';
+      }
+    }
+
+    function selectMode(m){
+      controllerMode = m;
+      localStorage.setItem(MODE_KEY, m);
+
+      pickGesture.classList.toggle('selected', m==='gesture');
+      pickCursor.classList.toggle('selected', m==='cursor');
+
+      gesturePanel.style.display = (m==='gesture') ? 'block' : 'none';
+      cursorPanel.style.display = (m==='cursor') ? 'block' : 'none';
+
+      updateAuthProfilePill();
+      setAuthSeen(false);
+    }
+
+    document.getElementById('lock-open').addEventListener('click', ()=>{
+      overlay.style.display='flex';
+      authStatusPill.textContent = hasProfileForMode(controllerMode) ? 'Status: Locked' : 'Status: Enroll required';
+      authStatusPill.className = hasProfileForMode(controllerMode) ? 'pill' : 'pill bad';
+      updateAuthProfilePill();
+      setAuthSeen(false);
+    });
+
+    // Tuner open
+    const liveTuner = document.getElementById('liveTuner');
+    document.getElementById('tuner-open').addEventListener('click', ()=>{
+      if (!isLoggedIn || controllerMode!=='gesture'){
+        statusDiv.innerHTML = "Tuner is available after Gesture Login.";
+        return;
+      }
+      liveTuner.style.display='block';
+    });
+    document.getElementById('closeLiveBtn').addEventListener('click', ()=> liveTuner.style.display='none');
+
+    pickGesture.addEventListener('click', async ()=>{
+      selectMode('gesture');
+      await ensureGestureEngine();
+    });
+    pickCursor.addEventListener('click', ()=>{
+      selectMode('cursor');
+    });
+
+    (function restoreMode(){
+      const saved = localStorage.getItem(MODE_KEY);
+      controllerMode = (saved==='cursor' || saved==='gesture') ? saved : 'gesture';
+      selectMode(controllerMode);
+    })();
+
+    /* ===========================
+       Gesture config
+       =========================== */
+    const cfgDefaults = {
+      absoluteMapping: false,
+
+      microRangeInches: 2.00,
+      sensitivity: 0.35,
+      smoothing: 0.22,
+      startupSmoothBoost: 3.0,
+      deadzonePx: 14,
+      pinchThresh: 0.30,
+      mirrorX: true,
+      invX: false,
+      invY: false,
+      offsetX: 0,
+      offsetY: 0,
+      gestureStrict: 0.92
+    };
+    const cfg = { ...cfgDefaults };
+
+    function loadCfg(){
+      try{
+        const raw = localStorage.getItem(GCFG_KEY);
+        if (!raw) return;
+        const o = JSON.parse(raw);
+        for (const k of Object.keys(cfgDefaults)){
+          if (typeof cfgDefaults[k] === 'boolean'){
+            if (typeof o[k] === 'boolean') cfg[k] = o[k];
+          } else if (typeof cfgDefaults[k] === 'number'){
+            if (typeof o[k] === 'number' && isFinite(o[k])) cfg[k] = o[k];
+          }
+        }
+      }catch{}
+    }
+    function saveCfg(){ try{ localStorage.setItem(GCFG_KEY, JSON.stringify(cfg)); }catch{} }
+
+    const rangeBindings = [];
+    const checkBindings = [];
+
+    function bindRange(id, key, fmt){
+      const el = document.getElementById(id);
+      const vEl = document.getElementById(id + "V");
+      if (!el) return;
+
+      rangeBindings.push({ el, vEl, key, fmt });
+
+      el.addEventListener("input", ()=>{
+        cfg[key] = +el.value;
+        saveCfg();
+        syncControls();
+      }, { passive:true });
+    }
+    function bindCheck(id, key){
+      const el = document.getElementById(id);
+      if (!el) return;
+
+      checkBindings.push({ el, key });
+      el.addEventListener("change", ()=>{
+        cfg[key] = !!el.checked;
+        saveCfg();
+        syncControls();
+      }, { passive:true });
+    }
+
+    const liveReadout = document.getElementById('liveReadout');
+
+    function syncControls(){
+      for (const b of rangeBindings){
+        b.el.value = cfg[b.key];
+        if (b.vEl && b.fmt) b.vEl.textContent = b.fmt(cfg[b.key]);
+      }
+      for (const b of checkBindings){
+        b.el.checked = !!cfg[b.key];
+      }
+
+      const mode = cfg.absoluteMapping ? "ABS" : "MICRO";
+      liveReadout.textContent =
+        `map=${mode} • micro=${cfg.microRangeInches.toFixed(2)}in • sens=${cfg.sensitivity.toFixed(2)}× • smooth=${cfg.smoothing.toFixed(2)} • ` +
+        `boost=${cfg.startupSmoothBoost.toFixed(1)}× • dead=${Math.round(cfg.deadzonePx)}px • pinch=${cfg.pinchThresh.toFixed(2)} • strict=${cfg.gestureStrict.toFixed(2)}`;
+    }
+
+    // overlay binds
+    bindCheck("absMap","absoluteMapping");
+
+    bindRange("microIn","microRangeInches",(v)=>`${v.toFixed(2)} in`);
+    bindRange("sens","sensitivity",(v)=>`${v.toFixed(2)}×`);
+    bindRange("smooth","smoothing",(v)=>v.toFixed(2));
+    bindRange("startupBoost","startupSmoothBoost",(v)=>`${Number(v).toFixed(1)}×`);
+    bindRange("dead","deadzonePx",(v)=>String(Math.round(v)));
+    bindRange("pinchT","pinchThresh",(v)=>v.toFixed(2));
+    bindRange("offX","offsetX",(v)=>String(Math.round(v)));
+    bindRange("offY","offsetY",(v)=>String(Math.round(v)));
+    bindRange("gStrict","gestureStrict",(v)=>v.toFixed(2));
+
+    bindCheck("mirrorX","mirrorX");
+    bindCheck("invX","invX");
+    bindCheck("invY","invY");
+
+    // live binds
+    bindCheck("absMapLive","absoluteMapping");
+
+    bindRange("microInLive","microRangeInches",(v)=>`${v.toFixed(2)} in`);
+    bindRange("sensLive","sensitivity",(v)=>`${v.toFixed(2)}×`);
+    bindRange("smoothLive","smoothing",(v)=>v.toFixed(2));
+    bindRange("startupBoostLive","startupSmoothBoost",(v)=>`${Number(v).toFixed(1)}×`);
+    bindRange("deadLive","deadzonePx",(v)=>String(Math.round(v)));
+    bindRange("pinchTLive","pinchThresh",(v)=>v.toFixed(2));
+    bindRange("offXLive","offsetX",(v)=>String(Math.round(v)));
+    bindRange("offYLive","offsetY",(v)=>String(Math.round(v)));
+    bindRange("gStrictLive","gestureStrict",(v)=>Number(v).toFixed(2));
+
+    bindCheck("mirrorXLive","mirrorX");
+    bindCheck("invXLive","invX");
+    bindCheck("invYLive","invY");
+
+    loadCfg();
+    syncControls();
+
+    document.getElementById('defaultsLive').addEventListener('click', ()=>{
+      Object.assign(cfg, cfgDefaults);
+      saveCfg();
+      syncControls();
+      statusDiv.innerHTML = "Gesture defaults restored.";
+    });
+
+    /* ===========================
+       Cursor Login (signature pad)
+       =========================== */
+    const pad = document.getElementById('patternPad');
+    const pCanvas = document.getElementById('patternCanvas');
+    const pStrict = document.getElementById('pStrict');
+    const pStrictV = document.getElementById('pStrictV');
+
+    function resizePattern(){
+      const r = pad.getBoundingClientRect();
+      const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+      pCanvas.width = Math.floor(r.width * dpr);
+      pCanvas.height = Math.floor(r.height * dpr);
+      const ctx = pCanvas.getContext('2d');
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+      drawPattern([]);
+    }
+    window.addEventListener('resize', resizePattern, {passive:true});
+    resizePattern();
+
+    pStrict.addEventListener('input', ()=> pStrictV.textContent = Number(pStrict.value).toFixed(2));
+
+    let drawing = false;
+    let pathPts = [];
+
+    function drawPattern(pts){
+      const ctx = pCanvas.getContext('2d');
+      const r = pad.getBoundingClientRect();
+      ctx.clearRect(0,0,r.width,r.height);
+
+      ctx.globalAlpha = 0.26;
+      ctx.strokeStyle = '#bfe6c9';
+      ctx.lineWidth = 1;
+      for (let i=1;i<6;i++){
+        const x = (r.width/6)*i;
+        ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,r.height); ctx.stroke();
+      }
+      for (let i=1;i<4;i++){
+        const y = (r.height/4)*i;
+        ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(r.width,y); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+
+      if (!pts.length) return;
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.stroke();
+    }
+
+    function padPos(ev){
+      const r = pad.getBoundingClientRect();
+      const x = (ev.clientX - r.left);
+      const y = (ev.clientY - r.top);
+      return {x: clamp(x,0,r.width), y: clamp(y,0,r.height)};
+    }
+
+    pad.addEventListener('pointerdown', (e)=>{
+      if (controllerMode !== 'cursor') return;
+      pad.setPointerCapture(e.pointerId);
+      drawing = true;
+      pathPts = [];
+      const p = padPos(e);
+      pathPts.push(p);
+      drawPattern(pathPts);
+    });
+    pad.addEventListener('pointermove', (e)=>{
+      if (!drawing || controllerMode !== 'cursor') return;
+      const p = padPos(e);
+      const last = pathPts[pathPts.length-1];
+      const dx = p.x - last.x, dy = p.y - last.y;
+      if (dx*dx + dy*dy < 6) return;
+      pathPts.push(p);
+      drawPattern(pathPts);
+    });
+    pad.addEventListener('pointerup', ()=>{ if (controllerMode==='cursor') drawing=false; });
+    pad.addEventListener('pointercancel', ()=> drawing=false);
+
+    function resamplePath(pts, n=64){
+      if (!pts || pts.length < 2) return null;
+
+      const d = [0];
+      let total = 0;
+      for (let i=1;i<pts.length;i++){
+        const dx = pts[i].x - pts[i-1].x, dy = pts[i].y - pts[i-1].y;
+        const dist = Math.hypot(dx,dy);
+        total += dist;
+        d.push(total);
+      }
+      if (total < 20) return null;
+
+      const out = [];
+      for (let k=0;k<n;k++){
+        const t = (total * k) / (n-1);
+        let i = 1;
+        while (i < d.length && d[i] < t) i++;
+        i = clamp(i,1,d.length-1);
+        const t0 = d[i-1], t1 = d[i];
+        const a = (t1 - t0) < 1e-9 ? 0 : (t - t0) / (t1 - t0);
+        out.push({
+          x: pts[i-1].x + (pts[i].x - pts[i-1].x) * a,
+          y: pts[i-1].y + (pts[i].y - pts[i-1].y) * a
+        });
+      }
+
+      let mx=0,my=0;
+      for (const p of out){ mx += p.x; my += p.y; }
+      mx/=out.length; my/=out.length;
+      let maxR = 1e-9;
+      for (const p of out){
+        const dx = p.x - mx, dy = p.y - my;
+        maxR = Math.max(maxR, Math.hypot(dx,dy));
+      }
+      return out.map(p=>({ x:(p.x-mx)/maxR, y:(p.y-my)/maxR }));
+    }
+
+    function pathDistance(a,b){
+      if (!a || !b || a.length !== b.length) return 999;
+      let sum = 0;
+      for (let i=0;i<a.length;i++){
+        const dx = a[i].x - b[i].x;
+        const dy = a[i].y - b[i].y;
+        sum += Math.hypot(dx,dy);
+      }
+      return sum / a.length;
+    }
+
+    /* ===========================
+       Gesture Engine + Cursor
+       =========================== */
+    let hands = null;
+    let cam = null;
+    const videoEl = document.getElementById('video');
+    let lastLoginLandmarks = null;
+
+    const gState = {
+      seen:false,
+      lastSeenAt:0,
+
+      rawX:0, rawY:0, rawZ:0,
+      rawFX: NaN, rawFY: NaN, rawFZ: NaN,
+
+      neutral: null,
+
+      cursorX: window.innerWidth * 0.5,
+      cursorY: window.innerHeight * 0.5,
+
+      pinchLatched:false,
+      pinchNorm: 1,
+
+      smoothBoostUntil: 0,
+      seenPrev: false
+    };
+
+    function pxPerInch(){
+      const d = document.createElement("div");
+      d.style.width = "1in";
+      d.style.position = "absolute";
+      d.style.left = "-200%";
+      d.style.top = "0";
+      document.body.appendChild(d);
+      const p = d.getBoundingClientRect().width || 96;
+      d.remove();
+      return p;
+    }
+    let PX_IN = pxPerInch();
+    window.addEventListener("resize", () => { PX_IN = pxPerInch(); }, { passive:true });
+
+    function distLm(a,b){
+      const dx = (a.x - b.x), dy = (a.y - b.y);
+      return Math.sqrt(dx*dx + dy*dy);
+    }
+    function avgLm(points){
+      let x=0,y=0,z=0;
+      for (const p of points){ x += p.x; y += p.y; z += (p.z || 0); }
+      const n = Math.max(1, points.length);
+      return { x: x/n, y: y/n, z: z/n };
+    }
+
+    function armStartupSmoothing(ms=2200){
+      gState.smoothBoostUntil = Math.max(gState.smoothBoostUntil, performance.now() + ms);
+    }
+    function effectiveSmoothing(now){
+      const base = clamp(cfg.smoothing, 0, 0.98);
+      const boost = (now < gState.smoothBoostUntil) ? Math.max(1, cfg.startupSmoothBoost || 1) : 1;
+      const step = (1 - base) / boost;
+      return clamp(1 - step, 0, 0.98);
+    }
+    function smoothStep(oldV, newV, effSmooth){
+      return oldV + (newV - oldV) * (1 - effSmooth);
+    }
+
+    function updatePinchLatch(pinchNorm){
+      const downT = cfg.pinchThresh;
+      const upT   = cfg.pinchThresh + 0.05;
+      if (!gState.pinchLatched){
+        if (pinchNorm <= downT) gState.pinchLatched = true;
+      } else {
+        if (pinchNorm >= upT) gState.pinchLatched = false;
+      }
+    }
+
+    function mapMicro(rawX, rawY){
+      const w = window.innerWidth, h = window.innerHeight;
+      const microRangePx = Math.max(8, cfg.microRangeInches * PX_IN);
+
+      const center = { x: w*0.5 + cfg.offsetX, y: h*0.5 + cfg.offsetY };
+
+      const pad = 18;
+      const maxDX = Math.max(30, (w * 0.5) - pad);
+      const maxDY = Math.max(30, (h * 0.5) - pad);
+
+      const scaleX = (maxDX / microRangePx) * cfg.sensitivity;
+      const scaleY = (maxDY / microRangePx) * cfg.sensitivity;
+
+      const nx = (gState.neutral?.x ?? rawX);
+      const ny = (gState.neutral?.y ?? rawY);
+
+      let dx = rawX - nx;
+      let dy = rawY - ny;
+
+      const dz = Math.max(0, cfg.deadzonePx);
+      if (Math.abs(dx) < dz) dx = 0;
+      if (Math.abs(dy) < dz) dy = 0;
+
+      let sx = center.x + dx * scaleX;
+      let sy = center.y + dy * scaleY;
+
+      if (cfg.invX) sx = w - sx;
+      if (cfg.invY) sy = h - sy;
+
+      return { x: clamp(sx, 0, w), y: clamp(sy, 0, h) };
+    }
+
+    function mapAbsolute(rawX, rawY){
+      const w = window.innerWidth, h = window.innerHeight;
+      let sx = rawX + cfg.offsetX;
+      let sy = rawY + cfg.offsetY;
+      if (cfg.invX) sx = w - sx;
+      if (cfg.invY) sy = h - sy;
+      return { x: clamp(sx, 0, w), y: clamp(sy, 0, h) };
+    }
+
+    function handleHandsResults(results){
+      const w = window.innerWidth, h = window.innerHeight;
+      const now = performance.now();
+
+      const lms = results.multiHandLandmarks || [];
+      lastLoginLandmarks = lms.length ? lms[0] : null;
+
+      if (!lms.length){
+        gState.seen = false;
+        setAuthSeen(false);
+        return;
+      }
+
+      const landmarks = lms[0];
+
+      const idxTip   = landmarks[8];
+      const thumbTip = landmarks[4];
+      const wrist    = landmarks[0];
+      const idxMcp   = landmarks[5];
+      const midMcp   = landmarks[9];
+      const ringMcp  = landmarks[13];
+      const pinkMcp  = landmarks[17];
+
+      const palm = avgLm([wrist, idxMcp, midMcp, ringMcp, pinkMcp]);
+      const BLEND = 0.22;
+
+      let px = idxTip.x * (1-BLEND) + palm.x * BLEND;
+      let py = idxTip.y * (1-BLEND) + palm.y * BLEND;
+      let pz = (idxTip.z || 0) * (1-BLEND) + (palm.z || 0) * BLEND;
+
+      if (cfg.mirrorX) px = 1 - px;
+
+      const rawX = px * w;
+      const rawY = py * h;
+      const rawZ = pz;
+
+      gState.rawX = rawX; gState.rawY = rawY; gState.rawZ = rawZ;
+
+      const scaleA = distLm(wrist, midMcp);
+      const scaleB = distLm(idxMcp, pinkMcp);
+      const handScale = Math.max(0.0001, scaleA, scaleB);
+      const pinchNorm = distLm(thumbTip, idxTip) / handScale;
+
+      gState.pinchNorm = pinchNorm;
+      updatePinchLatch(pinchNorm);
+
+      const reacquired = !gState.seenPrev;
+      if (reacquired) armStartupSmoothing(1100);
+      gState.seenPrev = true;
+
+      if (!gState.neutral){
+        gState.neutral = { x: rawX, y: rawY, z: rawZ };
+        armStartupSmoothing(2400);
+      }
+
+      const effSmooth = effectiveSmoothing(now);
+
+      if (!isFinite(gState.rawFX)){ gState.rawFX = rawX; gState.rawFY = rawY; gState.rawFZ = rawZ; }
+      gState.rawFX = smoothStep(gState.rawFX, rawX, effSmooth);
+      gState.rawFY = smoothStep(gState.rawFY, rawY, effSmooth);
+      gState.rawFZ = smoothStep(gState.rawFZ, rawZ, effSmooth);
+
+      const mapped = cfg.absoluteMapping
+        ? mapAbsolute(gState.rawFX, gState.rawFY)
+        : mapMicro(gState.rawFX, gState.rawFY);
+
+      gState.cursorX = smoothStep(gState.cursorX, mapped.x, effSmooth);
+      gState.cursorY = smoothStep(gState.cursorY, mapped.y, effSmooth);
+
+      gState.seen = true;
+      gState.lastSeenAt = now;
+
+      if (controllerMode === 'gesture' && overlay.style.display !== 'none'){
+        setAuthSeen(true);
+      } else {
+        setAuthSeen(gState.seen && (now - gState.lastSeenAt) < 420);
+      }
+    }
+
+    async function ensureGestureEngine(){
+      if (!window.Hands || !window.Camera) return false;
+      if (hands && cam) return true;
+
+      hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+      hands.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.55,
+        minTrackingConfidence: 0.55
+      });
+      hands.onResults(handleHandsResults);
+
+      cam = new Camera(videoEl, {
+        onFrame: async () => { try { await hands.send({ image: videoEl }); } catch {} },
+        width: 640,
+        height: 480
+      });
+
+      try{
+        await cam.start();
+        return true;
+      }catch(e){
+        hands = null; cam = null;
+        statusDiv.innerHTML = "Camera access blocked. Use HTTPS or localhost for Gesture Login.";
+        authStatusPill.textContent = 'Status: Camera blocked';
+        authStatusPill.className = 'pill bad';
+        return false;
+      }
+    }
+
+    /* Gesture cursor click emulation */
+    const gestureCursorEl = document.getElementById('gestureCursor');
+    let pinchPrev = false;
+    let clickCooldownUntil = 0;
+
+    function gestureTick(){
+      requestAnimationFrame(gestureTick);
+
+      if (!isLoggedIn || controllerMode !== 'gesture'){
+        gestureCursorEl.style.display = 'none';
+        pinchPrev = gState.pinchLatched;
+        gState.seenPrev = false;
+        return;
+      }
+
+      const now = performance.now();
+      const seen = gState.seen && (now - gState.lastSeenAt) < 420;
+      if (!seen){
+        gestureCursorEl.style.display = 'none';
+        pinchPrev = gState.pinchLatched;
+        gState.seenPrev = false;
+        return;
+      }
+
+      gestureCursorEl.style.display = 'block';
+      gestureCursorEl.style.left = gState.cursorX + 'px';
+      gestureCursorEl.style.top = gState.cursorY + 'px';
+      gestureCursorEl.classList.toggle('pinch', gState.pinchLatched);
+
+      if (!pinchPrev && gState.pinchLatched && now > clickCooldownUntil){
+        clickCooldownUntil = now + 260;
+
+        const el = document.elementFromPoint(gState.cursorX, gState.cursorY);
+        if (el){
+          const target = el.closest('button, td, input, label, a, [role="button"]') || el;
+          try { target.click(); } catch {}
+        }
+      }
+      pinchPrev = gState.pinchLatched;
+    }
+    gestureTick();
+
+    /* ===========================
+       Gesture Login Recognition
+       =========================== */
+    function gestureFeatureFromLandmarks(landmarks){
+      const wrist = landmarks[0];
+      const midMcp = landmarks[9];
+      const scale = Math.max(1e-6, Math.hypot(midMcp.x - wrist.x, midMcp.y - wrist.y));
+      const idxs = [0,5,9,13,17,4,8,12,16,20];
+      const v = [];
+      for (const i of idxs){
+        const p = landmarks[i];
+        v.push((p.x - wrist.x)/scale, (p.y - wrist.y)/scale, ((p.z||0) - (wrist.z||0))/scale);
+      }
+      return v;
+    }
+    function cosineSim(a,b){
+      if (!a || !b || a.length !== b.length) return -1;
+      let dot=0, na=0, nb=0;
+      for (let i=0;i<a.length;i++){
+        dot += a[i]*b[i];
+        na += a[i]*a[i];
+        nb += b[i]*b[i];
+      }
+      na = Math.sqrt(na); nb = Math.sqrt(nb);
+      if (na < 1e-9 || nb < 1e-9) return -1;
+      return dot/(na*nb);
+    }
+
+    async function captureGestureVector(ms=1200){
+      const start = performance.now();
+      const samples = [];
+      while (performance.now() - start < ms){
+        await wait(50);
+        if (lastLoginLandmarks){
+          samples.push(gestureFeatureFromLandmarks(lastLoginLandmarks));
+        }
+      }
+      if (samples.length < 6) return null;
+
+      const n = samples[0].length;
+      const mean = new Array(n).fill(0);
+      for (const s of samples){
+        for (let i=0;i<n;i++) mean[i] += s[i];
+      }
+      for (let i=0;i<n;i++) mean[i] /= samples.length;
+      return mean;
+    }
+
+    /* ===========================
+       Startup Scan (gesture neutral)
+       =========================== */
+    const startup = document.getElementById('startup');
+    const startupCount = document.getElementById('startupCount');
+    const startupMsg = document.getElementById('startupMsg');
+    const chipHand = document.getElementById('chipHand');
+    const chipZ = document.getElementById('chipZ');
+    const chipMicro = document.getElementById('chipMicro');
+    const bar1 = document.getElementById('bar1');
+    const bar2 = document.getElementById('bar2');
+    const skipStartup = document.getElementById('skipStartup');
+
+    let startupActive = false;
+    let countdownT = 0;
+    let stableT = 0;
+    let phase = 'idle';
+    let neutralSamples = [];
+
+    function showStartup(show){
+      startup.style.display = show ? 'flex' : 'none';
+      if (!show){
+        startupCount.textContent = '';
+        bar1.style.width = '0%';
+        bar2.style.width = '0%';
+      }
+    }
+
+    function beginStartupScan(){
+      if (controllerMode !== 'gesture') return;
+      startupActive = true;
+      phase = 'wait';
+      stableT = 0;
+      countdownT = 3.0;
+      neutralSamples = [];
+
+      chipMicro.textContent = `Micro: ${cfg.microRangeInches.toFixed(2)} in (${Math.round(cfg.microRangeInches*PX_IN)} px)`;
+      startupMsg.innerHTML = 'Raise your hand. Hold steady for <b>3-2-1</b>.';
+      showStartup(true);
+    }
+
+    skipStartup.addEventListener('click', ()=>{
+      startupActive = false;
+      showStartup(false);
+    });
+
+    startupScanAuth.addEventListener('click', async ()=>{
+      if (controllerMode !== 'gesture'){
+        alert('Startup scan is for Gesture mode.');
+        return;
+      }
+      await ensureGestureEngine();
+      beginStartupScan();
+    });
+
+    document.getElementById('recalBtn').addEventListener('click', async ()=>{
+      await ensureGestureEngine();
+      beginStartupScan();
+    });
+
+    document.getElementById('recenterBtn').addEventListener('click', ()=>{
+      if (!cfg.absoluteMapping){
+        gState.neutral = { x: gState.rawX, y: gState.rawY, z: gState.rawZ };
+      } else {
+        // In absolute mapping, recenter shifts offsets so current hand position maps near screen center
+        cfg.offsetX = clamp(cfg.offsetX + ((window.innerWidth*0.5) - gState.rawFX), -700, 700);
+        cfg.offsetY = clamp(cfg.offsetY + ((window.innerHeight*0.5) - gState.rawFY), -700, 700);
+        saveCfg();
+        syncControls();
+      }
+      armStartupSmoothing(2200);
+      statusDiv.innerHTML = "Gesture recentered (startup smoothing applied).";
+    });
+
+    let lastTick = performance.now();
+    function startupTick(){
+      requestAnimationFrame(startupTick);
+      const now = performance.now();
+      const dt = (now - lastTick) / 1000;
+      lastTick = now;
+
+      if (!startupActive) return;
+
+      const seen = gState.seen && (now - gState.lastSeenAt) < 420;
+      chipHand.className = 'pill ' + (seen ? 'ok' : 'bad');
+      chipHand.textContent = `Hand: ${seen ? 'seen' : 'not seen'}`;
+      chipZ.textContent = `Z: ${(gState.rawZ||0).toFixed(3)}`;
+      chipMicro.textContent = `Micro: ${cfg.microRangeInches.toFixed(2)} in`;
+
+      if (phase === 'wait'){
+        if (!seen) return;
+        stableT += dt;
+        bar1.style.width = `${Math.round(clamp(stableT / 0.5, 0, 1) * 100)}%`;
+        if (stableT >= 0.5){
+          phase = 'countdown';
+          countdownT = 3.0;
+          startupCount.textContent = '3';
+        }
+        return;
+      }
+
+      if (phase === 'countdown'){
+        if (!seen) return;
+
+        countdownT -= dt;
+        const c = Math.max(1, Math.ceil(countdownT));
+        startupCount.textContent = String(c);
+
+        neutralSamples.push({x:gState.rawFX, y:gState.rawFY, z:gState.rawFZ});
+        bar1.style.width = `${Math.round(clamp((3.0 - countdownT)/3.0, 0, 1) * 100)}%`;
+
+        if (countdownT <= 0){
+          const n = Math.max(1, neutralSamples.length);
+          let sx=0, sy=0, sz=0;
+          for (const s of neutralSamples){ sx+=s.x; sy+=s.y; sz+=s.z; }
+          gState.neutral = { x: sx/n, y: sy/n, z: sz/n };
+          armStartupSmoothing(2400);
+          bar2.style.width = '100%';
+          startupCount.textContent = '✓';
+          startupMsg.innerHTML = 'Neutral captured. Cursor stabilized.';
+          phase = 'done';
+          setTimeout(()=>{ startupActive=false; showStartup(false); }, 650);
+        }
+      }
+    }
+    startupTick();
+
+    /* ===========================
+       Enroll + Login flows
+       =========================== */
+    resetAuth.addEventListener('click', ()=>{
+      if (!confirm('Reset stored login profiles (gesture + cursor) and tuners?')) return;
+      localStorage.removeItem(G_PROFILE_KEY);
+      localStorage.removeItem(C_PROFILE_KEY);
+      localStorage.removeItem(GCFG_KEY);
+      Object.assign(cfg, cfgDefaults);
+      saveCfg();
+      syncControls();
+
+      updateAuthProfilePill();
+      loginBtn.disabled = true;
+      authStatusPill.textContent = 'Status: Locked';
+      authStatusPill.className = 'pill';
+      statusDiv.innerHTML = "Profiles reset.";
+    });
+
+    enrollBtn.addEventListener('click', async ()=>{
+      authStatusPill.textContent = 'Status: Enrolling…';
+      authStatusPill.className = 'pill';
+
+      if (controllerMode === 'gesture'){
+        const ok = await ensureGestureEngine();
+        if (!ok){
+          authStatusPill.textContent = 'Status: Camera blocked';
+          authStatusPill.className = 'pill bad';
+          return;
+        }
+
+        authStatusPill.textContent = 'Status: Hold steady…';
+        authStatusPill.className = 'pill';
+
+        const vec = await captureGestureVector(1100);
+        if (!vec){
+          authStatusPill.textContent = 'Status: No hand captured';
+          authStatusPill.className = 'pill bad';
+          return;
+        }
+        localStorage.setItem(G_PROFILE_KEY, JSON.stringify(vec));
+        updateAuthProfilePill();
+        loginBtn.disabled = false;
+
+        authStatusPill.textContent = 'Status: Enrolled';
+        authStatusPill.className = 'pill ok';
+        statusDiv.innerHTML = "Gesture profile enrolled. You can now Login.";
+      }
+
+      if (controllerMode === 'cursor'){
+        const pat = resamplePath(pathPts, 64);
+        if (!pat){
+          authStatusPill.textContent = 'Status: Draw a pattern first';
+          authStatusPill.className = 'pill bad';
+          return;
+        }
+        localStorage.setItem(C_PROFILE_KEY, JSON.stringify(pat));
+        updateAuthProfilePill();
+        loginBtn.disabled = false;
+
+        authStatusPill.textContent = 'Status: Enrolled';
+        authStatusPill.className = 'pill ok';
+        statusDiv.innerHTML = "Cursor signature enrolled. You can now Login.";
+      }
+    });
+
+    loginBtn.addEventListener('click', async ()=>{
+      authStatusPill.textContent = 'Status: Verifying…';
+      authStatusPill.className = 'pill';
+
+      if (controllerMode === 'gesture'){
+        const ok = await ensureGestureEngine();
+        if (!ok){
+          authStatusPill.textContent = 'Status: Camera blocked';
+          authStatusPill.className = 'pill bad';
+          return;
+        }
+        const savedRaw = localStorage.getItem(G_PROFILE_KEY);
+        if (!savedRaw){
+          authStatusPill.textContent = 'Status: No profile';
+          authStatusPill.className = 'pill bad';
+          return;
+        }
+        const saved = JSON.parse(savedRaw);
+
+        const vec = await captureGestureVector(900);
+        if (!vec){
+          authStatusPill.textContent = 'Status: No hand captured';
+          authStatusPill.className = 'pill bad';
+          return;
+        }
+
+        const sim = cosineSim(saved, vec);
+        const pass = sim >= cfg.gestureStrict;
+
+        if (!pass){
+          authStatusPill.textContent = `Status: Denied (${sim.toFixed(3)})`;
+          authStatusPill.className = 'pill bad';
+          statusDiv.innerHTML = `Gesture login failed (sim=${sim.toFixed(3)}). Try Startup Scan or lower strictness slightly.`;
+          return;
+        }
+
+        isLoggedIn = true;
+        overlay.style.display = 'none';
+        authStatusPill.textContent = 'Status: Verified';
+        authStatusPill.className = 'pill ok';
+
+        setControllerPill();
+        updateAuthProfilePill();
+        armStartupSmoothing(2400);
+
+        statusDiv.innerHTML = `Login verified — Gesture Control active. (sim=${sim.toFixed(3)})`;
+      }
+
+      if (controllerMode === 'cursor'){
+        const savedRaw = localStorage.getItem(C_PROFILE_KEY);
+        if (!savedRaw){
+          authStatusPill.textContent = 'Status: No profile';
+          authStatusPill.className = 'pill bad';
+          return;
+        }
+        const saved = JSON.parse(savedRaw);
+        const attempt = resamplePath(pathPts, 64);
+        if (!attempt){
+          authStatusPill.textContent = 'Status: Draw your pattern';
+          authStatusPill.className = 'pill bad';
+          return;
+        }
+
+        const dist = pathDistance(saved, attempt);
+        const thresh = Number(pStrict.value);
+        const pass = dist <= thresh;
+
+        if (!pass){
+          authStatusPill.textContent = `Status: Denied (d=${dist.toFixed(3)})`;
+          authStatusPill.className = 'pill bad';
+          statusDiv.innerHTML = `Cursor login failed (d=${dist.toFixed(3)}). Try again or raise strictness value (more forgiving).`;
+          return;
+        }
+
+        isLoggedIn = true;
+        overlay.style.display = 'none';
+        authStatusPill.textContent = 'Status: Verified';
+        authStatusPill.className = 'pill ok';
+
+        setControllerPill();
+        updateAuthProfilePill();
+        statusDiv.innerHTML = `Login verified — Cursor Control active. (d=${dist.toFixed(3)})`;
+      }
+
+      // Start/continue match game (Game 1)
+      startGame(match.gameIndex, true);
+    });
+
+    /* ===========================
+       Live clarity helpers
+       =========================== */
+    setInterval(()=> {
+      const ok = gState.seen && (performance.now() - gState.lastSeenAt) < 420;
+      setAuthSeen(ok);
+      updateAuthProfilePill();
+
+      if (controllerMode === 'gesture'){
+        const pinch = gState.pinchNorm;
+        const seenTxt = ok ? "seen" : "—";
+        gestureLivePill.textContent = `Live: ${seenTxt}`;
+        gestureLivePill.className = 'pill ' + (ok ? 'ok' : '');
+        const mode = cfg.absoluteMapping ? "ABS (full-screen)" : "MICRO (relative)";
+        gestureLiveHint.textContent =
+          ok
+            ? `mode=${mode} • pinch=${pinch.toFixed(3)} • threshold=${cfg.pinchThresh.toFixed(2)} • strict=${cfg.gestureStrict.toFixed(2)}`
+            : `Show your hand to the camera to enable live readout.`;
+      } else {
+        gestureLivePill.textContent = `Live: —`;
+        gestureLivePill.className = 'pill';
+        gestureLiveHint.textContent = `Switch to Gesture mode to view live hand + pinch diagnostics.`;
+      }
+    }, 450);
+
+    /* ===========================
+       Boot: initialize match + board behind overlay
+       =========================== */
+    resizeBoardForViewport();
+    window.addEventListener('resize', ()=> resizeBoardForViewport(), {passive:true});
+
+    // Initialize match and Game 1 (locked until login)
+    setColorsForGame(1);
+    initGame();
+    updateMatchHud();
+    setControllerPill();
+
+    // show login immediately
+    overlay.style.display = 'flex';
+  </script>
+</body>
+</html>

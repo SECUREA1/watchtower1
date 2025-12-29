@@ -1,0 +1,1281 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>RedNode — Locked Views Excavator (2-Hand ISO Controls + Sensitivity Tuners)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root{
+      --panel: rgba(10,12,16,0.74);
+      --panel2: rgba(10,12,16,0.62);
+      --text: rgba(240,240,245,0.92);
+      --muted: rgba(220,220,235,0.70);
+      --y: rgba(255,210,60,0.95);
+      --r: rgba(255,60,60,0.90);
+      --g: rgba(80,220,120,0.95);
+    }
+    html,body{ margin:0; padding:0; height:100%; background:#000; color:var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    body{ display:flex; align-items:center; justify-content:center; }
+    #container{
+      width:min(1200px, calc(100vw - 24px));
+      margin: 12px auto;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+    }
+    #wrap{
+      position:relative;
+      width:100%;
+      aspect-ratio: 920 / 640;
+      max-height: calc(100vh - 140px);
+      border-radius: 14px;
+      overflow:hidden;
+      background: radial-gradient(1100px 700px at 50% 30%, #11131b 0%, #06060a 55%, #000 100%);
+      box-shadow: 0 10px 40px rgba(0,0,0,0.65);
+      border: 1px solid rgba(255,210,60,0.12);
+    }
+    canvas{ width:100%; height:100%; display:block; background:#000; }
+    video{ display:none; }
+
+    /* HUD */
+    #hud{
+      position:absolute;
+      left:10px; right:10px; top:10px;
+      display:flex;
+      gap:10px;
+      pointer-events:none;
+      z-index: 5;
+    }
+    .hudBlock{
+      flex: 1 1 auto;
+      display:flex;
+      gap:12px;
+      align-items:center;
+      justify-content:space-between;
+      padding:10px 12px;
+      border-radius: 12px;
+      background: var(--panel);
+      border: 1px solid rgba(255,210,60,0.14);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 18px rgba(0,0,0,0.35);
+      min-width: 0;
+    }
+    .hudStat{ display:flex; flex-direction:column; gap:2px; line-height:1.1; min-width:0; }
+    .hudLabel{ font-size: 11px; color:var(--muted); }
+    .hudValue{ font-size: 14px; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+    /* Side-view panel */
+    #sidePanel{
+      position:absolute;
+      left:10px;
+      bottom:10px;
+      width: 450px;
+      height: 170px;
+      background: var(--panel);
+      border: 1px solid rgba(255,210,60,0.14);
+      border-radius: 12px;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 18px rgba(0,0,0,0.35);
+      padding: 8px;
+      z-index: 6;
+      pointer-events:none;
+    }
+    #sideHeader{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+      font-size: 11px;
+      color: rgba(255,235,170,0.92);
+      margin-bottom: 6px;
+    }
+    #sideCanvas{
+      width:100%;
+      height: calc(100% - 18px);
+      display:block;
+      border-radius: 10px;
+      background: rgba(0,0,0,0.28);
+      border: 1px solid rgba(255,210,60,0.10);
+    }
+
+    /* Corner activation display */
+    #actPanel{
+      position:absolute;
+      right:10px;
+      top:78px;
+      width: 250px;
+      background: var(--panel);
+      border: 1px solid rgba(255,210,60,0.14);
+      border-radius: 12px;
+      padding: 10px;
+      z-index: 7;
+      pointer-events:none;
+      box-shadow: 0 8px 18px rgba(0,0,0,0.35);
+      backdrop-filter: blur(10px);
+    }
+    #actTitle{ font-size: 11px; color: rgba(255,235,170,0.92); margin-bottom: 8px; }
+    .actRow{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin:6px 0; }
+    .pill{
+      width: 92px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,210,60,0.18);
+      background: rgba(0,0,0,0.33);
+      font-size: 11px;
+      color: rgba(220,220,235,0.85);
+      text-align:center;
+    }
+    .pill.on{
+      border-color: rgba(80,220,120,0.50);
+      color: rgba(80,220,120,0.95);
+      box-shadow: 0 0 0 1px rgba(80,220,120,0.10) inset, 0 0 12px rgba(80,220,120,0.10);
+    }
+    .val{
+      width: 120px;
+      text-align:right;
+      font-size: 11px;
+      color: rgba(220,220,235,0.78);
+      white-space:nowrap;
+    }
+
+    /* Tuner panel */
+    #tuner{
+      position:absolute;
+      right:10px;
+      bottom:10px;
+      width: 360px;
+      background: var(--panel2);
+      border: 1px solid rgba(255,210,60,0.14);
+      border-radius: 12px;
+      padding: 10px;
+      z-index: 8;
+      box-shadow: 0 8px 18px rgba(0,0,0,0.35);
+      backdrop-filter: blur(10px);
+      pointer-events:auto;
+      user-select:none;
+    }
+    #tunerHeader{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      margin-bottom: 8px;
+    }
+    #tunerHeader b{ font-size: 12px; color: rgba(255,235,170,0.92); }
+    #toggleTuner{
+      cursor:pointer;
+      padding: 6px 10px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,210,60,0.18);
+      background: rgba(0,0,0,0.35);
+      color: rgba(255,235,170,0.92);
+      font-size: 11px;
+    }
+    #tunerBody{ display:block; }
+    .row{ display:grid; grid-template-columns: 1fr 120px; gap:10px; align-items:center; margin:8px 0; }
+    .row label{ font-size: 11px; color: rgba(220,220,235,0.75); }
+    .ctrl{ display:flex; align-items:center; gap:10px; }
+    input[type="range"]{ width:100%; }
+    .num{
+      width: 54px;
+      text-align:right;
+      font-size: 11px;
+      color: rgba(220,220,235,0.85);
+    }
+    .hint{
+      margin-top: 8px;
+      font-size: 10px;
+      color: rgba(220,220,235,0.65);
+      line-height: 1.25;
+    }
+
+    /* Start overlay */
+    #start{
+      position:absolute;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding: 18px;
+      background:
+        radial-gradient(1200px 800px at 30% 20%, rgba(255,200,60,0.10) 0%, transparent 55%),
+        radial-gradient(900px 700px at 75% 35%, rgba(255,60,60,0.10) 0%, transparent 55%),
+        linear-gradient(180deg, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.68) 100%);
+      z-index: 20;
+    }
+    .card{
+      width:min(920px, 100%);
+      border-radius: 16px;
+      border: 1px solid rgba(255,210,60,0.16);
+      background: rgba(6,7,10,0.78);
+      box-shadow: 0 18px 60px rgba(0,0,0,0.72);
+      overflow:hidden;
+    }
+    .cardHead{
+      padding: 14px 16px;
+      border-bottom: 1px solid rgba(255,210,60,0.12);
+      background: rgba(0,0,0,0.35);
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+    }
+    .cardHead b{
+      color: rgba(255,235,170,0.95);
+      font-size: 14px;
+      letter-spacing: 0.4px;
+    }
+    .cardHead span{
+      display:block;
+      margin-top: 6px;
+      color: rgba(220,220,235,0.72);
+      font-size: 12px;
+      line-height: 1.3;
+    }
+    .startBtn{
+      cursor:pointer;
+      padding: 10px 14px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,210,60,0.20);
+      background: rgba(0,0,0,0.35);
+      color: rgba(255,235,170,0.92);
+      font-size: 12px;
+      white-space:nowrap;
+      align-self:flex-start;
+    }
+    .cardBody{
+      padding: 14px 16px;
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:12px;
+    }
+    .tile{
+      border-radius: 14px;
+      border: 1px solid rgba(255,210,60,0.14);
+      background: rgba(10,12,18,0.55);
+      padding: 12px;
+      color: rgba(220,220,235,0.78);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .tile b{ color: rgba(255,235,170,0.92); }
+    @media (max-width: 980px){
+      .cardBody{ grid-template-columns: 1fr; }
+      #sidePanel{ width: calc(100% - 20px); }
+      #actPanel{ width: 230px; top: 92px; }
+      #tuner{ width: calc(100% - 20px); }
+    }
+  </style>
+</head>
+
+<body>
+  <div id="container">
+    <div id="wrap">
+      <canvas id="top" width="920" height="640"></canvas>
+
+      <div id="hud">
+        <div class="hudBlock">
+          <div class="hudStat">
+            <div class="hudLabel">MODE</div>
+            <div class="hudValue">LOCKED VIEWS</div>
+          </div>
+          <div class="hudStat">
+            <div class="hudLabel">HANDS</div>
+            <div class="hudValue" id="hudHands">L:—  R:—</div>
+          </div>
+          <div class="hudStat">
+            <div class="hudLabel">DIG</div>
+            <div class="hudValue" id="hudDig">OFF</div>
+          </div>
+          <div class="hudStat">
+            <div class="hudLabel">TILE</div>
+            <div class="hudValue" id="hudTile">—</div>
+          </div>
+        </div>
+        <div class="hudBlock">
+          <div class="hudStat">
+            <div class="hudLabel">SWING</div>
+            <div class="hudValue" id="hudSwing">0°</div>
+          </div>
+          <div class="hudStat">
+            <div class="hudLabel">BOOM</div>
+            <div class="hudValue" id="hudBoom">0°</div>
+          </div>
+          <div class="hudStat">
+            <div class="hudLabel">STICK</div>
+            <div class="hudValue" id="hudStick">0.00</div>
+          </div>
+          <div class="hudStat">
+            <div class="hudLabel">BUCKET</div>
+            <div class="hudValue" id="hudBucket">0°</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Side view -->
+      <div id="sidePanel">
+        <div id="sideHeader">
+          <span>SIDE VIEW (LOCKED): Boom + Bucket</span>
+          <span id="sideReadout" style="color: rgba(220,220,235,0.75);">—</span>
+        </div>
+        <canvas id="sideCanvas" width="820" height="240"></canvas>
+      </div>
+
+      <!-- Activation / highlight panel -->
+      <div id="actPanel">
+        <div id="actTitle">ACTIVATION (ISO JOYSTICKS)</div>
+
+        <div class="actRow">
+          <div id="pillSwing" class="pill">Swing (Lx)</div>
+          <div id="valSwing" class="val">0.00</div>
+        </div>
+        <div class="actRow">
+          <div id="pillBoom" class="pill">Boom (Ly)</div>
+          <div id="valBoom" class="val">0.00</div>
+        </div>
+        <div class="actRow">
+          <div id="pillStick" class="pill">Stick (Ry)</div>
+          <div id="valStick" class="val">0.00</div>
+        </div>
+        <div class="actRow">
+          <div id="pillBucket" class="pill">Bucket (Rx)</div>
+          <div id="valBucket" class="val">0.00</div>
+        </div>
+        <div class="actRow">
+          <div id="pillDig" class="pill">Dig (pinch)</div>
+          <div id="valDig" class="val">OFF</div>
+        </div>
+      </div>
+
+      <!-- Tuner -->
+      <div id="tuner">
+        <div id="tunerHeader">
+          <b>MATH TUNERS (Sensitivity + Pickup)</b>
+          <div id="toggleTuner">Hide</div>
+        </div>
+        <div id="tunerBody">
+          <div class="row">
+            <label>Detection confidence</label>
+            <div class="ctrl">
+              <input id="detConf" type="range" min="0.30" max="0.90" step="0.01" value="0.60">
+              <div class="num" id="detConfV">0.60</div>
+            </div>
+          </div>
+          <div class="row">
+            <label>Tracking confidence</label>
+            <div class="ctrl">
+              <input id="trkConf" type="range" min="0.30" max="0.90" step="0.01" value="0.60">
+              <div class="num" id="trkConfV">0.60</div>
+            </div>
+          </div>
+
+          <div class="row">
+            <label>Smoothing tau (sec)</label>
+            <div class="ctrl">
+              <input id="smoothTau" type="range" min="0.03" max="0.25" step="0.01" value="0.10">
+              <div class="num" id="smoothTauV">0.10</div>
+            </div>
+          </div>
+          <div class="row">
+            <label>Deadzone</label>
+            <div class="ctrl">
+              <input id="deadzone" type="range" min="0.00" max="0.25" step="0.01" value="0.08">
+              <div class="num" id="deadzoneV">0.08</div>
+            </div>
+          </div>
+          <div class="row">
+            <label>Expo (curve)</label>
+            <div class="ctrl">
+              <input id="expo" type="range" min="1.00" max="2.20" step="0.05" value="1.35">
+              <div class="num" id="expoV">1.35</div>
+            </div>
+          </div>
+
+          <div class="row">
+            <label>Swing speed (deg/s)</label>
+            <div class="ctrl">
+              <input id="spdSwing" type="range" min="20" max="240" step="1" value="110">
+              <div class="num" id="spdSwingV">110</div>
+            </div>
+          </div>
+          <div class="row">
+            <label>Boom speed (deg/s)</label>
+            <div class="ctrl">
+              <input id="spdBoom" type="range" min="20" max="240" step="1" value="110">
+              <div class="num" id="spdBoomV">110</div>
+            </div>
+          </div>
+          <div class="row">
+            <label>Stick speed (units/s)</label>
+            <div class="ctrl">
+              <input id="spdStick" type="range" min="0.10" max="1.40" step="0.01" value="0.55">
+              <div class="num" id="spdStickV">0.55</div>
+            </div>
+          </div>
+          <div class="row">
+            <label>Bucket speed (deg/s)</label>
+            <div class="ctrl">
+              <input id="spdBucket" type="range" min="20" max="260" step="1" value="140">
+              <div class="num" id="spdBucketV">140</div>
+            </div>
+          </div>
+
+          <div class="row">
+            <label>Pinch ON / OFF</label>
+            <div class="ctrl" style="gap:8px;">
+              <input id="pinchOn" type="range" min="0.03" max="0.10" step="0.001" value="0.055" style="width:55%;">
+              <div class="num" id="pinchOnV">0.055</div>
+              <input id="pinchOff" type="range" min="0.04" max="0.12" step="0.001" value="0.075" style="width:55%;">
+              <div class="num" id="pinchOffV">0.075</div>
+            </div>
+          </div>
+
+          <div class="hint">
+            <b>ISO excavator hand controls (2 hands):</b><br/>
+            <span style="color:rgba(255,235,170,0.9)">Left hand</span> = Swing (L/R) + Boom (Up/Down)<br/>
+            <span style="color:rgba(255,235,170,0.9)">Right hand</span> = Bucket (L/R) + Stick In/Out (Up/Down)<br/>
+            Pinch (either hand) = Dig (also works with SPACE).<br/>
+            The <b>Top view</b> only shows Swing + Stick reach. The <b>Side view</b> shows Boom + Bucket.
+          </div>
+        </div>
+      </div>
+
+      <!-- Start overlay -->
+      <div id="start">
+        <div class="card">
+          <div class="cardHead">
+            <div>
+              <b>RedNode — Locked Views Excavator</b>
+              <span>
+                Uses <b>MediaPipe Holistic</b> to lock Left/Right hand identity using <b>arms + hands</b> (pose + hand landmarks).<br/>
+                Move your hands like excavator joysticks (ISO). Pinch to dig tiles.
+              </span>
+            </div>
+            <div class="startBtn" id="btnStart">START</div>
+          </div>
+          <div class="cardBody">
+            <div class="tile">
+              <b>Top View (Locked)</b><br/>
+              Only renders <b>Swing</b> + <b>Stick reach</b> (in/out depth). This is your “drone overhead” view.
+            </div>
+            <div class="tile">
+              <b>Side View (Locked)</b><br/>
+              Only renders <b>Boom</b> + <b>Bucket curl</b>. This is the “ground/side scroller” view.
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div style="padding:10px 12px;border-radius:12px;background:rgba(10,12,18,0.55);border:1px solid rgba(255,210,60,0.12);color:rgba(235,235,245,0.86);font:12px ui-monospace,SFMono-Regular,Menlo,monospace;">
+      <span style="color:rgba(220,220,235,0.64)">Dig:</span> <b>Pinch</b> or <b>SPACE</b> ·
+      <span style="color:rgba(220,220,235,0.64)">Reset tiles:</span> <b>R</b> ·
+      <span style="color:rgba(220,220,235,0.64)">Hide tuner:</span> <b>button</b> bottom-right
+    </div>
+  </div>
+
+  <!-- MediaPipe Holistic + Camera -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+  <video id="video" playsinline></video>
+
+  <script>
+    // ============================================================
+    // Locked Views Excavator (2-hand ISO joystick mapping)
+    //
+    // Robustness goals:
+    // - Track BOTH hands and arms using Holistic (pose + hands).
+    // - If hand landmarks drop, fall back to pose wrist.
+    // - Normalize relative to shoulder + shoulder span to keep stable.
+    // - Deadzone + expo + EMA smoothing for smooth motion.
+    // - Per-control speed tuners + pinch tuners.
+    // - Corner "activation" highlight for Swing/Boom/Stick/Bucket/Dig.
+    // ============================================================
+
+    // ---------- DOM ----------
+    const topCanvas = document.getElementById("top");
+    const ctx = topCanvas.getContext("2d", { alpha: false });
+
+    const sideCanvas = document.getElementById("sideCanvas");
+    const sctx = sideCanvas.getContext("2d", { alpha: true });
+
+    const hudHands  = document.getElementById("hudHands");
+    const hudDig    = document.getElementById("hudDig");
+    const hudTile   = document.getElementById("hudTile");
+    const hudSwing  = document.getElementById("hudSwing");
+    const hudBoom   = document.getElementById("hudBoom");
+    const hudStick  = document.getElementById("hudStick");
+    const hudBucket = document.getElementById("hudBucket");
+
+    const sideReadout = document.getElementById("sideReadout");
+
+    const pillSwing  = document.getElementById("pillSwing");
+    const pillBoom   = document.getElementById("pillBoom");
+    const pillStick  = document.getElementById("pillStick");
+    const pillBucket = document.getElementById("pillBucket");
+    const pillDig    = document.getElementById("pillDig");
+
+    const valSwing  = document.getElementById("valSwing");
+    const valBoom   = document.getElementById("valBoom");
+    const valStick  = document.getElementById("valStick");
+    const valBucket = document.getElementById("valBucket");
+    const valDig    = document.getElementById("valDig");
+
+    const startOverlay = document.getElementById("start");
+    document.getElementById("btnStart").addEventListener("click", ()=>{
+      startOverlay.style.display = "none";
+      started = true;
+      resetTiles();
+    });
+
+    // tuner elements
+    const tuner = {
+      detConf:  document.getElementById("detConf"),
+      trkConf:  document.getElementById("trkConf"),
+      smoothTau:document.getElementById("smoothTau"),
+      deadzone: document.getElementById("deadzone"),
+      expo:     document.getElementById("expo"),
+      spdSwing: document.getElementById("spdSwing"),
+      spdBoom:  document.getElementById("spdBoom"),
+      spdStick: document.getElementById("spdStick"),
+      spdBucket:document.getElementById("spdBucket"),
+      pinchOn:  document.getElementById("pinchOn"),
+      pinchOff: document.getElementById("pinchOff"),
+
+      detConfV:  document.getElementById("detConfV"),
+      trkConfV:  document.getElementById("trkConfV"),
+      smoothTauV:document.getElementById("smoothTauV"),
+      deadzoneV: document.getElementById("deadzoneV"),
+      expoV:     document.getElementById("expoV"),
+      spdSwingV: document.getElementById("spdSwingV"),
+      spdBoomV:  document.getElementById("spdBoomV"),
+      spdStickV: document.getElementById("spdStickV"),
+      spdBucketV:document.getElementById("spdBucketV"),
+      pinchOnV:  document.getElementById("pinchOnV"),
+      pinchOffV: document.getElementById("pinchOffV"),
+    };
+
+    function syncTunerLabels(){
+      tuner.detConfV.textContent   = (+tuner.detConf.value).toFixed(2);
+      tuner.trkConfV.textContent   = (+tuner.trkConf.value).toFixed(2);
+      tuner.smoothTauV.textContent = (+tuner.smoothTau.value).toFixed(2);
+      tuner.deadzoneV.textContent  = (+tuner.deadzone.value).toFixed(2);
+      tuner.expoV.textContent      = (+tuner.expo.value).toFixed(2);
+      tuner.spdSwingV.textContent  = String(Math.round(+tuner.spdSwing.value));
+      tuner.spdBoomV.textContent   = String(Math.round(+tuner.spdBoom.value));
+      tuner.spdStickV.textContent  = (+tuner.spdStick.value).toFixed(2);
+      tuner.spdBucketV.textContent = String(Math.round(+tuner.spdBucket.value));
+      tuner.pinchOnV.textContent   = (+tuner.pinchOn.value).toFixed(3);
+      tuner.pinchOffV.textContent  = (+tuner.pinchOff.value).toFixed(3);
+    }
+    Object.values(tuner).forEach(el=>{
+      if (el && el.tagName === "INPUT") el.addEventListener("input", syncTunerLabels);
+    });
+    syncTunerLabels();
+
+    const toggleTunerBtn = document.getElementById("toggleTuner");
+    const tunerBody = document.getElementById("tunerBody");
+    let tunerVisible = true;
+    toggleTunerBtn.addEventListener("click", ()=>{
+      tunerVisible = !tunerVisible;
+      tunerBody.style.display = tunerVisible ? "block" : "none";
+      toggleTunerBtn.textContent = tunerVisible ? "Hide" : "Show";
+    });
+
+    // ---------- Math helpers ----------
+    const TAU = Math.PI*2;
+    function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+    function lerp(a,b,t){ return a + (b-a)*t; }
+    function emaAlpha(dt, tau){
+      if (tau <= 0) return 1;
+      return 1 - Math.exp(-dt / tau);
+    }
+    function wrapAngle(a){
+      while (a > Math.PI) a -= TAU;
+      while (a < -Math.PI) a += TAU;
+      return a;
+    }
+    function applyDeadzone(v, dz){
+      const a = Math.abs(v);
+      if (a < dz) return 0;
+      const s = (a - dz) / Math.max(1e-6, (1 - dz));
+      return Math.sign(v) * clamp(s, 0, 1);
+    }
+    function expoCurve(v, expo){
+      const a = Math.abs(v);
+      return Math.sign(v) * Math.pow(a, expo);
+    }
+    function radToDeg(r){ return r * 180 / Math.PI; }
+    function degToRad(d){ return d * Math.PI / 180; }
+
+    // ---------- World / Tiles ----------
+    // simple "digging grid" so you can see bucket work
+    const W = topCanvas.width, H = topCanvas.height;
+    const TILE = 56;
+    const WORLD_T = 26;
+    const WORLD_SIZE = WORLD_T * TILE;
+
+    const TILE_HEALTH_MAX = 5;
+    const tileHealth = new Map(); // "x,y" => hp
+
+    function kxy(tx,ty){ return tx + "," + ty; }
+    function getHP(tx,ty){
+      const v = tileHealth.get(kxy(tx,ty));
+      return (v === undefined) ? TILE_HEALTH_MAX : v;
+    }
+    function setHP(tx,ty,hp){
+      const hh = clamp(Math.round(hp), 0, TILE_HEALTH_MAX);
+      if (hh === TILE_HEALTH_MAX) tileHealth.delete(kxy(tx,ty));
+      else tileHealth.set(kxy(tx,ty), hh);
+    }
+    function removed(tx,ty){ return getHP(tx,ty) <= 0; }
+    function depth01(tx,ty){
+      const hp = getHP(tx,ty);
+      return clamp((TILE_HEALTH_MAX - hp)/TILE_HEALTH_MAX, 0, 1);
+    }
+    function resetTiles(){
+      tileHealth.clear();
+    }
+
+    // ---------- Excavator DOF (Locked views) ----------
+    // Top view: swingYaw + stickExtend (reach)
+    // Side view: boomPitch + bucketCurl
+    const ex = WORLD_SIZE*0.5; // fixed base position in world
+    const ey = WORLD_SIZE*0.5;
+
+    let baseYaw = 0.0;             // optional base orientation (keyboard Q/E)
+    let swingYaw = 0.0;            // rad
+    let boomPitch = degToRad(35);  // rad
+    let stickExtend = 0.60;        // 0.15..1.0
+    let bucketCurl = degToRad(-35);// rad
+
+    // limits
+    const LIM = {
+      swing:  {min: degToRad(-180), max: degToRad(180)},
+      boom:   {min: degToRad(-5),   max: degToRad(75)},
+      stick:  {min: 0.15,           max: 1.00},
+      bucket: {min: degToRad(-110), max: degToRad(45)}
+    };
+
+    // geometry for top-down projection
+    const G = {
+      boom1: 92,
+      boom2Min: 55,
+      boom2Max: 160,
+      tip: 22
+    };
+
+    function bucketWorldPoint(){
+      // Top-down uses ONLY yaw + extend (locked)
+      const yawAbs = wrapAngle(baseYaw + swingYaw);
+      const boom2 = lerp(G.boom2Min, G.boom2Max, stickExtend);
+
+      const baseX = ex;
+      const baseY = ey;
+
+      const elbowX = baseX + Math.cos(yawAbs) * G.boom1;
+      const elbowY = baseY + Math.sin(yawAbs) * G.boom1;
+
+      const endX = elbowX + Math.cos(yawAbs) * boom2;
+      const endY = elbowY + Math.sin(yawAbs) * boom2;
+
+      const tipX = endX + Math.cos(yawAbs) * G.tip;
+      const tipY = endY + Math.sin(yawAbs) * G.tip;
+
+      return { baseX, baseY, elbowX, elbowY, endX, endY, tipX, tipY, yawAbs };
+    }
+
+    function bucketTileInfo(){
+      const bp = bucketWorldPoint();
+      const tx = clamp(Math.floor(bp.tipX / TILE), 0, WORLD_T-1);
+      const ty = clamp(Math.floor(bp.tipY / TILE), 0, WORLD_T-1);
+      const hp = getHP(tx,ty);
+      const d = depth01(tx,ty);
+      return { bp, tx, ty, hp, d, removed: hp<=0 };
+    }
+
+    // ---------- Digging ----------
+    let digActive = false;
+    let digPulse = 0.0;
+    const DIG_TICK = 0.16;
+    let digAccum = 0.0;
+
+    // More "realistic" gate: only dig when boom is down-ish (near ground)
+    function digAllowed(){
+      // lower boomPitch -> closer to ground. allow digging when boomPitch < ~35deg
+      return boomPitch < degToRad(38);
+    }
+
+    function digHit(tx,ty){
+      if (removed(tx,ty)) return;
+      setHP(tx,ty, getHP(tx,ty) - 1);
+      digPulse = 0.18;
+    }
+
+    function updateDig(dt){
+      if (!digActive || !digAllowed()) { digAccum = 0; return; }
+      const { bp, tx, ty } = bucketTileInfo();
+
+      // must be near tile center
+      const cx = tx*TILE + TILE*0.5;
+      const cy = ty*TILE + TILE*0.5;
+      const distN = Math.hypot(bp.tipX - cx, bp.tipY - cy) / (TILE*0.5);
+      if (distN > 0.95) return;
+
+      digAccum += dt;
+      while (digAccum >= DIG_TICK){
+        digAccum -= DIG_TICK;
+        digHit(tx,ty);
+      }
+    }
+
+    // ---------- Rendering (Top view) ----------
+    function clearTop(){
+      ctx.fillStyle = "rgb(14,16,22)";
+      ctx.fillRect(0,0,W,H);
+    }
+
+    // camera fixed to world center; map world -> screen centered
+    let camX = WORLD_SIZE*0.5, camY = WORLD_SIZE*0.5;
+    const camZoom = 1.0;
+    function worldToScreen(wx,wy){
+      return [
+        (wx - camX) * camZoom + W*0.5,
+        (wy - camY) * camZoom + H*0.5
+      ];
+    }
+
+    function drawTiles(){
+      const left = camX - (W*0.5)/camZoom - TILE;
+      const top  = camY - (H*0.5)/camZoom - TILE;
+      const right= camX + (W*0.5)/camZoom + TILE;
+      const bot  = camY + (H*0.5)/camZoom + TILE;
+
+      const tx0 = clamp(Math.floor(left / TILE), 0, WORLD_T-1);
+      const ty0 = clamp(Math.floor(top  / TILE), 0, WORLD_T-1);
+      const tx1 = clamp(Math.floor(right/ TILE), 0, WORLD_T-1);
+      const ty1 = clamp(Math.floor(bot  / TILE), 0, WORLD_T-1);
+
+      for (let ty=ty0; ty<=ty1; ty++){
+        for (let txi=tx0; txi<=tx1; txi++){
+          const wx = txi*TILE, wy = ty*TILE;
+          const [sx,sy] = worldToScreen(wx,wy);
+          const s = TILE*camZoom;
+
+          const hp = getHP(txi,ty);
+          const d = depth01(txi,ty);
+
+          if (hp <= 0){
+            const g = ctx.createRadialGradient(sx+s*0.5, sy+s*0.5, 0, sx+s*0.5, sy+s*0.5, s*0.7);
+            g.addColorStop(0, "rgb(6,7,9)");
+            g.addColorStop(1, "rgb(14,16,22)");
+            ctx.fillStyle = g;
+            ctx.fillRect(sx,sy,s,s);
+            ctx.strokeStyle = "rgba(255,210,60,0.10)";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(sx+1.5, sy+1.5, s-3, s-3);
+            ctx.lineWidth = 1;
+          } else {
+            // soil with depth tint
+            const base = [24,84,46];
+            const dullK = d*0.65;
+            const col = [
+              Math.round(base[0]*(1-dullK) + 40*d),
+              Math.round(base[1]*(1-dullK) + 25*d),
+              Math.round(base[2]*(1-dullK) + 10*d),
+            ];
+            ctx.fillStyle = `rgb(${col[0]},${col[1]},${col[2]})`;
+            ctx.fillRect(sx,sy,s,s);
+
+            // health bar
+            if (hp < TILE_HEALTH_MAX){
+              const pct = hp/TILE_HEALTH_MAX;
+              ctx.fillStyle = "rgba(0,0,0,0.35)";
+              ctx.fillRect(sx+5, sy+5, s-10, 4);
+              ctx.fillStyle = `rgba(255,210,60,${0.25 + (1-pct)*0.35})`;
+              ctx.fillRect(sx+5, sy+5, Math.max(0,(s-10)*pct), 4);
+            }
+          }
+
+          ctx.strokeStyle = "rgba(0,0,0,0.16)";
+          ctx.strokeRect(sx+0.5, sy+0.5, s, s);
+        }
+      }
+    }
+
+    function drawExcavTop(){
+      // base marker
+      const [sx,sy] = worldToScreen(ex,ey);
+
+      // base body
+      ctx.fillStyle = "rgba(0,0,0,0.35)";
+      ctx.strokeStyle = "rgba(255,210,60,0.22)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(sx, sy, 24, 18, 0, 0, TAU);
+      ctx.fill();
+      ctx.stroke();
+
+      // base yaw indicator
+      const fx = sx + Math.cos(baseYaw) * 26;
+      const fy = sy + Math.sin(baseYaw) * 26;
+      ctx.strokeStyle = "rgba(255,235,170,0.75)";
+      ctx.beginPath();
+      ctx.moveTo(sx,sy);
+      ctx.lineTo(fx,fy);
+      ctx.stroke();
+
+      // arm projection (locked top)
+      const bp = bucketWorldPoint();
+      const [b0x,b0y] = worldToScreen(bp.baseX, bp.baseY);
+      const [e1x,e1y] = worldToScreen(bp.elbowX, bp.elbowY);
+      const [e2x,e2y] = worldToScreen(bp.endX,  bp.endY);
+      const [tx,ty] = worldToScreen(bp.tipX,  bp.tipY);
+
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+
+      // segment 1
+      ctx.strokeStyle = "rgba(255,210,60,0.90)";
+      ctx.lineWidth = 10;
+      ctx.beginPath(); ctx.moveTo(b0x,b0y); ctx.lineTo(e1x,e1y); ctx.stroke();
+
+      // segment 2 (reach)
+      ctx.strokeStyle = "rgba(255,60,60,0.78)";
+      ctx.lineWidth = 9;
+      ctx.beginPath(); ctx.moveTo(e1x,e1y); ctx.lineTo(e2x,e2y); ctx.stroke();
+
+      // tip indicator
+      const pulseA = clamp(digPulse/0.18, 0, 1);
+      ctx.fillStyle = digActive ? `rgba(255,60,60,${0.40+0.35*pulseA})` : "rgba(255,210,60,0.65)";
+      ctx.beginPath(); ctx.arc(tx, ty, digActive ? (7 + 6*(1-pulseA)) : 7, 0, TAU); ctx.fill();
+
+      // top label
+      ctx.font = "13px ui-monospace, SFMono-Regular, Menlo, monospace";
+      ctx.fillStyle = "rgba(255,235,170,0.90)";
+      ctx.fillText("TOP VIEW (LOCKED): Swing + Stick reach", 12, 126);
+    }
+
+    function drawVignette(){
+      const g = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, Math.max(W,H)/1.15);
+      g.addColorStop(0, "rgba(0,0,0,0)");
+      g.addColorStop(1, "rgba(0,0,0,0.52)");
+      ctx.fillStyle = g;
+      ctx.fillRect(0,0,W,H);
+    }
+
+    // ---------- Side view rendering (locked) ----------
+    function pathRoundRect(c,x,y,w,h,r){
+      const rr = Math.max(0, Math.min(r, Math.min(w,h)/2));
+      c.beginPath();
+      c.moveTo(x+rr, y);
+      c.arcTo(x+w, y, x+w, y+h, rr);
+      c.arcTo(x+w, y+h, x, y+h, rr);
+      c.arcTo(x, y+h, x, y, rr);
+      c.arcTo(x, y, x+w, y, rr);
+      c.closePath();
+    }
+
+    function drawSide(){
+      const W2 = sideCanvas.width, H2 = sideCanvas.height;
+      sctx.clearRect(0,0,W2,H2);
+
+      sctx.fillStyle = "rgba(0,0,0,0.20)";
+      sctx.fillRect(0,0,W2,H2);
+
+      // grid
+      sctx.strokeStyle = "rgba(255,210,60,0.06)";
+      sctx.lineWidth = 1;
+      for (let x=0;x<=W2;x+=70){ sctx.beginPath(); sctx.moveTo(x+0.5,0); sctx.lineTo(x+0.5,H2); sctx.stroke(); }
+      for (let y=0;y<=H2;y+=35){ sctx.beginPath(); sctx.moveTo(0,y+0.5); sctx.lineTo(W2,y+0.5); sctx.stroke(); }
+
+      const groundY = H2*0.80;
+      sctx.strokeStyle = "rgba(220,220,235,0.20)";
+      sctx.beginPath();
+      sctx.moveTo(16, groundY+0.5);
+      sctx.lineTo(W2-16, groundY+0.5);
+      sctx.stroke();
+
+      // Map stickExtend to an arm-relative angle (so you visually see “in/out”)
+      // BoomPitch is true DOF, BucketCurl is true DOF. Stick extends both length + angle slightly.
+      const boomA = boomPitch; // rad
+      const armRel = (-0.55 + stickExtend*0.95); // rad-ish mapping
+      const armA  = boomA + armRel;
+      const buckA = armA + bucketCurl;
+
+      const L1 = 210;
+      const L2 = 140 + stickExtend*60;
+      const L3 = 58;
+
+      const baseX = 90;
+      const baseY = groundY - 18;
+
+      const elbowX = baseX + Math.cos(boomA)*L1;
+      const elbowY = baseY - Math.sin(boomA)*L1;
+
+      const endX = elbowX + Math.cos(armA)*L2;
+      const endY = elbowY - Math.sin(armA)*L2;
+
+      const tipX = endX + Math.cos(buckA)*L3;
+      const tipY = endY - Math.sin(buckA)*L3;
+
+      // base pad
+      sctx.fillStyle = "rgba(255,235,170,0.14)";
+      sctx.strokeStyle = "rgba(255,210,60,0.22)";
+      sctx.lineWidth = 2;
+      pathRoundRect(sctx, baseX-32, baseY-20, 64, 40, 12);
+      sctx.fill(); sctx.stroke();
+
+      sctx.lineCap = "round";
+      sctx.lineJoin = "round";
+
+      // boom
+      sctx.strokeStyle = "rgba(255,210,60,0.88)";
+      sctx.lineWidth = 12;
+      sctx.beginPath(); sctx.moveTo(baseX,baseY); sctx.lineTo(elbowX,elbowY); sctx.stroke();
+
+      // stick
+      sctx.strokeStyle = "rgba(255,60,60,0.78)";
+      sctx.lineWidth = 11;
+      sctx.beginPath(); sctx.moveTo(elbowX,elbowY); sctx.lineTo(endX,endY); sctx.stroke();
+
+      // bucket link
+      sctx.strokeStyle = "rgba(255,235,170,0.86)";
+      sctx.lineWidth = 9;
+      sctx.beginPath(); sctx.moveTo(endX,endY); sctx.lineTo(tipX,tipY); sctx.stroke();
+
+      // joints
+      sctx.fillStyle = "rgba(0,0,0,0.40)";
+      sctx.strokeStyle = "rgba(255,210,60,0.30)";
+      sctx.lineWidth = 2;
+      for (const [jx,jy] of [[baseX,baseY],[elbowX,elbowY],[endX,endY]]){
+        sctx.beginPath(); sctx.arc(jx,jy,8,0,TAU); sctx.fill(); sctx.stroke();
+      }
+
+      // bucket cup
+      sctx.save();
+      sctx.translate(tipX, tipY);
+      sctx.rotate(-buckA);
+      sctx.translate(-tipX, -tipY);
+      sctx.fillStyle = "rgba(0,0,0,0.26)";
+      sctx.strokeStyle = "rgba(255,210,60,0.70)";
+      sctx.lineWidth = 2;
+      pathRoundRect(sctx, tipX-26, tipY-10, 34, 20, 8);
+      sctx.fill(); sctx.stroke();
+      sctx.restore();
+
+      // tip marker
+      const pulseA = clamp(digPulse/0.18, 0, 1);
+      sctx.fillStyle = digActive ? `rgba(255,60,60,${0.45+0.35*pulseA})` : "rgba(255,210,60,0.55)";
+      sctx.beginPath(); sctx.arc(tipX, tipY, digActive ? (8 + 6*(1-pulseA)) : 8, 0, TAU); sctx.fill();
+
+      sideReadout.textContent =
+        `boom:${radToDeg(boomPitch).toFixed(0)}°  stick:${stickExtend.toFixed(2)}  bucket:${radToDeg(bucketCurl).toFixed(0)}°  dig:${digAllowed()?'OK':'NO'}`;
+    }
+
+    // ---------- Input: keyboard ----------
+    const keys = {};
+    window.addEventListener("keydown", (e)=>{
+      keys[e.code] = true;
+      if (e.code === "KeyR") resetTiles();
+    });
+    window.addEventListener("keyup", (e)=> keys[e.code] = false);
+
+    // ---------- MediaPipe Holistic ----------
+    const video = document.getElementById("video");
+    let holistic = null;
+    let camera = null;
+    let started = false;
+
+    // latest signals from holistic
+    let last = {
+      pose: null,
+      leftHand: null,
+      rightHand: null
+    };
+
+    function onResults(results){
+      last.pose = results.poseLandmarks || null;
+      last.leftHand = results.leftHandLandmarks || null;
+      last.rightHand = results.rightHandLandmarks || null;
+    }
+
+    function mkHolistic(){
+      if (holistic){
+        try { holistic.close(); } catch(e){}
+        holistic = null;
+      }
+      holistic = new Holistic({
+        locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${f}`
+      });
+
+      holistic.setOptions({
+        modelComplexity: 1,
+        smoothLandmarks: true,
+        refineFaceLandmarks: false,
+        minDetectionConfidence: +tuner.detConf.value,
+        minTrackingConfidence: +tuner.trkConf.value
+      });
+
+      holistic.onResults(onResults);
+    }
+
+    // debounce rebuild if conf changes
+    let rebuildTimer = null;
+    function scheduleRebuild(){
+      if (rebuildTimer) clearTimeout(rebuildTimer);
+      rebuildTimer = setTimeout(()=>{
+        mkHolistic();
+      }, 200);
+    }
+    tuner.detConf.addEventListener("change", scheduleRebuild);
+    tuner.trkConf.addEventListener("change", scheduleRebuild);
+
+    async function initHolistic(){
+      mkHolistic();
+      camera = new Camera(video, {
+        onFrame: async () => {
+          if (!holistic) return;
+          await holistic.send({ image: video });
+        },
+        width: 640,
+        height: 480
+      });
+      await camera.start();
+    }
+
+    // ---------- Arm+hand signal extraction (pose + hands) ----------
+    // Pose indices (Holistic uses BlazePose)
+    const POSE_L_SHOULDER = 11;
+    const POSE_R_SHOULDER = 12;
+    const POSE_L_WRIST = 15;
+    const POSE_R_WRIST = 16;
+
+    function posePt(idx){
+      if (!last.pose) return null;
+      const p = last.pose[idx];
+      if (!p) return null;
+      return { x: p.x, y: p.y, z: p.z, v: p.visibility ?? 0 };
+    }
+
+    function palmCenter(handLm){
+      // stable: average wrist + MCP joints
+      // indices: 0 wrist, 5/9/13/17 MCP
+      const pts = [handLm[0], handLm[5], handLm[9], handLm[13], handLm[17]];
+      let x=0,y=0;
+      for (const p of pts){ x += p.x; y += p.y; }
+      return { x: x/pts.length, y: y/pts.length };
+    }
+
+    function normHandSignal(side){
+      // returns {dx, dy, ok, source}
+      // dx: left(-) right(+), dy: up(+) down(-) in joystick sense
+      const ls = posePt(POSE_L_SHOULDER);
+      const rs = posePt(POSE_R_SHOULDER);
+      const lw = posePt(POSE_L_WRIST);
+      const rw = posePt(POSE_R_WRIST);
+
+      // shoulder span to normalize (keeps stable across distance)
+      let span = 0.34;
+      if (ls && rs){
+        span = Math.hypot(rs.x - ls.x, rs.y - ls.y);
+        span = clamp(span, 0.18, 0.60);
+      }
+
+      const deadV = +tuner.deadzone.value;
+      const expoV = +tuner.expo.value;
+
+      let sh = null, p = null, ok=false, source="NONE";
+
+      if (side === "left"){
+        sh = ls || rs; // fallback
+        if (last.leftHand){
+          p = palmCenter(last.leftHand);
+          ok = true; source="HAND";
+        } else if (lw){
+          p = { x: lw.x, y: lw.y };
+          ok = true; source="POSE";
+        }
+      } else {
+        sh = rs || ls;
+        if (last.rightHand){
+          p = palmCenter(last.rightHand);
+          ok = true; source="HAND";
+        } else if (rw){
+          p = { x: rw.x, y: rw.y };
+          ok = true; source="POSE";
+        }
+      }
+
+      if (!sh || !p){
+        return { dx:0, dy:0, ok:false, source:"NONE", span };
+      }
+
+      // normalized stick-like signal relative to shoulder
+      let dx = (p.x - sh.x) / span;   // right positive
+      let dy = (sh.y - p.y) / span;   // up positive
+
+      // clamp and shape
+      dx = clamp(dx, -1, 1);
+      dy = clamp(dy, -1, 1);
+
+      dx = expoCurve(applyDeadzone(dx, deadV), expoV);
+      dy = expoCurve(applyDeadzone(dy, deadV), expoV);
+
+      return { dx, dy, ok, source, span };
+    }
+
+    // ---------- Pinch detection (per hand) ----------
+    let pinch = { left:false, right:false };
+    function pinchDist(handLm){
+      if (!handLm) return null;
+      const t = handLm[4], i = handLm[8];
+      return Math.hypot(t.x - i.x, t.y - i.y);
+    }
+    function updatePinch(handLm, prevDown){
+      const d = pinchDist(handLm);
+      if (d == null) return false;
+      const on  = +tuner.pinchOn.value;
+      const off = +tuner.pinchOff.value;
+      if (!prevDown) return d < on;
+      return d < off;
+    }
+
+    // ---------- Smoothing for control axes ----------
+    const filt = {
+      lx:0, ly:0, rx:0, ry:0
+    };
+    function smoothAxis(prev, target, dt){
+      const tau = +tuner.smoothTau.value;
+      const a = emaAlpha(dt, tau);
+      return lerp(prev, target, a);
+    }
+
+    // ---------- Activation highlight ----------
+    function setPill(pillEl, on){
+      if (on) pillEl.classList.add("on");
+      else pillEl.classList.remove("on");
+    }
+
+    // ---------- Main loop ----------
+    let prevT = performance.now();
+
+    function updateAndRender(){
+      requestAnimationFrame(updateAndRender);
+
+      const now = performance.now();
+      const dt = Math.min(0.05, (now - prevT)/1000);
+      prevT = now;
+
+      clearTop();
+      drawTiles();
+
+      if (!started){
+        drawVignette();
+        return;
+      }
+
+      // base yaw keyboard optional (just to show "machine rotation maintained")
+      const baseYawRate = degToRad(70);
+      if (keys.KeyQ) baseYaw -= baseYawRate*dt;
+      if (keys.KeyE) baseYaw += baseYawRate*dt;
+      baseYaw = wrapAngle(baseYaw);
+
+      // robust 2-hand signals (pose+hands)
+      const L = normHandSignal("left");
+      const R = normHandSignal("right");
+
+      // smooth
+      filt.lx = smoothAxis(filt.lx, L.dx, dt);
+      filt.ly = smoothAxis(filt.ly, L.dy, dt);
+      filt.rx = smoothAxis(filt.rx, R.dx, dt);
+      filt.ry = smoothAxis(filt.ry, R.dy, dt);
+
+      // ISO mapping:
+      // Left:  dx -> swing, dy -> boom
+      // Right: dy -> stick in/out, dx -> bucket curl
+      const spSwing  = +tuner.spdSwing.value;   // deg/s
+      const spBoom   = +tuner.spdBoom.value;    // deg/s
+      const spStick  = +tuner.spdStick.value;   // units/s
+      const spBucket = +tuner.spdBucket.value;  // deg/s
+
+      const swingVel  = degToRad(spSwing)  * filt.lx;
+      const boomVel   = degToRad(spBoom)   * filt.ly;
+      const stickVel  = spStick            * filt.ry;
+      const bucketVel = degToRad(spBucket) * filt.rx;
+
+      // integrate
+      swingYaw += swingVel * dt;
+      boomPitch += boomVel * dt;
+      stickExtend += stickVel * dt;
+      bucketCurl += bucketVel * dt;
+
+      // clamp
+      swingYaw = wrapAngle(swingYaw);
+      swingYaw = clamp(swingYaw, LIM.swing.min, LIM.swing.max);
+      boomPitch = clamp(boomPitch, LIM.boom.min, LIM.boom.max);
+      stickExtend = clamp(stickExtend, LIM.stick.min, LIM.stick.max);
+      bucketCurl = clamp(bucketCurl, LIM.bucket.min, LIM.bucket.max);
+
+      // pinch states
+      pinch.left = updatePinch(last.leftHand, pinch.left);
+      pinch.right = updatePinch(last.rightHand, pinch.right);
+
+      // dig active = pinch either hand OR space
+      digActive = (keys.Space || pinch.left || pinch.right);
+
+      // update digging
+      updateDig(dt);
+      digPulse = Math.max(0, digPulse - dt);
+
+      // draw excavator top + side
+      drawExcavTop();
+      drawSide();
+      drawVignette();
+
+      // HUD tile
+      const info = bucketTileInfo();
+      hudTile.textContent = `${info.tx},${info.ty} (hp:${info.hp})`;
+      hudDig.textContent = digActive ? (digAllowed() ? "ON" : "ON (NO CONTACT)") : "OFF";
+
+      hudSwing.textContent  = `${radToDeg(swingYaw).toFixed(0)}°`;
+      hudBoom.textContent   = `${radToDeg(boomPitch).toFixed(0)}°`;
+      hudStick.textContent  = `${stickExtend.toFixed(2)}`;
+      hudBucket.textContent = `${radToDeg(bucketCurl).toFixed(0)}°`;
+
+      // hand status
+      const Ls = L.ok ? `${L.source}` : "LOST";
+      const Rs = R.ok ? `${R.source}` : "LOST";
+      hudHands.textContent = `L:${Ls}  R:${Rs}`;
+
+      // activation highlight + values
+      const TH = 0.12;
+
+      valSwing.textContent  = `${filt.lx.toFixed(2)}`;
+      valBoom.textContent   = `${filt.ly.toFixed(2)}`;
+      valStick.textContent  = `${filt.ry.toFixed(2)}`;
+      valBucket.textContent = `${filt.rx.toFixed(2)}`;
+      valDig.textContent    = digActive ? "ON" : "OFF";
+
+      setPill(pillSwing,  Math.abs(filt.lx) > TH);
+      setPill(pillBoom,   Math.abs(filt.ly) > TH);
+      setPill(pillStick,  Math.abs(filt.ry) > TH);
+      setPill(pillBucket, Math.abs(filt.rx) > TH);
+      setPill(pillDig,    digActive && digAllowed());
+
+      // (optional) little hint text on canvas
+      ctx.font = "12px ui-monospace, SFMono-Regular, Menlo, monospace";
+      ctx.fillStyle = "rgba(220,220,235,0.72)";
+      ctx.fillText("ISO: Left=Swing+Boom, Right=Stick+Bucket | Pinch/SPACE dig | R reset tiles | Q/E base rotate", 12, H-14);
+    }
+
+    // ---------- Boot ----------
+    (async ()=>{
+      await initHolistic();
+      requestAnimationFrame(updateAndRender);
+    })();
+  </script>
+</body>
+</html>

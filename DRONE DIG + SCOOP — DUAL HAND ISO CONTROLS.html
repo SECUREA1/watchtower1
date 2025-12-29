@@ -1,0 +1,2227 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Rednode Sentinel — Drone Dig + Scoop (Dual-Hand ISO Excavator + Corner Highlights)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root{
+      --panel: rgba(10,12,16,0.72);
+      --text: rgba(240,240,245,0.92);
+      --muted: rgba(220,220,235,0.70);
+    }
+    html,body{ margin:0; padding:0; background:#000; height:100%; color:var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    body{ display:flex; align-items:center; justify-content:center; }
+    #container{
+      width:min(1100px, calc(100vw - 24px));
+      margin: 12px auto;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+    }
+    #wrap{
+      position:relative;
+      width:100%;
+      aspect-ratio: 800 / 600;
+      max-height: calc(100vh - 150px);
+      background: radial-gradient(1100px 700px at 50% 30%, #11131b 0%, #06060a 55%, #000 100%);
+      border-radius: 14px;
+      overflow:hidden;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+      border: 1px solid rgba(255,210,60,0.12);
+    }
+    canvas{ width:100%; height:100%; display:block; background:#000; }
+    svg{ position:absolute; inset:0; width:100%; height:100%; pointer-events:none; overflow:visible; }
+    video{ display:none; }
+
+    #hud{
+      position:absolute;
+      left:10px; right:10px; top:10px;
+      display:flex;
+      gap:10px;
+      align-items:stretch;
+      justify-content:space-between;
+      pointer-events:none;
+      z-index: 5;
+    }
+    .hudBlock{
+      flex: 1 1 auto;
+      display:flex;
+      gap:10px;
+      align-items:center;
+      justify-content:flex-start;
+      padding:10px 12px;
+      border-radius: 12px;
+      background: var(--panel);
+      border: 1px solid rgba(255,210,60,0.14);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 18px rgba(0,0,0,0.35);
+      min-width: 0;
+    }
+    .hudRight{ justify-content:flex-end; }
+    .hudStat{ display:flex; flex-direction:column; line-height:1.1; min-width:0; }
+    .hudLabel{ font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; color:var(--muted); }
+    .hudValue{ font: 14px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+    /* Mode popup (thumbs up hold) */
+    #modePopup{
+      position:absolute;
+      left:50%;
+      top:64px;
+      transform: translateX(-50%);
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: rgba(10,12,16,0.78);
+      border: 1px solid rgba(255,210,60,0.18);
+      box-shadow: 0 10px 26px rgba(0,0,0,0.45);
+      backdrop-filter: blur(10px);
+      z-index: 9;
+      pointer-events:none;
+      display:none;
+      font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: rgba(255,235,170,0.95);
+      letter-spacing: 0.2px;
+      text-align:center;
+      min-width: 260px;
+    }
+    #modePopup .sub{
+      display:block;
+      margin-top:4px;
+      color: rgba(220,220,235,0.72);
+      font-size: 11px;
+    }
+
+    /* Track bars for easy driving feedback */
+    #trackBars{
+      position:absolute;
+      right:10px;
+      bottom:10px;
+      width: 190px;
+      background: rgba(10,12,16,0.72);
+      border: 1px solid rgba(255,210,60,0.14);
+      border-radius: 12px;
+      padding: 10px;
+      box-shadow: 0 8px 18px rgba(0,0,0,0.35);
+      backdrop-filter: blur(10px);
+      z-index: 7;
+      pointer-events:none;
+    }
+    .barRow{ display:flex; align-items:center; gap:10px; margin:6px 0; }
+    .barLabel{ width:18px; color: rgba(220,220,235,0.75); font-size: 11px; }
+    .bar{
+      position:relative;
+      flex:1;
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(0,0,0,0.35);
+      border: 1px solid rgba(255,210,60,0.12);
+      overflow:hidden;
+    }
+    .barMid{
+      position:absolute; left:50%; top:0; bottom:0;
+      width:1px; background: rgba(255,235,170,0.25);
+    }
+    .barFill{
+      position:absolute; top:0; bottom:0;
+      background: rgba(255,210,60,0.35);
+    }
+    .barFill.neg{ background: rgba(255,60,60,0.30); }
+    #barHint{
+      margin-top:8px;
+      font-size: 10px;
+      color: rgba(220,220,235,0.65);
+      line-height: 1.2;
+    }
+
+    /* NEW: Corner panel to highlight ARM controls */
+    #ctrlPanel{
+      position:absolute;
+      right:10px;
+      top:92px;
+      width: 190px;
+      background: rgba(10,12,16,0.72);
+      border: 1px solid rgba(255,210,60,0.14);
+      border-radius: 12px;
+      padding: 10px;
+      box-shadow: 0 8px 18px rgba(0,0,0,0.35);
+      backdrop-filter: blur(10px);
+      z-index: 7;
+      pointer-events:none;
+    }
+    #ctrlHead{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-bottom: 8px;
+      gap:10px;
+      font: 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: rgba(255,235,170,0.92);
+    }
+    #ctrlHands{
+      color: rgba(220,220,235,0.70);
+      font-size: 10px;
+      white-space:nowrap;
+    }
+    .ctrlRow{ display:flex; align-items:center; gap:10px; margin:6px 0; }
+    .ctrlLabel{ width:52px; color: rgba(220,220,235,0.75); font-size: 10px; letter-spacing: 0.2px; }
+    .ctrlBar{
+      position:relative;
+      flex:1;
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(0,0,0,0.35);
+      border: 1px solid rgba(255,210,60,0.12);
+      overflow:hidden;
+    }
+    .ctrlMid{ position:absolute; left:50%; top:0; bottom:0; width:1px; background: rgba(255,235,170,0.18); }
+    .ctrlFill{ position:absolute; top:0; bottom:0; background: rgba(255,210,60,0.35); }
+    .ctrlFill.neg{ background: rgba(255,60,60,0.30); }
+    .ctrlRow.active .ctrlBar{
+      border-color: rgba(255,210,60,0.28);
+      box-shadow: 0 0 0 1px rgba(255,210,60,0.10), 0 0 18px rgba(255,210,60,0.10);
+    }
+    .ctrlRow.active .ctrlLabel{ color: rgba(255,235,170,0.92); }
+    #ctrlHint{
+      margin-top:8px;
+      font-size: 10px;
+      color: rgba(220,220,235,0.65);
+      line-height: 1.2;
+    }
+
+    /* Boom side-view panel */
+    #boomPanel{
+      position:absolute;
+      left:10px;
+      bottom:10px;
+      width: 420px;
+      height: 150px;
+      background: rgba(10,12,16,0.72);
+      border: 1px solid rgba(255,210,60,0.14);
+      border-radius: 12px;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 18px rgba(0,0,0,0.35);
+      padding: 8px;
+      z-index: 6;
+      pointer-events:none;
+    }
+    #boomPanelHeader{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+      font: 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: rgba(255,235,170,0.92);
+      margin-bottom: 6px;
+    }
+    #boomCanvas{
+      width:100%;
+      height: calc(100% - 18px);
+      display:block;
+      border-radius: 10px;
+      background: rgba(0,0,0,0.30);
+      border: 1px solid rgba(255,210,60,0.10);
+    }
+
+    #hintBar{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      padding:10px 12px;
+      border-radius: 12px;
+      background: rgba(10,12,18,0.55);
+      border: 1px solid rgba(255,210,60,0.12);
+      font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: rgba(235,235,245,0.86);
+    }
+    #hintBar .muted{ color: rgba(220,220,235,0.64); }
+    #hintBar kbd{
+      padding:2px 6px;
+      border-radius: 8px;
+      border: 1px solid rgba(255,210,60,0.18);
+      background: rgba(0,0,0,0.35);
+      color: rgba(255,235,160,0.92);
+      font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    #startScreen{
+      position:absolute;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding: 18px;
+      background:
+        radial-gradient(1200px 800px at 30% 20%, rgba(255,200,60,0.10) 0%, transparent 55%),
+        radial-gradient(900px 700px at 75% 35%, rgba(255,60,60,0.10) 0%, transparent 55%),
+        linear-gradient(180deg, rgba(0,0,0,0.80) 0%, rgba(0,0,0,0.68) 100%);
+      z-index: 10;
+    }
+    .startCard{
+      width:min(940px, 100%);
+      border-radius: 16px;
+      border: 1px solid rgba(255,210,60,0.16);
+      background: rgba(6,7,10,0.78);
+      box-shadow: 0 18px 60px rgba(0,0,0,0.72);
+      overflow:hidden;
+    }
+    .startHead{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      padding: 14px 16px;
+      background: rgba(0,0,0,0.35);
+      border-bottom: 1px solid rgba(255,210,60,0.12);
+    }
+    .brand{ display:flex; align-items:center; gap:12px; min-width:0; }
+    .brandTitle{ display:flex; flex-direction:column; min-width:0; }
+    .brandTitle b{
+      font: 14px/1.15 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: 0.6px;
+      color: rgba(255,235,170,0.95);
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
+    .brandTitle span{
+      font: 12px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: rgba(220,220,235,0.70);
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
+    .grid{
+      display:grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      padding: 14px;
+    }
+    @media (max-width: 820px){
+      .grid{ grid-template-columns: 1fr; }
+      #boomPanel{ width: calc(100% - 20px); }
+      #trackBars{ width: 170px; }
+      #ctrlPanel{ width: 170px; top: 86px; }
+      #modePopup{ top: 58px; min-width: 240px; }
+    }
+    .tile{
+      display:flex;
+      gap:12px;
+      align-items:center;
+      padding: 12px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,210,60,0.14);
+      background: rgba(10,12,18,0.55);
+      cursor:pointer;
+      user-select:none;
+      transition: transform 0.08s ease, border-color 0.08s ease, background 0.08s ease;
+      min-width:0;
+    }
+    .tile:hover{
+      transform: translateY(-1px);
+      border-color: rgba(255,210,60,0.26);
+      background: rgba(12,14,22,0.68);
+    }
+    .tileIcon{
+      width:84px; height:84px;
+      flex: 0 0 auto;
+      border-radius: 14px;
+      background: radial-gradient(60px 60px at 35% 30%, rgba(255,210,60,0.12) 0%, transparent 60%),
+                  radial-gradient(60px 60px at 75% 70%, rgba(255,60,60,0.10) 0%, transparent 60%),
+                  rgba(0,0,0,0.35);
+      border: 1px solid rgba(255,210,60,0.12);
+      display:flex; align-items:center; justify-content:center;
+      overflow:hidden;
+    }
+    .tileMeta{ display:flex; flex-direction:column; gap:6px; min-width:0; }
+    .tileMeta b{
+      font: 13px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: rgba(255,235,170,0.95);
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
+    .tileMeta span{
+      font: 12px/1.25 ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: rgba(220,220,235,0.70);
+      display:-webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow:hidden;
+    }
+    .tileCTA{
+      margin-left:auto;
+      padding: 8px 10px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,210,60,0.20);
+      background: rgba(0,0,0,0.35);
+      font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: rgba(255,235,170,0.92);
+      flex: 0 0 auto;
+    }
+    .badge{
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,210,60,0.18);
+      background: rgba(0,0,0,0.35);
+      font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: rgba(255,235,170,0.9);
+      white-space:nowrap;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="container">
+    <div id="wrap">
+      <canvas id="screen" width="800" height="600"></canvas>
+
+      <!-- Thumbs-up mode popup -->
+      <div id="modePopup"></div>
+
+      <!-- BOOM SIDE VIEW -->
+      <div id="boomPanel">
+        <div id="boomPanelHeader">
+          <span>BOOM CAM (SIDE VIEW)</span>
+          <span id="boomReadout" style="color: rgba(220,220,235,0.75);">—</span>
+        </div>
+        <canvas id="boomCanvas" width="760" height="210"></canvas>
+      </div>
+
+      <!-- NEW: ARM control highlight panel -->
+      <div id="ctrlPanel">
+        <div id="ctrlHead">
+          <span>ARM CONTROLS</span>
+          <span id="ctrlHands">L:-- R:--</span>
+        </div>
+
+        <div id="rowSwing" class="ctrlRow">
+          <div class="ctrlLabel">SWING</div>
+          <div class="ctrlBar"><div class="ctrlMid"></div><div id="fillSwing" class="ctrlFill" style="left:50%;width:0;"></div></div>
+        </div>
+        <div id="rowBoom" class="ctrlRow">
+          <div class="ctrlLabel">BOOM</div>
+          <div class="ctrlBar"><div class="ctrlMid"></div><div id="fillBoom" class="ctrlFill" style="left:50%;width:0;"></div></div>
+        </div>
+        <div id="rowStick" class="ctrlRow">
+          <div class="ctrlLabel">STICK</div>
+          <div class="ctrlBar"><div class="ctrlMid"></div><div id="fillStick" class="ctrlFill" style="left:50%;width:0;"></div></div>
+        </div>
+        <div id="rowBucket" class="ctrlRow">
+          <div class="ctrlLabel">BUCKET</div>
+          <div class="ctrlBar"><div class="ctrlMid"></div><div id="fillBucket" class="ctrlFill" style="left:50%;width:0;"></div></div>
+        </div>
+
+        <div id="ctrlHint">
+          ISO/Cat mapping:<br/>
+          L hand = Swing + Boom • R hand = Stick + Bucket
+        </div>
+      </div>
+
+      <!-- Track bars -->
+      <div id="trackBars">
+        <div class="barRow">
+          <div class="barLabel">L</div>
+          <div class="bar">
+            <div class="barMid"></div>
+            <div id="barL" class="barFill" style="left:50%;width:0;"></div>
+          </div>
+        </div>
+        <div class="barRow">
+          <div class="barLabel">R</div>
+          <div class="bar">
+            <div class="barMid"></div>
+            <div id="barR" class="barFill" style="left:50%;width:0;"></div>
+          </div>
+        </div>
+        <div id="barHint">
+          DRIVE (hands): move each hand <b>up/down</b> to set each track speed (tank controls).<br/>
+          One-hand fallback: up/down = forward/back, left/right = turn.
+        </div>
+      </div>
+
+      <!-- TOP-DOWN EXCAVATOR SVG OVERLAY -->
+      <svg id="excavSVG" viewBox="0 0 800 600" xmlns="http://www.w3.org/2000/svg" aria-label="Excavator top down">
+        <defs>
+          <linearGradient id="rnMetal" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0" stop-color="#14161c"/>
+            <stop offset="0.55" stop-color="#0b0c10"/>
+            <stop offset="1" stop-color="#060608"/>
+          </linearGradient>
+          <linearGradient id="rnEdgeY" x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0" stop-color="#ffe07a"/>
+            <stop offset="0.55" stop-color="#ffb400"/>
+            <stop offset="1" stop-color="#fff1a0"/>
+          </linearGradient>
+          <linearGradient id="rnEdgeR" x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0" stop-color="#ff6b6b"/>
+            <stop offset="0.55" stop-color="#ff2a2a"/>
+            <stop offset="1" stop-color="#ff9b9b"/>
+          </linearGradient>
+          <filter id="rnGlowY" x="-60%" y="-60%" width="220%" height="220%">
+            <feGaussianBlur stdDeviation="3.0" result="b"/>
+            <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+          <filter id="rnGlowR" x="-60%" y="-60%" width="220%" height="220%">
+            <feGaussianBlur stdDeviation="3.0" result="r"/>
+            <feMerge><feMergeNode in="r"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+          <filter id="rnSoft" x="-40%" y="-40%" width="180%" height="180%">
+            <feGaussianBlur stdDeviation="1.2" result="s"/>
+            <feMerge><feMergeNode in="s"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+          <clipPath id="trackClipL"><rect x="-34" y="-18" width="18" height="36" rx="7" ry="7"/></clipPath>
+          <clipPath id="trackClipR"><rect x="16" y="-18" width="18" height="36" rx="7" ry="7"/></clipPath>
+        </defs>
+
+        <g id="excavatorGroup" transform="translate(400,300) rotate(0) scale(1)">
+          <!-- Tracks -->
+          <g id="tracksGroup">
+            <g id="trackLeft">
+              <rect x="-34" y="-18" width="18" height="36" rx="8" ry="8" fill="#070708" stroke="rgba(255,200,40,0.22)" stroke-width="1"/>
+              <rect x="-32" y="-16" width="14" height="32" rx="7" ry="7" fill="#040405" stroke="rgba(255,200,40,0.10)" stroke-width="1"/>
+              <g clip-path="url(#trackClipL)" opacity="0.95">
+                <g id="treadsL" transform="translate(0,0)" fill="#0f1013" stroke="rgba(255,200,40,0.10)" stroke-width="0.6">
+                  <rect x="-32" y="-40" width="14" height="6" rx="1.6"/>
+                  <rect x="-32" y="-30" width="14" height="6" rx="1.6"/>
+                  <rect x="-32" y="-20" width="14" height="6" rx="1.6"/>
+                  <rect x="-32" y="-10" width="14" height="6" rx="1.6"/>
+                  <rect x="-32" y="0"   width="14" height="6" rx="1.6"/>
+                  <rect x="-32" y="10"  width="14" height="6" rx="1.6"/>
+                  <rect x="-32" y="20"  width="14" height="6" rx="1.6"/>
+                  <rect x="-32" y="30"  width="14" height="6" rx="1.6"/>
+                  <rect x="-32" y="40"  width="14" height="6" rx="1.6"/>
+                </g>
+              </g>
+              <path d="M-31 -16 V16" fill="none" stroke="url(#rnEdgeY)" stroke-width="1.2" opacity="0.18" filter="url(#rnGlowY)"/>
+              <path d="M-20 -16 V16" fill="none" stroke="url(#rnEdgeR)" stroke-width="1.2" opacity="0.12" filter="url(#rnGlowR)"/>
+            </g>
+            <g id="trackRight">
+              <rect x="16" y="-18" width="18" height="36" rx="8" ry="8" fill="#070708" stroke="rgba(255,200,40,0.22)" stroke-width="1"/>
+              <rect x="18" y="-16" width="14" height="32" rx="7" ry="7" fill="#040405" stroke="rgba(255,200,40,0.10)" stroke-width="1"/>
+              <g clip-path="url(#trackClipR)" opacity="0.95">
+                <g id="treadsR" transform="translate(0,0)" fill="#0f1013" stroke="rgba(255,200,40,0.10)" stroke-width="0.6">
+                  <rect x="18" y="-40" width="14" height="6" rx="1.6"/>
+                  <rect x="18" y="-30" width="14" height="6" rx="1.6"/>
+                  <rect x="18" y="-20" width="14" height="6" rx="1.6"/>
+                  <rect x="18" y="-10" width="14" height="6" rx="1.6"/>
+                  <rect x="18" y="0"   width="14" height="6" rx="1.6"/>
+                  <rect x="18" y="10"  width="14" height="6" rx="1.6"/>
+                  <rect x="18" y="20"  width="14" height="6" rx="1.6"/>
+                  <rect x="18" y="30"  width="14" height="6" rx="1.6"/>
+                  <rect x="18" y="40"  width="14" height="6" rx="1.6"/>
+                </g>
+              </g>
+              <path d="M19 -16 V16" fill="none" stroke="url(#rnEdgeY)" stroke-width="1.2" opacity="0.18" filter="url(#rnGlowY)"/>
+              <path d="M30 -16 V16" fill="none" stroke="url(#rnEdgeR)" stroke-width="1.2" opacity="0.12" filter="url(#rnGlowR)"/>
+            </g>
+          </g>
+
+          <!-- Body -->
+          <g id="bodyGroup">
+            <path
+              d="M-20 -22
+                 H20
+                 C25 -22 28 -19 28 -14
+                 V14
+                 C28 19 25 22 20 22
+                 H-20
+                 C-25 22 -28 19 -28 14
+                 V-14
+                 C-28 -19 -25 -22 -20 -22
+                 Z"
+              fill="url(#rnMetal)"
+              stroke="rgba(255,200,40,0.22)"
+              stroke-width="1"
+            />
+            <path d="M-20 -22 H20" fill="none" stroke="url(#rnEdgeY)" stroke-width="1.6" opacity="0.24" filter="url(#rnGlowY)"/>
+            <path d="M-18 22 H18" fill="none" stroke="url(#rnEdgeR)" stroke-width="1.2" opacity="0.18" filter="url(#rnGlowR)"/>
+            <rect x="-10" y="-10" width="20" height="20" rx="6" fill="rgba(0,0,0,0.35)" stroke="rgba(255,210,60,0.16)"/>
+            <text x="0" y="3.5" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="7.4" fill="rgba(255,235,170,0.92)" filter="url(#rnSoft)">RN</text>
+            <path d="M0 -18 L-6 -8 H6 Z" fill="rgba(255,220,120,0.18)" stroke="rgba(255,220,120,0.22)" stroke-width="0.8" filter="url(#rnGlowY)"/>
+          </g>
+
+          <!-- Arm system (top-down) -->
+          <g id="armBaseGroup" transform="translate(0,-6) rotate(0)">
+            <circle cx="0" cy="0" r="6.2" fill="#08090c" stroke="rgba(255,200,40,0.24)" stroke-width="1"/>
+            <circle cx="0" cy="0" r="3.0" fill="rgba(255,60,60,0.16)" stroke="rgba(255,60,60,0.22)" stroke-width="0.9" filter="url(#rnGlowR)"/>
+
+            <g id="arm1Group" transform="translate(0,0) rotate(0)">
+              <path d="M2 -4 H82 C88 -4 92 -1 94 0 C92 1 88 4 82 4 H2 C-1 4 -3 2 -3 0 C-3 -2 -1 -4 2 -4 Z"
+                    fill="url(#rnMetal)" stroke="rgba(255,200,40,0.20)" stroke-width="1"/>
+              <path d="M6 -2 H78" fill="none" stroke="url(#rnEdgeY)" stroke-width="1.2" opacity="0.22" filter="url(#rnGlowY)"/>
+
+              <g id="arm2Group" transform="translate(96,0) rotate(0)">
+                <circle cx="0" cy="0" r="5.6" fill="#08090c" stroke="rgba(255,200,40,0.24)" stroke-width="1"/>
+                <circle cx="0" cy="0" r="2.6" fill="rgba(255,60,60,0.14)" stroke="rgba(255,60,60,0.20)" stroke-width="0.8" filter="url(#rnGlowR)"/>
+
+                <path d="M2 -3.6 H62 C66 -3.6 70 -1.6 72 0 C70 1.6 66 3.6 62 3.6 H2 C-1 3.6 -3 2 -3 0 C-3 -2 -1 -3.6 2 -3.6 Z"
+                      fill="url(#rnMetal)" stroke="rgba(255,200,40,0.20)" stroke-width="1"/>
+                <path d="M6 -1.5 H58" fill="none" stroke="url(#rnEdgeR)" stroke-width="1.1" opacity="0.18" filter="url(#rnGlowR)"/>
+
+                <g id="bucketGroup" transform="translate(78,0) rotate(0)">
+                  <circle cx="0" cy="0" r="4.6" fill="#08090c" stroke="rgba(255,200,40,0.22)" stroke-width="1"/>
+                  <path d="M2 -6 L14 -6 C16 -6 18 -5 19 -3 L26 10 C24 11 22 11 20 10 L14 7 L10 14 L5 12 L8 7 H2 C0 7 -1 6 -1 4 V-3 C-1 -5 0 -6 2 -6 Z"
+                        fill="url(#rnMetal)" stroke="rgba(255,200,40,0.22)" stroke-width="1"/>
+                  <path d="M2 -5 H13 C16 -5 17 -4 18 -2 L24 9"
+                        fill="none" stroke="url(#rnEdgeY)" stroke-width="1.2" opacity="0.22" filter="url(#rnGlowY)"/>
+                </g>
+              </g>
+            </g>
+          </g>
+        </g>
+      </svg>
+
+      <div id="hud">
+        <div class="hudBlock">
+          <div class="hudStat">
+            <div class="hudLabel">SCORE</div>
+            <div class="hudValue" id="hudScore">0</div>
+          </div>
+          <div class="hudStat">
+            <div class="hudLabel">TIME</div>
+            <div class="hudValue" id="hudTime">--</div>
+          </div>
+          <div class="hudStat">
+            <div class="hudLabel">MODE</div>
+            <div class="hudValue" id="hudMode">ARM</div>
+          </div>
+          <div class="hudStat">
+            <div class="hudLabel">TILE</div>
+            <div class="hudValue" id="hudTile">—</div>
+          </div>
+        </div>
+
+        <div class="hudBlock hudRight">
+          <div class="hudStat">
+            <div class="hudLabel">THROTTLE</div>
+            <div class="hudValue" id="hudThrottle">x1.00</div>
+          </div>
+          <div class="hudStat">
+            <div class="hudLabel">DIG</div>
+            <div class="hudValue" id="hudDig">OFF</div>
+          </div>
+          <div class="hudStat">
+            <div class="hudLabel">LOAD</div>
+            <div class="hudValue" id="hudLoad">0.00</div>
+          </div>
+          <div class="hudStat">
+            <div class="hudLabel">SCENE</div>
+            <div class="hudValue" id="hudScene">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- STARTUP / SCENE SELECT -->
+      <div id="startScreen">
+        <div class="startCard">
+          <div class="startHead">
+            <div class="brand">
+              <div class="tileIcon" style="width:44px;height:44px;border-radius:12px;">
+                <svg width="34" height="34" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <defs>
+                    <filter id="sGlowY" x="-60%" y="-60%" width="220%" height="220%">
+                      <feGaussianBlur stdDeviation="2.8" result="b"/>
+                      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+                    </filter>
+                    <filter id="sGlowR" x="-60%" y="-60%" width="220%" height="220%">
+                      <feGaussianBlur stdDeviation="2.8" result="r"/>
+                      <feMerge><feMergeNode in="r"/><feMergeNode in="SourceGraphic"/></feMerge>
+                    </filter>
+                  </defs>
+                  <rect x="10" y="10" width="44" height="44" rx="12" fill="rgba(0,0,0,0.35)" stroke="rgba(255,210,60,0.25)"/>
+                  <path d="M22 42 V22 H34 C40 22 44 26 44 32 C44 38 40 42 34 42 Z"
+                        fill="none" stroke="rgba(255,190,40,0.9)" stroke-width="3.4" filter="url(#sGlowY)"/>
+                  <path d="M22 22 L42 42"
+                        fill="none" stroke="rgba(255,40,40,0.85)" stroke-width="2.8" filter="url(#sGlowR)"/>
+                </svg>
+              </div>
+              <div class="brandTitle">
+                <b>DRONE DIG + SCOOP — DUAL HAND ISO CONTROLS</b>
+                <span>ARM: Left=Swing/Boom • Right=Stick/Bucket • 👍 hold 3s to switch • Drive: tank hands</span>
+              </div>
+            </div>
+            <div class="badge">Pick a scene</div>
+          </div>
+
+          <div class="grid">
+            <div class="tile" data-scene="0">
+              <div class="tileIcon"></div>
+              <div class="tileMeta">
+                <b>Scene 1 — Forest Dig</b>
+                <span>Soft soil, smoother steering, fast digging.</span>
+              </div>
+              <div class="tileCTA">START</div>
+            </div>
+
+            <div class="tile" data-scene="1">
+              <div class="tileIcon"></div>
+              <div class="tileMeta">
+                <b>Scene 2 — Quarry Grid</b>
+                <span>More rock tiles, heavier feel, slower digging.</span>
+              </div>
+              <div class="tileCTA">START</div>
+            </div>
+
+            <div class="tile" data-scene="2">
+              <div class="tileIcon"></div>
+              <div class="tileMeta">
+                <b>Scene 3 — Night Ops</b>
+                <span>Stronger depth glow (richer/deeper pits).</span>
+              </div>
+              <div class="tileCTA">START</div>
+            </div>
+
+            <div class="tile" data-scene="3">
+              <div class="tileIcon"></div>
+              <div class="tileMeta">
+                <b>Scene 4 — Ice Yard</b>
+                <span>Slipperier drift. Good for 360 spins + dumping ramps.</span>
+              </div>
+              <div class="tileCTA">START</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="hintBar">
+      <div>
+        <span class="muted">Toggle:</span> <kbd>TAB</kbd> drive/arm
+        <span class="muted">or</span> <span class="muted">👍 hold 3s</span>
+        <span class="muted">Throttle:</span> <kbd>[</kbd>/<kbd>]</kbd> <kbd>SHIFT</kbd> boost
+        <span class="muted">Drive (keys):</span> <kbd>WASD</kbd>
+        <span class="muted">Dig:</span> <kbd>SPACE</kbd> or <span class="muted">LEFT pinch</span>
+        <span class="muted">Dump:</span> <kbd>F</kbd> or <span class="muted">RIGHT pinch</span>
+      </div>
+      <div class="muted">R restart • Tile health: 5 hits to remove</div>
+    </div>
+  </div>
+
+  <!-- MediaPipe Hands -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <video id="video" playsinline></video>
+
+  <script>
+  // ============================================================
+  // DUAL-HAND FIX + ISO/CAT EXCAVATOR MAPPING + CORNER HIGHLIGHTS
+  //
+  // KEY FIX:
+  //   MediaPipe "Left/Right" can be unreliable depending on camera mirroring.
+  //   This build assigns hands by SCREEN POSITION:
+  //     left-most hand in frame => LEFT controls
+  //     right-most hand in frame => RIGHT controls
+  //
+  // ISO / Caterpillar joystick mapping (in ARM mode):
+  //   LEFT HAND:  Swing (armYaw) + Boom (armExtend)
+  //   RIGHT HAND: Stick (stickBend) + Bucket (bucketAngle)
+  //
+  // Corner panel highlights SWING/BOOM/STICK/BUCKET when active.
+  // ============================================================
+
+  // ---------- DOM ----------
+  const canvas = document.getElementById('screen');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const boomCanvas = document.getElementById('boomCanvas');
+  const bctx = boomCanvas.getContext('2d', { alpha: true });
+
+  const boomReadout = document.getElementById('boomReadout');
+
+  const svgGroup = document.getElementById('excavatorGroup');
+  const armBaseGroup = document.getElementById('armBaseGroup');
+  const arm2Group = document.getElementById('arm2Group');
+  const bucketGroup = document.getElementById('bucketGroup');
+  const treadsL = document.getElementById('treadsL');
+  const treadsR = document.getElementById('treadsR');
+
+  const hudScore = document.getElementById('hudScore');
+  const hudTime = document.getElementById('hudTime');
+  const hudMode = document.getElementById('hudMode');
+  const hudThrottle = document.getElementById('hudThrottle');
+  const hudDig = document.getElementById('hudDig');
+  const hudLoad = document.getElementById('hudLoad');
+  const hudScene = document.getElementById('hudScene');
+  const hudTile = document.getElementById('hudTile');
+
+  const startScreen = document.getElementById('startScreen');
+  const modePopup = document.getElementById('modePopup');
+  const barL = document.getElementById('barL');
+  const barR = document.getElementById('barR');
+
+  // NEW: control panel refs
+  const ctrlHands = document.getElementById('ctrlHands');
+  const rowSwing = document.getElementById('rowSwing');
+  const rowBoom = document.getElementById('rowBoom');
+  const rowStick = document.getElementById('rowStick');
+  const rowBucket = document.getElementById('rowBucket');
+  const fillSwing = document.getElementById('fillSwing');
+  const fillBoom = document.getElementById('fillBoom');
+  const fillStick = document.getElementById('fillStick');
+  const fillBucket = document.getElementById('fillBucket');
+
+  // ---------- Math helpers ----------
+  const SCREEN_W = 800, SCREEN_H = 600;
+  const TAU = Math.PI * 2;
+  function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+  function lerp(a,b,t){ return a + (b-a)*t; }
+  function radToDeg(r){ return r * 180 / Math.PI; }
+  function wrapAngle(a){
+    while (a > Math.PI) a -= TAU;
+    while (a < -Math.PI) a += TAU;
+    return a;
+  }
+  function emaAlpha(dt, tau){
+    if (tau <= 0) return 1;
+    return 1 - Math.exp(-dt / tau);
+  }
+
+  function pathRoundRect(c, x, y, w, h, r){
+    const rr = Math.max(0, Math.min(r, Math.min(w,h)/2));
+    c.beginPath();
+    c.moveTo(x+rr, y);
+    c.arcTo(x+w, y, x+w, y+h, rr);
+    c.arcTo(x+w, y+h, x, y+h, rr);
+    c.arcTo(x, y+h, x, y, rr);
+    c.arcTo(x, y, x+w, y, rr);
+    c.closePath();
+  }
+
+  // ---------- Deterministic hash ----------
+  function hash2i(x,y,seed){
+    let h = (x * 73856093) ^ (y * 19349663) ^ (seed * 83492791);
+    h = (h ^ (h >>> 13)) * 1274126177;
+    h = (h ^ (h >>> 16));
+    return h >>> 0;
+  }
+  function hashFloat01(x,y,seed){
+    return (hash2i(x,y,seed) % 1000000) / 1000000;
+  }
+
+  // ---------- Scenes ----------
+  const SCENES = [
+    { id:0, name:"Forest Dig", seed:1337,
+      palette:{ soil:[24,84,46], soil2:[20,72,40], rock:[70,80,88], rock2:[56,64,72], ore:[240,210,60],
+        hole0:[6,7,9], hole1:[12,14,18], glowY:[255,190,40], glowR:[255,45,45], fog:[14,16,22] },
+      friction:0.90, drift:0.10, rockRate:0.12 },
+    { id:1, name:"Quarry Grid", seed:2029,
+      palette:{ soil:[64,70,76], soil2:[54,60,66], rock:[90,96,104], rock2:[78,84,92], ore:[245,200,55],
+        hole0:[8,9,10], hole1:[18,20,24], glowY:[255,190,40], glowR:[255,45,45], fog:[16,16,20] },
+      friction:0.88, drift:0.16, rockRate:0.24 },
+    { id:2, name:"Night Ops", seed:9091,
+      palette:{ soil:[18,28,44], soil2:[14,22,36], rock:[52,62,80], rock2:[44,52,68], ore:[255,220,70],
+        hole0:[3,4,6], hole1:[10,12,16], glowY:[255,210,60], glowR:[255,60,60], fog:[8,10,16] },
+      friction:0.92, drift:0.08, rockRate:0.18 },
+    { id:3, name:"Ice Yard", seed:7712,
+      palette:{ soil:[120,140,160], soil2:[108,128,150], rock:[80,92,108], rock2:[70,82,96], ore:[255,210,70],
+        hole0:[10,12,16], hole1:[22,26,32], glowY:[255,190,40], glowR:[255,45,45], fog:[20,24,30] },
+      friction:0.82, drift:0.26, rockRate:0.10 },
+  ];
+  let scene = SCENES[0];
+
+  // ---------- World / Tiles ----------
+  const TILE = 60;
+  const WORLD_TILES = 44;
+  const WORLD_SIZE = WORLD_TILES * TILE;
+
+  const TILE_HEALTH_MAX = 5;
+  const tileHealth = new Map(); // "x,y" => 0..5
+
+  function keyXY(tx,ty){ return tx + "," + ty; }
+  function getHealth(tx,ty){
+    const v = tileHealth.get(keyXY(tx,ty));
+    return (v === undefined) ? TILE_HEALTH_MAX : v;
+  }
+  function setHealth(tx,ty,h){
+    const k = keyXY(tx,ty);
+    const hh = clamp(Math.round(h), 0, TILE_HEALTH_MAX);
+    if (hh === TILE_HEALTH_MAX) tileHealth.delete(k);
+    else tileHealth.set(k, hh);
+  }
+  function tileRemoved(tx,ty){ return getHealth(tx,ty) <= 0; }
+  function getDepth(tx,ty){
+    const h = getHealth(tx,ty);
+    return clamp((TILE_HEALTH_MAX - h) / TILE_HEALTH_MAX, 0, 1);
+  }
+  function tileType(tx,ty){
+    const n = hashFloat01(tx,ty,scene.seed);
+    return (n < scene.rockRate) ? 1 : 0; // 1 rock, 0 soil
+  }
+  function baseTileColor(tx,ty){
+    const pal = scene.palette;
+    const t = tileType(tx,ty);
+    const n = hashFloat01(tx,ty,scene.seed + 99);
+    const base = (t === 1) ? (n < 0.5 ? pal.rock : pal.rock2) : (n < 0.5 ? pal.soil : pal.soil2);
+    return base.slice();
+  }
+
+  // ---------- Camera ----------
+  let camX = WORLD_SIZE * 0.5;
+  let camY = WORLD_SIZE * 0.5;
+  let camZoom = 1.0;
+  function worldToScreen(wx,wy){
+    return [
+      (wx - camX) * camZoom + SCREEN_W*0.5,
+      (wy - camY) * camZoom + SCREEN_H*0.5
+    ];
+  }
+
+  // ---------- Base / Ore / Score ----------
+  let base = { x: WORLD_SIZE - 220, y: WORLD_SIZE - 220, w: 160, h: 120 };
+  let oreNodes = [];
+
+  function spawnOre(){
+    oreNodes = [];
+    for (let i=0;i<18;i++){
+      const tx = 3 + Math.floor(Math.random()*(WORLD_TILES-6));
+      const ty = 3 + Math.floor(Math.random()*(WORLD_TILES-6));
+      const required = 0.35 + Math.random()*0.45;
+      oreNodes.push({
+        tx,ty,
+        x: tx*TILE + TILE*0.5 + (Math.random()*12 - 6),
+        y: ty*TILE + TILE*0.5 + (Math.random()*12 - 6),
+        requiredDepth: required,
+        collected: false,
+        carried: false
+      });
+    }
+  }
+
+  let score = 0;
+  const ROUND_DURATION = 90;
+  const TIME_BONUS_PER_SCORE = 5;
+  const TIME_CAP = 120;
+  const BASE_POINTS = 100;
+  const COMBO_WINDOW = 4.0;
+  const COMBO_STEP = 0.25;
+  const COMBO_MAX_MULT = 3.0;
+  const PRESSURE_MAX_MULT = 3.0;
+
+  let game_over = false;
+  let time_bonus_ms = 0;
+  let start_ticks = 0;
+  let last_score_time = null;
+  let combo_count = 0;
+
+  function remaining_time_sec(){
+    const elapsed_ms = performance.now() - start_ticks;
+    const total_ms = Math.min((ROUND_DURATION * 1000) + time_bonus_ms, TIME_CAP * 1000);
+    return Math.max(0, Math.floor((total_ms - elapsed_ms) / 1000));
+  }
+  function time_pressure_multiplier(){
+    const rem = remaining_time_sec();
+    const t = 1.0 - (rem / TIME_CAP);
+    return 1.0 + t * (PRESSURE_MAX_MULT - 1.0);
+  }
+  function combo_multiplier(now_sec){
+    if (last_score_time === null || (now_sec - last_score_time) > COMBO_WINDOW) combo_count = 1;
+    else combo_count += 1;
+    last_score_time = now_sec;
+    const mult = 1.0 + (combo_count - 1) * COMBO_STEP;
+    return Math.min(mult, COMBO_MAX_MULT);
+  }
+  function add_score_and_time(){
+    const now_sec = performance.now()/1000.0;
+    const tp = time_pressure_multiplier();
+    const cm = combo_multiplier(now_sec);
+    const gained = Math.floor(BASE_POINTS * tp * cm);
+    score += gained;
+    time_bonus_ms = Math.min(
+      time_bonus_ms + TIME_BONUS_PER_SCORE * 1000,
+      (TIME_CAP - ROUND_DURATION) * 1000
+    );
+    return gained;
+  }
+
+  // ---------- Excavator state ----------
+  let mode = "arm"; // "arm" or "drive"
+  const keysPressed = {};
+
+  const THROTTLE_MIN = 0.25, THROTTLE_MAX = 4.0, THROTTLE_STEP = 0.10, BOOST_MULT = 1.5;
+  let throttle = 1.0;
+  function currentThrottle(){
+    const boost = (keysPressed.ShiftLeft || keysPressed.ShiftRight) ? BOOST_MULT : 1.0;
+    return clamp(throttle, THROTTLE_MIN, THROTTLE_MAX) * boost;
+  }
+
+  const SPEED_MAX = 190;
+  const ACCEL = 760;
+
+  let left_track_v = 0.0, right_track_v = 0.0;
+  let left_track_target = 0.0, right_track_target = 0.0; // -1..1 (bars)
+
+  let ex = WORLD_SIZE*0.18;
+  let ey = WORLD_SIZE*0.18;
+  let heading = 0.0;
+
+  // Arm DOF
+  let armYaw = 0.0;        // swing
+  let armExtend = 0.75;    // boom extend/retract (simplified)
+  let stickBend = 0.0;     // stick in/out (angle)
+  let bucketAngle = 0.0;   // bucket curl/dump
+
+  // Rates
+  const ARM_YAW_RATE    = 2.4;
+  const ARM_EXT_RATE    = 0.75;
+  const STICK_RATE      = 2.6;
+  const BUCKET_RATE     = 2.8;
+
+  // Arm geometry
+  const BOOM1 = 92;
+  const BOOM2_BASE = 74;
+
+  // Digging & scoop
+  let digActive = false;
+  const DIG_TICK_SECONDS = 0.18;
+  let digTickAccum = 0.0;
+  let lastDigKey = null;
+
+  let soilLoad = 0.0;                // 0..1.25
+  const SOIL_LOAD_MAX = 1.25;
+  const SOIL_PER_HIT = 0.10;
+
+  // Piles per tile
+  const MAX_GRAINS_PER_TILE = 90;
+  const pileGrains = new Map(); // "x,y" -> array of {ox,oy,r}
+  function getPileArr(tx,ty){
+    const k = keyXY(tx,ty);
+    let arr = pileGrains.get(k);
+    if (!arr){ arr = []; pileGrains.set(k, arr); }
+    return arr;
+  }
+  function trimPileArr(tx,ty){
+    const k = keyXY(tx,ty);
+    const arr = pileGrains.get(k);
+    if (!arr) return;
+    if (arr.length === 0) pileGrains.delete(k);
+    else if (arr.length > MAX_GRAINS_PER_TILE) arr.splice(0, arr.length - MAX_GRAINS_PER_TILE);
+  }
+
+  let carriedOre = null;
+
+  // Boom viewer (dig feedback)
+  let digPulse = 0.0;
+  let lastDigTile = { tx:-1, ty:-1, h:TILE_HEALTH_MAX, removed:false };
+
+  // Particles
+  let particles = [];
+  function spawnDirt(wx,wy,amount){
+    const count = Math.max(1, Math.floor(amount));
+    for(let i=0;i<count;i++){
+      const a = Math.random()*TAU;
+      const v = 40 + Math.random()*90;
+      particles.push({
+        x: wx + (Math.random()*10-5),
+        y: wy + (Math.random()*10-5),
+        vx: Math.cos(a)*v,
+        vy: Math.sin(a)*v,
+        life: 0.25 + Math.random()*0.35
+      });
+    }
+  }
+  function updateParticles(dt){
+    for(let i=particles.length-1;i>=0;i--){
+      const p = particles[i];
+      p.life -= dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vx *= 0.84;
+      p.vy *= 0.84;
+      if (p.life <= 0) particles.splice(i,1);
+    }
+  }
+
+  // ---------- Input: Keyboard ----------
+  window.addEventListener('keydown', (e)=>{
+    keysPressed[e.code] = true;
+
+    if (e.code === 'Tab'){
+      e.preventDefault();
+      if (!game_over) mode = (mode === 'arm') ? 'drive' : 'arm';
+    }
+    if (e.code === 'KeyR' && game_over){ startRound(); }
+
+    if (e.code === 'BracketLeft')  throttle = Math.max(THROTTLE_MIN, Math.round((throttle - THROTTLE_STEP)*100)/100);
+    if (e.code === 'BracketRight') throttle = Math.min(THROTTLE_MAX, Math.round((throttle + THROTTLE_STEP)*100)/100);
+
+    if (e.code === 'KeyF') dumpSoilAtBucket();
+  });
+  window.addEventListener('keyup', (e)=>{
+    keysPressed[e.code] = false;
+  });
+
+  // ---------- MediaPipe Hands ----------
+  const videoElement = document.getElementById('video');
+  let handsDetector = null;
+  let cameraInstance = null;
+
+  // IMPORTANT: we store hands by SCREEN POSITION (x), not by handedness label.
+  let lastHands = {left:null, right:null, meta:{leftX:null,rightX:null,count:0}};
+
+  function palmCenterLite(hand_lm){
+    const p0 = hand_lm[0], p5 = hand_lm[5], p9 = hand_lm[9], p13 = hand_lm[13], p17 = hand_lm[17];
+    return {
+      x: (p0.x + p5.x + p9.x + p13.x + p17.x) / 5,
+      y: (p0.y + p5.y + p9.y + p13.y + p17.y) / 5
+    };
+  }
+
+  function onResults(results){
+    lastHands = {left:null, right:null, meta:{leftX:null,rightX:null,count:0}};
+
+    if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) return;
+
+    const hands = [];
+    for (let i=0;i<results.multiHandLandmarks.length;i++){
+      const lm = results.multiHandLandmarks[i];
+      const pc = palmCenterLite(lm);
+      hands.push({ lm, x: pc.x, y: pc.y });
+    }
+
+    hands.sort((a,b)=>a.x - b.x);
+
+    if (hands.length === 1){
+      // If only one hand: assign it by where it is on screen.
+      const h = hands[0];
+      if (h.x < 0.5){ lastHands.left = h.lm; lastHands.meta.leftX = h.x; }
+      else          { lastHands.right = h.lm; lastHands.meta.rightX = h.x; }
+      lastHands.meta.count = 1;
+    } else {
+      // Two+ hands: left-most is LEFT, right-most is RIGHT.
+      const hl = hands[0];
+      const hr = hands[hands.length-1];
+      lastHands.left = hl.lm;  lastHands.right = hr.lm;
+      lastHands.meta.leftX = hl.x; lastHands.meta.rightX = hr.x;
+      lastHands.meta.count = hands.length;
+    }
+  }
+
+  async function initHands(){
+    handsDetector = new Hands({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+    handsDetector.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.7,
+      minTrackingConfidence: 0.5
+    });
+    handsDetector.onResults(onResults);
+
+    cameraInstance = new Camera(videoElement, {
+      onFrame: async () => { await handsDetector.send({ image: videoElement }); },
+      width: 640, height: 480
+    });
+    await cameraInstance.start();
+  }
+
+  // ---------- Control tuning ----------
+  const CONTROL = {
+    stickDead: 0.07,
+    stickScale: 0.38,
+    stickExpo: 1.35,
+
+    stickSmoothTau: 0.085,
+    driveTargetSmooth: 0.12,
+    armVelSmooth: 0.10,
+
+    oneHandTurn: 0.85,
+    keyTurn: 0.80,
+
+    thumbsHoldSeconds: 3.0,
+    popupDoneMs: 1200,
+
+    // highlight threshold for corner panel
+    activeThresh: 0.14,
+  };
+
+  // ---------- Hand stick + smoothing ----------
+  const stickState = {
+    left: {dx:0, dy:0, seen:false},
+    right:{dx:0, dy:0, seen:false},
+  };
+
+  function applyDeadzone(v, dead){
+    const a = Math.abs(v);
+    if (a < dead) return 0;
+    const s = (a - dead) / (1 - dead);
+    return Math.sign(v) * clamp(s, 0, 1);
+  }
+  function expoCurve(v, expo){
+    const a = Math.abs(v);
+    return Math.sign(v) * Math.pow(a, expo);
+  }
+
+  function palmCenter(hand_lm){
+    const p0 = hand_lm[0], p5 = hand_lm[5], p9 = hand_lm[9], p13 = hand_lm[13], p17 = hand_lm[17];
+    return {
+      x: (p0.x + p5.x + p9.x + p13.x + p17.x) / 5,
+      y: (p0.y + p5.y + p9.y + p13.y + p17.y) / 5
+    };
+  }
+
+  // dx: left(-) right(+), dy: up(-) down(+)
+  function handStickRaw(hand_lm){
+    if (!hand_lm) return null;
+    const i = hand_lm[8];
+    const pc = palmCenter(hand_lm);
+
+    let dx = clamp(i.x - pc.x, -0.55, 0.55);
+    let dy = clamp(i.y - pc.y, -0.55, 0.55);
+
+    dx = clamp(dx / CONTROL.stickScale, -1, 1);
+    dy = clamp(dy / CONTROL.stickScale, -1, 1);
+
+    dx = expoCurve(applyDeadzone(dx, CONTROL.stickDead), CONTROL.stickExpo);
+    dy = expoCurve(applyDeadzone(dy, CONTROL.stickDead), CONTROL.stickExpo);
+
+    return {dx, dy};
+  }
+
+  function updateSmoothedStick(side, raw, dt){
+    const st = stickState[side];
+    const a = emaAlpha(dt, CONTROL.stickSmoothTau);
+
+    if (raw){
+      st.dx = lerp(st.dx, raw.dx, a);
+      st.dy = lerp(st.dy, raw.dy, a);
+      st.seen = true;
+    } else {
+      st.dx = lerp(st.dx, 0, a * 0.55);
+      st.dy = lerp(st.dy, 0, a * 0.55);
+      st.seen = false;
+    }
+    return {dx: st.dx, dy: st.dy};
+  }
+
+  function tankSpeedFromStick(stick){
+    return clamp(-stick.dy, -1, 1);
+  }
+
+  // ---------- Pinch hysteresis + edge detect ----------
+  const PINCH_ON  = 0.060;
+  const PINCH_OFF = 0.078;
+  const pinch = { left:false, right:false };
+  const pinchPrev = { left:false, right:false };
+
+  function pinchDistance(hand_lm){
+    if (!hand_lm) return null;
+    const t = hand_lm[4], i = hand_lm[8];
+    return Math.hypot(t.x - i.x, t.y - i.y);
+  }
+  function updatePinch(hand_lm, prevDown){
+    const d = pinchDistance(hand_lm);
+    if (d === null) return false;
+    if (!prevDown) return d < PINCH_ON;
+    return d < PINCH_OFF;
+  }
+
+  // ---------- Thumbs-up hold toggle ----------
+  const modeSwitch = {
+    active:false,
+    startedAt:0,
+    doneFlashUntil:0,
+    lastHTML:"",
+  };
+
+  function showModePopup(html){
+    if (!html){
+      modePopup.style.display = "none";
+      modeSwitch.lastHTML = "";
+      return;
+    }
+    if (modeSwitch.lastHTML !== html){
+      modePopup.innerHTML = html;
+      modeSwitch.lastHTML = html;
+    }
+    modePopup.style.display = "block";
+  }
+
+  function isFingerCurled(hand_lm, tipIdx, pipIdx){
+    const tip = hand_lm[tipIdx];
+    const pip = hand_lm[pipIdx];
+    return (tip.y > pip.y + 0.015);
+  }
+  function isThumbUp(hand_lm){
+    const tip = hand_lm[4];
+    const ip  = hand_lm[3];
+    const mcp = hand_lm[2];
+    const up = (tip.y < ip.y - 0.010) && (ip.y < mcp.y - 0.010);
+    const idxMcp = hand_lm[5];
+    const sep = Math.hypot(tip.x - idxMcp.x, tip.y - idxMcp.y);
+    return up && (sep > 0.10);
+  }
+  function isThumbsUpGesture(hand_lm){
+    if (!hand_lm) return false;
+    if (!isThumbUp(hand_lm)) return false;
+    const indexCurled  = isFingerCurled(hand_lm, 8, 6);
+    const middleCurled = isFingerCurled(hand_lm,12,10);
+    const ringCurled   = isFingerCurled(hand_lm,16,14);
+    const pinkyCurled  = isFingerCurled(hand_lm,20,18);
+    return indexCurled && middleCurled && ringCurled && pinkyCurled;
+  }
+  function isGameplayActive(){
+    return (startScreen.style.display === "none") && !game_over;
+  }
+  function handleThumbsUpToggle(nowMs){
+    if (!isGameplayActive()) return;
+
+    const thumbsUp = isThumbsUpGesture(lastHands.left) || isThumbsUpGesture(lastHands.right);
+    if (thumbsUp){
+      if (!modeSwitch.active){
+        modeSwitch.active = true;
+        modeSwitch.startedAt = nowMs;
+      }
+      const elapsed = (nowMs - modeSwitch.startedAt) / 1000;
+      const remain = Math.max(0, CONTROL.thumbsHoldSeconds - elapsed);
+
+      if (remain > 0){
+        const target = (mode === "arm") ? "DRIVE" : "ARM";
+        showModePopup(`👍 HOLD… switching to <b>${target}</b> in <b>${Math.ceil(remain)}s</b><span class="sub">keep thumbs-up steady</span>`);
+      } else {
+        mode = (mode === 'arm') ? 'drive' : 'arm';
+        modeSwitch.active = false;
+        modeSwitch.doneFlashUntil = nowMs + CONTROL.popupDoneMs;
+        showModePopup(`✅ MODE: <b>${mode.toUpperCase()}</b><span class="sub">thumbs-up switch complete</span>`);
+      }
+    } else {
+      if (modeSwitch.active){
+        modeSwitch.active = false;
+        showModePopup(null);
+      }
+    }
+
+    if (!modeSwitch.active && nowMs > modeSwitch.doneFlashUntil){
+      if (modePopup.style.display === "block") showModePopup(null);
+    }
+  }
+
+  // ---------- Kinematics helpers ----------
+  function bucketWorldPoint(){
+    const baseOff = 10;
+    const baseX = ex + Math.cos(heading) * baseOff;
+    const baseY = ey + Math.sin(heading) * baseOff;
+
+    const yawAbs = heading + armYaw;
+    const boom2 = BOOM2_BASE * armExtend;
+
+    const elbowX = baseX + Math.cos(yawAbs) * BOOM1;
+    const elbowY = baseY + Math.sin(yawAbs) * BOOM1;
+
+    const arm2Abs = yawAbs + stickBend;
+    const endX = elbowX + Math.cos(arm2Abs) * boom2;
+    const endY = elbowY + Math.sin(arm2Abs) * boom2;
+
+    const tipAbs = arm2Abs + bucketAngle;
+    const tipX = endX + Math.cos(tipAbs) * 22;
+    const tipY = endY + Math.sin(tipAbs) * 22;
+
+    return { baseX, baseY, elbowX, elbowY, endX, endY, tipX, tipY, yawAbs, arm2Abs, tipAbs };
+  }
+
+  function bucketTileInfo(){
+    const bp = bucketWorldPoint();
+    const tx = clamp(Math.floor(bp.tipX / TILE), 0, WORLD_TILES-1);
+    const ty = clamp(Math.floor(bp.tipY / TILE), 0, WORLD_TILES-1);
+    const h = getHealth(tx,ty);
+    const depth = getDepth(tx,ty);
+    const removed = tileRemoved(tx,ty);
+    return { bp, tx, ty, h, depth, removed };
+  }
+
+  // ---------- Digging / Scoop / Dump ----------
+  function digHitAt(tx,ty, wx,wy){
+    if (tx < 0 || ty < 0 || tx >= WORLD_TILES || ty >= WORLD_TILES) return;
+    if (tileRemoved(tx,ty)) return;
+
+    const ttype = tileType(tx,ty);
+    const rockMult = (ttype === 1) ? 0.65 : 1.0;
+
+    const h = getHealth(tx,ty);
+    const nh = h - 1;
+    setHealth(tx,ty, nh);
+
+    // capture depends on bucket curl (more curled = more scoop)
+    const capture = clamp((0.20 - bucketAngle) / 0.80, 0, 1);
+    const gain = SOIL_PER_HIT * rockMult * (0.25 + 0.75*capture);
+    soilLoad = clamp(soilLoad + gain, 0, SOIL_LOAD_MAX);
+
+    spawnDirt(wx, wy, 10 * rockMult);
+    digPulse = 0.18;
+
+    lastDigTile.tx = tx;
+    lastDigTile.ty = ty;
+    lastDigTile.h = Math.max(0, nh);
+    lastDigTile.removed = (nh <= 0);
+
+    if (nh <= 0){
+      spawnDirt(wx, wy, 22);
+    }
+  }
+
+  function applyDigTicks(dt){
+    if (!digActive) { digTickAccum = 0; lastDigKey = null; return; }
+
+    const { bp } = bucketTileInfo();
+    const wx = bp.tipX, wy = bp.tipY;
+
+    const tx = clamp(Math.floor(wx / TILE), 0, WORLD_TILES-1);
+    const ty = clamp(Math.floor(wy / TILE), 0, WORLD_TILES-1);
+
+    // only dig if near tile center
+    const cx = tx*TILE + TILE*0.5;
+    const cy = ty*TILE + TILE*0.5;
+    const distN = Math.hypot(wx - cx, wy - cy) / (TILE*0.5);
+    if (distN > 0.95) return;
+
+    const k = keyXY(tx,ty);
+    if (lastDigKey !== k){ digTickAccum = 0; lastDigKey = k; }
+
+    digTickAccum += dt;
+    while (digTickAccum >= DIG_TICK_SECONDS){
+      digTickAccum -= DIG_TICK_SECONDS;
+      digHitAt(tx,ty, wx,wy);
+    }
+  }
+
+  function dumpSoilAtBucket(){
+    if (soilLoad <= 0.001 || game_over) return;
+
+    const { bp, tx, ty } = bucketTileInfo();
+
+    let dtx = tx, dty = ty;
+    if (tileRemoved(dtx,dty)){
+      let found = false;
+      for (let r=1; r<=2 && !found; r++){
+        for (let oy=-r; oy<=r && !found; oy++){
+          for (let ox=-r; ox<=r && !found; ox++){
+            const ntx = tx+ox, nty = ty+oy;
+            if (ntx<0||nty<0||ntx>=WORLD_TILES||nty>=WORLD_TILES) continue;
+            if (!tileRemoved(ntx,nty)){ dtx = ntx; dty = nty; found = true; }
+          }
+        }
+      }
+      if (!found) return;
+    }
+
+    const arr = getPileArr(dtx,dty);
+    const grainCount = Math.max(10, Math.floor(soilLoad * 140));
+
+    for (let i=0;i<grainCount;i++){
+      const a = Math.random()*TAU;
+      const r = Math.pow(Math.random(), 0.60) * (TILE*0.42);
+      arr.push({
+        ox: Math.cos(a)*r + (Math.random()*8-4),
+        oy: Math.sin(a)*r + (Math.random()*8-4),
+        r: 1.4 + Math.random()*1.8
+      });
+    }
+    trimPileArr(dtx,dty);
+
+    spawnDirt(bp.tipX, bp.tipY, 26);
+    soilLoad = 0.0;
+  }
+
+  function scoopFromPiles(dt){
+    if (soilLoad >= SOIL_LOAD_MAX - 0.01) return;
+    if (bucketAngle > -0.15) return; // must be curled
+
+    const { bp, tx, ty } = bucketTileInfo();
+    const arr = pileGrains.get(keyXY(tx,ty));
+    if (!arr || arr.length === 0) return;
+
+    const cx = tx*TILE + TILE*0.5;
+    const cy = ty*TILE + TILE*0.5;
+    const dist = Math.hypot(bp.tipX - cx, bp.tipY - cy);
+    if (dist > TILE*0.55) return;
+
+    const curl = clamp((-bucketAngle) / 0.9, 0, 1);
+    const take = Math.min(arr.length, Math.max(0, Math.floor( (8 + 14*curl) * dt*60 )));
+    if (take <= 0) return;
+
+    arr.splice(0, take);
+    if (arr.length === 0) pileGrains.delete(keyXY(tx,ty));
+
+    soilLoad = clamp(soilLoad + (take / 180), 0, SOIL_LOAD_MAX);
+    spawnDirt(bp.tipX, bp.tipY, 2 + 2*curl);
+  }
+
+  // ---------- Ore scoop + base drop ----------
+  function tryScoopOre(){
+    if (carriedOre !== null) return;
+    if (bucketAngle > -0.10) return; // curl required
+
+    const { bp } = bucketTileInfo();
+    const sx = bp.tipX, sy = bp.tipY;
+
+    for (let i=0;i<oreNodes.length;i++){
+      const o = oreNodes[i];
+      if (o.collected || o.carried) continue;
+      const depth = getDepth(o.tx,o.ty);
+      if (depth < o.requiredDepth) continue;
+
+      const dist = Math.hypot(o.x - sx, o.y - sy);
+      if (dist < 26){
+        carriedOre = i;
+        o.carried = true;
+        return;
+      }
+    }
+  }
+
+  function collideRect(ax,ay,aw,ah, bx,by,bw,bh){
+    return !(ax+aw < bx || ax > bx+bw || ay+ah < by || ay > by+bh);
+  }
+  function checkBaseDrop(){
+    if (carriedOre === null) return;
+    const o = oreNodes[carriedOre];
+    if (!o) { carriedOre = null; return; }
+
+    const rectA = {x: base.x, y: base.y, w: base.w, h: base.h};
+    const rectB = {x: o.x - 10, y: o.y - 10, w: 20, h: 20};
+
+    if (collideRect(rectA.x,rectA.y,rectA.w,rectA.h, rectB.x,rectB.y,rectB.w,rectB.h)){
+      o.collected = true;
+      o.carried = false;
+      carriedOre = null;
+      add_score_and_time();
+    }
+  }
+
+  // ---------- Rendering ----------
+  function clearBackground(){
+    const fog = scene.palette.fog;
+    ctx.fillStyle = `rgb(${fog[0]},${fog[1]},${fog[2]})`;
+    ctx.fillRect(0,0,SCREEN_W,SCREEN_H);
+  }
+
+  function drawTiles(){
+    const left = camX - (SCREEN_W*0.5)/camZoom - TILE;
+    const top  = camY - (SCREEN_H*0.5)/camZoom - TILE;
+    const right= camX + (SCREEN_W*0.5)/camZoom + TILE;
+    const bot  = camY + (SCREEN_H*0.5)/camZoom + TILE;
+
+    const tx0 = clamp(Math.floor(left / TILE), 0, WORLD_TILES-1);
+    const ty0 = clamp(Math.floor(top  / TILE), 0, WORLD_TILES-1);
+    const tx1 = clamp(Math.floor(right/ TILE), 0, WORLD_TILES-1);
+    const ty1 = clamp(Math.floor(bot  / TILE), 0, WORLD_TILES-1);
+
+    const pal = scene.palette;
+    ctx.lineWidth = 1;
+
+    for (let ty=ty0; ty<=ty1; ty++){
+      for (let tx=tx0; tx<=tx1; tx++){
+        const wx = tx*TILE, wy = ty*TILE;
+        const [sx,sy] = worldToScreen(wx,wy);
+        const s = TILE * camZoom;
+
+        const removed = tileRemoved(tx,ty);
+        const depth = getDepth(tx,ty);
+
+        if (removed){
+          const g = ctx.createRadialGradient(
+            sx + s*0.50, sy + s*0.50, 0,
+            sx + s*0.50, sy + s*0.50, s*0.65
+          );
+          const h0 = pal.hole0, h1 = pal.hole1;
+          g.addColorStop(0.0, `rgb(${h0[0]},${h0[1]},${h0[2]})`);
+          g.addColorStop(1.0, `rgb(${h1[0]},${h1[1]},${h1[2]})`);
+          ctx.fillStyle = g;
+          ctx.fillRect(sx, sy, s, s);
+
+          const gy = pal.glowY;
+          ctx.strokeStyle = `rgba(${gy[0]},${gy[1]},${gy[2]},0.10)`;
+          ctx.lineWidth = 2;
+          ctx.strokeRect(sx+1.5, sy+1.5, s-3, s-3);
+          ctx.lineWidth = 1;
+        } else {
+          const base = baseTileColor(tx,ty);
+
+          if (depth > 0.001){
+            const dullK = clamp(depth * 0.65, 0, 0.65);
+            const dull = [
+              Math.round(base[0] * (1 - dullK)),
+              Math.round(base[1] * (1 - dullK)),
+              Math.round(base[2] * (1 - dullK))
+            ];
+
+            const gy = pal.glowY;
+            const richK = clamp(depth * 0.60, 0, 0.60);
+            const rich = [
+              Math.round(lerp(dull[0], gy[0], richK)),
+              Math.round(lerp(dull[1], gy[1], richK)),
+              Math.round(lerp(dull[2], gy[2], richK))
+            ];
+
+            const rg = ctx.createRadialGradient(
+              sx + s*0.52, sy + s*0.48, s*0.12,
+              sx + s*0.50, sy + s*0.50, s*0.72
+            );
+            rg.addColorStop(0.0, `rgb(${rich[0]},${rich[1]},${rich[2]})`);
+            rg.addColorStop(1.0, `rgb(${dull[0]},${dull[1]},${dull[2]})`);
+
+            ctx.fillStyle = rg;
+            ctx.fillRect(sx, sy, s, s);
+          } else {
+            ctx.fillStyle = `rgb(${base[0]},${base[1]},${base[2]})`;
+            ctx.fillRect(sx, sy, s, s);
+          }
+        }
+
+        ctx.strokeStyle = `rgba(0,0,0,0.14)`;
+        ctx.strokeRect(sx+0.5, sy+0.5, s, s);
+
+        const h = getHealth(tx,ty);
+        if (!removed && h < TILE_HEALTH_MAX){
+          const pct = h / TILE_HEALTH_MAX;
+          const barW = (s - 10) * pct;
+          ctx.fillStyle = "rgba(0,0,0,0.35)";
+          ctx.fillRect(sx+5, sy+5, s-10, 4);
+          ctx.fillStyle = `rgba(255,210,60,${0.25 + (1-pct)*0.35})`;
+          ctx.fillRect(sx+5, sy+5, Math.max(0,barW), 4);
+        }
+      }
+    }
+  }
+
+  function drawPiles(){
+    const left = camX - (SCREEN_W*0.5)/camZoom - TILE;
+    const top  = camY - (SCREEN_H*0.5)/camZoom - TILE;
+    const right= camX + (SCREEN_W*0.5)/camZoom + TILE;
+    const bot  = camY + (SCREEN_H*0.5)/camZoom + TILE;
+
+    const tx0 = clamp(Math.floor(left / TILE), 0, WORLD_TILES-1);
+    const ty0 = clamp(Math.floor(top  / TILE), 0, WORLD_TILES-1);
+    const tx1 = clamp(Math.floor(right/ TILE), 0, WORLD_TILES-1);
+    const ty1 = clamp(Math.floor(bot  / TILE), 0, WORLD_TILES-1);
+
+    for (let ty=ty0; ty<=ty1; ty++){
+      for (let tx=tx0; tx<=tx1; tx++){
+        const arr = pileGrains.get(keyXY(tx,ty));
+        if (!arr || arr.length === 0) continue;
+
+        const col = baseTileColor(tx,ty);
+        const c0 = `rgba(${col[0]},${col[1]},${col[2]},0.80)`;
+        const c1 = `rgba(${Math.min(255,col[0]+30)},${Math.min(255,col[1]+30)},${Math.min(255,col[2]+30)},0.65)`;
+
+        const cx = tx*TILE + TILE*0.5;
+        const cy = ty*TILE + TILE*0.5;
+
+        for (let i=0;i<arr.length;i++){
+          const g = arr[i];
+          const [sx,sy] = worldToScreen(cx + g.ox, cy + g.oy);
+          const r = Math.max(1.0, g.r * camZoom);
+          ctx.fillStyle = (i % 3 === 0) ? c1 : c0;
+          ctx.beginPath();
+          ctx.arc(sx, sy, r, 0, TAU);
+          ctx.fill();
+        }
+
+        const [sx0,sy0] = worldToScreen(cx, cy);
+        ctx.fillStyle = "rgba(0,0,0,0.12)";
+        ctx.beginPath();
+        ctx.ellipse(sx0, sy0, 18*camZoom, 8*camZoom, 0, 0, TAU);
+        ctx.fill();
+      }
+    }
+  }
+
+  function drawBase(){
+    const [sx,sy] = worldToScreen(base.x, base.y);
+    const w = base.w * camZoom, h = base.h * camZoom;
+    ctx.fillStyle = `rgba(140,20,170,0.85)`;
+    ctx.fillRect(sx, sy, w, h);
+    ctx.strokeStyle = `rgba(230,190,255,0.85)`;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(sx, sy, w, h);
+    ctx.fillStyle = "rgba(255,255,255,0.10)";
+    ctx.fillRect(sx+10, sy+10, Math.max(12,w-20), 10);
+    ctx.font = "14px ui-monospace, SFMono-Regular, Menlo, monospace";
+    ctx.fillStyle = "rgba(255,240,210,0.92)";
+    ctx.fillText("DROP ZONE", sx + 12, sy + 34);
+  }
+
+  function drawOre(){
+    const pal = scene.palette;
+    for (const o of oreNodes){
+      if (o.collected) continue;
+      const depth = getDepth(o.tx,o.ty);
+      const visible = (depth >= o.requiredDepth) || o.carried;
+      if (!visible) continue;
+      const [sx,sy] = worldToScreen(o.x, o.y);
+      const r = 10 * camZoom;
+      ctx.fillStyle = `rgb(${pal.ore[0]},${pal.ore[1]},${pal.ore[2]})`;
+      ctx.beginPath(); ctx.arc(sx, sy, r, 0, TAU); ctx.fill();
+      ctx.strokeStyle = "rgba(255,235,120,0.85)";
+      ctx.beginPath(); ctx.arc(sx, sy, r, 0, TAU); ctx.stroke();
+      ctx.fillStyle = "rgba(255,255,220,0.40)";
+      ctx.beginPath(); ctx.arc(sx + r*0.25, sy - r*0.25, Math.max(1.5, r*0.35), 0, TAU); ctx.fill();
+    }
+  }
+
+  function drawParticles(){
+    const fog = scene.palette.fog;
+    for (const p of particles){
+      const a = clamp(p.life / 0.6, 0, 1) * 0.40;
+      const [sx,sy] = worldToScreen(p.x,p.y);
+      ctx.fillStyle = `rgba(${fog[0]},${fog[1]},${fog[2]},${a})`;
+      ctx.beginPath();
+      ctx.arc(sx, sy, 2.0*camZoom + 0.5, 0, TAU);
+      ctx.fill();
+    }
+  }
+
+  function drawVignette(){
+    const grad = ctx.createRadialGradient(SCREEN_W/2, SCREEN_H/2, 0, SCREEN_W/2, SCREEN_H/2, Math.max(SCREEN_W,SCREEN_H)/1.15);
+    grad.addColorStop(0, 'rgba(0,0,0,0)');
+    grad.addColorStop(1, 'rgba(0,0,0,0.46)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0,0,SCREEN_W,SCREEN_H);
+  }
+
+  function setMidBar(el, v){
+    const vv = clamp(v, -1, 1);
+    const mid = 50;
+    if (vv >= 0){
+      el.classList.remove('neg');
+      el.style.left = mid + "%";
+      el.style.width = (vv*50) + "%";
+    } else {
+      el.classList.add('neg');
+      el.style.left = (mid + vv*50) + "%";
+      el.style.width = (-vv*50) + "%";
+    }
+  }
+
+  function updateTrackBars(){
+    setMidBar(barL, left_track_target);
+    setMidBar(barR, right_track_target);
+  }
+
+  function updateArmCornerPanel(inputs){
+    // inputs: {swing, boom, stick, bucket, haveL, haveR}
+    ctrlHands.textContent = `L:${inputs.haveL ? "OK" : "--"} R:${inputs.haveR ? "OK" : "--"}`;
+
+    setMidBar(fillSwing, inputs.swing);
+    setMidBar(fillBoom, inputs.boom);
+    setMidBar(fillStick, inputs.stick);
+    setMidBar(fillBucket, inputs.bucket);
+
+    const a = CONTROL.activeThresh;
+    rowSwing.classList.toggle("active", mode==="arm" && Math.abs(inputs.swing) >= a);
+    rowBoom.classList.toggle("active",  mode==="arm" && Math.abs(inputs.boom)  >= a);
+    rowStick.classList.toggle("active", mode==="arm" && Math.abs(inputs.stick) >= a);
+    rowBucket.classList.toggle("active",mode==="arm" && Math.abs(inputs.bucket)>= a);
+
+    // If not in arm mode, dim highlights
+    if (mode !== "arm"){
+      rowSwing.classList.remove("active");
+      rowBoom.classList.remove("active");
+      rowStick.classList.remove("active");
+      rowBucket.classList.remove("active");
+    }
+  }
+
+  // ---------- Boom side view ----------
+  function drawBoomSideView(){
+    const W = boomCanvas.width, H = boomCanvas.height;
+    bctx.clearRect(0,0,W,H);
+
+    bctx.fillStyle = "rgba(0,0,0,0.20)";
+    bctx.fillRect(0,0,W,H);
+
+    bctx.strokeStyle = "rgba(255,210,60,0.07)";
+    bctx.lineWidth = 1;
+    for (let x=0; x<=W; x+=60){ bctx.beginPath(); bctx.moveTo(x+0.5, 0); bctx.lineTo(x+0.5, H); bctx.stroke(); }
+    for (let y=0; y<=H; y+=30){ bctx.beginPath(); bctx.moveTo(0, y+0.5); bctx.lineTo(W, y+0.5); bctx.stroke(); }
+
+    const groundY = H * 0.78;
+    bctx.strokeStyle = "rgba(220,220,235,0.20)";
+    bctx.beginPath();
+    bctx.moveTo(16, groundY+0.5);
+    bctx.lineTo(W-16, groundY+0.5);
+    bctx.stroke();
+
+    const boomPitch  = clamp(armYaw, -1.1, 1.1) * 0.55;
+    const stickPitch = boomPitch + clamp(stickBend, -1.1, 1.1) * 0.45;
+    const buckPitch  = stickPitch + clamp(bucketAngle, -1.0, 1.0) * 0.75;
+
+    const L1 = 190;
+    const L2 = 145 * armExtend;
+    const L3 = 52;
+
+    const baseX = 80;
+    const baseY = groundY - 20;
+
+    const elbowX = baseX + Math.cos(boomPitch) * L1;
+    const elbowY = baseY - Math.sin(boomPitch) * L1;
+
+    const endX = elbowX + Math.cos(stickPitch) * L2;
+    const endY = elbowY - Math.sin(stickPitch) * L2;
+
+    const tipX = endX + Math.cos(buckPitch) * L3;
+    const tipY = endY - Math.sin(buckPitch) * L3;
+
+    // base
+    bctx.fillStyle = "rgba(255,235,170,0.16)";
+    bctx.strokeStyle = "rgba(255,210,60,0.22)";
+    bctx.lineWidth = 2;
+    pathRoundRect(bctx, baseX-30, baseY-20, 60, 40, 12);
+    bctx.fill(); bctx.stroke();
+
+    bctx.lineCap = "round";
+    bctx.lineJoin = "round";
+
+    // boom segments
+    bctx.strokeStyle = "rgba(255,210,60,0.85)";
+    bctx.lineWidth = 11;
+    bctx.beginPath(); bctx.moveTo(baseX, baseY); bctx.lineTo(elbowX, elbowY); bctx.stroke();
+
+    bctx.strokeStyle = "rgba(255,60,60,0.78)";
+    bctx.lineWidth = 10;
+    bctx.beginPath(); bctx.moveTo(elbowX, elbowY); bctx.lineTo(endX, endY); bctx.stroke();
+
+    bctx.strokeStyle = "rgba(255,235,170,0.85)";
+    bctx.lineWidth = 8;
+    bctx.beginPath(); bctx.moveTo(endX, endY); bctx.lineTo(tipX, tipY); bctx.stroke();
+
+    // bucket cup
+    const cupW = 26, cupH = 18;
+    const cupCx = tipX, cupCy = tipY;
+
+    bctx.save();
+    bctx.translate(cupCx, cupCy);
+    bctx.rotate(-buckPitch);
+    bctx.translate(-cupCx, -cupCy);
+
+    bctx.strokeStyle = "rgba(255,210,60,0.70)";
+    bctx.fillStyle = "rgba(0,0,0,0.26)";
+    bctx.lineWidth = 2;
+    pathRoundRect(bctx, cupCx - cupW, cupCy - cupH*0.5, cupW*1.2, cupH, 8);
+    bctx.fill(); bctx.stroke();
+
+    const fillT = clamp(soilLoad / SOIL_LOAD_MAX, 0, 1);
+    if (fillT > 0.01){
+      bctx.fillStyle = `rgba(255,210,60,${0.12 + 0.30*fillT})`;
+      pathRoundRect(bctx, cupCx - cupW + 3, cupCy - cupH*0.5 + 4, (cupW*1.2 - 6)*fillT, cupH - 8, 6);
+      bctx.fill();
+    }
+
+    if (carriedOre !== null){
+      bctx.fillStyle = "rgba(255,235,170,0.55)";
+      bctx.beginPath();
+      bctx.arc(cupCx - 6, cupCy, 5, 0, TAU);
+      bctx.fill();
+      bctx.strokeStyle = "rgba(255,235,170,0.85)";
+      bctx.stroke();
+    }
+
+    bctx.restore();
+
+    // joints
+    bctx.fillStyle = "rgba(0,0,0,0.40)";
+    bctx.strokeStyle = "rgba(255,210,60,0.30)";
+    bctx.lineWidth = 2;
+    for (const [jx,jy] of [[baseX,baseY],[elbowX,elbowY],[endX,endY]]){
+      bctx.beginPath(); bctx.arc(jx, jy, 8, 0, TAU); bctx.fill(); bctx.stroke();
+    }
+
+    // tip indicator
+    const tipPulseA = clamp(digPulse / 0.18, 0, 1);
+    if (digActive){
+      bctx.fillStyle = `rgba(255,60,60,${0.45 + 0.35*tipPulseA})`;
+      bctx.beginPath(); bctx.arc(tipX, tipY, 8 + 6*(1-tipPulseA), 0, TAU); bctx.fill();
+      bctx.fillStyle = "rgba(255,60,60,0.92)";
+      bctx.font = "12px ui-monospace, SFMono-Regular, Menlo, monospace";
+      bctx.fillText("DIGGING", Math.min(W-90, tipX + 12), Math.max(18, tipY - 10));
+    } else {
+      bctx.fillStyle = "rgba(255,210,60,0.55)";
+      bctx.beginPath(); bctx.arc(tipX, tipY, 7, 0, TAU); bctx.fill();
+    }
+
+    // tile health mini-bars (last hit)
+    const infoX = W - 220;
+    const infoY = 18;
+
+    bctx.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
+    bctx.fillStyle = "rgba(220,220,235,0.75)";
+    const label = (lastDigTile.tx >= 0) ? `LAST HIT ${lastDigTile.tx},${lastDigTile.ty}` : "LAST HIT —";
+    bctx.fillText(label, infoX, infoY);
+
+    const h = lastDigTile.h ?? TILE_HEALTH_MAX;
+    for (let i=0;i<TILE_HEALTH_MAX;i++){
+      const px = infoX + i*16;
+      const py = infoY + 10;
+      bctx.fillStyle = (i < h) ? "rgba(255,210,60,0.55)" : "rgba(255,60,60,0.35)";
+      pathRoundRect(bctx, px, py, 12, 8, 3);
+      bctx.fill();
+      bctx.strokeStyle = "rgba(0,0,0,0.30)";
+      bctx.stroke();
+    }
+    if (lastDigTile.removed){
+      bctx.fillStyle = "rgba(255,60,60,0.85)";
+      bctx.fillText("REMOVED", infoX, infoY + 38);
+    }
+
+    // readout
+    const { tx, ty, depth } = bucketTileInfo();
+    const carryTxt = (carriedOre !== null) ? "ORE:YES" : "ORE:NO";
+    boomReadout.textContent =
+      `swing:${radToDeg(armYaw).toFixed(0)}° boom:${armExtend.toFixed(2)} stick:${radToDeg(stickBend).toFixed(0)}° ` +
+      `bucket:${radToDeg(bucketAngle).toFixed(0)}° load:${soilLoad.toFixed(2)} ` +
+      `| tipTile:${tx},${ty} depth:${depth.toFixed(2)} ${carryTxt}`;
+  }
+
+  // ---------- SVG transforms ----------
+  function updateSVG(dt, tsec){
+    const [sx,sy] = worldToScreen(ex, ey);
+    svgGroup.setAttribute(
+      "transform",
+      `translate(${sx.toFixed(2)},${sy.toFixed(2)}) rotate(${radToDeg(heading).toFixed(2)}) scale(${(camZoom*1.05).toFixed(4)})`
+    );
+    armBaseGroup.setAttribute("transform", `translate(0,-6) rotate(${radToDeg(armYaw).toFixed(2)})`);
+    arm2Group.setAttribute("transform", `translate(96,0) rotate(${radToDeg(stickBend).toFixed(2)})`);
+    bucketGroup.setAttribute("transform", `translate(78,0) rotate(${radToDeg(bucketAngle).toFixed(2)})`);
+
+    const speed = (left_track_v + right_track_v) * 0.5;
+    const off = (tsec * speed * 22) % 20;
+    treadsL.setAttribute("transform", `translate(0,${(-off).toFixed(2)})`);
+    treadsR.setAttribute("transform", `translate(0,${(-off).toFixed(2)})`);
+  }
+
+  // ---------- Round lifecycle ----------
+  function startRound(){
+    score = 0;
+    game_over = false;
+    time_bonus_ms = 0;
+    start_ticks = performance.now();
+    last_score_time = null;
+    combo_count = 0;
+
+    tileHealth.clear();
+    pileGrains.clear();
+    spawnOre();
+
+    ex = WORLD_SIZE*0.18;
+    ey = WORLD_SIZE*0.18;
+    heading = 0.0;
+
+    armYaw = 0.0;
+    armExtend = 0.75;
+    stickBend = 0.0;
+    bucketAngle = 0.0;
+
+    left_track_v = right_track_v = 0.0;
+    left_track_target = right_track_target = 0.0;
+
+    base = { x: WORLD_SIZE - 240, y: WORLD_SIZE - 220, w: 170, h: 120 };
+    particles = [];
+    carriedOre = null;
+
+    soilLoad = 0.0;
+    digTickAccum = 0.0;
+    lastDigKey = null;
+    digPulse = 0.0;
+    lastDigTile = { tx:-1, ty:-1, h:TILE_HEALTH_MAX, removed:false };
+
+    camX = ex; camY = ey;
+    camZoom = (scene.id === 2) ? 1.05 : (scene.id === 1 ? 0.98 : 1.0);
+
+    modeSwitch.active = false;
+    modeSwitch.doneFlashUntil = 0;
+    showModePopup(null);
+  }
+
+  // ---------- Drive + Arm control ----------
+  let armYawVel = 0, armExtVel = 0, stickVel = 0, bucketVel = 0;
+
+  function readDriveTargetsFromHandsOrKeys(lStick, rStick, rawL, rawR){
+    const haveL = !!rawL;
+    const haveR = !!rawR;
+
+    if (haveL && haveR){
+      return { tL: tankSpeedFromStick(lStick), tR: tankSpeedFromStick(rStick) };
+    }
+
+    if (haveL || haveR){
+      const one = haveL ? lStick : rStick;
+      const fwd = clamp(-one.dy, -1, 1);
+      const turn = clamp(one.dx, -1, 1) * CONTROL.oneHandTurn;
+      return { tL: clamp(fwd - turn, -1, 1), tR: clamp(fwd + turn, -1, 1) };
+    }
+
+    let f = 0;
+    if (keysPressed.KeyW || keysPressed.ArrowUp) f += 1;
+    if (keysPressed.KeyS || keysPressed.ArrowDown) f -= 1;
+
+    let turn = 0;
+    if (keysPressed.KeyA || keysPressed.ArrowLeft) turn -= 1;
+    if (keysPressed.KeyD || keysPressed.ArrowRight) turn += 1;
+
+    return { tL: clamp(f - turn*CONTROL.keyTurn, -1, 1), tR: clamp(f + turn*CONTROL.keyTurn, -1, 1) };
+  }
+
+  // ISO/Cat mapping:
+  // Left joystick:  Swing (x) + Boom (y)
+  // Right joystick: Stick (y) + Bucket (x)
+  function readArmVelocityTargetsISO(lStick, rStick, rawL, rawR){
+    // Keyboard still works (optional extras)
+    let kyaw=0, kboom=0, kstick=0, kbucket=0;
+
+    // keep WASD usable for arm when in ARM mode
+    if (keysPressed.KeyA) kyaw -= 1;
+    if (keysPressed.KeyD) kyaw += 1;
+    if (keysPressed.KeyW) kboom += 1;
+    if (keysPressed.KeyS) kboom -= 1;
+
+    // optional: Q/E stick, Z/X bucket
+    if (keysPressed.KeyQ) kstick -= 1;
+    if (keysPressed.KeyE) kstick += 1;
+    if (keysPressed.KeyZ) kbucket -= 1;
+    if (keysPressed.KeyX) kbucket += 1;
+
+    // Gesture targets
+    const haveL = !!rawL;
+    const haveR = !!rawR;
+
+    const swingIn  = haveL ? lStick.dx : 0;      // left hand X
+    const boomIn   = haveL ? (-lStick.dy) : 0;   // left hand Y (up = positive)
+    const stickIn  = haveR ? (-rStick.dy) : 0;   // right hand Y (up = positive)
+    const bucketIn = haveR ? (-rStick.dx) : 0;   // right hand X (right = curl => negative angle)
+
+    // scale to velocities
+    const yawTarget    = swingIn  * ARM_YAW_RATE * 1.35 + kyaw  * ARM_YAW_RATE;
+    const boomTarget   = boomIn   * ARM_EXT_RATE * 1.20 + kboom * ARM_EXT_RATE;
+    const stickTarget  = stickIn  * STICK_RATE   * 1.20 + kstick* STICK_RATE;
+    const bucketTarget = bucketIn * BUCKET_RATE  * 1.20 + kbucket*BUCKET_RATE;
+
+    return {
+      yaw: yawTarget,
+      boom: boomTarget,
+      stick: stickTarget,
+      bucket: bucketTarget,
+      // for corner panel bars:
+      swingIn, boomIn, stickIn, bucketIn,
+      haveL, haveR
+    };
+  }
+
+  // ---------- Main update ----------
+  function update(dt){
+    if (game_over) return;
+    const nowMs = performance.now();
+
+    handleThumbsUpToggle(nowMs);
+
+    const rawL = handStickRaw(lastHands.left);
+    const rawR = handStickRaw(lastHands.right);
+    const l = updateSmoothedStick("left", rawL, dt);
+    const r = updateSmoothedStick("right", rawR, dt);
+
+    // pinch states + edges (based on our screen-position hands)
+    pinchPrev.left  = pinch.left;
+    pinchPrev.right = pinch.right;
+    pinch.left  = updatePinch(lastHands.left,  pinch.left);
+    pinch.right = updatePinch(lastHands.right, pinch.right);
+    const rightPinchDownEdge = pinch.right && !pinchPrev.right;
+
+    // dig + dump mapping
+    digActive = (mode === "arm") && ((keysPressed.Space || false) || pinch.left);
+    if (mode === "arm" && rightPinchDownEdge) dumpSoilAtBucket();
+
+    const th = currentThrottle();
+    let maxSpeed = SPEED_MAX * th;
+
+    // slowdown if driving on a hole
+    const cxTile = clamp(Math.floor(ex / TILE), 0, WORLD_TILES-1);
+    const cyTile = clamp(Math.floor(ey / TILE), 0, WORLD_TILES-1);
+    const onHole = tileRemoved(cxTile, cyTile);
+    if (onHole) maxSpeed *= 0.35;
+
+    // DRIVE
+    if (mode === "drive"){
+      const { tL, tR } = readDriveTargetsFromHandsOrKeys(l, r, rawL, rawR);
+
+      const aT = emaAlpha(dt, CONTROL.driveTargetSmooth);
+      left_track_target  = lerp(left_track_target,  tL, aT);
+      right_track_target = lerp(right_track_target, tR, aT);
+
+      const targetVL = left_track_target * maxSpeed;
+      const targetVR = right_track_target * maxSpeed;
+
+      const a = ACCEL * th;
+      left_track_v  += clamp(targetVL - left_track_v,  -a*dt, a*dt);
+      right_track_v += clamp(targetVR - right_track_v, -a*dt, a*dt);
+
+      // in drive mode, show arm panel neutral
+      updateArmCornerPanel({swing:0, boom:0, stick:0, bucket:0, haveL:!!rawL, haveR:!!rawR});
+    }
+    // ARM
+    else {
+      left_track_target *= 0.85;
+      right_track_target *= 0.85;
+      left_track_v *= 0.90;
+      right_track_v *= 0.90;
+
+      const targets = readArmVelocityTargetsISO(l, r, rawL, rawR);
+
+      // corner highlight (input bars are [-1..1])
+      updateArmCornerPanel({
+        swing: targets.swingIn,
+        boom: targets.boomIn,
+        stick: targets.stickIn,
+        bucket: targets.bucketIn,
+        haveL: targets.haveL,
+        haveR: targets.haveR
+      });
+
+      // smooth velocities
+      const aV = emaAlpha(dt, CONTROL.armVelSmooth);
+      armYawVel = lerp(armYawVel, targets.yaw, aV);
+      armExtVel = lerp(armExtVel, targets.boom, aV);
+      stickVel  = lerp(stickVel,  targets.stick, aV);
+      bucketVel = lerp(bucketVel, targets.bucket, aV);
+
+      // integrate
+      armYaw      += armYawVel * dt;
+      armExtend   += armExtVel * dt;
+      stickBend   += stickVel  * dt;
+      bucketAngle += bucketVel * dt;
+
+      // clamp
+      armYaw = wrapAngle(armYaw);
+      armExtend = clamp(armExtend, 0.20, 1.00);
+      stickBend = clamp(stickBend, -1.10, 1.10);
+      bucketAngle = clamp(bucketAngle, -0.95, 0.95);
+    }
+
+    // global friction
+    const friction = scene.friction;
+    left_track_v  *= Math.pow(friction, dt*60);
+    right_track_v *= Math.pow(friction, dt*60);
+
+    // differential drive -> heading + translation
+    const v = (left_track_v + right_track_v) * 0.5;
+    const w = (right_track_v - left_track_v) / 54;
+
+    heading = wrapAngle(heading + w * dt);
+
+    const drift = scene.drift;
+    const vx = Math.cos(heading) * v;
+    const vy = Math.sin(heading) * v;
+
+    ex += (vx - Math.sin(heading)*v*drift*Math.abs(w)*0.5) * dt;
+    ey += (vy + Math.cos(heading)*v*drift*Math.abs(w)*0.5) * dt;
+
+    ex = clamp(ex, 30, WORLD_SIZE - 30);
+    ey = clamp(ey, 30, WORLD_SIZE - 30);
+
+    camX = lerp(camX, ex, 0.10);
+    camY = lerp(camY, ey, 0.10);
+
+    // carried ore follows bucket
+    if (carriedOre !== null){
+      const { bp } = bucketTileInfo();
+      const o = oreNodes[carriedOre];
+      if (o){ o.x = bp.tipX; o.y = bp.tipY; }
+    }
+
+    // gameplay interactions
+    applyDigTicks(dt);
+    scoopFromPiles(dt);
+
+    if (!digActive) tryScoopOre();
+    checkBaseDrop();
+
+    digPulse = Math.max(0, digPulse - dt);
+
+    if (Math.abs(v) > 35) spawnDirt(ex, ey, 1 + Math.abs(v)*0.01);
+    updateParticles(dt);
+
+    if (remaining_time_sec() <= 0) game_over = true;
+
+    const { tx, ty, h } = bucketTileInfo();
+    hudTile.textContent = `${tx},${ty} (hp:${h})`;
+
+    updateTrackBars();
+  }
+
+  // ---------- Render ----------
+  function render(dt, tsec){
+    clearBackground();
+    drawTiles();
+    drawPiles();
+    drawBase();
+    drawOre();
+    drawParticles();
+    drawVignette();
+
+    // bucket marker + curl arc
+    const { bp } = bucketTileInfo();
+    const [bx,by] = worldToScreen(bp.tipX, bp.tipY);
+
+    ctx.fillStyle = (digActive ? "rgba(255,60,60,0.70)" : "rgba(255,200,60,0.55)");
+    ctx.beginPath(); ctx.arc(bx, by, 6, 0, TAU); ctx.fill();
+
+    ctx.strokeStyle = "rgba(255,235,170,0.40)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(bx, by, 12, -Math.PI*0.25, -Math.PI*0.25 + clamp((bucketAngle+0.95)/1.90,0,1)*Math.PI*1.5);
+    ctx.stroke();
+
+    if (game_over){
+      ctx.fillStyle = "rgba(0,0,0,0.62)";
+      ctx.fillRect(0,0,SCREEN_W,SCREEN_H);
+      ctx.font = "54px ui-monospace, SFMono-Regular, Menlo, monospace";
+      ctx.fillStyle = "rgb(255,230,200)";
+      const msg = "GAME OVER";
+      ctx.fillText(msg, SCREEN_W/2 - ctx.measureText(msg).width/2, SCREEN_H/2 - 30);
+      ctx.font = "18px ui-monospace, SFMono-Regular, Menlo, monospace";
+      ctx.fillStyle = "rgb(230,230,240)";
+      const sub = `Final Score: ${score}   |   Press R to Restart`;
+      ctx.fillText(sub, SCREEN_W/2 - ctx.measureText(sub).width/2, SCREEN_H/2 + 12);
+    }
+
+    updateSVG(dt, tsec);
+    drawBoomSideView();
+
+    // HUD
+    hudScore.textContent = String(score);
+    hudTime.textContent = String(remaining_time_sec()).padStart(2,'0') + "s";
+    hudMode.textContent = mode.toUpperCase();
+    hudThrottle.textContent = "x" + currentThrottle().toFixed(2);
+    hudDig.textContent = digActive ? "ON" : "OFF";
+    hudLoad.textContent = soilLoad.toFixed(2);
+    hudScene.textContent = scene.name;
+  }
+
+  // ---------- Loop ----------
+  let prevTime = performance.now();
+  function frame(){
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - prevTime)/1000);
+    prevTime = now;
+    const tsec = now/1000;
+
+    update(dt);
+    render(dt, tsec);
+
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- Scenes ----------
+  function startScene(sceneId){
+    scene = SCENES[sceneId] || SCENES[0];
+    hudScene.textContent = scene.name;
+    startScreen.style.display = "none";
+    startRound();
+  }
+
+  document.querySelectorAll('.tile').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const id = parseInt(el.getAttribute('data-scene') || "0", 10);
+      startScene(id);
+    });
+  });
+
+  // ---------- Boot ----------
+  (async ()=>{
+    await initHands();
+    prevTime = performance.now();
+    requestAnimationFrame(frame);
+  })();
+  </script>
+</body>
+</html>

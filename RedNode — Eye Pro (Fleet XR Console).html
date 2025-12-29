@@ -1,0 +1,2381 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>RedNode — Eye Pro (Fleet XR Console)</title>
+
+  <!-- Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&family=Poppins:wght@500;700&display=swap" rel="stylesheet">
+
+  <!-- Core libs -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.20.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface@0.0.7/dist/blazeface.min.js"></script>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.min.js"></script>
+
+  <!-- MQTT over WebSockets -->
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+  <!-- Three.js (3D HUD overlay) -->
+  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+
+  <style>
+    /* =========================================================
+       RedNode Eye Pro — Premium UI / Dark industrial theme
+       ========================================================= */
+    :root{
+      --bg-1:#070709;
+      --bg-2:#050b10;
+      --panel:rgba(255,255,255,0.03);
+      --card:linear-gradient(180deg, rgba(255,255,255,0.018), rgba(255,255,255,0.006));
+      --stroke:rgba(255,255,255,0.045);
+
+      --txt:#eaf2fb;
+      --muted:#b2bcc4;
+
+      --red:#ff2d2d;
+      --orange:#ff8a00;
+      --gold:#ffd166;
+      --green:#36e07a;
+      --danger:#ff4d4d;
+
+      --glow:linear-gradient(90deg, rgba(255,45,45,0.12), rgba(255,138,0,0.12));
+      --glass:rgba(255,255,255,0.02);
+
+      font-family: Inter, Poppins, system-ui, -apple-system, "Segoe UI", Roboto, Arial;
+      color-scheme: dark;
+    }
+
+    html,body{height:100%; margin:0; background:linear-gradient(180deg,var(--bg-1),var(--bg-2)); color:var(--txt); -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;}
+
+    /* subtle noise overlay (premium feel) */
+    body::before{
+      content:"";
+      position:fixed; inset:0;
+      pointer-events:none;
+      background:
+        radial-gradient(circle at 10% 10%, rgba(255,45,45,0.08), transparent 40%),
+        radial-gradient(circle at 90% 30%, rgba(255,138,0,0.06), transparent 42%),
+        radial-gradient(circle at 50% 95%, rgba(255,255,255,0.03), transparent 35%),
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='.18'/%3E%3C/svg%3E");
+      mix-blend-mode: overlay;
+      opacity:0.35;
+    }
+
+    .app{
+      display:grid;
+      grid-template-columns: 360px 1fr 380px;
+      grid-template-rows: auto 360px;
+      gap:16px;
+      padding:18px;
+      height:100vh;
+      box-sizing:border-box;
+      position:relative;
+      z-index:1;
+    }
+
+    .panel{
+      background:var(--card);
+      border:1px solid var(--stroke);
+      border-radius:14px;
+      box-shadow: 0 14px 40px rgba(0,0,0,0.45);
+      backdrop-filter: blur(10px);
+      padding:14px;
+    }
+
+    header.panel{
+      grid-column:1/4;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      padding:14px 16px;
+    }
+
+    .brand{display:flex; align-items:center; gap:12px;}
+    .logo{
+      width:52px; height:52px; border-radius:14px;
+      background:linear-gradient(135deg,var(--red),var(--orange));
+      display:flex; align-items:center; justify-content:center;
+      box-shadow: 0 12px 30px rgba(255,45,45,0.10), inset 0 -10px 18px rgba(0,0,0,0.22);
+    }
+    .logo svg{width:36px;height:36px; filter:drop-shadow(0 6px 18px rgba(0,0,0,0.35));}
+
+    h1{margin:0; font-family:Poppins,Inter,sans-serif; font-weight:800; letter-spacing:0.3px; font-size:18px;}
+    .tagline{color:var(--muted); font-size:13px; margin-top:4px}
+
+    .badge{
+      display:inline-flex; align-items:center; gap:8px;
+      padding:6px 10px; border-radius:999px;
+      background:rgba(255,255,255,0.04);
+      border:1px solid rgba(255,255,255,0.05);
+      color:var(--muted);
+      font-size:12px;
+      font-weight:700;
+    }
+    .dot{width:10px;height:10px;border-radius:50%;}
+    .dot.red{background:var(--red);}
+    .dot.green{background:var(--green);}
+    .dot.gray{background:rgba(255,255,255,0.12);}
+
+    .top-controls{display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:flex-end;}
+    .toggle{
+      display:flex; align-items:center; gap:10px;
+      padding:8px 10px; border-radius:12px;
+      border:1px solid rgba(255,255,255,0.05);
+      background:rgba(255,255,255,0.02);
+      color:var(--muted);
+      font-weight:700;
+      font-size:12px;
+    }
+    .toggle input{accent-color: var(--red);}
+
+    .status-row{display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:flex-end;}
+    .status-pill{
+      display:flex; align-items:center; gap:10px;
+      padding:8px 12px; border-radius:999px;
+      background:rgba(255,255,255,0.02);
+      border:1px solid rgba(255,255,255,0.04);
+      color:var(--muted);
+      font-size:13px;
+      font-weight:700;
+      min-height:36px;
+    }
+    .pulse{
+      position:relative;
+      width:10px; height:10px; border-radius:50%;
+      background:var(--red);
+      box-shadow:0 6px 18px rgba(255,45,45,0.18);
+    }
+    .pulse::after{
+      content:"";
+      position:absolute; inset:-8px;
+      border-radius:50%;
+      background:rgba(255,45,45,0.35);
+      animation:pulse 1800ms infinite;
+      opacity:0;
+    }
+    @keyframes pulse{
+      0%{transform:scale(0.6); opacity:0.55;}
+      70%{transform:scale(1.6); opacity:0;}
+      100%{opacity:0;}
+    }
+
+    .side{
+      overflow:auto;
+      height:calc(100% - 64px);
+      padding:12px;
+    }
+
+    .section-title{display:flex; align-items:center; justify-content:space-between; gap:10px; margin:0 0 10px 0;}
+    .section-title h3{margin:0; font-size:14px; letter-spacing:0.4px;}
+    .section-title .muted{font-size:12px;}
+
+    .muted{color:var(--muted); font-size:13px;}
+    label{display:block; color:var(--muted); font-size:12px; font-weight:700; margin-bottom:6px;}
+
+    input[type=text], input[type=password], select, textarea{
+      width:100%;
+      box-sizing:border-box;
+      padding:10px 12px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,0.06);
+      background:rgba(255,255,255,0.02);
+      color:var(--txt);
+      outline:none;
+    }
+    textarea{min-height:74px; resize:vertical;}
+
+    .row{display:flex; gap:10px; align-items:center;}
+    .row > * {flex:1;}
+
+    button{
+      border:none; cursor:pointer;
+      padding:10px 12px;
+      border-radius:12px;
+      font-weight:900;
+      letter-spacing:0.2px;
+      color:#0b0b0d;
+      background:linear-gradient(135deg,var(--red),var(--orange));
+      box-shadow:0 10px 30px rgba(255,45,45,0.08);
+      transition: transform .14s ease, box-shadow .14s ease, filter .14s ease;
+    }
+    button:hover{transform:translateY(-2px); filter:saturate(1.1); box-shadow:0 16px 44px rgba(255,45,45,0.12);}
+    button.secondary{
+      background:transparent; color:var(--txt);
+      border:1px solid rgba(255,255,255,0.07);
+      box-shadow:none;
+    }
+    button.danger{
+      background:linear-gradient(135deg,#ff2d2d,#ff004d);
+      color:#fff;
+    }
+    button.ghost{
+      background:rgba(255,255,255,0.02);
+      border:1px solid rgba(255,255,255,0.06);
+      color:var(--txt);
+      box-shadow:none;
+    }
+    button:disabled{opacity:0.45; cursor:not-allowed; transform:none; box-shadow:none;}
+
+    .divider{height:1px; background:rgba(255,255,255,0.06); margin:12px 0;}
+
+    .device-list{display:flex; flex-direction:column; gap:10px;}
+    .device-card{
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,0.05);
+      background:rgba(255,255,255,0.02);
+      padding:10px 10px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .device-card.active{
+      border-color: rgba(255,45,45,0.35);
+      background: linear-gradient(180deg, rgba(255,45,45,0.10), rgba(255,255,255,0.02));
+      box-shadow: 0 12px 32px rgba(255,45,45,0.08);
+    }
+    .device-meta{display:flex; flex-direction:column; gap:3px; min-width:0;}
+    .device-name{font-weight:900; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+    .device-sub{color:var(--muted); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+    .device-actions{display:flex; gap:8px; align-items:center; flex:0 0 auto;}
+    .chip{
+      padding:6px 10px; border-radius:999px;
+      font-size:12px; font-weight:900;
+      border:1px solid rgba(255,255,255,0.06);
+      background:rgba(0,0,0,0.18);
+      color:var(--muted);
+      white-space:nowrap;
+    }
+    .chip.ok{color:#001; background:rgba(54,224,122,0.20); border-color:rgba(54,224,122,0.35);}
+    .chip.bad{color:#fff; background:rgba(255,45,45,0.22); border-color:rgba(255,45,45,0.35);}
+
+    /* Center scene */
+    #sceneWrap{
+      position:relative;
+      width:100%;
+      height:100%;
+      border-radius:16px;
+      overflow:hidden;
+      background:linear-gradient(180deg,#020203,#081119);
+      border:1px solid rgba(255,255,255,0.05);
+      display:flex; flex-direction:column;
+    }
+
+    .scene-toolbar{
+      display:flex; align-items:center; justify-content:space-between;
+      padding:10px 10px;
+      background:rgba(255,255,255,0.02);
+      border-bottom:1px solid rgba(255,255,255,0.05);
+      gap:12px;
+      flex-wrap:wrap;
+    }
+    .scene-toolbar .left{display:flex; gap:10px; align-items:center; flex-wrap:wrap;}
+    .scene-toolbar .right{display:flex; gap:10px; align-items:center; flex-wrap:wrap; justify-content:flex-end;}
+
+    .sceneStage{position:relative; flex:1; display:flex; align-items:center; justify-content:center;}
+    video{
+      width:100%; height:100%;
+      object-fit:cover;
+      transform:scaleX(-1);
+      display:block;
+      background:#000;
+    }
+    canvas.overlay2d, canvas.overlay3d{
+      position:absolute; inset:0;
+      width:100%; height:100%;
+      pointer-events:none;
+    }
+    canvas.overlay3d{ /* Three.js uses its own drawing; keep transparent */
+      pointer-events:none;
+    }
+
+    .hint{
+      padding:10px 12px;
+      border-radius:12px;
+      background:rgba(255,255,255,0.02);
+      border:1px solid rgba(255,255,255,0.05);
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.35;
+    }
+
+    /* Right panel metrics */
+    .metric-grid{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px;}
+    .metric{
+      padding:10px;
+      border-radius:14px;
+      background:rgba(255,255,255,0.02);
+      border:1px solid rgba(255,255,255,0.05);
+      display:flex; flex-direction:column; gap:6px;
+    }
+    .metric .k{color:var(--muted); font-size:12px; font-weight:800;}
+    .metric .v{font-size:18px; font-weight:900;}
+    .metric .u{color:var(--muted); font-size:12px;}
+
+    .chart-card{
+      padding:10px;
+      border-radius:14px;
+      background:rgba(255,255,255,0.02);
+      border:1px solid rgba(255,255,255,0.05);
+      margin-top:10px;
+    }
+    .chart-container{height:140px;}
+
+    /* Logs */
+    .log{
+      background: linear-gradient(180deg, rgba(0,0,0,0.40), rgba(0,0,0,0.26));
+      border:1px solid rgba(255,255,255,0.05);
+      border-radius:14px;
+      padding:12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size:12px;
+      color:#ffdede;
+      max-height:240px;
+      overflow:auto;
+    }
+
+    /* Bottom area */
+    .bottom{
+      grid-column:1/4;
+      display:grid;
+      grid-template-columns: 1fr 460px;
+      gap:12px;
+    }
+
+    /* Modal */
+    .modal-backdrop{
+      position:fixed; inset:0;
+      background:rgba(0,0,0,0.62);
+      display:none;
+      align-items:center;
+      justify-content:center;
+      z-index:9999;
+      padding:18px;
+    }
+    .modal{
+      width:min(720px, 98vw);
+      border-radius:18px;
+      background:linear-gradient(180deg, rgba(22,22,26,0.98), rgba(10,10,12,0.98));
+      border:1px solid rgba(255,255,255,0.08);
+      box-shadow: 0 20px 70px rgba(0,0,0,0.60);
+      padding:14px;
+    }
+    .modal h3{margin:0 0 6px 0;}
+    .modal .modal-body{color:var(--muted); font-size:13px; line-height:1.45;}
+    .modal .modal-actions{display:flex; justify-content:flex-end; gap:10px; margin-top:12px; flex-wrap:wrap;}
+
+    /* Responsive */
+    @media (max-width:1150px){
+      .app{grid-template-columns:1fr; grid-template-rows:auto 1fr auto; height:auto;}
+      header.panel{grid-column:1/2;}
+      .bottom{grid-column:1/2; grid-template-columns:1fr;}
+      .side{height:auto;}
+    }
+  </style>
+</head>
+
+<body>
+<div class="app">
+  <!-- =========================================================
+       HEADER
+       ========================================================= -->
+  <header class="panel">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">
+        <!-- RedNode mark -->
+        <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="rg1" x1="0" x2="1">
+              <stop offset="0" stop-color="#ff2d2d"/>
+              <stop offset="1" stop-color="#ff8a00"/>
+            </linearGradient>
+          </defs>
+          <circle cx="32" cy="32" r="19.5" fill="url(#rg1)" opacity="0.98"/>
+          <circle cx="14" cy="18" r="4" fill="#050b10"/>
+          <circle cx="50" cy="18" r="4" fill="#050b10"/>
+          <circle cx="32" cy="48" r="4" fill="#050b10"/>
+          <path d="M20 26 L28 32" stroke="#050b10" stroke-width="2.2" stroke-linecap="round"/>
+          <path d="M44 26 L36 32" stroke="#050b10" stroke-width="2.2" stroke-linecap="round"/>
+          <path d="M32 40 L32 36" stroke="#050b10" stroke-width="2.2" stroke-linecap="round"/>
+        </svg>
+      </div>
+
+      <div>
+        <div style="display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;">
+          <h1>RedNode · Eye Pro</h1>
+          <span class="badge"><span class="dot red"></span> Commercial Console</span>
+          <span class="badge">Fleet · XR · Excavators · Vehicles · SmartSites</span>
+        </div>
+        <div class="tagline">Unified control & telemetry overlay for machines, batteries, and connected environments</div>
+      </div>
+    </div>
+
+    <div style="display:flex; flex-direction:column; align-items:flex-end; gap:8px; min-width:380px;">
+      <div class="top-controls">
+        <div class="toggle">
+          <span>Read‑Only</span>
+          <input id="readOnlyToggle" type="checkbox" checked />
+        </div>
+        <div class="toggle">
+          <span>Controls Enabled</span>
+          <input id="controlsToggle" type="checkbox" />
+        </div>
+        <button id="btnEnterXR" class="ghost" style="padding:10px 12px; color:var(--txt);">Enter XR</button>
+      </div>
+
+      <div class="status-row">
+        <div class="status-pill" id="netStatus"><span class="pulse"></span> Network: unknown</div>
+        <div class="status-pill" id="btStatus"><span class="dot gray"></span> Bluetooth: idle</div>
+        <div class="status-pill" id="opsStatus"><span class="dot gray"></span> Ops Room: offline</div>
+        <div class="status-pill"><span class="dot gray"></span> <span id="sysTime">—</span></div>
+      </div>
+    </div>
+  </header>
+
+  <!-- =========================================================
+       LEFT: FLEET + CONNECTIONS
+       ========================================================= -->
+  <aside class="panel side">
+    <div class="section-title">
+      <h3>Fleet</h3>
+      <div class="muted" id="fleetMeta">0 devices</div>
+    </div>
+
+    <div id="deviceList" class="device-list"></div>
+
+    <div class="divider"></div>
+
+    <div class="section-title">
+      <h3>Add Connection</h3>
+      <div class="muted">Adapters</div>
+    </div>
+
+    <label>Connection Type</label>
+    <select id="connType">
+      <option value="gateway">RedNode Gateway (WSS)</option>
+      <option value="bluetooth">Bluetooth LE (GATT)</option>
+      <option value="mqtt">MQTT (WebSockets)</option>
+      <option value="webrtc">WebRTC Camera (Signaling WS)</option>
+      <option value="sim">Simulator (Demo)</option>
+    </select>
+
+    <div id="connForm" style="margin-top:10px;"></div>
+
+    <div class="divider"></div>
+
+    <div class="section-title">
+      <h3>Ops Room</h3>
+      <div class="muted">Multi‑operator</div>
+    </div>
+
+    <div class="hint">
+      Ops Room syncs <b>annotations</b> and <b>audit events</b> across operators. Use a secure WSS room server in production.
+    </div>
+
+    <div style="margin-top:10px;">
+      <label>Ops Room WSS</label>
+      <input id="opsUrl" type="text" placeholder="wss://ops.rednode.example/room" />
+    </div>
+
+    <div class="row" style="margin-top:10px;">
+      <div>
+        <label>Room</label>
+        <input id="opsRoom" type="text" placeholder="yard-17A" />
+      </div>
+      <div>
+        <label>Operator</label>
+        <input id="opsOperator" type="text" placeholder="operator@rednode" />
+      </div>
+    </div>
+
+    <div style="display:flex; gap:10px; margin-top:10px;">
+      <button id="btnJoinOps" class="secondary">Join</button>
+      <button id="btnLeaveOps" class="secondary">Leave</button>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="section-title">
+      <h3>Historical Memory</h3>
+      <div class="muted">localStorage</div>
+    </div>
+
+    <div class="log" id="historyLog" style="height:180px;"></div>
+
+    <div style="display:flex; gap:10px; margin-top:10px;">
+      <button id="btnExportHistory" class="secondary">Export CSV</button>
+      <button id="btnClearHistory" class="secondary" style="border-color:rgba(255,45,45,0.35); color:#fff;">Clear</button>
+    </div>
+  </aside>
+
+  <!-- =========================================================
+       CENTER: SCENE (VIDEO + 2D & 3D HUD overlays)
+       ========================================================= -->
+  <main class="panel" style="display:flex; flex-direction:column; gap:12px;">
+    <div class="section-title">
+      <h3>Scene Overlay</h3>
+      <div class="muted">Live feed + operational HUD</div>
+    </div>
+
+    <div id="sceneWrap">
+      <div class="scene-toolbar">
+        <div class="left">
+          <span class="badge" id="sceneSourceBadge"><span class="dot gray"></span> Source: local camera</span>
+          <span class="badge" id="modelBadge"><span class="dot gray"></span> Models: unloaded</span>
+          <span class="badge" id="hudBadge"><span class="dot green"></span> HUD: active</span>
+        </div>
+
+        <div class="right">
+          <span class="toggle"><span>2D Detect</span> <input id="toggle2d" type="checkbox" checked /></span>
+          <span class="toggle"><span>3D HUD</span> <input id="toggle3d" type="checkbox" checked /></span>
+          <span class="toggle"><span>Annotations</span> <input id="toggleAnno" type="checkbox" checked /></span>
+
+          <select id="detectRate" style="max-width:160px;">
+            <option value="200">Detect: 200ms</option>
+            <option value="350" selected>Detect: 350ms</option>
+            <option value="500">Detect: 500ms</option>
+          </select>
+
+          <button id="btnLocalCam" class="secondary">Local Cam</button>
+          <button id="btnStopCam" class="secondary">Stop</button>
+        </div>
+      </div>
+
+      <div class="sceneStage" id="sceneStage">
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="overlay2d" class="overlay2d"></canvas>
+        <canvas id="overlay3d" class="overlay3d"></canvas>
+      </div>
+    </div>
+
+    <div class="hint">
+      Tip: click on the scene to drop an annotation marker (shared to Ops Room when connected).
+      For remote excavators/vehicles, connect a <b>WebRTC camera stream</b> and set that device as “Active”.
+    </div>
+  </main>
+
+  <!-- =========================================================
+       RIGHT: SELECTED UNIT + TELEMETRY + SAFE CONTROLS
+       ========================================================= -->
+  <aside class="panel side">
+    <div class="section-title">
+      <h3>Selected Unit</h3>
+      <div class="muted" id="selectedUnitMeta">none</div>
+    </div>
+
+    <div class="metric-grid">
+      <div class="metric">
+        <div class="k">Battery SoC</div>
+        <div class="v" id="m_soc">—</div>
+        <div class="u">%</div>
+      </div>
+      <div class="metric">
+        <div class="k">Pack Temp</div>
+        <div class="v" id="m_temp">—</div>
+        <div class="u">°C</div>
+      </div>
+      <div class="metric">
+        <div class="k">Hydraulic</div>
+        <div class="v" id="m_hyd">—</div>
+        <div class="u">bar</div>
+      </div>
+      <div class="metric">
+        <div class="k">Mode</div>
+        <div class="v" id="m_mode">—</div>
+        <div class="u">state</div>
+      </div>
+    </div>
+
+    <div class="chart-card">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div><b>Battery Power</b> <span class="muted">(kW)</span></div>
+        <div class="muted" id="v_power">—</div>
+      </div>
+      <div class="chart-container"><canvas id="powerChart"></canvas></div>
+    </div>
+
+    <div class="chart-card">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div><b>Hydraulic Pressure</b> <span class="muted">(bar)</span></div>
+        <div class="muted" id="v_pressure">—</div>
+      </div>
+      <div class="chart-container"><canvas id="pressureChart"></canvas></div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="section-title">
+      <h3>Safe Controls</h3>
+      <div class="muted">Guarded</div>
+    </div>
+
+    <div class="hint">
+      Controls require <b>Controls Enabled</b> and not Read‑Only.
+      Critical actions require hold‑to‑send or confirmation and are audit‑logged.
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px;">
+      <button id="cmdArm" class="ghost">ARM</button>
+      <button id="cmdDisarm" class="ghost">DISARM</button>
+      <button id="cmdMove" style="grid-column:1/3;" class="ghost">MOVE (demo)</button>
+      <button id="cmdBatterySave" class="ghost">Battery SAVE</button>
+      <button id="cmdLights" class="ghost">Site Lights</button>
+      <button id="cmdEstop" class="danger" style="grid-column:1/3;">EMERGENCY STOP</button>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="section-title">
+      <h3>Command / Audit Log</h3>
+      <div class="muted">local + ops</div>
+    </div>
+
+    <div class="log" id="cmdLog" style="height:160px;"></div>
+
+    <div class="divider"></div>
+
+    <div class="section-title">
+      <h3>Raw Telemetry</h3>
+      <div class="muted">normalized</div>
+    </div>
+
+    <div class="log" id="telemetryLog" style="height:160px;"></div>
+  </aside>
+
+  <!-- =========================================================
+       BOTTOM: TIMELINE + OPERATIONS
+       ========================================================= -->
+  <div class="bottom">
+    <section class="panel">
+      <div class="section-title">
+        <h3>Timeline</h3>
+        <div class="muted">events</div>
+      </div>
+
+      <div class="log" id="timeline" style="height:220px;"></div>
+
+      <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:10px;">
+        <button id="btnClearTimeline" class="secondary">Clear Timeline</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="section-title">
+        <h3>System Actions</h3>
+        <div class="muted">simulate / tools</div>
+      </div>
+
+      <div class="hint">
+        These simulate field telemetry and overlays. Replace with real gateways, MQTT topics, and BLE services.
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:10px; margin-top:10px;">
+        <button id="simTelemetry" class="secondary">Simulate Fleet Telemetry</button>
+        <button id="simAnnotation" class="secondary">Simulate Annotation</button>
+        <button id="simAlert" class="secondary">Simulate Alert</button>
+      </div>
+
+      <div class="divider"></div>
+
+      <label>Custom Command</label>
+      <div class="row">
+        <input id="customCmd" type="text" placeholder="e.g. excavator_bucket_set" />
+        <button id="sendCustomCmd" class="secondary" style="flex:0 0 auto;">Send</button>
+      </div>
+      <label style="margin-top:10px;">Params (JSON)</label>
+      <textarea id="customParams" placeholder='{"angle":12.5,"speed":0.3}'></textarea>
+    </section>
+  </div>
+
+  <!-- =========================================================
+       MODAL
+       ========================================================= -->
+  <div class="modal-backdrop" id="modalBackdrop" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal">
+      <h3 id="modalTitle">Modal</h3>
+      <div class="modal-body" id="modalBody">…</div>
+      <div class="modal-actions" id="modalActions"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ============================================================
+   RedNode Eye Pro — Commercial-Ready Skeleton
+   ============================================================ */
+
+const RN = {
+  version: "1.0.0-pro",
+  historyKey: "rednode_eye_pro_history_v1",
+  maxHistory: 2000,
+  maxLogLines: 500,
+  // PLACEHOLDERS: Replace these with your real UUIDs in production
+  profiles: {
+    excavator_ble: {
+      name: "Excavator Controller (BLE)",
+      serviceUUID: "0000feed-0000-1000-8000-00805f9b34fb",
+      telemetryCharUUID: "0000beef-0000-1000-8000-00805f9b34fb",
+      commandCharUUID: "0000c0de-0000-1000-8000-00805f9b34fb"
+    },
+    battery_ble: {
+      name: "Battery Pack (BLE)",
+      serviceUUID: "0000batt-0000-1000-8000-00805f9b34fb".replace("batt","b4tt"),
+      telemetryCharUUID: "0000b10b-0000-1000-8000-00805f9b34fb",
+      commandCharUUID: "0000b0c0-0000-1000-8000-00805f9b34fb"
+    }
+  }
+};
+
+const ui = {
+  sysTime: document.getElementById("sysTime"),
+  netStatus: document.getElementById("netStatus"),
+  btStatus: document.getElementById("btStatus"),
+  opsStatus: document.getElementById("opsStatus"),
+
+  readOnlyToggle: document.getElementById("readOnlyToggle"),
+  controlsToggle: document.getElementById("controlsToggle"),
+  btnEnterXR: document.getElementById("btnEnterXR"),
+
+  deviceList: document.getElementById("deviceList"),
+  fleetMeta: document.getElementById("fleetMeta"),
+  selectedUnitMeta: document.getElementById("selectedUnitMeta"),
+
+  connType: document.getElementById("connType"),
+  connForm: document.getElementById("connForm"),
+
+  opsUrl: document.getElementById("opsUrl"),
+  opsRoom: document.getElementById("opsRoom"),
+  opsOperator: document.getElementById("opsOperator"),
+  btnJoinOps: document.getElementById("btnJoinOps"),
+  btnLeaveOps: document.getElementById("btnLeaveOps"),
+
+  historyLog: document.getElementById("historyLog"),
+  btnExportHistory: document.getElementById("btnExportHistory"),
+  btnClearHistory: document.getElementById("btnClearHistory"),
+
+  video: document.getElementById("video"),
+  overlay2d: document.getElementById("overlay2d"),
+  overlay3d: document.getElementById("overlay3d"),
+  sceneStage: document.getElementById("sceneStage"),
+  sceneSourceBadge: document.getElementById("sceneSourceBadge"),
+  modelBadge: document.getElementById("modelBadge"),
+  hudBadge: document.getElementById("hudBadge"),
+  detectRate: document.getElementById("detectRate"),
+  toggle2d: document.getElementById("toggle2d"),
+  toggle3d: document.getElementById("toggle3d"),
+  toggleAnno: document.getElementById("toggleAnno"),
+  btnLocalCam: document.getElementById("btnLocalCam"),
+  btnStopCam: document.getElementById("btnStopCam"),
+
+  m_soc: document.getElementById("m_soc"),
+  m_temp: document.getElementById("m_temp"),
+  m_hyd: document.getElementById("m_hyd"),
+  m_mode: document.getElementById("m_mode"),
+  v_power: document.getElementById("v_power"),
+  v_pressure: document.getElementById("v_pressure"),
+
+  cmdArm: document.getElementById("cmdArm"),
+  cmdDisarm: document.getElementById("cmdDisarm"),
+  cmdMove: document.getElementById("cmdMove"),
+  cmdBatterySave: document.getElementById("cmdBatterySave"),
+  cmdLights: document.getElementById("cmdLights"),
+  cmdEstop: document.getElementById("cmdEstop"),
+
+  cmdLog: document.getElementById("cmdLog"),
+  telemetryLog: document.getElementById("telemetryLog"),
+  timeline: document.getElementById("timeline"),
+  btnClearTimeline: document.getElementById("btnClearTimeline"),
+
+  simTelemetry: document.getElementById("simTelemetry"),
+  simAnnotation: document.getElementById("simAnnotation"),
+  simAlert: document.getElementById("simAlert"),
+
+  customCmd: document.getElementById("customCmd"),
+  customParams: document.getElementById("customParams"),
+  sendCustomCmd: document.getElementById("sendCustomCmd"),
+
+  modalBackdrop: document.getElementById("modalBackdrop"),
+  modalTitle: document.getElementById("modalTitle"),
+  modalBody: document.getElementById("modalBody"),
+  modalActions: document.getElementById("modalActions")
+};
+
+const state = {
+  // operator safety
+  readOnly: true,
+  controlsEnabled: false,
+
+  // devices
+  devices: new Map(), // id -> device
+  selectedDeviceId: null,
+
+  // camera
+  localCamStream: null,
+  videoSource: "local", // local | webrtc
+
+  // detection models
+  cocoModel: null,
+  blazeModel: null,
+  detectionRunning: false,
+
+  // overlays
+  annotations: [], // {id,x,y,label,ts,by}
+  lastDetections: {objects: [], faces: []},
+
+  // ops room
+  ops: {
+    ws: null,
+    connected: false,
+    room: null,
+    operator: null
+  },
+
+  // 3D HUD
+  hud3d: {
+    enabled: true,
+    ready: false,
+    renderer: null,
+    scene: null,
+    camera: null,
+    boxGroup: null,
+    annoGroup: null,
+    reticle: null
+  }
+};
+
+/* ============================================================
+   Utilities
+   ============================================================ */
+function nowIso(){ return new Date().toISOString(); }
+function clamp(n,min,max){ return Math.max(min, Math.min(max, n)); }
+function safeJsonParse(txt, fallback=null){
+  try { return JSON.parse(txt); } catch(e) { return fallback; }
+}
+function logTo(el, msg, maxLines=RN.maxLogLines){
+  const line = `${nowIso()} — ${msg}`;
+  const existing = (el.innerText || "").split("\n").filter(Boolean);
+  existing.unshift(line);
+  el.innerText = existing.slice(0, maxLines).join("\n");
+}
+
+function showModal(title, bodyHtml, actions){
+  ui.modalTitle.innerText = title;
+  ui.modalBody.innerHTML = bodyHtml;
+
+  ui.modalActions.innerHTML = "";
+  (actions || []).forEach(a=>{
+    const b = document.createElement("button");
+    b.innerText = a.label;
+    b.className = a.className || "secondary";
+    b.onclick = () => { try{ a.onClick?.(); } finally { if(a.close !== false) hideModal(); } };
+    ui.modalActions.appendChild(b);
+  });
+
+  ui.modalBackdrop.style.display = "flex";
+  ui.modalBackdrop.setAttribute("aria-hidden","false");
+}
+function hideModal(){
+  ui.modalBackdrop.style.display = "none";
+  ui.modalBackdrop.setAttribute("aria-hidden","true");
+}
+
+/* ============================================================
+   System time & network
+   ============================================================ */
+function updateSysTime(){ ui.sysTime.innerText = new Date().toLocaleString(); }
+setInterval(updateSysTime, 1000); updateSysTime();
+
+function updateNetworkInfo(){
+  const n = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  const t = n?.effectiveType || "unknown";
+  ui.netStatus.innerHTML = `<span class="pulse"></span> Network: ${t}`;
+}
+updateNetworkInfo();
+if (navigator.connection) navigator.connection.addEventListener("change", updateNetworkInfo);
+
+/* ============================================================
+   History persistence
+   ============================================================ */
+function addToHistory(event){
+  try{
+    const arr = JSON.parse(localStorage.getItem(RN.historyKey) || "[]");
+    arr.unshift({ts: nowIso(), event});
+    localStorage.setItem(RN.historyKey, JSON.stringify(arr.slice(0, RN.maxHistory)));
+    renderHistory();
+  }catch(e){ console.warn(e); }
+}
+function renderHistory(){
+  const arr = JSON.parse(localStorage.getItem(RN.historyKey) || "[]");
+  ui.historyLog.innerText = arr.map(r=>`${r.ts} — ${JSON.stringify(r.event)}`).join("\n\n");
+}
+ui.btnClearHistory.addEventListener("click", ()=>{
+  localStorage.removeItem(RN.historyKey);
+  renderHistory();
+});
+ui.btnExportHistory.addEventListener("click", ()=>{
+  const arr = JSON.parse(localStorage.getItem(RN.historyKey) || "[]");
+  if(!arr.length){ alert("No history"); return; }
+  const csv = "timestamp,event\n" + arr.map(r => `${r.ts},"${JSON.stringify(r.event).replace(/"/g,'""')}"`).join("\n");
+  const blob = new Blob([csv], {type:"text/csv"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "rednode_eye_pro_history.csv"; a.click();
+  URL.revokeObjectURL(url);
+});
+renderHistory();
+
+/* ============================================================
+   Device model + adapters
+   ============================================================ */
+function makeId(prefix="dev"){
+  try{ return `${prefix}-${crypto.randomUUID().slice(0,8)}`; }
+  catch(e){ return `${prefix}-${Math.random().toString(16).slice(2,10)}`; }
+}
+
+class EventBus {
+  constructor(){ this.handlers = new Map(); }
+  on(evt, fn){ if(!this.handlers.has(evt)) this.handlers.set(evt, []); this.handlers.get(evt).push(fn); }
+  emit(evt, data){ (this.handlers.get(evt) || []).forEach(fn=>{ try{ fn(data); }catch(e){ console.warn(e);} }); }
+}
+
+class BaseAdapter extends EventBus {
+  constructor(){ super(); this.connected = false; }
+  async connect(){ throw new Error("connect not implemented"); }
+  async disconnect(){ /* optional */ }
+  async sendCommand(cmd, params){ /* optional */ }
+}
+
+class WsGatewayAdapter extends BaseAdapter {
+  constructor({url, token, deviceName}){
+    super();
+    this.url = url;
+    this.token = token || "";
+    this.deviceName = deviceName || "Gateway Unit";
+    this.ws = null;
+  }
+  async connect(){
+    if(!this.url) throw new Error("Missing gateway url");
+    if(!this.url.startsWith("wss://") && !this.url.startsWith("ws://")){
+      throw new Error("Gateway URL must be ws:// or wss://");
+    }
+    this.ws = new WebSocket(this.url);
+    this.emit("status", {phase:"connecting"});
+    this.ws.onopen = () => {
+      this.connected = true;
+      this.emit("status", {phase:"connected"});
+      // optional auth handshake
+      this.ws.send(JSON.stringify({type:"hello", token:this.token, client:"rednode-eye-pro", ts:nowIso()}));
+    };
+    this.ws.onclose = () => { this.connected = false; this.emit("status", {phase:"disconnected"}); };
+    this.ws.onerror = () => { this.connected = false; this.emit("status", {phase:"error"}); };
+    this.ws.onmessage = (m)=>{
+      const raw = safeJsonParse(m.data, {type:"raw", data:String(m.data)});
+      this.emit("telemetry", raw);
+    };
+  }
+  async disconnect(){
+    try{ this.ws?.close(); }catch(e){}
+    this.connected = false;
+  }
+  async sendCommand(cmd, params){
+    if(!this.ws || this.ws.readyState !== WebSocket.OPEN) throw new Error("Gateway not connected");
+    const msg = {type:"command", cmd, params: params||{}, ts: nowIso()};
+    this.ws.send(JSON.stringify(msg));
+    return msg;
+  }
+}
+
+class BluetoothGattAdapter extends BaseAdapter {
+  constructor({profileKey}){
+    super();
+    this.profileKey = profileKey || "excavator_ble";
+    this.profile = RN.profiles[this.profileKey] || RN.profiles.excavator_ble;
+    this.device = null;
+    this.server = null;
+    this.telemetryChar = null;
+    this.commandChar = null;
+  }
+
+  async connect(){
+    if(!navigator.bluetooth) throw new Error("WebBluetooth not available in this browser");
+    ui.btStatus.innerHTML = `<span class="dot gray"></span> Bluetooth: scanning…`;
+
+    const device = await navigator.bluetooth.requestDevice({
+      acceptAllDevices: true,
+      optionalServices: [this.profile.serviceUUID]
+    });
+
+    this.device = device;
+    this.device.addEventListener("gattserverdisconnected", ()=>{
+      this.connected = false;
+      this.emit("status", {phase:"disconnected"});
+      ui.btStatus.innerHTML = `<span class="dot gray"></span> Bluetooth: disconnected`;
+    });
+
+    this.server = await device.gatt.connect();
+    const svc = await this.server.getPrimaryService(this.profile.serviceUUID);
+
+    // telemetry notifications
+    this.telemetryChar = await svc.getCharacteristic(this.profile.telemetryCharUUID);
+    await this.telemetryChar.startNotifications();
+    this.telemetryChar.addEventListener("characteristicvaluechanged", (ev)=>{
+      const dv = ev.target.value;
+      const bytes = new Uint8Array(dv.buffer);
+      // Expect either UTF‑8 JSON or a compact binary frame (production: define schema)
+      let asText = "";
+      try { asText = new TextDecoder().decode(bytes); } catch(e) {}
+      const parsed = safeJsonParse(asText, null);
+
+      const payload = parsed || {type:"ble_frame", bytes:Array.from(bytes), ts:nowIso()};
+      this.emit("telemetry", payload);
+    });
+
+    // optional command characteristic
+    try{ this.commandChar = await svc.getCharacteristic(this.profile.commandCharUUID); }catch(e){ this.commandChar=null; }
+
+    this.connected = true;
+    ui.btStatus.innerHTML = `<span class="dot green"></span> Bluetooth: connected`;
+    this.emit("status", {phase:"connected", name: device.name || device.id});
+  }
+
+  async disconnect(){
+    try{
+      if(this.server?.connected) this.server.disconnect();
+    }catch(e){}
+    this.connected = false;
+  }
+
+  async sendCommand(cmd, params){
+    // Production approach: define a binary protocol with CRC + sequence numbers.
+    // Demo: send JSON via a command characteristic.
+    if(!this.commandChar) throw new Error("Command characteristic not available for this BLE profile");
+    const msg = JSON.stringify({type:"command", cmd, params:params||{}, ts:nowIso()});
+    const bytes = new TextEncoder().encode(msg);
+    await this.commandChar.writeValue(bytes);
+    return msg;
+  }
+}
+
+class MqttWsAdapter extends BaseAdapter {
+  constructor({url, username, password, topicPrefix}){
+    super();
+    this.url = url;
+    this.username = username || "";
+    this.password = password || "";
+    this.topicPrefix = (topicPrefix || "rednode/+/telemetry").trim();
+    this.client = null;
+  }
+
+  async connect(){
+    if(!window.mqtt) throw new Error("MQTT library not loaded");
+    if(!this.url) throw new Error("Missing MQTT URL (wss://broker:port/mqtt)");
+    this.emit("status",{phase:"connecting"});
+
+    this.client = mqtt.connect(this.url, {
+      username: this.username || undefined,
+      password: this.password || undefined,
+      reconnectPeriod: 2000,
+      keepalive: 30,
+      clientId: "rednode-eye-pro-" + Math.random().toString(16).slice(2,8)
+    });
+
+    this.client.on("connect", ()=>{
+      this.connected = true;
+      this.emit("status",{phase:"connected"});
+      // Subscribe to telemetry topics
+      this.client.subscribe(this.topicPrefix, {qos: 0});
+    });
+
+    this.client.on("reconnect", ()=> this.emit("status",{phase:"reconnecting"}));
+    this.client.on("close", ()=> { this.connected=false; this.emit("status",{phase:"disconnected"}); });
+    this.client.on("error", ()=> { this.connected=false; this.emit("status",{phase:"error"}); });
+
+    this.client.on("message", (topic, payload)=>{
+      const txt = payload?.toString?.() ?? "";
+      const parsed = safeJsonParse(txt, null);
+      this.emit("telemetry", parsed || {type:"mqtt_raw", topic, payload:txt, ts:nowIso()});
+    });
+  }
+
+  async disconnect(){
+    try{ this.client?.end(true); }catch(e){}
+    this.connected = false;
+  }
+
+  async sendCommand(cmd, params){
+    // Convention: publish to rednode/<deviceId>/command (adjust per your infra)
+    if(!this.client || !this.connected) throw new Error("MQTT not connected");
+    const targetTopic = "rednode/command";
+    const msg = JSON.stringify({type:"command", cmd, params:params||{}, ts:nowIso()});
+    this.client.publish(targetTopic, msg, {qos:0});
+    return msg;
+  }
+}
+
+class WebRtcStreamAdapter extends BaseAdapter {
+  constructor({signalingUrl, room, token}){
+    super();
+    this.signalingUrl = signalingUrl;
+    this.room = room || "default";
+    this.token = token || "";
+    this.ws = null;
+    this.pc = null;
+    this.stream = null;
+    this.dataChannel = null;
+  }
+
+  async connect(){
+    if(!this.signalingUrl) throw new Error("Missing signaling URL");
+    this.emit("status",{phase:"connecting"});
+
+    // Production: Use TURN; replace with your infrastructure
+    this.pc = new RTCPeerConnection({
+      iceServers: [
+        {urls: "stun:stun.l.google.com:19302"}
+      ]
+    });
+
+    this.pc.onicecandidate = (ev)=>{
+      if(ev.candidate){
+        this.ws?.send(JSON.stringify({type:"candidate", room:this.room, candidate:ev.candidate}));
+      }
+    };
+
+    this.pc.ontrack = (ev)=>{
+      this.stream = ev.streams[0];
+      this.emit("stream", this.stream);
+    };
+
+    this.pc.ondatachannel = (ev)=>{
+      this.dataChannel = ev.channel;
+      this.dataChannel.onmessage = (m)=>{
+        const parsed = safeJsonParse(m.data, {type:"dc_raw", data:String(m.data)});
+        this.emit("telemetry", parsed);
+      };
+    };
+
+    this.ws = new WebSocket(this.signalingUrl);
+    this.ws.onopen = ()=>{
+      this.connected = true;
+      this.emit("status",{phase:"connected"});
+      this.ws.send(JSON.stringify({type:"join", room:this.room, token:this.token, client:"rednode-eye-pro", ts:nowIso()}));
+    };
+    this.ws.onclose = ()=>{ this.connected=false; this.emit("status",{phase:"disconnected"}); };
+    this.ws.onerror = ()=>{ this.connected=false; this.emit("status",{phase:"error"}); };
+
+    // Expected signaling messages:
+    // {type:"offer", sdp:{...}}
+    // {type:"answer", sdp:{...}}
+    // {type:"candidate", candidate:{...}}
+    this.ws.onmessage = async (m)=>{
+      const msg = safeJsonParse(m.data, null);
+      if(!msg) return;
+
+      if(msg.type === "offer"){
+        await this.pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+        const answer = await this.pc.createAnswer();
+        await this.pc.setLocalDescription(answer);
+        this.ws.send(JSON.stringify({type:"answer", room:this.room, sdp: this.pc.localDescription}));
+      }
+
+      if(msg.type === "answer"){
+        await this.pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+      }
+
+      if(msg.type === "candidate" && msg.candidate){
+        try{ await this.pc.addIceCandidate(new RTCIceCandidate(msg.candidate)); }catch(e){}
+      }
+    };
+  }
+
+  async disconnect(){
+    try{ this.ws?.close(); }catch(e){}
+    try{ this.pc?.close(); }catch(e){}
+    this.connected = false;
+  }
+}
+
+/* ============================================================
+   Fleet manager
+   ============================================================ */
+function addDevice({id, name, type, adapter, capabilities}){
+  const dev = {
+    id,
+    name,
+    type,
+    adapter,
+    connected: false,
+    capabilities: capabilities || {},
+    lastSeen: null,
+    metrics: {soc:null, temp:null, hyd:null, mode:null, power:null, pressure:null}
+  };
+
+  adapter.on("status", (s)=>{
+    dev.connected = (s.phase === "connected");
+    renderFleet();
+  });
+
+  adapter.on("telemetry", (raw)=>{
+    dev.lastSeen = nowIso();
+    // normalize telemetry and route
+    handleIncomingTelemetry(raw, dev);
+  });
+
+  adapter.on("stream", (stream)=>{
+    // if this device is selected or active, route to scene
+    if(state.selectedDeviceId === dev.id){
+      setSceneStream(stream, "webrtc");
+    }
+  });
+
+  state.devices.set(dev.id, dev);
+  if(!state.selectedDeviceId) state.selectedDeviceId = dev.id;
+
+  renderFleet();
+  selectDevice(state.selectedDeviceId);
+  return dev;
+}
+
+function removeDevice(id){
+  const dev = state.devices.get(id);
+  if(!dev) return;
+  try{ dev.adapter.disconnect?.(); }catch(e){}
+  state.devices.delete(id);
+  if(state.selectedDeviceId === id){
+    state.selectedDeviceId = state.devices.size ? Array.from(state.devices.keys())[0] : null;
+  }
+  renderFleet();
+  selectDevice(state.selectedDeviceId);
+}
+
+function selectDevice(id){
+  state.selectedDeviceId = id || null;
+  renderFleet();
+
+  const dev = id ? state.devices.get(id) : null;
+  ui.selectedUnitMeta.innerText = dev ? `${dev.name} · ${dev.type}` : "none";
+  updateSelectedMetrics(dev);
+}
+
+function renderFleet(){
+  ui.deviceList.innerHTML = "";
+  const entries = Array.from(state.devices.values());
+  ui.fleetMeta.innerText = `${entries.length} device${entries.length===1?"":"s"}`;
+
+  if(!entries.length){
+    const empty = document.createElement("div");
+    empty.className = "hint";
+    empty.innerHTML = `No devices connected yet.<br><br>
+      Add a connection (Gateway / BLE / MQTT / WebRTC) to build your RedNode fleet.`;
+    ui.deviceList.appendChild(empty);
+    return;
+  }
+
+  entries.forEach(dev=>{
+    const card = document.createElement("div");
+    card.className = "device-card" + (dev.id === state.selectedDeviceId ? " active" : "");
+    card.onclick = ()=> selectDevice(dev.id);
+
+    const meta = document.createElement("div");
+    meta.className = "device-meta";
+    meta.innerHTML = `
+      <div class="device-name">${escapeHtml(dev.name)}</div>
+      <div class="device-sub">${escapeHtml(dev.type)} · ${dev.lastSeen ? ("last " + new Date(dev.lastSeen).toLocaleTimeString()) : "no data"}</div>
+    `;
+
+    const actions = document.createElement("div");
+    actions.className = "device-actions";
+
+    const status = document.createElement("span");
+    status.className = "chip " + (dev.connected ? "ok" : "bad");
+    status.innerText = dev.connected ? "CONNECTED" : "OFFLINE";
+
+    const btnX = document.createElement("button");
+    btnX.className = "secondary";
+    btnX.style.padding = "8px 10px";
+    btnX.innerText = "×";
+    btnX.onclick = (e)=>{ e.stopPropagation(); removeDevice(dev.id); };
+
+    actions.appendChild(status);
+    actions.appendChild(btnX);
+
+    card.appendChild(meta);
+    card.appendChild(actions);
+    ui.deviceList.appendChild(card);
+  });
+}
+
+function escapeHtml(s){
+  return String(s || "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* ============================================================
+   Connection form (dynamic)
+   ============================================================ */
+function renderConnForm(){
+  const t = ui.connType.value;
+  ui.connForm.innerHTML = "";
+
+  if(t === "gateway"){
+    ui.connForm.innerHTML = `
+      <label>Gateway WSS URL</label>
+      <input id="gwUrl" type="text" placeholder="wss://gateway.rednode.example/telemetry" />
+      <label style="margin-top:10px;">Token (optional)</label>
+      <input id="gwToken" type="password" placeholder="jwt / api token" />
+      <label style="margin-top:10px;">Device Name</label>
+      <input id="gwName" type="text" placeholder="Excavator-AX12 Gateway" />
+      <div style="display:flex; gap:10px; margin-top:10px;">
+        <button id="btnAddGateway" class="secondary">Add Gateway</button>
+      </div>
+    `;
+    setTimeout(()=>{
+      document.getElementById("btnAddGateway").onclick = async ()=>{
+        const url = document.getElementById("gwUrl").value.trim();
+        const token = document.getElementById("gwToken").value.trim();
+        const name = document.getElementById("gwName").value.trim() || "RedNode Gateway";
+        const adapter = new WsGatewayAdapter({url, token, deviceName:name});
+        const dev = addDevice({id: makeId("gw"), name, type:"gateway", adapter, capabilities:{telemetry:true, commands:true}});
+        try{
+          await adapter.connect();
+          logTo(ui.timeline, `Gateway added: ${name} (${url})`);
+        }catch(e){
+          logTo(ui.timeline, `Gateway connect failed: ${e.message || e}`);
+          showModal("Gateway Connection Failed", `<div class="modal-body">${escapeHtml(e.message||String(e))}</div>`, [{label:"OK", className:"secondary"}]);
+        }
+      };
+    }, 0);
+  }
+
+  if(t === "bluetooth"){
+    ui.connForm.innerHTML = `
+      <label>BLE Profile</label>
+      <select id="bleProfile">
+        <option value="excavator_ble">Excavator Controller (BLE)</option>
+        <option value="battery_ble">Battery Pack (BLE)</option>
+      </select>
+      <div class="hint" style="margin-top:10px;">
+        BLE works best on Chrome/Edge. In production, lock down to known services and avoid acceptAllDevices.
+      </div>
+      <div style="display:flex; gap:10px; margin-top:10px;">
+        <button id="btnAddBLE" class="secondary">Scan & Connect BLE</button>
+      </div>
+    `;
+    setTimeout(()=>{
+      document.getElementById("btnAddBLE").onclick = async ()=>{
+        const profileKey = document.getElementById("bleProfile").value;
+        const adapter = new BluetoothGattAdapter({profileKey});
+        const name = RN.profiles[profileKey]?.name || "BLE Device";
+        const dev = addDevice({id: makeId("ble"), name, type:"bluetooth", adapter, capabilities:{telemetry:true, commands:true}});
+        try{
+          await adapter.connect();
+          logTo(ui.timeline, `BLE connected: ${name}`);
+        }catch(e){
+          logTo(ui.timeline, `BLE failed: ${e.message || e}`);
+          showModal("Bluetooth Failed", `<div class="modal-body">${escapeHtml(e.message||String(e))}</div>`, [{label:"OK", className:"secondary"}]);
+          ui.btStatus.innerHTML = `<span class="dot gray"></span> Bluetooth: idle`;
+        }
+      };
+    }, 0);
+  }
+
+  if(t === "mqtt"){
+    ui.connForm.innerHTML = `
+      <label>MQTT URL (WSS)</label>
+      <input id="mqUrl" type="text" placeholder="wss://broker.example:8084/mqtt" />
+      <div class="row" style="margin-top:10px;">
+        <div>
+          <label>User</label>
+          <input id="mqUser" type="text" placeholder="optional" />
+        </div>
+        <div>
+          <label>Password</label>
+          <input id="mqPass" type="password" placeholder="optional" />
+        </div>
+      </div>
+      <label style="margin-top:10px;">Subscribe Topic</label>
+      <input id="mqTopic" type="text" value="rednode/+/telemetry" />
+      <div class="hint" style="margin-top:10px;">
+        Great for smart-homes (HomeAssistant bridges), yard sensors, chargers, site beacons.
+      </div>
+      <div style="display:flex; gap:10px; margin-top:10px;">
+        <button id="btnAddMQTT" class="secondary">Connect MQTT</button>
+      </div>
+    `;
+    setTimeout(()=>{
+      document.getElementById("btnAddMQTT").onclick = async ()=>{
+        const url = document.getElementById("mqUrl").value.trim();
+        const username = document.getElementById("mqUser").value.trim();
+        const password = document.getElementById("mqPass").value.trim();
+        const topicPrefix = document.getElementById("mqTopic").value.trim() || "rednode/+/telemetry";
+        const adapter = new MqttWsAdapter({url, username, password, topicPrefix});
+        const name = "MQTT Broker";
+        addDevice({id: makeId("mqtt"), name, type:"mqtt", adapter, capabilities:{telemetry:true, commands:true}});
+        try{
+          await adapter.connect();
+          logTo(ui.timeline, `MQTT connected: ${url} (sub ${topicPrefix})`);
+        }catch(e){
+          logTo(ui.timeline, `MQTT failed: ${e.message || e}`);
+          showModal("MQTT Failed", `<div class="modal-body">${escapeHtml(e.message||String(e))}</div>`, [{label:"OK", className:"secondary"}]);
+        }
+      };
+    }, 0);
+  }
+
+  if(t === "webrtc"){
+    ui.connForm.innerHTML = `
+      <label>Signaling WSS</label>
+      <input id="rtcSig" type="text" placeholder="wss://signal.rednode.example/webrtc" />
+      <div class="row" style="margin-top:10px;">
+        <div>
+          <label>Room</label>
+          <input id="rtcRoom" type="text" placeholder="excavator-AX12" />
+        </div>
+        <div>
+          <label>Token</label>
+          <input id="rtcToken" type="password" placeholder="optional" />
+        </div>
+      </div>
+      <div class="hint" style="margin-top:10px;">
+        This connects the remote machine camera and (optionally) telemetry over a WebRTC DataChannel.
+        Requires a signaling server.
+      </div>
+      <div style="display:flex; gap:10px; margin-top:10px;">
+        <button id="btnAddRTC" class="secondary">Connect WebRTC Stream</button>
+      </div>
+    `;
+    setTimeout(()=>{
+      document.getElementById("btnAddRTC").onclick = async ()=>{
+        const signalingUrl = document.getElementById("rtcSig").value.trim();
+        const room = document.getElementById("rtcRoom").value.trim() || "default";
+        const token = document.getElementById("rtcToken").value.trim();
+        const adapter = new WebRtcStreamAdapter({signalingUrl, room, token});
+        const name = `WebRTC Camera (${room})`;
+        const dev = addDevice({id: makeId("rtc"), name, type:"webrtc", adapter, capabilities:{video:true, telemetry:true, commands:false}});
+        try{
+          await adapter.connect();
+          logTo(ui.timeline, `WebRTC connecting: ${room}`);
+        }catch(e){
+          logTo(ui.timeline, `WebRTC failed: ${e.message || e}`);
+          showModal("WebRTC Failed", `<div class="modal-body">${escapeHtml(e.message||String(e))}</div>`, [{label:"OK", className:"secondary"}]);
+        }
+      };
+    }, 0);
+  }
+
+  if(t === "sim"){
+    ui.connForm.innerHTML = `
+      <div class="hint">
+        Adds a simulated RedNode excavator + battery telemetry feed (no network).
+      </div>
+      <div style="display:flex; gap:10px; margin-top:10px;">
+        <button id="btnAddSim" class="secondary">Add Simulator</button>
+      </div>
+    `;
+    setTimeout(()=>{
+      document.getElementById("btnAddSim").onclick = async ()=>{
+        const adapter = new (class extends BaseAdapter{
+          async connect(){
+            this.connected=true;
+            this.emit("status",{phase:"connected"});
+            this._timer = setInterval(()=>{
+              const msg = {
+                type:"telemetry",
+                source:"sim",
+                soc: clamp(60 + Math.sin(Date.now()/5000)*20 + Math.random()*4, 0, 100),
+                temp: clamp(35 + Math.cos(Date.now()/4200)*12 + Math.random()*2, 0, 90),
+                hyd: clamp(180 + Math.sin(Date.now()/2200)*80 + Math.random()*10, 0, 350),
+                mode: ["IDLE","WORK","TRAVEL"][Math.floor((Date.now()/6000)%3)],
+                power_kw: clamp(22 + Math.abs(Math.sin(Date.now()/1600))*68 + Math.random()*6, 0, 120),
+                pressure_bar: clamp(160 + Math.abs(Math.cos(Date.now()/1400))*160 + Math.random()*8, 0, 350),
+                ts: nowIso()
+              };
+              this.emit("telemetry", msg);
+            }, 600);
+          }
+          async disconnect(){
+            clearInterval(this._timer);
+            this.connected=false;
+            this.emit("status",{phase:"disconnected"});
+          }
+          async sendCommand(cmd, params){
+            this.emit("telemetry", {type:"robot_ack", cmd, status:"ok", ts:nowIso(), params});
+          }
+        })();
+
+        const name = "Sim Excavator AX‑DEMO";
+        addDevice({id: makeId("sim"), name, type:"simulator", adapter, capabilities:{telemetry:true, commands:true, video:false}});
+        await adapter.connect();
+        logTo(ui.timeline, `Simulator added: ${name}`);
+      };
+    }, 0);
+  }
+}
+
+ui.connType.addEventListener("change", renderConnForm);
+renderConnForm();
+
+/* ============================================================
+   Ops Room (collaboration)
+   ============================================================ */
+function opsSend(msg){
+  if(state.ops.ws && state.ops.ws.readyState === WebSocket.OPEN){
+    state.ops.ws.send(JSON.stringify(msg));
+  }
+}
+function joinOpsRoom(){
+  const url = ui.opsUrl.value.trim();
+  const room = ui.opsRoom.value.trim();
+  const operator = ui.opsOperator.value.trim() || "operator";
+
+  if(!url || !room){
+    showModal("Ops Room", "Enter an Ops Room WSS URL and Room name.", [{label:"OK", className:"secondary"}]);
+    return;
+  }
+
+  try{
+    state.ops.ws = new WebSocket(url);
+  }catch(e){
+    showModal("Ops Room Failed", escapeHtml(e.message||String(e)), [{label:"OK", className:"secondary"}]);
+    return;
+  }
+
+  state.ops.room = room;
+  state.ops.operator = operator;
+
+  ui.opsStatus.innerHTML = `<span class="dot gray"></span> Ops Room: connecting`;
+  state.ops.ws.onopen = ()=>{
+    state.ops.connected = true;
+    ui.opsStatus.innerHTML = `<span class="dot green"></span> Ops Room: online`;
+    opsSend({type:"join", room, operator, ts:nowIso()});
+    addToHistory({type:"ops_join", room, operator});
+    logTo(ui.timeline, `Ops Room joined: ${room} as ${operator}`);
+  };
+  state.ops.ws.onclose = ()=>{
+    state.ops.connected = false;
+    ui.opsStatus.innerHTML = `<span class="dot gray"></span> Ops Room: offline`;
+    logTo(ui.timeline, `Ops Room disconnected`);
+  };
+  state.ops.ws.onerror = ()=>{
+    state.ops.connected = false;
+    ui.opsStatus.innerHTML = `<span class="dot gray"></span> Ops Room: error`;
+  };
+
+  // Message types (example):
+  // {type:"annotation_add", anno:{...}}
+  // {type:"audit", event:{...}}
+  state.ops.ws.onmessage = (m)=>{
+    const msg = safeJsonParse(m.data, null);
+    if(!msg) return;
+
+    if(msg.type === "annotation_add" && msg.anno){
+      state.annotations.push(msg.anno);
+      addToHistory({type:"ops_annotation", anno: msg.anno});
+    }
+
+    if(msg.type === "audit" && msg.event){
+      logTo(ui.cmdLog, `[OPS] ${JSON.stringify(msg.event)}`);
+    }
+  };
+}
+
+function leaveOpsRoom(){
+  try{
+    opsSend({type:"leave", room: state.ops.room, operator: state.ops.operator, ts:nowIso()});
+    state.ops.ws?.close();
+  }catch(e){}
+  state.ops.ws = null;
+  state.ops.connected = false;
+  ui.opsStatus.innerHTML = `<span class="dot gray"></span> Ops Room: offline`;
+}
+
+ui.btnJoinOps.addEventListener("click", joinOpsRoom);
+ui.btnLeaveOps.addEventListener("click", leaveOpsRoom);
+
+/* ============================================================
+   Camera sources (local vs remote)
+   ============================================================ */
+function updateSceneSourceBadge(kind){
+  if(kind === "local"){
+    ui.sceneSourceBadge.innerHTML = `<span class="dot green"></span> Source: local camera`;
+  } else if(kind === "webrtc"){
+    ui.sceneSourceBadge.innerHTML = `<span class="dot green"></span> Source: remote stream`;
+  } else {
+    ui.sceneSourceBadge.innerHTML = `<span class="dot gray"></span> Source: none`;
+  }
+}
+
+async function startLocalCamera(){
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({video:{width:1280,height:720}, audio:false});
+    state.localCamStream = stream;
+    ui.video.srcObject = stream;
+    await ui.video.play();
+    state.videoSource = "local";
+    updateSceneSourceBadge("local");
+    resizeOverlayCanvases();
+  }catch(e){
+    showModal("Camera Access Needed", escapeHtml(e.message||String(e)), [{label:"OK", className:"secondary"}]);
+    updateSceneSourceBadge("none");
+  }
+}
+
+function stopCamera(){
+  try{
+    if(state.localCamStream){
+      state.localCamStream.getTracks().forEach(t=>t.stop());
+      state.localCamStream = null;
+    }
+    // if remote, detach stream
+    ui.video.srcObject = null;
+  }catch(e){}
+  updateSceneSourceBadge("none");
+}
+
+function setSceneStream(stream, kind="webrtc"){
+  ui.video.srcObject = stream;
+  ui.video.play().catch(()=>{});
+  state.videoSource = kind;
+  updateSceneSourceBadge(kind);
+  resizeOverlayCanvases();
+}
+
+ui.btnLocalCam.addEventListener("click", ()=> startLocalCamera());
+ui.btnStopCam.addEventListener("click", ()=> stopCamera());
+
+/* auto-start local cam */
+startLocalCamera();
+
+/* ============================================================
+   Overlay canvases sizing
+   ============================================================ */
+const ctx2d = ui.overlay2d.getContext("2d");
+function resizeOverlayCanvases(){
+  const vw = ui.video.videoWidth || ui.video.clientWidth || 1280;
+  const vh = ui.video.videoHeight || ui.video.clientHeight || 720;
+
+  ui.overlay2d.width = vw; ui.overlay2d.height = vh;
+  ui.overlay3d.width = vw; ui.overlay3d.height = vh;
+
+  // keep CSS size consistent with video box
+  ui.overlay2d.style.width = ui.video.clientWidth + "px";
+  ui.overlay2d.style.height = ui.video.clientHeight + "px";
+  ui.overlay3d.style.width = ui.video.clientWidth + "px";
+  ui.overlay3d.style.height = ui.video.clientHeight + "px";
+
+  initOrResize3DHud();
+}
+window.addEventListener("resize", ()=> resizeOverlayCanvases());
+ui.video.addEventListener("loadedmetadata", ()=> resizeOverlayCanvases());
+
+/* ============================================================
+   Three.js 3D HUD overlay (screen-space)
+   ============================================================ */
+function initOrResize3DHud(){
+  if(!ui.toggle3d.checked){
+    state.hud3d.enabled = false;
+    return;
+  }
+  state.hud3d.enabled = true;
+
+  const w = ui.overlay3d.width;
+  const h = ui.overlay3d.height;
+
+  if(!state.hud3d.ready){
+    const renderer = new THREE.WebGLRenderer({canvas: ui.overlay3d, alpha:true, antialias:true});
+    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+    renderer.setSize(w, h, false);
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+    camera.position.z = 2;
+
+    // groups
+    const boxGroup = new THREE.Group();
+    const annoGroup = new THREE.Group();
+    scene.add(boxGroup);
+    scene.add(annoGroup);
+
+    // reticle
+    const reticleMat = new THREE.LineBasicMaterial({color: 0xff2d2d, transparent:true, opacity:0.9});
+    const reticleGeom = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-0.03, 0, 0),
+      new THREE.Vector3( 0.03, 0, 0),
+      new THREE.Vector3( 0, -0.03, 0),
+      new THREE.Vector3( 0,  0.03, 0)
+    ]);
+    const reticle = new THREE.LineSegments(reticleGeom, reticleMat);
+    scene.add(reticle);
+
+    state.hud3d.renderer = renderer;
+    state.hud3d.scene = scene;
+    state.hud3d.camera = camera;
+    state.hud3d.boxGroup = boxGroup;
+    state.hud3d.annoGroup = annoGroup;
+    state.hud3d.reticle = reticle;
+    state.hud3d.ready = true;
+
+    function animate(){
+      if(state.hud3d.ready){
+        renderer.render(scene, camera);
+      }
+      requestAnimationFrame(animate);
+    }
+    animate();
+  }else{
+    state.hud3d.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+    state.hud3d.renderer.setSize(w, h, false);
+  }
+}
+
+/* Render 3D HUD rectangles from detections */
+function hud3dSetBoxes(boxes){
+  if(!state.hud3d.ready || !state.hud3d.enabled) return;
+  const g = state.hud3d.boxGroup;
+  // clear
+  while(g.children.length) g.remove(g.children[0]);
+
+  const w = ui.overlay3d.width;
+  const h = ui.overlay3d.height;
+
+  boxes.forEach(b=>{
+    const {x,y,w:bw,h:bh, kind} = b;
+
+    // pixel -> NDC (-1..1)
+    const x0 = (x / w) * 2 - 1;
+    const y0 = -((y / h) * 2 - 1);
+    const x1 = ((x + bw) / w) * 2 - 1;
+    const y1 = -(((y + bh) / h) * 2 - 1);
+
+    const color = (kind === "face") ? 0xff2d2d : 0xff8a00;
+    const mat = new THREE.LineBasicMaterial({color, transparent:true, opacity:0.9});
+    const pts = [
+      new THREE.Vector3(x0, y0, 0),
+      new THREE.Vector3(x1, y0, 0),
+      new THREE.Vector3(x1, y1, 0),
+      new THREE.Vector3(x0, y1, 0),
+      new THREE.Vector3(x0, y0, 0)
+    ];
+    const geom = new THREE.BufferGeometry().setFromPoints(pts);
+    const line = new THREE.Line(geom, mat);
+    g.add(line);
+  });
+}
+
+/* Render annotations as small cross markers */
+function hud3dRenderAnnotations(){
+  if(!state.hud3d.ready || !state.hud3d.enabled) return;
+  const g = state.hud3d.annoGroup;
+  while(g.children.length) g.remove(g.children[0]);
+
+  if(!ui.toggleAnno.checked) return;
+
+  const w = ui.overlay3d.width;
+  const h = ui.overlay3d.height;
+
+  state.annotations.slice(-60).forEach(a=>{
+    const x = (a.x / w) * 2 - 1;
+    const y = -((a.y / h) * 2 - 1);
+
+    const mat = new THREE.LineBasicMaterial({color: 0xffd166, transparent:true, opacity:0.9});
+    const geom = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(x-0.02, y, 0),
+      new THREE.Vector3(x+0.02, y, 0),
+      new THREE.Vector3(x, y-0.02, 0),
+      new THREE.Vector3(x, y+0.02, 0)
+    ]);
+    const l = new THREE.LineSegments(geom, mat);
+    g.add(l);
+  });
+}
+
+/* ============================================================
+   2D overlay rendering
+   ============================================================ */
+function drawRoundedRect(ctx, x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+
+function renderOverlay2D(){
+  if(!ui.toggle2d.checked && !ui.toggleAnno.checked) {
+    ctx2d.clearRect(0,0,ui.overlay2d.width, ui.overlay2d.height);
+    return;
+  }
+
+  const W = ui.overlay2d.width, H = ui.overlay2d.height;
+  ctx2d.clearRect(0,0,W,H);
+
+  // subtle safe-zone grid
+  ctx2d.save();
+  ctx2d.strokeStyle = "rgba(255,255,255,0.02)";
+  ctx2d.lineWidth = 1;
+  for(let i=1;i<6;i++){
+    ctx2d.beginPath();
+    ctx2d.moveTo(0, H*i/6);
+    ctx2d.lineTo(W, H*i/6);
+    ctx2d.stroke();
+  }
+  ctx2d.restore();
+
+  // detections
+  if(ui.toggle2d.checked){
+    const boxes = [];
+
+    // faces
+    (state.lastDetections.faces || []).forEach(f=>{
+      const tl = f.topLeft || f.boundingBox?.topLeft;
+      const br = f.bottomRight || f.boundingBox?.bottomRight;
+      if(!tl || !br) return;
+
+      const x = tl[0], y = tl[1];
+      const w = br[0]-tl[0], h = br[1]-tl[1];
+
+      ctx2d.save();
+      ctx2d.lineWidth = 3;
+      drawRoundedRect(ctx2d, x-2,y-2,w+4,h+4, 12);
+      ctx2d.fillStyle = "rgba(255,45,45,0.07)";
+      ctx2d.fill();
+      ctx2d.strokeStyle = "rgba(255,45,45,0.95)";
+      ctx2d.stroke();
+
+      ctx2d.font = "800 14px Poppins, Inter, sans-serif";
+      const label = "Face";
+      const tw = ctx2d.measureText(label).width + 18;
+      drawRoundedRect(ctx2d, x, y-26, tw, 22, 10);
+      const grad = ctx2d.createLinearGradient(x, y-26, x+tw, y-26);
+      grad.addColorStop(0,"#ff2d2d"); grad.addColorStop(1,"#ff8a00");
+      ctx2d.fillStyle = grad;
+      ctx2d.fill();
+      ctx2d.fillStyle = "#001";
+      ctx2d.fillText(label, x+10, y-10);
+      ctx2d.restore();
+
+      boxes.push({x,y,w,h, kind:"face"});
+    });
+
+    // objects
+    (state.lastDetections.objects || []).slice(0,8).forEach(d=>{
+      const [x,y,w,h] = d.bbox;
+      ctx2d.save();
+      ctx2d.lineWidth = 2;
+      drawRoundedRect(ctx2d, x-2,y-2,w+4,h+4, 10);
+      ctx2d.fillStyle = "rgba(255,138,0,0.10)";
+      ctx2d.fill();
+      ctx2d.strokeStyle = "rgba(255,138,0,0.92)";
+      ctx2d.stroke();
+
+      const label = `${d.class} ${(d.score*100|0)}%`;
+      ctx2d.font = "800 12px Inter, sans-serif";
+      const tw = ctx2d.measureText(label).width + 14;
+      drawRoundedRect(ctx2d, x, y-22, tw, 18, 8);
+      ctx2d.fillStyle = "rgba(0,0,0,0.62)";
+      ctx2d.fill();
+      ctx2d.fillStyle = "#ffd166";
+      ctx2d.fillText(label, x+7, y-9);
+      ctx2d.restore();
+
+      boxes.push({x,y,w,h, kind:"object"});
+    });
+
+    hud3dSetBoxes(boxes);
+  } else {
+    hud3dSetBoxes([]);
+  }
+
+  // annotations
+  if(ui.toggleAnno.checked){
+    state.annotations.slice(-60).forEach(a=>{
+      ctx2d.save();
+      ctx2d.strokeStyle = "rgba(255,209,102,0.95)";
+      ctx2d.fillStyle = "rgba(255,209,102,0.18)";
+      ctx2d.lineWidth = 2;
+      ctx2d.beginPath();
+      ctx2d.arc(a.x, a.y, 8, 0, Math.PI*2);
+      ctx2d.fill();
+      ctx2d.stroke();
+
+      ctx2d.font = "800 12px Inter, sans-serif";
+      const label = a.label || "Marker";
+      const tw = ctx2d.measureText(label).width + 14;
+      drawRoundedRect(ctx2d, a.x+10, a.y-18, tw, 18, 8);
+      ctx2d.fillStyle = "rgba(0,0,0,0.66)";
+      ctx2d.fill();
+      ctx2d.fillStyle = "#ffd166";
+      ctx2d.fillText(label, a.x+17, a.y-6);
+      ctx2d.restore();
+    });
+
+    hud3dRenderAnnotations();
+  }
+}
+
+/* ============================================================
+   Click to annotate (shared to Ops Room)
+   ============================================================ */
+ui.sceneStage.addEventListener("click", (ev)=>{
+  if(!ui.toggleAnno.checked) return;
+
+  const rect = ui.sceneStage.getBoundingClientRect();
+  // convert click position into video pixel coordinate space
+  const x = (ev.clientX - rect.left) * (ui.overlay2d.width / rect.width);
+  const y = (ev.clientY - rect.top) * (ui.overlay2d.height / rect.height);
+
+  const dev = state.devices.get(state.selectedDeviceId);
+  const label = dev ? dev.name : "Marker";
+
+  const anno = {
+    id: makeId("anno"),
+    x, y,
+    label: "Note",
+    ts: nowIso(),
+    by: state.ops.operator || "local",
+    device: dev?.id || null
+  };
+
+  state.annotations.push(anno);
+  addToHistory({type:"annotation_add", anno});
+  logTo(ui.timeline, `Annotation @ (${x|0},${y|0})`);
+
+  if(state.ops.connected){
+    opsSend({type:"annotation_add", room: state.ops.room, anno});
+  }
+});
+
+/* ============================================================
+   Detection models (TFJS)
+   ============================================================ */
+async function loadModels(){
+  ui.modelBadge.innerHTML = `<span class="dot gray"></span> Models: loading`;
+  try{
+    state.cocoModel = await cocoSsd.load();
+    state.blazeModel = await blazeface.load();
+    ui.modelBadge.innerHTML = `<span class="dot green"></span> Models: loaded`;
+  }catch(e){
+    ui.modelBadge.innerHTML = `<span class="dot gray"></span> Models: failed`;
+    logTo(ui.timeline, `Model load failed: ${e.message||e}`);
+  }
+}
+loadModels();
+
+async function detectionLoop(){
+  if(state.detectionRunning) return;
+  state.detectionRunning = true;
+
+  async function runOnce(){
+    if(ui.video.readyState < 2) return;
+    if(!ui.toggle2d.checked) { renderOverlay2D(); return; }
+
+    // faces + objects
+    if(state.blazeModel){
+      try{
+        const faces = await state.blazeModel.estimateFaces(ui.video, false);
+        state.lastDetections.faces = faces || [];
+      }catch(e){ /* ignore */ }
+    }
+    if(state.cocoModel){
+      try{
+        const objects = await state.cocoModel.detect(ui.video);
+        state.lastDetections.objects = objects || [];
+      }catch(e){ /* ignore */ }
+    }
+    renderOverlay2D();
+  }
+
+  async function loop(){
+    if(!state.detectionRunning) return;
+    await runOnce();
+    setTimeout(loop, parseInt(ui.detectRate.value || "350", 10));
+  }
+
+  loop();
+}
+detectionLoop();
+
+/* Keep overlay alive even when detections disabled */
+setInterval(()=> renderOverlay2D(), 250);
+
+/* ============================================================
+   Charts (Battery Power / Hydraulic Pressure)
+   ============================================================ */
+const powerCtx = document.getElementById("powerChart").getContext("2d");
+const pressureCtx = document.getElementById("pressureChart").getContext("2d");
+
+function makeLineChart(ctx, yMin, yMax){
+  return new Chart(ctx, {
+    type:"line",
+    data:{
+      labels:Array.from({length:60},(_,i)=>i),
+      datasets:[{
+        data:Array.from({length:60},()=>0),
+        borderColor:"#ff2d2d",
+        backgroundColor:"rgba(255,45,45,0.10)",
+        tension:0.25,
+        radius:0,
+        fill:true
+      }]
+    },
+    options:{
+      animation:false,
+      plugins:{legend:{display:false}},
+      scales:{
+        x:{display:false},
+        y:{min:yMin, max:yMax, display:false}
+      },
+      elements:{line:{borderWidth:2}}
+    }
+  });
+}
+const powerChart = makeLineChart(powerCtx, 0, 140);
+const pressureChart = makeLineChart(pressureCtx, 0, 380);
+
+function pushChart(chart, v){
+  chart.data.datasets[0].data.push(v);
+  chart.data.datasets[0].data.shift();
+  chart.update("none");
+}
+
+/* ============================================================
+   Telemetry normalization + routing
+   ============================================================ */
+function normalizeTelemetry(raw, dev){
+  // Accept multiple shapes:
+  // 1) Already normalized: {type:"sensor", sensor:"soc", value:...}
+  // 2) Gateway style: {type:"telemetry", soc:..., temp:..., hyd:...}
+  // 3) MQTT: topic-based payloads etc.
+  // 4) BLE: JSON {soc,temp,hyd,...} or binary (bytes) -> kept as ble_frame
+
+  if(raw && typeof raw === "object" && raw.type === "sensor") {
+    return [{...raw, source: dev.id, ts: raw.ts || nowIso()}];
+  }
+
+  // common compact telemetry
+  if(raw && typeof raw === "object" && (raw.type === "telemetry" || raw.soc !== undefined || raw.power_kw !== undefined)){
+    const ts = raw.ts || nowIso();
+    const out = [];
+
+    if(raw.soc !== undefined) out.push({type:"sensor", source:dev.id, sensor:"soc", unit:"%", value:Number(raw.soc), ts});
+    if(raw.temp !== undefined) out.push({type:"sensor", source:dev.id, sensor:"temp", unit:"C", value:Number(raw.temp), ts});
+    if(raw.hyd !== undefined) out.push({type:"sensor", source:dev.id, sensor:"hyd", unit:"bar", value:Number(raw.hyd), ts});
+    if(raw.mode !== undefined) out.push({type:"state", source:dev.id, key:"mode", value:String(raw.mode), ts});
+    if(raw.power_kw !== undefined) out.push({type:"sensor", source:dev.id, sensor:"power_kw", unit:"kW", value:Number(raw.power_kw), ts});
+    if(raw.pressure_bar !== undefined) out.push({type:"sensor", source:dev.id, sensor:"pressure_bar", unit:"bar", value:Number(raw.pressure_bar), ts});
+
+    // pass through full raw as trace
+    out.push({type:"raw", source:dev.id, data: raw, ts});
+    return out;
+  }
+
+  // WebRTC datachannel might send "robot_ack"
+  if(raw && typeof raw === "object" && (raw.type === "robot_ack" || raw.type === "machine_ack")){
+    return [{...raw, source:dev.id, ts: raw.ts || nowIso()}];
+  }
+
+  // fallback: raw payload
+  return [{type:"raw", source:dev.id, data: raw, ts: nowIso()}];
+}
+
+function handleIncomingTelemetry(raw, dev){
+  const events = normalizeTelemetry(raw, dev);
+
+  events.forEach(evt=>{
+    addToHistory(evt);
+    logTo(ui.telemetryLog, `${dev.name}: ${JSON.stringify(evt)}`);
+
+    // timeline (only key event types)
+    if(evt.type === "sensor" || evt.type === "state" || evt.type === "robot_ack" || evt.type === "alert"){
+      logTo(ui.timeline, JSON.stringify(evt));
+    }
+
+    // update device metrics cache
+    if(evt.type === "sensor"){
+      if(evt.sensor === "soc") dev.metrics.soc = evt.value;
+      if(evt.sensor === "temp") dev.metrics.temp = evt.value;
+      if(evt.sensor === "hyd") dev.metrics.hyd = evt.value;
+      if(evt.sensor === "power_kw") dev.metrics.power = evt.value;
+      if(evt.sensor === "pressure_bar") dev.metrics.pressure = evt.value;
+
+      // update selected panel
+      if(dev.id === state.selectedDeviceId){
+        updateSelectedMetrics(dev);
+      }
+    }
+    if(evt.type === "state" && evt.key === "mode"){
+      dev.metrics.mode = evt.value;
+      if(dev.id === state.selectedDeviceId){
+        updateSelectedMetrics(dev);
+      }
+    }
+
+    if(evt.type === "robot_ack" || evt.type === "machine_ack"){
+      logTo(ui.cmdLog, `ACK ${dev.name}: ${JSON.stringify(evt)}`);
+    }
+
+    if(evt.type === "alert"){
+      logTo(ui.cmdLog, `ALERT ${dev.name}: ${JSON.stringify(evt)}`);
+    }
+  });
+
+  renderFleet();
+}
+
+function updateSelectedMetrics(dev){
+  if(!dev){
+    ui.m_soc.innerText = "—";
+    ui.m_temp.innerText = "—";
+    ui.m_hyd.innerText = "—";
+    ui.m_mode.innerText = "—";
+    ui.v_power.innerText = "—";
+    ui.v_pressure.innerText = "—";
+    return;
+  }
+
+  const soc = dev.metrics.soc;
+  const temp = dev.metrics.temp;
+  const hyd = dev.metrics.hyd;
+  const mode = dev.metrics.mode;
+  const power = dev.metrics.power;
+  const pressure = dev.metrics.pressure;
+
+  ui.m_soc.innerText = (soc==null) ? "—" : soc.toFixed(0);
+  ui.m_temp.innerText = (temp==null) ? "—" : temp.toFixed(0);
+  ui.m_hyd.innerText = (hyd==null) ? "—" : hyd.toFixed(0);
+  ui.m_mode.innerText = (mode==null) ? "—" : String(mode);
+
+  ui.v_power.innerText = (power==null) ? "—" : power.toFixed(1);
+  ui.v_pressure.innerText = (pressure==null) ? "—" : pressure.toFixed(0);
+
+  // charts
+  if(power != null) pushChart(powerChart, power);
+  if(pressure != null) pushChart(pressureChart, pressure);
+}
+
+/* ============================================================
+   Safety / commercial control gating
+   ============================================================ */
+function refreshControlState(){
+  state.readOnly = !!ui.readOnlyToggle.checked;
+  state.controlsEnabled = !!ui.controlsToggle.checked;
+
+  const enabled = (!state.readOnly && state.controlsEnabled);
+  const selected = state.devices.get(state.selectedDeviceId);
+
+  // disable if no device or no command capability
+  const canCommand = enabled && selected && selected.capabilities?.commands;
+
+  [ui.cmdArm, ui.cmdDisarm, ui.cmdMove, ui.cmdBatterySave, ui.cmdLights, ui.sendCustomCmd].forEach(b=>{
+    b.disabled = !canCommand;
+  });
+
+  // E-stop only if enabled + selected exists
+  ui.cmdEstop.disabled = !(enabled && selected);
+
+  // hud badge
+  ui.hudBadge.innerHTML = `<span class="dot ${enabled ? "green" : "gray"}"></span> Controls: ${enabled ? "enabled" : "locked"}`;
+}
+ui.readOnlyToggle.addEventListener("change", refreshControlState);
+ui.controlsToggle.addEventListener("change", refreshControlState);
+refreshControlState();
+
+/* hold-to-send helper (commercial feel) */
+function holdToSend(button, ms, fn){
+  let timer = null;
+  let start = 0;
+  const originalText = button.innerText;
+
+  function reset(){
+    if(timer) clearInterval(timer);
+    timer = null;
+    button.innerText = originalText;
+  }
+
+  button.addEventListener("pointerdown", ()=>{
+    if(button.disabled) return;
+    start = Date.now();
+    timer = setInterval(()=>{
+      const t = Date.now()-start;
+      const pct = clamp(t/ms, 0, 1);
+      button.innerText = `${originalText} (${Math.round(pct*100)}%)`;
+      if(t >= ms){
+        reset();
+        fn();
+      }
+    }, 80);
+  });
+  button.addEventListener("pointerup", reset);
+  button.addEventListener("pointerleave", reset);
+  button.addEventListener("pointercancel", reset);
+}
+
+async function sendCommandToSelected(cmd, params){
+  const dev = state.devices.get(state.selectedDeviceId);
+  if(!dev) throw new Error("No selected device");
+  if(state.readOnly) throw new Error("Read‑Only mode is ON");
+  if(!state.controlsEnabled) throw new Error("Controls are not enabled");
+
+  const auditEvent = {type:"audit", action:"command", cmd, params, device:dev.id, by: state.ops.operator || "local", ts:nowIso()};
+  logTo(ui.cmdLog, `SEND ${dev.name}: ${JSON.stringify(auditEvent)}`);
+  addToHistory(auditEvent);
+  if(state.ops.connected) opsSend({type:"audit", room: state.ops.room, event:auditEvent});
+
+  // actual send
+  const sent = await dev.adapter.sendCommand(cmd, params || {});
+  return sent;
+}
+
+/* command bindings */
+holdToSend(ui.cmdArm, 900, ()=> sendCommandToSelected("arm", {}).catch(e=>logTo(ui.cmdLog, `ERR ${e.message||e}`)));
+holdToSend(ui.cmdDisarm, 900, ()=> sendCommandToSelected("disarm", {}).catch(e=>logTo(ui.cmdLog, `ERR ${e.message||e}`)));
+holdToSend(ui.cmdMove, 1200, ()=> sendCommandToSelected("move", {vx:0.4, vy:0.0, duration_ms:2500}).catch(e=>logTo(ui.cmdLog, `ERR ${e.message||e}`)));
+holdToSend(ui.cmdBatterySave, 900, ()=> sendCommandToSelected("battery_save", {}).catch(e=>logTo(ui.cmdLog, `ERR ${e.message||e}`)));
+holdToSend(ui.cmdLights, 900, ()=> sendCommandToSelected("site_lights_toggle", {zone:"yard"}).catch(e=>logTo(ui.cmdLog, `ERR ${e.message||e}`)));
+
+/* E-STOP with typed confirmation */
+ui.cmdEstop.addEventListener("click", ()=>{
+  if(ui.cmdEstop.disabled) return;
+
+  showModal(
+    "EMERGENCY STOP",
+    `
+      <div class="modal-body">
+        This will send an <b>Emergency Stop</b> to the selected unit and log the action.<br><br>
+        Type <b>STOP</b> to confirm:
+        <div style="margin-top:10px;">
+          <input id="estopConfirm" type="text" placeholder="Type STOP" />
+        </div>
+      </div>
+    `,
+    [
+      {label:"Cancel", className:"secondary"},
+      {
+        label:"CONFIRM E‑STOP",
+        className:"danger",
+        onClick: async ()=>{
+          const v = (document.getElementById("estopConfirm")?.value || "").trim().toUpperCase();
+          if(v !== "STOP"){
+            showModal("Not Confirmed", "Confirmation text did not match. E‑STOP not sent.", [{label:"OK", className:"secondary"}]);
+            return;
+          }
+          try{
+            await sendCommandToSelected("estop", {reason:"operator_requested"});
+          }catch(e){
+            logTo(ui.cmdLog, `ERR ${e.message||e}`);
+          }
+        }
+      }
+    ]
+  );
+});
+
+/* custom command */
+ui.sendCustomCmd.addEventListener("click", async ()=>{
+  try{
+    const cmd = ui.customCmd.value.trim();
+    if(!cmd) throw new Error("Enter a command name");
+    const params = safeJsonParse(ui.customParams.value.trim() || "{}", {});
+    await sendCommandToSelected(cmd, params);
+  }catch(e){
+    logTo(ui.cmdLog, `ERR ${e.message||e}`);
+    showModal("Command Failed", escapeHtml(e.message||String(e)), [{label:"OK", className:"secondary"}]);
+  }
+});
+
+/* ============================================================
+   XR (WebXR entry point)
+   ============================================================ */
+ui.btnEnterXR.addEventListener("click", async ()=>{
+  // This is a readiness hook. Full XR rendering requires a dedicated WebXR render loop.
+  // The console remains useful without XR. Use this as a gateway to your XR front-end.
+  if(!navigator.xr){
+    showModal("XR Not Available", "This browser/device does not support WebXR.", [{label:"OK", className:"secondary"}]);
+    return;
+  }
+
+  try{
+    const ok = await navigator.xr.isSessionSupported("immersive-ar");
+    if(!ok){
+      showModal("XR Not Supported", "Immersive AR not supported on this device. Try VR or a compatible AR browser.", [{label:"OK", className:"secondary"}]);
+      return;
+    }
+
+    showModal(
+      "XR Mode (Ready)",
+      `
+        <div class="modal-body">
+          WebXR is supported. In production, launch a dedicated XR renderer that subscribes to the same
+          telemetry + annotations feeds (Gateway/MQTT/Ops Room) and renders HUD content in 3D space.
+          <br><br>
+          This dashboard already normalizes telemetry and can share annotations to Ops Room.
+        </div>
+      `,
+      [{label:"OK", className:"secondary"}]
+    );
+  }catch(e){
+    showModal("XR Error", escapeHtml(e.message||String(e)), [{label:"OK", className:"secondary"}]);
+  }
+});
+
+/* ============================================================
+   Timeline controls & simulation
+   ============================================================ */
+ui.btnClearTimeline.addEventListener("click", ()=>{ ui.timeline.innerText=""; });
+
+ui.simTelemetry.addEventListener("click", ()=>{
+  // Add simulator quickly
+  ui.connType.value = "sim";
+  renderConnForm();
+  document.getElementById("btnAddSim")?.click();
+});
+
+ui.simAnnotation.addEventListener("click", ()=>{
+  const anno = {id: makeId("anno"), x: ui.overlay2d.width*0.55, y: ui.overlay2d.height*0.35, label:"Hazard", ts:nowIso(), by:"sim"};
+  state.annotations.push(anno);
+  addToHistory({type:"annotation_add", anno});
+  if(state.ops.connected) opsSend({type:"annotation_add", room: state.ops.room, anno});
+  logTo(ui.timeline, "Sim annotation added");
+});
+
+ui.simAlert.addEventListener("click", ()=>{
+  const dev = state.devices.get(state.selectedDeviceId);
+  if(!dev) return;
+  handleIncomingTelemetry({type:"alert", severity:"warning", text:"Proximity alert: exclusion zone breached", ts:nowIso()}, dev);
+});
+
+/* ============================================================
+   Device selection side effects
+   ============================================================ */
+function onSelectedDeviceChanged(){
+  const dev = state.devices.get(state.selectedDeviceId);
+  refreshControlState();
+
+  // If selected device is a WebRTC device and already has stream, prioritize it
+  // (stream is handled via adapter "stream" event)
+  if(dev && dev.type === "webrtc"){
+    // scene source badge updated when stream arrives
+  }
+}
+const _selectDevice = selectDevice;
+selectDevice = function(id){
+  _selectDevice(id);
+  onSelectedDeviceChanged();
+};
+
+/* ============================================================
+   Boot
+   ============================================================ */
+console.info(`RedNode Eye Pro loaded — v${RN.version}`);
+renderFleet();
+refreshControlState();
+
+</script>
+</body>
+</html>

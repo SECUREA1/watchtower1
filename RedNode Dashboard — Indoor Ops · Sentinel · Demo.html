@@ -1,0 +1,1917 @@
+<!-- rednode-dashboard-full.html (INDOOR + SMALL AREA UPGRADE)
+     Adds:
+     - Indoor Mode + Room Profiles + Small-Area tuning
+     - Area size (m²) affects LiDAR density
+     - Privacy Blur + Low-Light Boost
+     - Shift+Drag to draw No-Go Zones (double click still adds a zone)
+     - Compact UI mode for home/office screens
+     - Minimize/Expand buttons for logs (matches your “minimize messages” request)
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>RedNode Dashboard — Indoor Ops · Sentinel · Demo</title>
+  <meta name="description" content="RedNode Dashboard — Indoor home/office ops, AR overlay demo, local sensor fusion simulation, and Sentinel syncing." />
+  <link rel="icon" href="rednode-mark.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <style>
+    :root{
+      --bg:#041021; --panel:#071826; --card:#081826;
+      --accent:#FF4F3A; --accent-2:#FF8A5B; --muted:#9FB4C7; --glass:rgba(255,255,255,0.03);
+      --tile-highlight: linear-gradient(180deg, rgba(255,255,255,0.015), rgba(255,255,255,0.02));
+      --max-width:1300px;
+      font-family: 'Montserrat', system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+      color:#E9F6FF;
+    }
+    html,body{height:100%;margin:0;background:linear-gradient(180deg,#03101a,#041021);-webkit-font-smoothing:antialiased}
+    a{color:var(--accent);text-decoration:none}
+    .hidden{display:none !important;}
+    .container{max-width:var(--max-width);margin:0 auto;padding:18px}
+    header.site-header{display:flex;align-items:center;gap:18px;justify-content:space-between;padding:18px 0}
+    .logo{display:flex;align-items:center;gap:12px;font-weight:700;color:var(--accent)}
+    .logo__mark{width:48px;height:48px;border-radius:10px;background:linear-gradient(90deg,var(--accent),var(--accent-2));box-shadow:0 8px 30px rgba(0,0,0,0.45)}
+    .site-nav ul{display:flex;gap:12px;list-style:none;margin:0;padding:0}
+    .site-nav a{color:var(--muted);font-size:14px;padding:8px 10px;border-radius:8px}
+    .site-nav a:hover{color:var(--accent);background:rgba(255,255,255,0.02)}
+    .btn{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:9px;font-weight:700;border:none;cursor:pointer}
+    .btn-primary{background:linear-gradient(90deg,var(--accent),var(--accent-2));color:#072025;box-shadow:0 8px 30px rgba(255,79,58,0.06)}
+    .btn-outline{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted)}
+    .btn-outline:hover{border-color:rgba(255,255,255,0.12);color:#d6e7f6}
+    .btn-sm{padding:7px 10px;border-radius:8px;font-weight:700}
+    .btn-pill{padding:7px 12px;border-radius:999px;font-weight:800}
+
+    /* layout */
+    .page{display:grid;grid-template-columns:1fr 420px;gap:18px;align-items:start}
+    .tile-highlight{background:var(--tile-highlight);border-radius:12px;padding:16px;border:1px solid rgba(255,255,255,0.03);box-shadow:0 8px 30px rgba(2,6,23,0.45)}
+    h1{margin:6px 0;font-size:28px}
+    .eyebrow{color:var(--accent-2);font-weight:800;font-size:12px}
+    .muted{color:var(--muted)}
+    .small{font-size:13px;color:var(--muted)}
+    .muted-small{color:var(--muted);font-size:13px}
+
+    /* collapsible logs */
+    .logbox{position:relative}
+    .log-collapsed{max-height:78px !important;overflow:hidden !important}
+    .log-fade{
+      position:absolute;left:0;right:0;bottom:0;height:34px;
+      background:linear-gradient(180deg, rgba(4,16,33,0), rgba(4,16,33,0.9));
+      pointer-events:none;
+    }
+
+    /* sentinel */
+    .sentinel-panel{display:grid;grid-template-columns:300px 1fr 360px;gap:12px;align-items:start;margin-top:12px}
+    .device-list{max-height:280px;overflow:auto;display:flex;flex-direction:column;gap:8px;margin-top:8px}
+    .device-tile{display:flex;justify-content:space-between;align-items:center;padding:10px;border-radius:8px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.03)}
+    .node-list{max-height:160px;overflow:auto}
+    .subscription-grid{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+    .node-history{max-height:220px;overflow:auto;padding:8px;background:rgba(255,255,255,0.02);border-radius:8px}
+    .device-logs{max-height:260px;overflow:auto;padding:8px;background:rgba(255,255,255,0.02);border-radius:8px}
+
+    /* demo */
+    .hero{display:flex;gap:18px;align-items:stretch;padding:12px 0}
+    .hero__content{flex:1}
+    .hero__visual{width:520px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));padding:18px;border-radius:12px;position:relative}
+    #arView{position:relative;background:#000;border-radius:8px;overflow:hidden;height:320px}
+    video#demoVideo{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+    canvas.overlay{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;transform:scaleX(-1)}
+    .mini-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+    .chipbar{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+
+    /* tuner modal */
+    .tuner-modal{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:900px;max-width:96%;background:var(--card);border-radius:12px;padding:18px;z-index:1002;border:1px solid rgba(255,255,255,0.06);box-shadow:0 30px 80px rgba(0,0,0,0.6)}
+    .tuner-backdrop{position:fixed;left:0;top:0;right:0;bottom:0;background:rgba(0,0,0,0.55);z-index:1001}
+    .tuner-row{display:flex;gap:12px;align-items:center;margin:8px 0;flex-wrap:wrap}
+    .tuner-header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+    .tuner-header h3{margin:0}
+    .tuner-x{line-height:1}
+
+    /* mapping summary */
+    .legend{display:flex;gap:10px;margin-top:8px;flex-wrap:wrap}
+    .legend .item{display:flex;gap:6px;align-items:center;padding:6px 10px;border-radius:8px;background:rgba(255,255,255,0.02);color:var(--muted)}
+    .color-swatch{width:12px;height:12px;border-radius:4px;display:inline-block}
+
+    /* small forms */
+    input[type=text], input[type=email], input[type=number], textarea, select {
+      width:100%; padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);
+      background:transparent;color:inherit
+    }
+    .controls-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px}
+
+    /* Compact Mode (home/office) */
+    body.compact .container{padding:12px}
+    body.compact .hero{gap:12px}
+    body.compact .tile-highlight{padding:12px}
+    body.compact #arView{height:280px}
+    body.compact .sentinel-panel{grid-template-columns:1fr}
+    body.compact .hero__visual{width:100%}
+
+    @media (max-width:1100px){
+      .page{grid-template-columns:1fr}
+      .hero__visual{width:100%}
+      .sentinel-panel{grid-template-columns:1fr}
+    }
+    @media (max-width:700px){
+      .site-nav ul{display:none}
+    }
+  </style>
+</head>
+<body>
+  <header class="site-header container" role="banner">
+    <div style="display:flex;align-items:center;gap:12px">
+      <a class="logo" href="/">
+        <div class="logo__mark" aria-hidden="true"></div>
+        <div style="display:flex;flex-direction:column">
+          <span style="font-weight:800">RedNode</span>
+          <span class="small" style="margin-top:2px;color:var(--muted)">Indoor Ops Dashboard</span>
+        </div>
+      </a>
+    </div>
+
+    <nav class="site-nav" aria-label="Primary">
+      <ul>
+        <li><a href="#demo">Demo</a></li>
+        <li><a href="#indoor">Indoor</a></li>
+        <li><a href="#sentinel">Sentinel</a></li>
+        <li><a href="#marketplace">Marketplace</a></li>
+        <li><a href="#contact">Contact</a></li>
+      </ul>
+    </nav>
+
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-outline" id="btnCompactToggle">Compact</button>
+      <button class="btn btn-primary" id="btnTryDemo">Open Demo</button>
+      <a class="btn btn-outline" href="mailto:hello@rednode.ai">Contact</a>
+    </div>
+  </header>
+
+  <main class="container" role="main">
+    <!-- HERO / DEMO -->
+    <section id="demo" class="tile-highlight" aria-labelledby="demoTitle">
+      <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+        <div style="flex:1;min-width:320px">
+          <span class="eyebrow">Interactive Demo</span>
+          <h1 id="demoTitle">AR Overlay — Indoor Home/Office + Small Area Tuning</h1>
+          <p class="muted">
+            Indoor-first overlay presets (home/office), small-area LiDAR simulation tuning, privacy/low-light options,
+            and your Sentinel local sync simulator.
+          </p>
+
+          <div class="controls-row">
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <button class="btn btn-outline" id="cameraToggleBtn">📷 Camera</button>
+              <button class="btn btn-outline" id="arToggleBtn">🕶 AR</button>
+              <button class="btn btn-outline" id="trackingToggleBtn">🎯 Tracking</button>
+              <button class="btn btn-outline" id="indoorModeBtn">🏠 Indoor Mode</button>
+              <button class="btn btn-outline" id="privacyBlurBtn">🫥 Privacy Blur</button>
+              <button class="btn btn-outline" id="lowLightBtn">🌙 Low-Light</button>
+            </div>
+
+            <div style="display:flex;gap:8px;align-items:center;margin-left:auto;flex-wrap:wrap">
+              <button class="btn btn-primary" id="openARBtn">Open AR</button>
+              <button class="btn btn-outline" id="openTunerBtn">TUNER</button>
+            </div>
+          </div>
+
+          <div class="mini-grid">
+            <div class="tile-highlight">
+              <div class="small muted">Room profile</div>
+              <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+                <select id="roomProfileSelect">
+                  <option value="home_office">Home Office</option>
+                  <option value="living_room">Living Room</option>
+                  <option value="workshop">Workshop</option>
+                  <option value="garage">Garage</option>
+                  <option value="warehouse">Warehouse</option>
+                </select>
+                <button class="btn btn-primary btn-sm" id="applyRoomProfileBtn">Apply</button>
+              </div>
+              <div class="small muted" style="margin-top:10px">
+                Tip: <span style="color:#d6e7f6">Shift+Drag</span> in AR view to draw a No-Go zone. Double-click still adds a zone.
+              </div>
+            </div>
+
+            <div class="tile-highlight">
+              <div class="small muted">Area size (m²)</div>
+              <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+                <input id="areaSizeInput" type="number" min="3" max="400" step="1" value="25" />
+                <button class="btn btn-outline btn-sm" id="areaSizeApplyBtn">Set</button>
+              </div>
+              <div class="small muted" style="margin-top:10px">
+                Smaller areas = denser “LiDAR” points and tighter overlay pacing.
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top:10px" id="demoControlsStatus">
+            <span class="muted-small">Status: <strong id="statusText">idle</strong></span>
+            <span class="muted-small" style="margin-left:12px">Model: <strong id="modelStatusLabel">not loaded</strong></span>
+            <span class="muted-small" style="margin-left:12px">Overlay opacity: <strong id="opacityText">0.8</strong></span>
+          </div>
+
+          <div style="margin-top:12px" class="legend">
+            <div class="item"><span class="color-swatch" style="background:#ffd7c9"></span> Human</div>
+            <div class="item"><span class="color-swatch" style="background:#ff8a5b"></span> Vehicle</div>
+            <div class="item"><span class="color-swatch" style="background:#ff4f3a"></span> Excavator</div>
+            <div class="item"><span class="color-swatch" style="background:#7bbfff"></span> Robot</div>
+            <div class="item"><span class="color-swatch" style="background:#9aa6b0"></span> Generic</div>
+          </div>
+
+          <div style="margin-top:12px" class="tile-highlight">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+              <h4 style="margin:0">Live Detections</h4>
+              <button class="btn btn-outline btn-sm" id="btnToggleLiveDetections">Minimize</button>
+            </div>
+            <div class="logbox" style="margin-top:8px">
+              <div id="liveDetections" class="device-logs small" style="min-height:100px"></div>
+              <div id="liveDetectionsFade" class="log-fade hidden"></div>
+            </div>
+          </div>
+
+        </div>
+
+        <aside class="hero__visual tile-highlight" style="min-width:420px;max-width:520px">
+          <div id="arView" title="Shift+Drag to draw zones • Double-click to add a zone">
+            <video id="demoVideo" autoplay muted playsinline></video>
+            <canvas id="demoOverlay" class="overlay"></canvas>
+          </div>
+
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">
+            <div class="small muted">Camera & AR Preview</div>
+            <div class="small muted">Detection freq: <span id="detectFreqText">350ms</span></div>
+          </div>
+
+          <div class="chipbar">
+            <span class="small muted">Zones: <strong id="zoneCountLabel">0</strong></span>
+            <button class="btn btn-outline btn-sm" id="btnClearZones">Clear zones</button>
+            <button class="btn btn-outline btn-sm" id="btnIndoorPreset">Indoor Preset</button>
+          </div>
+
+          <div style="margin-top:8px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+            <button class="btn btn-outline" id="btnExportOverlayCSV">Export Detections CSV</button>
+            <button class="btn btn-primary" id="btnClearDetections">Clear</button>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- INDOOR OPS -->
+    <section id="indoor" class="tile-highlight" style="margin-top:18px">
+      <h2>Indoor Ops — Home / Office / Small Area</h2>
+      <p class="muted">
+        This section is tuned for small spaces: compact UI, room-based profiles, privacy-first video filters,
+        and quick “safety zones” (no-go) for pets/children/off-limits areas.
+      </p>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+        <div class="tile-highlight">
+          <h4 style="margin:0 0 8px 0">Indoor Safety Controls</h4>
+          <div class="controls-row">
+            <button class="btn btn-outline" id="btnIndoorQuickZones">Add 4 Corner Zones</button>
+            <button class="btn btn-outline" id="btnHallwayMode">Hallway Mode</button>
+            <button class="btn btn-outline" id="btnDeskMode">Desk Mode</button>
+          </div>
+          <div class="small muted" style="margin-top:10px">
+            Corner zones are a fast “keep out” for edges; Hallway/Desk mode tighten detection pace and overlay scale.
+          </div>
+        </div>
+
+        <div class="tile-highlight">
+          <h4 style="margin:0 0 8px 0">Indoor Device Types (Sentinel-ready)</h4>
+          <div class="small muted">Recommended indoor nodes:</div>
+          <div class="legend" style="margin-top:10px">
+            <div class="item"><i class="fa-solid fa-video"></i> SmartCam</div>
+            <div class="item"><i class="fa-solid fa-door-open"></i> Door Sensor</div>
+            <div class="item"><i class="fa-solid fa-person-walking"></i> Motion Sensor</div>
+            <div class="item"><i class="fa-solid fa-temperature-high"></i> Thermostat</div>
+            <div class="item"><i class="fa-solid fa-wifi"></i> Wi-Fi Beacon</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SENTINEL: local simulation -->
+    <section id="sentinel" class="tile-highlight" style="margin-top:18px">
+      <h2>Sentinel Sync — Local Simulation</h2>
+      <p class="muted">Create devices, nodes, subscriptions, and publish events. This local simulation demonstrates deterministic node-based sync similar to production Sentinel (mTLS/tenant keys in real deployments).</p>
+
+      <div class="sentinel-panel" style="margin-top:12px">
+        <!-- Devices -->
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+            <strong>Devices</strong>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <select id="deviceTypeSelect" style="padding:6px;border-radius:6px;background:transparent;color:inherit;border:1px solid rgba(255,255,255,0.04)">
+                <option>Headset</option><option>Drone</option><option>Robot</option><option>Excavator</option><option>EnergyNode</option>
+                <option>SmartCam</option><option>DoorSensor</option><option>MotionSensor</option><option>Thermostat</option><option>WiFiBeacon</option>
+              </select>
+              <input id="deviceNameInput" placeholder="Device name" style="padding:8px;border-radius:6px;background:transparent;border:1px solid rgba(255,255,255,0.04);color:inherit" />
+              <button class="btn btn-primary" id="btnAddDevice">Add</button>
+            </div>
+          </div>
+
+          <div class="device-list" id="deviceList"></div>
+          <div style="margin-top:8px; display:flex; gap:8px;flex-wrap:wrap">
+            <button class="btn btn-outline" id="btnClearDevices">Clear devices</button>
+            <button class="btn btn-primary" id="btnExportDevices">Export CSV</button>
+          </div>
+        </div>
+
+        <!-- Nodes & publish -->
+        <div>
+          <div style="display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap">
+            <strong>Node channels</strong>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <input id="nodeNameInput" placeholder="Node name (e.g. Home-Office)" style="padding:8px;border-radius:6px;background:transparent;border:1px solid rgba(255,255,255,0.04);color:inherit" />
+              <button class="btn btn-primary" id="btnAddNode">Create Node</button>
+            </div>
+          </div>
+
+          <div class="node-list" id="nodeList" style="margin-top:8px"></div>
+
+          <div style="margin-top:12px">
+            <strong>Subscriptions</strong>
+            <div class="subscription-grid" id="subscriptionGrid"></div>
+          </div>
+
+          <div style="margin-top:12px">
+            <strong>Publish</strong>
+            <div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap">
+              <select id="publishFromDevice" style="padding:8px;border-radius:6px;background:transparent;border:1px solid rgba(255,255,255,0.04);color:inherit"></select>
+              <select id="publishNode" style="padding:8px;border-radius:6px;background:transparent;border:1px solid rgba(255,255,255,0.04);color:inherit"></select>
+            </div>
+            <textarea id="publishPayload" rows="3" placeholder='{"action":"indoor","text":"Door opened"}' style="width:100%;margin-top:8px;padding:8px;border-radius:8px;background:transparent;border:1px solid rgba(255,255,255,0.04);color:inherit"></textarea>
+            <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-primary" id="btnPublish">Publish</button>
+              <button class="btn btn-outline" id="btnSimTelemetry">Sim Telemetry</button>
+              <button class="btn btn-outline" id="btnExportNodeHistory">Export Node History</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- History -->
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+            <strong>Node History</strong>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <select id="nodeHistorySelect" style="padding:6px;border-radius:6px;background:transparent;border:1px solid rgba(255,255,255,0.04);color:inherit"></select>
+              <button class="btn btn-outline btn-sm" id="btnToggleNodeHistory">Minimize</button>
+            </div>
+          </div>
+          <div class="logbox" style="margin-top:8px">
+            <div class="node-history" id="nodeHistory"></div>
+            <div id="nodeHistoryFade" class="log-fade hidden"></div>
+          </div>
+
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;gap:8px">
+            <h4 style="margin:0">Device Logs</h4>
+            <button class="btn btn-outline btn-sm" id="btnToggleDeviceLogs">Minimize</button>
+          </div>
+
+          <div class="logbox" style="margin-top:8px">
+            <div id="deviceLogs" class="device-logs"></div>
+            <div id="deviceLogsFade" class="log-fade hidden"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Marketplace -->
+    <section id="marketplace" style="margin-top:18px">
+      <div class="tile-highlight">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+          <div>
+            <h2 style="margin:0">Marketplace (local demo)</h2>
+            <p class="muted" style="margin:6px 0 0 0">Upload schematics, bids, and community assets — stored locally for demo purposes.</p>
+          </div>
+          <button class="btn btn-outline btn-sm" id="btnToggleMarketplaceUploads">Minimize uploads</button>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 320px;gap:12px;margin-top:12px">
+          <div class="tile-highlight">
+            <h4>Share an upload</h4>
+            <form id="marketplace-upload-form" class="marketplace-form" novalidate>
+              <label>Title<input id="marketplace-title" name="title" /></label>
+              <label>Description<textarea id="marketplace-description"></textarea></label>
+              <label>Creator<input id="marketplace-username" /></label>
+              <label>Wallet<input id="marketplace-wallet" /></label>
+              <label>Media URL<input id="marketplace-media" type="url" /></label>
+              <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+                <button class="btn btn-primary" type="submit">Submit</button>
+                <p id="upload-status" class="muted-small" role="status"></p>
+              </div>
+            </form>
+          </div>
+
+          <div class="tile-highlight logbox">
+            <h4 style="margin-top:0">Recent uploads</h4>
+            <div id="marketplace-uploads" class="device-logs"></div>
+            <div id="marketplaceFade" class="log-fade hidden"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Contact -->
+    <section id="contact" style="margin-top:18px">
+      <div class="tile-highlight">
+        <h2>Contact</h2>
+        <form id="contact-form" class="contact-form" novalidate>
+          <label>Name<input id="contact-name" name="name" type="text" /></label>
+          <label>Email<input id="contact-email" name="email" type="email" required /></label>
+          <label>Message<textarea id="contact-message" rows="4"></textarea></label>
+          <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
+            <button type="submit" class="btn btn-primary">Transmit request</button>
+            <p id="contact-status" class="muted-small" role="status"></p>
+          </div>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <!-- Tuner Modal -->
+  <div id="tunerBackdrop" class="tuner-backdrop hidden" hidden aria-hidden="true"></div>
+  <div id="tunerModal" class="tuner-modal hidden" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-label="AR Tuner">
+    <div class="tuner-header">
+      <div>
+        <h3>TUNER — Overlay, Detection & Indoor Tuning</h3>
+        <p class="muted-small" style="margin:6px 0 0 0">Tune overlay/detection values + indoor controls (privacy, low-light, area size). Map coco-ssd classes to overlay types.</p>
+      </div>
+      <button class="btn btn-outline btn-sm tuner-x" id="t_xCloseBtn" aria-label="Close tuner">✕</button>
+    </div>
+
+    <div style="display:flex;gap:12px;flex-direction:column;margin-top:10px">
+      <div class="tuner-row">
+        <label class="small">Overlay opacity</label>
+        <input id="t_overlayOpacity" type="range" min="0" max="1" step="0.05">
+        <div id="t_overlayOpacity_val" class="small"></div>
+      </div>
+
+      <div class="tuner-row">
+        <label class="small">Detection frequency (ms)</label>
+        <input id="t_detectFreq" type="range" min="120" max="1400" step="40">
+        <div id="t_detectFreq_val" class="small"></div>
+      </div>
+
+      <div class="tuner-row">
+        <label class="small">Confidence threshold</label>
+        <input id="t_confThreshold" type="range" min="0" max="1" step="0.01">
+        <div id="t_confThreshold_val" class="small"></div>
+      </div>
+
+      <div class="tuner-row">
+        <label class="small">Overlay color</label>
+        <input id="t_overlayColor" type="color">
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+        <div>
+          <label class="small">Indoor mode</label>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+            <input id="t_indoorMode" type="checkbox">
+            <div class="small muted-small">Small-area tuned defaults</div>
+          </div>
+        </div>
+        <div>
+          <label class="small">Privacy blur</label>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+            <input id="t_privacyBlur" type="checkbox">
+            <div class="small muted-small">Blur camera preview</div>
+          </div>
+        </div>
+        <div>
+          <label class="small">Low-light boost</label>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+            <input id="t_lowLight" type="checkbox">
+            <div class="small muted-small">Brighten/contrast</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+        <div>
+          <label class="small">Area size (m²)</label>
+          <input id="t_areaSize" type="number" min="3" max="400" step="1">
+        </div>
+        <div>
+          <label class="small">LiDAR sensitivity</label>
+          <input id="t_lidarSensitivity" type="range" min="0" max="100" step="1">
+          <div id="t_lidarSensitivity_val" class="small"></div>
+        </div>
+        <div>
+          <label class="small">Overlay scale</label>
+          <input id="t_overlayScale" type="range" min="0.5" max="2.0" step="0.05">
+          <div id="t_overlayScale_val" class="small"></div>
+        </div>
+      </div>
+
+      <div class="tuner-row">
+        <label class="small">Bucket angle offset (°)</label>
+        <input id="t_bucketOffset" type="range" min="-45" max="45" step="1">
+        <div id="t_bucketOffset_val" class="small"></div>
+      </div>
+
+      <div class="tuner-row">
+        <label class="small">Use TFJS Model</label>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input id="t_useModel" type="checkbox">
+          <div class="small muted-small">Loads coco-ssd for object detection</div>
+        </div>
+      </div>
+
+      <hr style="opacity:0.06;margin-top:8px">
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <label class="small">Human classes</label>
+          <input id="t_mapHuman" type="text" placeholder="person">
+        </div>
+        <div>
+          <label class="small">Vehicle classes</label>
+          <input id="t_mapVehicle" type="text" placeholder="car,bus,truck">
+        </div>
+        <div>
+          <label class="small">Excavator classes</label>
+          <input id="t_mapExcavator" type="text" placeholder="truck">
+        </div>
+        <div>
+          <label class="small">Robot classes</label>
+          <input id="t_mapRobot" type="text" placeholder="">
+        </div>
+        <div>
+          <label class="small">Ignore classes</label>
+          <input id="t_mapIgnore" type="text" placeholder="">
+        </div>
+        <div>
+          <label class="small">Custom labels (class:Label)</label>
+          <input id="t_customLabels" type="text" placeholder="person:Operator,laptop:Workstation">
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;flex-wrap:wrap">
+        <button class="btn btn-outline" id="t_indoorPresetBtn">Apply Indoor Preset</button>
+        <button class="btn btn-primary" id="t_applyBtn">Apply</button>
+        <button class="btn btn-outline" id="t_closeBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <footer style="padding:18px;text-align:center;color:var(--muted);margin-top:18px">
+    <div>© <span id="currentYear"></span> RedNode. All rights reserved. Built for edge AR and indoor ops.</div>
+  </footer>
+
+  <script>
+  /* =============================
+     Constants / Storage Keys / Utilities
+     ============================= */
+  const STORAGE = {
+    SENTINEL_KEY: 'rednode_sentinel_v1',
+    MARKETPLACE_KEY: 'rednode_marketplace_v1',
+    CONTACTS_KEY: 'rednode_contacts_v1',
+    DEMO_SETTINGS_KEY: 'rednode_demo_settings_v2_indoor',
+    METRICS_KEY: 'rednode_metrics_v1'
+  };
+
+  function nowISO(){ return new Date().toISOString(); }
+  function uid(prefix='id'){ return prefix + '_' + Math.random().toString(36).slice(2,9); }
+  function save(key,obj){ localStorage.setItem(key, JSON.stringify(obj)); }
+  function load(key, fallback){ try{ return JSON.parse(localStorage.getItem(key)) || fallback; }catch(e){ return fallback; } }
+  function hexToRgba(hex, alpha){
+    const h=hex.replace('#',''); const bigint=parseInt(h,16);
+    const r=(bigint>>16)&255; const g=(bigint>>8)&255; const b=bigint&255;
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+  function clamp(v,min,max){ return Math.max(min,Math.min(max,v)); }
+  function parseList(s){ if(!s) return []; return s.split(',').map(x=>x.trim().toLowerCase()).filter(Boolean); }
+  function parseCustomLabels(s){
+    const map={}; if(!s) return map;
+    s.split(',').forEach(pair=>{
+      const parts=pair.split(':');
+      if(parts.length>=2){
+        const k=parts.shift().trim().toLowerCase();
+        const v=parts.join(':').trim();
+        if(k && v) map[k]=v;
+      }
+    });
+    return map;
+  }
+
+  document.getElementById('currentYear').innerText = new Date().getFullYear();
+
+  // BroadcastChannel for multi-tab sync (fallback to localStorage ping)
+  const BC_NAME = 'rednode_broadcast_v1';
+  let bc = null;
+  try { if('BroadcastChannel' in window) bc = new BroadcastChannel(BC_NAME); } catch(e){ bc = null; }
+
+  function bcPost(type, payload){
+    const msg = { type, payload, ts: nowISO() };
+    try {
+      if(bc) bc.postMessage(msg);
+      else { localStorage.setItem(BC_NAME, JSON.stringify(msg)); localStorage.removeItem(BC_NAME); }
+    } catch(e){ console.warn('Broadcast error', e); }
+  }
+
+  function handleBroadcast(msg){
+    if(!msg || !msg.type) return;
+    try {
+      if(msg.type === 'sentinel_state_update' && window.RedNodeSentinel) window.RedNodeSentinel.syncFromBroadcast(msg.payload.state);
+      if(msg.type === 'marketplace_update' && window.RedNodeMarketplace) window.RedNodeMarketplace.syncFromBroadcast(msg.payload.state);
+    } catch(e){ console.warn('broadcast handler', e); }
+  }
+
+  if(bc) bc.onmessage = ev => handleBroadcast(ev.data);
+  else window.addEventListener('storage', (e)=>{
+    if(e.key===BC_NAME && e.newValue){ try{ handleBroadcast(JSON.parse(e.newValue)); }catch(_){ } }
+  });
+
+  /* =============================
+     METRICS (simple)
+     ============================= */
+  (function metricsModule(){
+    let metrics = load(STORAGE.METRICS_KEY, { live:0, viewed:0, sessions:{} });
+    const sessionId = uid('sess');
+    metrics.live = (metrics.live||0) + 1;
+    metrics.viewed = (metrics.viewed||0) + 1;
+    metrics.sessions[sessionId] = { start: nowISO(), active:true };
+    save(STORAGE.METRICS_KEY, metrics);
+    window.addEventListener('beforeunload', ()=>{
+      const m = load(STORAGE.METRICS_KEY, { live:0, sessions:{} });
+      m.live = Math.max(0,(m.live||1)-1);
+      if(m.sessions && m.sessions[sessionId]){ m.sessions[sessionId].end = nowISO(); m.sessions[sessionId].active = false; }
+      save(STORAGE.METRICS_KEY, m); bcPost('metrics_update', { sessionId, live:m.live });
+    });
+  })();
+
+  /* =============================
+     COLLAPSE HELPERS (minimize logs)
+     ============================= */
+  function wireCollapse(btnId, targetId, fadeId){
+    const btn = document.getElementById(btnId);
+    const target = document.getElementById(targetId);
+    const fade = fadeId ? document.getElementById(fadeId) : null;
+    if(!btn || !target) return;
+
+    const apply = (collapsed)=>{
+      target.classList.toggle('log-collapsed', collapsed);
+      if(fade) fade.classList.toggle('hidden', !collapsed);
+      btn.textContent = collapsed ? 'Expand' : 'Minimize';
+    };
+
+    let collapsed = false;
+    btn.addEventListener('click', ()=>{
+      collapsed = !collapsed;
+      apply(collapsed);
+    });
+
+    apply(false);
+  }
+
+  /* =============================
+     MARKETPLACE (local)
+     ============================= */
+  (function marketplaceModule(){
+    const KEY = STORAGE.MARKETPLACE_KEY;
+    let state = load(KEY, { uploads:[], bids:[] });
+
+    function escapeHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    function saveState(){ save(KEY, state); bcPost('marketplace_update', { state }); renderAll(); }
+
+    function renderUploads(){
+      const el = document.getElementById('marketplace-uploads');
+      el.innerHTML='';
+      if(!state.uploads.length) { el.innerHTML = '<div class="muted small">No uploads yet.</div>'; return; }
+      state.uploads.slice().reverse().forEach(u=>{
+        const card = document.createElement('div');
+        card.className='device-tile';
+        card.style.alignItems = 'flex-start';
+        card.innerHTML = `
+          <div style="flex:1">
+            <strong>${escapeHtml(u.title)}</strong>
+            <div class="small muted">${escapeHtml(u.username||'')} • ${escapeHtml(u.created)}</div>
+            <div style="margin-top:6px;color:var(--muted)">${escapeHtml(u.description||'')}</div>
+          </div>`;
+        el.appendChild(card);
+      });
+    }
+
+    function renderAll(){ renderUploads(); }
+
+    document.getElementById('marketplace-upload-form').addEventListener('submit', (e)=>{
+      e.preventDefault();
+      const title = document.getElementById('marketplace-title').value.trim();
+      if(!title){ document.getElementById('upload-status').innerText='Enter a title'; return; }
+      const upload = {
+        id: uid('u'),
+        title,
+        description: document.getElementById('marketplace-description').value.trim(),
+        username: document.getElementById('marketplace-username').value.trim(),
+        wallet: document.getElementById('marketplace-wallet').value.trim(),
+        mediaUrl: document.getElementById('marketplace-media').value.trim(),
+        created: nowISO()
+      };
+      state.uploads.push(upload);
+      saveState();
+      document.getElementById('upload-status').innerText = 'Upload published';
+      e.target.reset();
+    });
+
+    renderAll();
+    window.RedNodeMarketplace = { syncFromBroadcast:(s)=>{ state=s; renderAll(); } };
+  })();
+
+  /* =============================
+     CONTACT (local)
+     ============================= */
+  (function contactModule(){
+    const KEY = STORAGE.CONTACTS_KEY;
+    let contacts = load(KEY, []);
+    document.getElementById('contact-form').addEventListener('submit',(e)=>{
+      e.preventDefault();
+      const email = document.getElementById('contact-email').value.trim();
+      if(!email){ document.getElementById('contact-status').innerText='Email required'; return; }
+      contacts.push({
+        id: uid('c'),
+        name: document.getElementById('contact-name').value.trim(),
+        email,
+        message: document.getElementById('contact-message').value.trim(),
+        ts: nowISO()
+      });
+      save(KEY, contacts);
+      document.getElementById('contact-status').innerText = 'Request received (local demo)';
+      e.target.reset();
+    });
+  })();
+
+  /* =============================
+     SENTINEL: Local Node Simulation
+     ============================= */
+  (function sentinelModule(){
+    const KEY = STORAGE.SENTINEL_KEY;
+    let state = load(KEY, { devices:[], nodes:[], subscriptions:[], messages:[] });
+
+    function saveState(){ save(KEY, state); bcPost('sentinel_state_update', { state }); renderAll(); }
+    function compareMessages(a,b){ if(a.ts === b.ts) return (a.deviceId||'').localeCompare(b.deviceId||''); return new Date(a.ts)-new Date(b.ts); }
+    function escapeHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+    function renderDevices(){
+      const container = document.getElementById('deviceList');
+      container.innerHTML='';
+      state.devices.forEach(d=>{
+        const div = document.createElement('div');
+        div.className='device-tile';
+        div.innerHTML = `
+          <div>
+            <strong>${escapeHtml(d.name)}</strong>
+            <div class="small muted">${escapeHtml(d.type)} • ${escapeHtml(d.id)}</div>
+          </div>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-outline" data-id="${d.id}" data-action="view">View</button>
+            <button class="btn btn-primary" data-id="${d.id}" data-action="remove">Remove</button>
+          </div>`;
+        container.appendChild(div);
+      });
+
+      const publishFrom = document.getElementById('publishFromDevice');
+      publishFrom.innerHTML='';
+      state.devices.forEach(d=>{
+        const opt=document.createElement('option');
+        opt.value=d.id;
+        opt.textContent=`${d.name} (${d.type})`;
+        publishFrom.appendChild(opt);
+      });
+
+      renderDeviceLogsOverview();
+    }
+
+    function renderNodes(){
+      const list = document.getElementById('nodeList');
+      list.innerHTML='';
+      state.nodes.forEach(n=>{
+        const div=document.createElement('div');
+        div.style.marginBottom='8px';
+        div.innerHTML = `
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+            <div>
+              <strong>${escapeHtml(n.name)}</strong>
+              <div class="small muted">${escapeHtml(n.id)}</div>
+            </div>
+            <div style="display:flex;gap:6px">
+              <button class="btn btn-primary" data-node="${n.id}" data-action="view">View</button>
+              <button class="btn btn-outline" data-node="${n.id}" data-action="remove">Remove</button>
+            </div>
+          </div>`;
+        list.appendChild(div);
+      });
+
+      const publishNode = document.getElementById('publishNode');
+      publishNode.innerHTML='';
+      const nodeHistorySelect = document.getElementById('nodeHistorySelect');
+      nodeHistorySelect.innerHTML='';
+      state.nodes.forEach(n=>{
+        const opt=document.createElement('option');
+        opt.value=n.id;
+        opt.textContent=n.name;
+        publishNode.appendChild(opt);
+        nodeHistorySelect.appendChild(opt.cloneNode(true));
+      });
+    }
+
+    function renderSubscriptions(){
+      const grid = document.getElementById('subscriptionGrid');
+      grid.innerHTML='';
+      if(state.devices.length===0 || state.nodes.length===0){
+        grid.innerHTML='<div class="small muted">Add at least one device and one node.</div>';
+        return;
+      }
+      state.devices.forEach(d=>{
+        const row=document.createElement('div');
+        row.style.display='flex';
+        row.style.alignItems='center';
+        row.style.justifyContent='space-between';
+        row.style.gap='10px';
+        row.style.flexWrap='wrap';
+
+        const left=document.createElement('div');
+        left.innerHTML=`<strong>${escapeHtml(d.name)}</strong><div class="small muted">${escapeHtml(d.type)}</div>`;
+
+        const right=document.createElement('div');
+        state.nodes.forEach(n=>{
+          const cbId=`sub_${d.id}_${n.id}`;
+          const checked=!!state.subscriptions.find(s=>s.deviceId===d.id && s.nodeId===n.id);
+          const label=document.createElement('label');
+          label.style.marginLeft='8px';
+          label.innerHTML = `<input type="checkbox" id="${cbId}" data-device="${d.id}" data-node="${n.id}" ${checked?'checked':''}> <span class="small muted">${escapeHtml(n.name)}</span>`;
+          right.appendChild(label);
+        });
+
+        row.appendChild(left);
+        row.appendChild(right);
+        grid.appendChild(row);
+      });
+
+      grid.querySelectorAll('input[type=checkbox]').forEach(cb=>{
+        cb.addEventListener('change', ()=>{
+          const deviceId = cb.getAttribute('data-device');
+          const nodeId = cb.getAttribute('data-node');
+          if(cb.checked){
+            if(!state.subscriptions.find(s=>s.deviceId===deviceId && s.nodeId===nodeId)){
+              state.subscriptions.push({ deviceId, nodeId });
+              saveState();
+            }
+          } else {
+            state.subscriptions = state.subscriptions.filter(s=>!(s.deviceId===deviceId && s.nodeId===nodeId));
+            saveState();
+          }
+        });
+      });
+    }
+
+    function renderNodeHistory(nodeId){
+      const el=document.getElementById('nodeHistory');
+      el.innerHTML='';
+      const msgs = state.messages.filter(m=>m.nodeId===nodeId).sort(compareMessages);
+      if(!msgs.length){
+        el.innerHTML='<div class="small muted">No events for this node.</div>';
+        return;
+      }
+      msgs.forEach(m=>{
+        const card=document.createElement('div');
+        card.style.borderBottom='1px dashed rgba(255,255,255,0.03)';
+        card.style.padding='8px';
+        card.innerHTML = `
+          <div style="font-weight:800">${escapeHtml(m.deviceName)} <span class="small muted" style="font-weight:400">• ${escapeHtml(m.deviceType)}</span></div>
+          <div class="small muted">${m.ts}</div>
+          <pre style="white-space:pre-wrap;background:rgba(0,0,0,0.2);padding:8px;border-radius:6px;margin-top:6px">${escapeHtml(JSON.stringify(m.payload,null,2))}</pre>`;
+        el.appendChild(card);
+      });
+    }
+
+    function renderDeviceLogsOverview(){
+      const logEl = document.getElementById('deviceLogs');
+      logEl.innerHTML='';
+      state.devices.forEach(d=>{
+        const msgs = state.messages
+          .filter(m=>m.deviceId===d.id)
+          .sort((a,b)=> new Date(b.ts)-new Date(a.ts))
+          .slice(0,5);
+
+        const card = document.createElement('div');
+        card.style.borderBottom='1px dashed rgba(255,255,255,0.03)';
+        card.style.padding='8px';
+
+        const header = `<div style="font-weight:800">${escapeHtml(d.name)} <span class="small muted">• ${escapeHtml(d.type)}</span></div>`;
+        const lines = msgs.map(m=> `<div class="small muted" style="margin-top:6px">${m.ts} — ${escapeHtml(JSON.stringify(m.payload))}</div>`).join('');
+        card.innerHTML = header + lines;
+        logEl.appendChild(card);
+      });
+    }
+
+    function publishMessage(deviceId,nodeId,payload){
+      const device = state.devices.find(d=>d.id===deviceId);
+      const node = state.nodes.find(n=>n.id===nodeId);
+      if(!device || !node) return;
+      const message = {
+        id: uid('msg'),
+        nodeId,
+        nodeName:node.name,
+        deviceId,
+        deviceName:device.name,
+        deviceType:device.type,
+        payload,
+        ts: nowISO()
+      };
+      state.messages.push(message);
+      saveState();
+      renderAll();
+    }
+
+    function exportNodeCSV(nodeId){
+      const msgs = state.messages.filter(m=>m.nodeId===nodeId).sort(compareMessages);
+      const rows=[['ts','node','device','type','payload']];
+      msgs.forEach(m=> rows.push([m.ts,m.nodeName,m.deviceName,m.deviceType,JSON.stringify(m.payload).replace(/"/g,'""')]));
+      const csv = rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+      const a=document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+      a.download=`node_${nodeId}_history.csv`;
+      a.click();
+    }
+
+    function exportDevicesCSV(){
+      const rows=[['id','name','type','created']];
+      state.devices.forEach(d=> rows.push([d.id,d.name,d.type,d.created]));
+      const csv = rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+      const a=document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+      a.download='devices.csv';
+      a.click();
+    }
+
+    function renderDeviceLog(deviceId){
+      const logEl = document.getElementById('deviceLogs');
+      logEl.innerHTML='';
+      const msgs = state.messages.filter(m=>m.deviceId===deviceId).sort((a,b)=> new Date(b.ts)-new Date(a.ts));
+      if(!msgs.length){
+        logEl.innerHTML='<div class="small muted">No events for this device yet.</div>';
+        return;
+      }
+      msgs.forEach(m=>{
+        const d=document.createElement('div');
+        d.style.borderBottom='1px dashed rgba(255,255,255,0.03)';
+        d.style.padding='6px';
+        d.innerHTML = `<div style="font-weight:800">${escapeHtml(m.nodeName)} <span class="small muted">• ${m.ts}</span></div><div class="small muted" style="margin-top:6px">${escapeHtml(JSON.stringify(m.payload))}</div>`;
+        logEl.appendChild(d);
+      });
+    }
+
+    function wireUI(){
+      document.getElementById('btnAddDevice').addEventListener('click', ()=>{
+        const name = document.getElementById('deviceNameInput').value.trim();
+        const type = document.getElementById('deviceTypeSelect').value;
+        if(!name){ alert('Enter a device name'); return; }
+        const d = { id: uid('dev'), name, type, created: nowISO() };
+        state.devices.push(d);
+        saveState();
+        document.getElementById('deviceNameInput').value='';
+        renderAll();
+      });
+
+      document.getElementById('btnClearDevices').addEventListener('click', ()=>{
+        if(!confirm('Remove ALL devices and their subscriptions/messages?')) return;
+        state.devices=[];
+        state.subscriptions=[];
+        state.messages=[];
+        saveState();
+        renderAll();
+      });
+
+      document.getElementById('btnExportDevices').addEventListener('click', ()=> exportDevicesCSV());
+
+      document.getElementById('btnAddNode').addEventListener('click', ()=>{
+        const name=document.getElementById('nodeNameInput').value.trim();
+        if(!name){ alert('Enter node name'); return; }
+        const n={ id: uid('node'), name, created: nowISO() };
+        state.nodes.push(n);
+        saveState();
+        document.getElementById('nodeNameInput').value='';
+        renderAll();
+      });
+
+      document.getElementById('btnPublish').addEventListener('click', ()=>{
+        const deviceId = document.getElementById('publishFromDevice').value;
+        const nodeId = document.getElementById('publishNode').value;
+        const payloadText = document.getElementById('publishPayload').value.trim();
+        if(!deviceId||!nodeId){ alert('Choose device and node'); return; }
+        let payload={};
+        if(payloadText){
+          try{ payload = JSON.parse(payloadText); }
+          catch(e){ alert('Payload must be valid JSON'); return; }
+        }
+        publishMessage(deviceId,nodeId,payload);
+      });
+
+      document.getElementById('btnSimTelemetry').addEventListener('click', ()=>{
+        const deviceId=document.getElementById('publishFromDevice').value;
+        const nodeId=document.getElementById('publishNode').value;
+        if(!deviceId||!nodeId){ alert('Choose device and node'); return; }
+        const telemetry = {
+          type:'telemetry',
+          motion: Number((Math.abs(Math.sin(Date.now()/500)+Math.random()*0.4)/1.8).toFixed(3)),
+          tempC: Number((20 + Math.sin(Date.now()/20000)*2 + Math.random()*0.2).toFixed(2)),
+          ts: nowISO()
+        };
+        publishMessage(deviceId,nodeId,{ telemetry });
+      });
+
+      document.getElementById('btnExportNodeHistory').addEventListener('click', ()=>{
+        const nodeId=document.getElementById('nodeHistorySelect').value;
+        if(!nodeId){ alert('No node selected'); return; }
+        exportNodeCSV(nodeId);
+      });
+
+      document.getElementById('nodeList').addEventListener('click',(e)=>{
+        const btn=e.target.closest('button'); if(!btn) return;
+        const nodeId=btn.getAttribute('data-node');
+        const action=btn.getAttribute('data-action');
+        if(action==='view'){
+          renderNodeHistory(nodeId);
+          document.getElementById('nodeHistorySelect').value = nodeId;
+        }
+        if(action==='remove'){
+          state.nodes = state.nodes.filter(n=>n.id!==nodeId);
+          state.subscriptions = state.subscriptions.filter(s=>s.nodeId!==nodeId);
+          state.messages = state.messages.filter(m=>m.nodeId!==nodeId);
+          saveState();
+          renderAll();
+        }
+      });
+
+      document.getElementById('deviceList').addEventListener('click',(e)=>{
+        const btn=e.target.closest('button'); if(!btn) return;
+        const deviceId=btn.getAttribute('data-id');
+        const action=btn.getAttribute('data-action');
+        if(action==='view'){ renderDeviceLog(deviceId); }
+        if(action==='remove'){
+          state.devices = state.devices.filter(dd=>dd.id!==deviceId);
+          state.subscriptions = state.subscriptions.filter(s=>s.deviceId!==deviceId);
+          state.messages = state.messages.filter(m=>m.deviceId!==deviceId);
+          saveState();
+          renderAll();
+        }
+      });
+
+      document.getElementById('nodeHistorySelect').addEventListener('change', ()=>{
+        const nodeId=document.getElementById('nodeHistorySelect').value;
+        if(nodeId) renderNodeHistory(nodeId);
+      });
+    }
+
+    function seedDemo(){
+      if(!state.nodes.length){
+        state.nodes.push({ id:'node_home', name:'Home-Office', created: nowISO() }, { id:'node_entry', name:'Entryway', created: nowISO() });
+      }
+      if(!state.devices.length){
+        state.devices.push({ id:'dev_cam_1', name:'SmartCam 1', type:'SmartCam', created: nowISO() });
+        state.devices.push({ id:'dev_door_1', name:'Front Door', type:'DoorSensor', created: nowISO() });
+        state.devices.push({ id:'dev_motion_1', name:'Hall Motion', type:'MotionSensor', created: nowISO() });
+        state.devices.push({ id:'dev_headset_1', name:'Headset A', type:'Headset', created: nowISO() });
+      }
+      if(!state.subscriptions.length){
+        state.subscriptions.push({ deviceId:'dev_cam_1', nodeId:'node_home' });
+        state.subscriptions.push({ deviceId:'dev_door_1', nodeId:'node_entry' });
+        state.subscriptions.push({ deviceId:'dev_motion_1', nodeId:'node_entry' });
+      }
+      saveState();
+    }
+
+    function renderAll(){
+      renderDevices();
+      renderNodes();
+      renderSubscriptions();
+      const nodeSel = document.getElementById('nodeHistorySelect');
+      if(nodeSel && !nodeSel.value && state.nodes[0]) nodeSel.value = state.nodes[0].id;
+      if(nodeSel && nodeSel.value) renderNodeHistory(nodeSel.value);
+      renderDeviceLogsOverview();
+    }
+
+    seedDemo();
+    wireUI();
+    renderAll();
+
+    window.RedNodeSentinel = { syncFromBroadcast:(s)=>{ state=s; renderAll(); } };
+  })();
+
+  /* =============================
+     Demo & TFJS + Mapping + Indoor Controls
+     ============================= */
+  (function demoModule(){
+    const cameraToggleBtn = document.getElementById('cameraToggleBtn');
+    const arToggleBtn = document.getElementById('arToggleBtn');
+    const trackingToggleBtn = document.getElementById('trackingToggleBtn');
+    const openARBtn = document.getElementById('openARBtn');
+    const openTunerBtn = document.getElementById('openTunerBtn');
+    const tunerBackdrop = document.getElementById('tunerBackdrop');
+    const tunerModal = document.getElementById('tunerModal');
+    const t_applyBtn = document.getElementById('t_applyBtn');
+    const t_closeBtn = document.getElementById('t_closeBtn');
+    const t_xCloseBtn = document.getElementById('t_xCloseBtn');
+
+    const video = document.getElementById('demoVideo');
+    const overlay = document.getElementById('demoOverlay');
+    const overlayCtx = overlay.getContext('2d');
+    const statusText = document.getElementById('statusText');
+    const modelStatusLabel = document.getElementById('modelStatusLabel');
+    const opacityText = document.getElementById('opacityText');
+    const detectFreqText = document.getElementById('detectFreqText');
+    const liveDetectionsList = document.getElementById('liveDetections');
+
+    const indoorModeBtn = document.getElementById('indoorModeBtn');
+    const privacyBlurBtn = document.getElementById('privacyBlurBtn');
+    const lowLightBtn = document.getElementById('lowLightBtn');
+
+    const roomProfileSelect = document.getElementById('roomProfileSelect');
+    const applyRoomProfileBtn = document.getElementById('applyRoomProfileBtn');
+    const areaSizeInput = document.getElementById('areaSizeInput');
+    const areaSizeApplyBtn = document.getElementById('areaSizeApplyBtn');
+    const zoneCountLabel = document.getElementById('zoneCountLabel');
+
+    const btnClearZones = document.getElementById('btnClearZones');
+    const btnIndoorPreset = document.getElementById('btnIndoorPreset');
+    const btnIndoorQuickZones = document.getElementById('btnIndoorQuickZones');
+    const btnHallwayMode = document.getElementById('btnHallwayMode');
+    const btnDeskMode = document.getElementById('btnDeskMode');
+
+    // tuner inputs
+    const t_overlayOpacity = document.getElementById('t_overlayOpacity');
+    const t_detectFreq = document.getElementById('t_detectFreq');
+    const t_confThreshold = document.getElementById('t_confThreshold');
+    const t_overlayColor = document.getElementById('t_overlayColor');
+    const t_lidarSensitivity = document.getElementById('t_lidarSensitivity');
+    const t_bucketOffset = document.getElementById('t_bucketOffset');
+    const t_overlayScale = document.getElementById('t_overlayScale');
+    const t_useModel = document.getElementById('t_useModel');
+
+    const t_indoorMode = document.getElementById('t_indoorMode');
+    const t_privacyBlur = document.getElementById('t_privacyBlur');
+    const t_lowLight = document.getElementById('t_lowLight');
+    const t_areaSize = document.getElementById('t_areaSize');
+    const t_indoorPresetBtn = document.getElementById('t_indoorPresetBtn');
+
+    const t_mapHuman = document.getElementById('t_mapHuman');
+    const t_mapVehicle = document.getElementById('t_mapVehicle');
+    const t_mapExcavator = document.getElementById('t_mapExcavator');
+    const t_mapRobot = document.getElementById('t_mapRobot');
+    const t_mapIgnore = document.getElementById('t_mapIgnore');
+    const t_customLabels = document.getElementById('t_customLabels');
+
+    const DEFAULT_SETTINGS = {
+      overlayOpacity:0.8,
+      detectFreq:500,
+      confThreshold:0.55,
+      overlayColor:'#ff8a5b',
+      lidarSensitivity:52,
+      bucketOffset:0,
+      overlayScale:0.95,
+      useModel:false,
+
+      // indoor
+      indoorMode:true,
+      privacyBlur:false,
+      lowLight:false,
+      areaSize:25, // m²
+
+      // mapping (indoor-friendly coco-ssd common objects)
+      mapHuman:'person',
+      mapVehicle:'car,bus,truck',
+      mapExcavator:'truck',
+      mapRobot:'robot',
+      mapIgnore:'',
+      customLabels:'person:Occupant,laptop:Workstation,tv:Display,cell phone:Phone'
+    };
+
+    const ROOM_PROFILES = {
+      home_office: {
+        indoorMode:true, areaSize:18, detectFreq:520, confThreshold:0.58, overlayScale:0.95, lidarSensitivity:50,
+        mapIgnore:'', customLabels:'person:Occupant,laptop:Workstation,tv:Display,cell phone:Phone'
+      },
+      living_room: {
+        indoorMode:true, areaSize:28, detectFreq:560, confThreshold:0.55, overlayScale:1.0, lidarSensitivity:55,
+        customLabels:'person:Occupant,couch:Seating,tv:Display,remote:Remote'
+      },
+      workshop: {
+        indoorMode:true, areaSize:35, detectFreq:420, confThreshold:0.52, overlayScale:1.05, lidarSensitivity:65,
+        customLabels:'person:Operator,knife:Tool,scissors:Tool,book:Manual'
+      },
+      garage: {
+        indoorMode:true, areaSize:45, detectFreq:420, confThreshold:0.50, overlayScale:1.05, lidarSensitivity:70,
+        mapVehicle:'car,truck', customLabels:'person:Operator,car:Vehicle,truck:Vehicle'
+      },
+      warehouse: {
+        indoorMode:true, areaSize:120, detectFreq:360, confThreshold:0.45, overlayScale:1.1, lidarSensitivity:78,
+        mapVehicle:'car,truck,bus', customLabels:'person:Worker,truck:Transport'
+      }
+    };
+
+    let settings = Object.assign({}, DEFAULT_SETTINGS, load(STORAGE.DEMO_SETTINGS_KEY) || {});
+    let cocoModel = null;
+    let modelLoading = false;
+
+    let stream = null;
+    let trackingTimer = null;
+    let trackingEnabled = false;
+    let cameraActive = false;
+    let arEnabled = false;
+    let detectionsHistory = [];
+    let nogoZones = [];
+
+    // drawing zone (shift+drag)
+    const arView = document.getElementById('arView');
+    let dragActive = false;
+    let dragStart = null;
+
+    function logTelemetry(msg){ console.debug(`[Demo] ${msg}`); }
+    function appendTimeline(msg){ console.debug(`[Timeline] ${msg}`); }
+
+    function updateVideoFilters(){
+      const filters = [];
+      if(settings.privacyBlur) filters.push('blur(8px)');
+      if(settings.lowLight) filters.push('brightness(1.25) contrast(1.12) saturate(1.05)');
+      video.style.filter = filters.join(' ');
+      privacyBlurBtn.classList.toggle('active', !!settings.privacyBlur);
+      lowLightBtn.classList.toggle('active', !!settings.lowLight);
+    }
+
+    function updateCompactFromStorage(){
+      const compact = load('rednode_compact_v1', false);
+      document.body.classList.toggle('compact', !!compact);
+      document.getElementById('btnCompactToggle').textContent = compact ? 'Compact (On)' : 'Compact';
+    }
+
+    function setModalOpen(open){
+      if(open){
+        updateUIFromSettings();
+        tunerBackdrop.classList.remove('hidden');
+        tunerModal.classList.remove('hidden');
+        tunerBackdrop.hidden = false;
+        tunerModal.hidden = false;
+        tunerBackdrop.setAttribute('aria-hidden','false');
+        tunerModal.setAttribute('aria-hidden','false');
+        openTunerBtn.textContent = 'TUNER (Close)';
+      } else {
+        save(STORAGE.DEMO_SETTINGS_KEY, settings);
+        applySettings();
+        tunerBackdrop.classList.add('hidden');
+        tunerModal.classList.add('hidden');
+        tunerBackdrop.hidden = true;
+        tunerModal.hidden = true;
+        tunerBackdrop.setAttribute('aria-hidden','true');
+        tunerModal.setAttribute('aria-hidden','true');
+        openTunerBtn.textContent = 'TUNER';
+      }
+    }
+
+    function isModalOpen(){
+      return !tunerModal.classList.contains('hidden') && !tunerModal.hidden;
+    }
+    function closeTuner(){ setModalOpen(false); }
+    function openTuner(){ setModalOpen(true); }
+
+    function updateUIFromSettings(){
+      t_overlayOpacity.value = settings.overlayOpacity; document.getElementById('t_overlayOpacity_val').innerText = settings.overlayOpacity;
+      t_detectFreq.value = settings.detectFreq; document.getElementById('t_detectFreq_val').innerText = settings.detectFreq + 'ms';
+      t_confThreshold.value = settings.confThreshold; document.getElementById('t_confThreshold_val').innerText = settings.confThreshold;
+      t_overlayColor.value = settings.overlayColor;
+
+      t_lidarSensitivity.value = settings.lidarSensitivity; document.getElementById('t_lidarSensitivity_val').innerText = settings.lidarSensitivity;
+      t_bucketOffset.value = settings.bucketOffset; document.getElementById('t_bucketOffset_val').innerText = settings.bucketOffset;
+      t_overlayScale.value = settings.overlayScale; document.getElementById('t_overlayScale_val').innerText = settings.overlayScale;
+      t_useModel.checked = !!settings.useModel;
+
+      t_indoorMode.checked = !!settings.indoorMode;
+      t_privacyBlur.checked = !!settings.privacyBlur;
+      t_lowLight.checked = !!settings.lowLight;
+      t_areaSize.value = settings.areaSize;
+
+      t_mapHuman.value = settings.mapHuman;
+      t_mapVehicle.value = settings.mapVehicle;
+      t_mapExcavator.value = settings.mapExcavator;
+      t_mapRobot.value = settings.mapRobot;
+      t_mapIgnore.value = settings.mapIgnore;
+      t_customLabels.value = settings.customLabels;
+
+      opacityText.innerText = settings.overlayOpacity;
+      detectFreqText.innerText = settings.detectFreq + 'ms';
+      indoorModeBtn.classList.toggle('active', !!settings.indoorMode);
+      updateVideoFilters();
+    }
+
+    function applySettings(){
+      overlay.style.opacity = settings.overlayOpacity;
+      opacityText.innerText = settings.overlayOpacity;
+      detectFreqText.innerText = settings.detectFreq + 'ms';
+      zoneCountLabel.innerText = String(nogoZones.length);
+      areaSizeInput.value = settings.areaSize;
+      save(STORAGE.DEMO_SETTINGS_KEY, settings);
+      indoorModeBtn.classList.toggle('active', !!settings.indoorMode);
+      updateVideoFilters();
+    }
+
+    function applyIndoorPreset(){
+      // Indoor defaults: a little slower, more stable overlay, denser lidar
+      settings.indoorMode = true;
+      settings.detectFreq = clamp(settings.detectFreq || 520, 360, 800);
+      settings.confThreshold = clamp(settings.confThreshold || 0.56, 0.45, 0.75);
+      settings.overlayScale = clamp(settings.overlayScale || 0.95, 0.8, 1.2);
+      settings.lidarSensitivity = clamp(settings.lidarSensitivity || 55, 40, 85);
+
+      // Indoor mapping improvements (coco-ssd common indoor objects)
+      settings.mapHuman = 'person';
+      settings.mapVehicle = 'car,truck,bus';
+      settings.mapExcavator = 'truck';
+      settings.mapRobot = 'robot';
+      settings.customLabels = 'person:Occupant,laptop:Workstation,tv:Display,cell phone:Phone,remote:Remote';
+
+      applySettings();
+      updateUIFromSettings();
+      logTelemetry('Indoor preset applied');
+    }
+
+    async function loadTFJSModelIfNeeded(){
+      if(cocoModel || modelLoading) return cocoModel;
+      if(!settings.useModel) return null;
+      modelLoading = true;
+      modelStatusLabel.innerText = 'loading...';
+      try {
+        if(typeof tf === 'undefined'){
+          await new Promise((res,rej)=>{
+            const s=document.createElement('script');
+            s.src='https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.20.0/dist/tf.min.js';
+            s.onload=res; s.onerror=rej;
+            document.head.appendChild(s);
+          });
+        }
+        if(typeof cocoSsd === 'undefined'){
+          await new Promise((res,rej)=>{
+            const s=document.createElement('script');
+            s.src='https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js';
+            s.onload=res; s.onerror=rej;
+            document.head.appendChild(s);
+          });
+        }
+        modelStatusLabel.innerText = 'loading model...';
+        cocoModel = await cocoSsd.load();
+        modelStatusLabel.innerText = 'model loaded';
+        logTelemetry('TFJS coco-ssd loaded');
+      } catch(e){
+        cocoModel=null;
+        modelStatusLabel.innerText='model failed';
+        alert('Model failed to load. Check console/network/secure context.');
+      } finally {
+        modelLoading=false;
+      }
+      return cocoModel;
+    }
+
+    function getMappingSets(){
+      return {
+        human: new Set(parseList(settings.mapHuman)),
+        vehicle: new Set(parseList(settings.mapVehicle)),
+        excavator: new Set(parseList(settings.mapExcavator)),
+        robot: new Set(parseList(settings.mapRobot)),
+        ignore: new Set(parseList(settings.mapIgnore)),
+        customLabelsObj: parseCustomLabels(settings.customLabels)
+      };
+    }
+
+    function getOverlayType(className){
+      if(!className) return 'generic';
+      const cls = String(className).toLowerCase();
+      const mapping = getMappingSets();
+      if(mapping.excavator.has(cls)) return 'excavator';
+      if(mapping.robot.has(cls)) return 'robot';
+      if(mapping.vehicle.has(cls)) return 'vehicle';
+      if(mapping.human.has(cls)) return 'human';
+      if(mapping.ignore.has(cls)) return 'ignore';
+      return 'generic';
+    }
+
+    function getDisplayLabel(className, overlayType){
+      const mapping = getMappingSets();
+      const cls = (className||'').toLowerCase();
+      if(mapping.customLabelsObj[cls]) return mapping.customLabelsObj[cls];
+      if(overlayType==='human') return 'Human';
+      if(overlayType==='vehicle') return 'Vehicle';
+      if(overlayType==='excavator') return 'Excavator';
+      if(overlayType==='robot') return 'Robot';
+      return className || 'Object';
+    }
+
+    function resizeOverlay(){
+      const rect = arView.getBoundingClientRect();
+      overlay.width = Math.max(2, Math.floor(rect.width));
+      overlay.height = Math.max(2, Math.floor(rect.height));
+      overlay.style.width = rect.width + 'px';
+      overlay.style.height = rect.height + 'px';
+    }
+    window.addEventListener('resize', resizeOverlay);
+
+    async function startCamera(){
+      if(stream) return;
+      try{
+        // indoor default resolution: lighter + more stable on small devices
+        const videoConstraints = settings.indoorMode
+          ? { width: 960, height: 540 }
+          : { width: 1280, height: 720 };
+
+        stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio:false });
+        video.srcObject = stream;
+        await video.play();
+        cameraActive = true;
+        statusText.innerText = 'camera running';
+        resizeOverlay();
+        if(trackingEnabled) startTrackingLoop();
+      }catch(e){
+        statusText.innerText = 'camera unavailable';
+        alert('Camera unavailable — use HTTPS or localhost and allow permission.');
+      }
+    }
+    function stopCamera(){
+      if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
+      video.pause(); video.srcObject=null;
+      cameraActive=false;
+      statusText.innerText='camera stopped';
+    }
+
+    function drawLiDARSimulation(){
+      const w = overlay.width, h = overlay.height;
+      const grd = overlayCtx.createRadialGradient(w/2, h/2, 10, w/2, h/2, Math.max(w,h));
+      grd.addColorStop(0, hexToRgba('#002029', 0.0));
+      grd.addColorStop(1, hexToRgba('#00121a', settings.indoorMode ? 0.28 : 0.25));
+      overlayCtx.fillStyle = grd;
+      overlayCtx.fillRect(0,0,w,h);
+
+      // density scales with area size: small area => denser points
+      const area = clamp(Number(settings.areaSize)||25, 3, 400);
+      const smallAreaBoost = clamp(60 / Math.sqrt(area), 0.5, 2.2); // 3m²=>~2.2, 25=>~1.2, 120=>~0.55
+      const base = 42 * (settings.lidarSensitivity/60);
+      const pts = Math.floor(base * smallAreaBoost);
+
+      for(let i=0;i<pts;i++){
+        const rx = Math.random()*w; const ry = Math.random()*h; const r = Math.random()*3 + 1;
+        overlayCtx.beginPath();
+        overlayCtx.fillStyle = hexToRgba(settings.overlayColor, Math.random() * (settings.indoorMode ? 0.14 : 0.12));
+        overlayCtx.arc(rx,ry,r,0,Math.PI*2);
+        overlayCtx.fill();
+      }
+
+      // grid hint in indoor mode
+      if(settings.indoorMode){
+        overlayCtx.strokeStyle = hexToRgba('#9FB4C7', 0.08);
+        overlayCtx.lineWidth = 1;
+        const step = 40;
+        for(let x=0;x<w;x+=step){ overlayCtx.beginPath(); overlayCtx.moveTo(x,0); overlayCtx.lineTo(x,h); overlayCtx.stroke(); }
+        for(let y=0;y<h;y+=step){ overlayCtx.beginPath(); overlayCtx.moveTo(0,y); overlayCtx.lineTo(w,y); overlayCtx.stroke(); }
+      }
+
+      // zones
+      overlayCtx.strokeStyle = hexToRgba('#ff4f3a', 0.9);
+      overlayCtx.lineWidth = 2;
+      nogoZones.forEach(z=>{
+        overlayCtx.fillStyle = hexToRgba('#ff4f3a', 0.10);
+        overlayCtx.fillRect(z.x*w, z.y*h, z.w*w, z.h*h);
+        overlayCtx.strokeRect(z.x*w, z.y*h, z.w*w, z.h*h);
+      });
+    }
+
+    // Double-click adds a default zone
+    arView.addEventListener('dblclick', (ev)=>{
+      const rect = arView.getBoundingClientRect();
+      const nx = (ev.clientX - rect.left) / rect.width;
+      const ny = (ev.clientY - rect.top) / rect.height;
+      nogoZones.push({ x: clamp(nx - 0.08, 0, 0.9), y: clamp(ny - 0.06, 0, 0.9), w:0.16, h:0.12 });
+      zoneCountLabel.innerText = String(nogoZones.length);
+    });
+
+    // Shift + Drag draw zone
+    arView.addEventListener('mousedown', (ev)=>{
+      if(!ev.shiftKey) return;
+      const rect = arView.getBoundingClientRect();
+      dragActive = true;
+      dragStart = { x:(ev.clientX-rect.left)/rect.width, y:(ev.clientY-rect.top)/rect.height };
+    });
+    window.addEventListener('mousemove', (ev)=>{
+      if(!dragActive) return;
+      // preview is drawn in overlay loop
+    });
+    window.addEventListener('mouseup', (ev)=>{
+      if(!dragActive) return;
+      dragActive = false;
+      const rect = arView.getBoundingClientRect();
+      const end = { x:(ev.clientX-rect.left)/rect.width, y:(ev.clientY-rect.top)/rect.height };
+      const x = clamp(Math.min(dragStart.x,end.x), 0, 1);
+      const y = clamp(Math.min(dragStart.y,end.y), 0, 1);
+      const w = clamp(Math.abs(dragStart.x-end.x), 0.02, 1);
+      const h = clamp(Math.abs(dragStart.y-end.y), 0.02, 1);
+      nogoZones.push({ x: clamp(x,0,0.98), y: clamp(y,0,0.98), w: clamp(w,0.02,0.98), h: clamp(h,0.02,0.98) });
+      zoneCountLabel.innerText = String(nogoZones.length);
+      dragStart = null;
+    });
+
+    function addLiveDetectionEntry(d, mappedType){
+      detectionsHistory.unshift({ ts:nowISO(), class:d.class, score:d.score, mappedType });
+      if(detectionsHistory.length>400) detectionsHistory.length=400;
+      const lines = detectionsHistory.slice(0,40).map(x => `${x.ts} • ${x.mappedType} • ${x.class} ${(x.score*100|0)}%`).join('\n');
+      liveDetectionsList.innerText = lines;
+    }
+
+    function drawDetection(d){
+      const type = getOverlayType(d.class);
+      if(type==='ignore') return;
+
+      const videoW = video.videoWidth || overlay.width;
+      const videoH = video.videoHeight || overlay.height;
+      const scaleX = overlay.width / videoW;
+      const scaleY = overlay.height / videoH;
+
+      const [x,y,w,h] = d.bbox || [0,0,0,0];
+      overlayCtx.save();
+
+      if(type==='human'){
+        overlayCtx.fillStyle = hexToRgba('#ffd7c9',0.22);
+        overlayCtx.fillRect(x*scaleX,y*scaleY,w*scaleX,h*scaleY);
+        overlayCtx.strokeStyle = '#ffd7c9';
+        overlayCtx.lineWidth = 2 * settings.overlayScale;
+        overlayCtx.strokeRect(x*scaleX,y*scaleY,w*scaleX,h*scaleY);
+        overlayCtx.font = `${13*settings.overlayScale}px sans-serif`;
+        overlayCtx.fillStyle='#fff';
+        overlayCtx.fillText(getDisplayLabel(d.class,'human'), x*scaleX+6, Math.max(12,y*scaleY-6));
+      } else if(type==='vehicle'){
+        overlayCtx.fillStyle = hexToRgba(settings.overlayColor,0.12);
+        overlayCtx.fillRect(x*scaleX,y*scaleY,w*scaleX,h*scaleY);
+        overlayCtx.strokeStyle = settings.overlayColor;
+        overlayCtx.lineWidth = 2*settings.overlayScale;
+        overlayCtx.strokeRect(x*scaleX,y*scaleY,w*scaleX,h*scaleY);
+        overlayCtx.font = `${12*settings.overlayScale}px sans-serif`;
+        overlayCtx.fillStyle='#fff';
+        overlayCtx.fillText(getDisplayLabel(d.class,'vehicle'), x*scaleX+6, Math.max(12,y*scaleY-6));
+      } else if(type==='excavator'){
+        overlayCtx.strokeStyle = settings.overlayColor;
+        overlayCtx.lineWidth = 2*settings.overlayScale;
+        overlayCtx.strokeRect(x*scaleX,y*scaleY,w*scaleX,h*scaleY);
+        overlayCtx.font = `${13*settings.overlayScale}px sans-serif`;
+        overlayCtx.fillStyle = settings.overlayColor;
+        overlayCtx.fillText(getDisplayLabel(d.class,'excavator'), x*scaleX+6, Math.max(12,y*scaleY-6));
+
+        const cx = x*scaleX + (w*scaleX)*0.5;
+        const cy = y*scaleY + (h*scaleY) + 20*settings.overlayScale;
+        const rad = 28*settings.overlayScale;
+        const angle = clamp(Number(settings.bucketOffset)||0,-45,45);
+        const sAng = -Math.PI/2 - Math.PI/3;
+        const eAng = -Math.PI/2 + Math.PI/3;
+        const normalized = (angle+45)/90;
+        const dAng = sAng + (eAng-sAng)*normalized;
+
+        overlayCtx.beginPath();
+        overlayCtx.strokeStyle = hexToRgba(settings.overlayColor,0.16);
+        overlayCtx.lineWidth = 8*settings.overlayScale;
+        overlayCtx.arc(cx,cy,rad,sAng,eAng,false);
+        overlayCtx.stroke();
+
+        overlayCtx.beginPath();
+        overlayCtx.strokeStyle = settings.overlayColor;
+        overlayCtx.lineWidth = 8*settings.overlayScale;
+        overlayCtx.arc(cx,cy,rad,sAng,dAng,false);
+        overlayCtx.stroke();
+
+        overlayCtx.fillStyle='#fff';
+        overlayCtx.font=`${11*settings.overlayScale}px sans-serif`;
+        overlayCtx.fillText(angle+'°', cx-10, cy+rad+16);
+      } else if(type==='robot'){
+        const cx = x*scaleX + (w*scaleX)*0.5;
+        const cy = y*scaleY + 12*settings.overlayScale;
+        overlayCtx.beginPath();
+        overlayCtx.fillStyle = hexToRgba('#7bbfff',0.2);
+        overlayCtx.arc(cx,cy,14*settings.overlayScale,0,Math.PI*2);
+        overlayCtx.fill();
+        overlayCtx.strokeStyle='#7bbfff';
+        overlayCtx.lineWidth = 2;
+        overlayCtx.stroke();
+        overlayCtx.fillStyle='#fff';
+        overlayCtx.font=`${12*settings.overlayScale}px sans-serif`;
+        const label=getDisplayLabel(d.class,'robot');
+        overlayCtx.fillText(label, cx - (overlayCtx.measureText(label).width/2), cy + 4);
+      } else {
+        overlayCtx.strokeStyle = settings.overlayColor;
+        overlayCtx.lineWidth = 2*settings.overlayScale;
+        overlayCtx.strokeRect(x*scaleX,y*scaleY,w*scaleX,h*scaleY);
+        overlayCtx.font = `${12*settings.overlayScale}px sans-serif`;
+        const label = getDisplayLabel(d.class,'generic');
+        const labelW = overlayCtx.measureText(label).width + 10;
+        overlayCtx.fillStyle = hexToRgba(settings.overlayColor,0.9);
+        overlayCtx.fillRect(x*scaleX, Math.max(0,y*scaleY-20), labelW, 20);
+        overlayCtx.fillStyle = '#022029';
+        overlayCtx.fillText(label, x*scaleX+4, Math.max(12,y*scaleY-6));
+      }
+      overlayCtx.restore();
+    }
+
+    function simulateOverlay(){
+      const w = overlay.width, h = overlay.height;
+      overlayCtx.clearRect(0,0,w,h);
+      drawLiDARSimulation();
+
+      // drag preview
+      if(dragActive && dragStart){
+        const rect = arView.getBoundingClientRect();
+        // approximate last known mouse position using window event? we draw a soft hint instead
+        overlayCtx.fillStyle = hexToRgba('#ff4f3a', 0.06);
+        overlayCtx.strokeStyle = hexToRgba('#ff4f3a', 0.35);
+        overlayCtx.lineWidth = 2;
+        overlayCtx.strokeRect(12,12, w-24, 6); // subtle "drawing" hint bar
+      }
+
+      overlayCtx.fillStyle = hexToRgba(settings.overlayColor, 0.14);
+      const bw = 160 * settings.overlayScale, bh = 80 * settings.overlayScale;
+      overlayCtx.fillRect(w-bw-20, h-bh-20, bw, bh);
+      overlayCtx.strokeStyle = settings.overlayColor;
+      overlayCtx.lineWidth = 2;
+      overlayCtx.strokeRect(w-bw-20, h-bh-20, bw, bh);
+      overlayCtx.fillStyle='#fff';
+      overlayCtx.font=`${13*settings.overlayScale}px sans-serif`;
+      overlayCtx.fillText(`Indoor ${settings.areaSize}m²`, w-bw-14, h-bh+8);
+
+      overlayCtx.beginPath();
+      overlayCtx.arc(60,80,24*settings.overlayScale,0,Math.PI*2);
+      overlayCtx.fillStyle = hexToRgba(settings.overlayColor,0.18);
+      overlayCtx.fill();
+      overlayCtx.strokeStyle = settings.overlayColor;
+      overlayCtx.stroke();
+      overlayCtx.fillStyle='#fff';
+      overlayCtx.fillText('Cam A', 46, 88);
+
+      overlayCtx.strokeStyle='#ffd7c9';
+      overlayCtx.lineWidth=2;
+      overlayCtx.strokeRect(w/2-34,h/3-60,68,140);
+      overlayCtx.fillStyle='#fff';
+      overlayCtx.font=`${12*settings.overlayScale}px sans-serif`;
+      overlayCtx.fillText('Occupant', w/2-34, h/3-70);
+    }
+
+    async function startTrackingLoop(){
+      if(trackingTimer) return;
+      trackingEnabled = true;
+      if(settings.useModel) await loadTFJSModelIfNeeded();
+
+      const loop = async ()=>{
+        if(!trackingEnabled) return;
+
+        overlayCtx.clearRect(0,0,overlay.width,overlay.height);
+        drawLiDARSimulation();
+
+        // draw shift+drag preview rectangle using last mouse position is non-trivial without tracking it;
+        // so we keep a subtle hint bar in simulateOverlay.
+
+        if(arEnabled){
+          if(settings.useModel && cocoModel && video.readyState>=2){
+            try{
+              const dets = await cocoModel.detect(video);
+              const filtered = (dets||[]).filter(d=> (d.score||0) >= settings.confThreshold);
+              filtered.slice(0,12).forEach(d=>{
+                drawDetection(d);
+                addLiveDetectionEntry(d, getOverlayType(d.class));
+              });
+              if(filtered.length) appendTimeline('model-detections:' + filtered.map(d=>`${d.class}:${(d.score*100|0)}%`).join(','));
+            }catch(e){
+              simulateOverlay();
+            }
+          } else {
+            simulateOverlay();
+          }
+        }
+        trackingTimer = setTimeout(loop, clamp(settings.detectFreq || 500, 120, 2200));
+      };
+      loop();
+    }
+
+    function stopTrackingLoop(){
+      trackingEnabled=false;
+      clearTimeout(trackingTimer);
+      trackingTimer=null;
+      overlayCtx.clearRect(0,0,overlay.width,overlay.height);
+    }
+
+    // Buttons
+    cameraToggleBtn.addEventListener('click', async ()=>{
+      if(!cameraActive){
+        await startCamera();
+        cameraToggleBtn.classList.add('active');
+      } else {
+        stopCamera();
+        cameraToggleBtn.classList.remove('active');
+      }
+    });
+
+    arToggleBtn.addEventListener('click', ()=>{
+      arEnabled=!arEnabled;
+      arToggleBtn.classList.toggle('active', arEnabled);
+      if(!arEnabled) overlayCtx.clearRect(0,0,overlay.width,overlay.height);
+    });
+
+    trackingToggleBtn.addEventListener('click', ()=>{
+      if(trackingEnabled) stopTrackingLoop();
+      else {
+        if(!cameraActive){
+          if(confirm('Camera not started — start camera for tracking?')){
+            cameraToggleBtn.click();
+            setTimeout(()=>startTrackingLoop(),700);
+          }
+        } else startTrackingLoop();
+      }
+    });
+
+    openARBtn.addEventListener('click', async ()=>{
+      if(!arEnabled && !confirm('AR overlays are disabled. Enable and open?')) return;
+      if(!cameraActive && !confirm('Camera is not running. Start camera?')) return;
+      resizeOverlay();
+      try{
+        if(arView.requestFullscreen) await arView.requestFullscreen();
+        else if(arView.webkitRequestFullscreen) arView.webkitRequestFullscreen();
+      }catch(_){}
+    });
+
+    // TUNER toggle
+    openTunerBtn.addEventListener('click', ()=>{
+      if(isModalOpen()) closeTuner();
+      else openTuner();
+    });
+    t_closeBtn.addEventListener('click', closeTuner);
+    t_xCloseBtn.addEventListener('click', closeTuner);
+    tunerBackdrop.addEventListener('click', closeTuner);
+    document.addEventListener('keydown', (e)=>{ if(e.key === 'Escape' && isModalOpen()) closeTuner(); });
+
+    // Apply
+    t_applyBtn.addEventListener('click', async ()=>{
+      applySettings();
+      if(settings.useModel) await loadTFJSModelIfNeeded();
+      closeTuner();
+    });
+
+    // Tuner controls
+    t_overlayOpacity.addEventListener('input', ()=>{ settings.overlayOpacity = Number(t_overlayOpacity.value); document.getElementById('t_overlayOpacity_val').innerText = settings.overlayOpacity; });
+    t_detectFreq.addEventListener('input', ()=>{ document.getElementById('t_detectFreq_val').innerText = t_detectFreq.value + 'ms'; });
+    t_detectFreq.addEventListener('change', ()=>{ settings.detectFreq = Number(t_detectFreq.value); });
+    t_confThreshold.addEventListener('input', ()=>{ document.getElementById('t_confThreshold_val').innerText = t_confThreshold.value; });
+    t_confThreshold.addEventListener('change', ()=>{ settings.confThreshold = Number(t_confThreshold.value); });
+    t_overlayColor.addEventListener('input', ()=>{ settings.overlayColor = t_overlayColor.value; });
+
+    t_lidarSensitivity.addEventListener('input', ()=>{ document.getElementById('t_lidarSensitivity_val').innerText = t_lidarSensitivity.value; });
+    t_lidarSensitivity.addEventListener('change', ()=>{ settings.lidarSensitivity = Number(t_lidarSensitivity.value); });
+
+    t_bucketOffset.addEventListener('input', ()=>{ document.getElementById('t_bucketOffset_val').innerText = t_bucketOffset.value; });
+    t_bucketOffset.addEventListener('change', ()=>{ settings.bucketOffset = Number(t_bucketOffset.value); });
+
+    t_overlayScale.addEventListener('input', ()=>{ document.getElementById('t_overlayScale_val').innerText = t_overlayScale.value; });
+    t_overlayScale.addEventListener('change', ()=>{ settings.overlayScale = Number(t_overlayScale.value); });
+
+    t_useModel.addEventListener('change', ()=>{ settings.useModel = t_useModel.checked; });
+
+    t_indoorMode.addEventListener('change', ()=>{ settings.indoorMode = t_indoorMode.checked; });
+    t_privacyBlur.addEventListener('change', ()=>{ settings.privacyBlur = t_privacyBlur.checked; updateVideoFilters(); });
+    t_lowLight.addEventListener('change', ()=>{ settings.lowLight = t_lowLight.checked; updateVideoFilters(); });
+    t_areaSize.addEventListener('change', ()=>{ settings.areaSize = clamp(Number(t_areaSize.value)||25, 3, 400); });
+
+    t_mapHuman.addEventListener('change', ()=> settings.mapHuman = t_mapHuman.value);
+    t_mapVehicle.addEventListener('change', ()=> settings.mapVehicle = t_mapVehicle.value);
+    t_mapExcavator.addEventListener('change', ()=> settings.mapExcavator = t_mapExcavator.value);
+    t_mapRobot.addEventListener('change', ()=> settings.mapRobot = t_mapRobot.value);
+    t_mapIgnore.addEventListener('change', ()=> settings.mapIgnore = t_mapIgnore.value);
+    t_customLabels.addEventListener('change', ()=> settings.customLabels = t_customLabels.value);
+
+    t_indoorPresetBtn.addEventListener('click', ()=>{
+      applyIndoorPreset();
+      updateUIFromSettings();
+    });
+
+    // top buttons
+    indoorModeBtn.addEventListener('click', ()=>{
+      settings.indoorMode = !settings.indoorMode;
+      if(settings.indoorMode) applyIndoorPreset();
+      applySettings();
+      updateUIFromSettings();
+    });
+
+    privacyBlurBtn.addEventListener('click', ()=>{
+      settings.privacyBlur = !settings.privacyBlur;
+      applySettings(); updateUIFromSettings();
+    });
+
+    lowLightBtn.addEventListener('click', ()=>{
+      settings.lowLight = !settings.lowLight;
+      applySettings(); updateUIFromSettings();
+    });
+
+    applyRoomProfileBtn.addEventListener('click', ()=>{
+      const key = roomProfileSelect.value;
+      const prof = ROOM_PROFILES[key];
+      if(!prof) return;
+      settings = Object.assign(settings, prof);
+      applySettings();
+      updateUIFromSettings();
+    });
+
+    areaSizeApplyBtn.addEventListener('click', ()=>{
+      settings.areaSize = clamp(Number(areaSizeInput.value)||25, 3, 400);
+      applySettings();
+      updateUIFromSettings();
+    });
+
+    btnIndoorPreset.addEventListener('click', ()=>{
+      applyIndoorPreset();
+      updateUIFromSettings();
+    });
+
+    btnClearZones.addEventListener('click', ()=>{
+      nogoZones = [];
+      zoneCountLabel.innerText = '0';
+    });
+
+    btnIndoorQuickZones.addEventListener('click', ()=>{
+      // 4 corner zones (keep-out)
+      nogoZones.push({x:0.02,y:0.02,w:0.18,h:0.14});
+      nogoZones.push({x:0.80,y:0.02,w:0.18,h:0.14});
+      nogoZones.push({x:0.02,y:0.84,w:0.18,h:0.14});
+      nogoZones.push({x:0.80,y:0.84,w:0.18,h:0.14});
+      zoneCountLabel.innerText = String(nogoZones.length);
+    });
+
+    btnHallwayMode.addEventListener('click', ()=>{
+      settings.indoorMode = true;
+      settings.areaSize = 22;
+      settings.detectFreq = 420;
+      settings.overlayScale = 0.92;
+      settings.lidarSensitivity = 62;
+      applySettings(); updateUIFromSettings();
+    });
+
+    btnDeskMode.addEventListener('click', ()=>{
+      settings.indoorMode = true;
+      settings.areaSize = 12;
+      settings.detectFreq = 560;
+      settings.overlayScale = 0.9;
+      settings.lidarSensitivity = 58;
+      settings.confThreshold = 0.6;
+      applySettings(); updateUIFromSettings();
+    });
+
+    // CSV export / clear
+    document.getElementById('btnExportOverlayCSV').addEventListener('click', ()=>{
+      if(!detectionsHistory.length){ alert('No detections yet'); return; }
+      const rows=[['ts','class','mappedType','score']];
+      detectionsHistory.forEach(d=> rows.push([d.ts,d.class,d.mappedType,(d.score||'').toString()]));
+      const csv = rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+      a.download='detections.csv';
+      a.click();
+    });
+
+    document.getElementById('btnClearDetections').addEventListener('click', ()=>{
+      detectionsHistory=[];
+      liveDetectionsList.innerText='';
+    });
+
+    // Demo nav
+    document.getElementById('btnTryDemo').addEventListener('click', ()=>{ window.location.href = '#demo'; });
+
+    // Compact toggle
+    document.getElementById('btnCompactToggle').addEventListener('click', ()=>{
+      const cur = load('rednode_compact_v1', false);
+      save('rednode_compact_v1', !cur);
+      updateCompactFromStorage();
+      resizeOverlay();
+    });
+
+    // wire collapses
+    wireCollapse('btnToggleLiveDetections','liveDetections','liveDetectionsFade');
+    wireCollapse('btnToggleNodeHistory','nodeHistory','nodeHistoryFade');
+    wireCollapse('btnToggleDeviceLogs','deviceLogs','deviceLogsFade');
+    wireCollapse('btnToggleMarketplaceUploads','marketplace-uploads','marketplaceFade');
+
+    // init
+    updateCompactFromStorage();
+    updateUIFromSettings();
+    applySettings();
+    resizeOverlay();
+    setModalOpen(false);
+
+    // model preload if enabled
+    if(settings.useModel) loadTFJSModelIfNeeded();
+
+    window.addEventListener('beforeunload', ()=>{ stopTrackingLoop(); stopCamera(); });
+  })();
+  </script>
+</body>
+</html>

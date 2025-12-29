@@ -1,0 +1,1613 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Rednode Excavation — Gesture Controlled Sim</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root{
+      --bg:#050505;
+      --panel:#0b0b0b;
+      --stroke:rgba(255,255,255,.09);
+      --muted:rgba(255,255,255,.65);
+      --accent:#ffcc33;
+      --accent2:#ff3b3b;
+      --glow: 0 0 18px rgba(255,190,40,.22), 0 0 56px rgba(255,60,60,.12);
+      --glow2: drop-shadow(0 0 10px rgba(255,190,40,.25)) drop-shadow(0 0 26px rgba(255,60,60,.18));
+    }
+    html,body{margin:0;height:100%;background:var(--bg);color:#eee;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;}
+    .page{
+      max-width:1180px;
+      margin:0 auto;
+      padding:14px;
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+    }
+    header{
+      border:1px solid var(--stroke);
+      border-radius:14px;
+      padding:12px 14px;
+      background:linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.01));
+      display:flex;
+      align-items:flex-end;
+      justify-content:space-between;
+      gap:12px;
+    }
+    header .title{
+      display:flex;
+      flex-direction:column;
+      gap:3px;
+      min-width:260px;
+    }
+    header h1{margin:0;font-size:16px;letter-spacing:.3px;}
+    header .sub{font-size:12px;color:var(--muted);line-height:1.35;}
+    header .brand{
+      font-size:12px;
+      color:rgba(255,210,60,.9);
+      text-shadow:0 0 12px rgba(255,210,60,.18);
+      white-space:nowrap;
+    }
+
+    .layout{
+      display:flex;
+      gap:12px;
+      align-items:stretch;
+      flex-wrap:wrap;
+    }
+    .side{
+      flex: 0 1 340px;
+      min-width: 290px;
+      border:1px solid var(--stroke);
+      border-radius:14px;
+      background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
+      padding:12px;
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+    }
+    .stage{
+      flex: 1 1 720px;
+      min-width: 320px;
+      border:1px solid var(--stroke);
+      border-radius:14px;
+      background:radial-gradient(1100px 600px at 50% 15%, rgba(255,200,80,.06), rgba(0,0,0,0));
+      padding:10px;
+    }
+    .wrap{
+      position:relative;
+      width:100%;
+      aspect-ratio: 4 / 3;
+      border-radius:12px;
+      overflow:hidden;
+      background:#000;
+      box-shadow: 0 14px 36px rgba(0,0,0,.55);
+    }
+
+    /* ✅ IMPORTANT: only the STAGE svg is absolute (prevents tile SVGs from overlaying the game) */
+    .wrap > canvas,
+    .wrap > svg{
+      position:absolute;
+      left:0; top:0;
+      width:100%; height:100%;
+      display:block;
+    }
+    .wrap > svg{ pointer-events:none; }
+    canvas{ background:#000; }
+
+    .sectionTitle{
+      margin:0;
+      font-size:12px;
+      color:var(--muted);
+      letter-spacing:.25px;
+    }
+
+    .hero{
+      border:1px solid rgba(255,255,255,.08);
+      border-radius:14px;
+      padding:10px;
+      background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
+      display:flex;
+      gap:10px;
+      align-items:center;
+    }
+    .heroBadge{
+      width:56px; height:56px;
+      border-radius:16px;
+      border:1px solid rgba(255,255,255,.08);
+      background:radial-gradient(180px 160px at 50% 55%, rgba(255,190,60,.12), rgba(0,0,0,0));
+      display:flex; align-items:center; justify-content:center;
+      filter: var(--glow2);
+      flex: 0 0 auto;
+    }
+    .heroBadge svg{ width:44px; height:44px; position:static; }
+    .heroText{display:flex;flex-direction:column;gap:3px;min-width:0;}
+    .heroName{font-size:13px;color:rgba(255,210,60,.95);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .heroScene{font-size:12px;color:rgba(255,255,255,.72);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .heroHint{font-size:11px;color:rgba(255,255,255,.55);line-height:1.35;}
+
+    .btnRow{display:flex;gap:10px;flex-wrap:wrap;}
+    button{
+      appearance:none;
+      border:1px solid rgba(255,255,255,.10);
+      background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+      color:#fff;
+      border-radius:12px;
+      padding:10px 12px;
+      font-weight:650;
+      letter-spacing:.2px;
+      cursor:pointer;
+      transition: transform .12s, border-color .12s, box-shadow .12s;
+      user-select:none;
+    }
+    button:hover{ transform: translateY(-1px); border-color: rgba(255,210,60,.25); box-shadow: var(--glow); }
+    button.secondary{ font-weight:600; color:rgba(255,255,255,.82); }
+    button.secondary:hover{ border-color: rgba(255,255,255,.18); box-shadow:none; transform:none; }
+
+    .tiles{
+      display:grid;
+      grid-template-columns:repeat(2, minmax(0, 1fr));
+      gap:10px;
+    }
+    .tile{
+      border-radius:14px;
+      background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
+      border:1px solid rgba(255,255,255,.08);
+      padding:10px;
+      cursor:pointer;
+      transition:.12s transform, .12s border-color, .12s box-shadow;
+      user-select:none;
+      min-width:0;
+    }
+    .tile:hover{ transform: translateY(-1px); border-color: rgba(255,210,60,.22); box-shadow: var(--glow); }
+    .tile.selected{ border-color: rgba(255,210,60,.34); box-shadow: var(--glow); }
+    .tileTop{ display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:8px; min-width:0; }
+    .tileName{ font-size:12px; color:rgba(255,210,60,.95); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .tileTag{ font-size:11px; color:rgba(255,255,255,.55); white-space:nowrap; }
+    .thumb{
+      width:100%;
+      aspect-ratio: 1 / 1;
+      border-radius:14px;
+      background:radial-gradient(280px 280px at 50% 55%, rgba(255,180,60,.10), rgba(0,0,0,0));
+      border:1px solid rgba(255,255,255,.06);
+      overflow:hidden;
+      display:flex; align-items:center; justify-content:center;
+    }
+    .thumb svg{
+      width:92%;
+      height:92%;
+      position:static; /* ✅ keep inside tile */
+    }
+
+    .controls{
+      border-top:1px solid rgba(255,255,255,.08);
+      padding-top:10px;
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      font-size:12px;
+      color:rgba(255,255,255,.72);
+    }
+    .kbd{
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      background:rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.10);
+      padding:1px 6px;
+      border-radius:6px;
+      color:#fff;
+      white-space:nowrap;
+    }
+    .note{ font-size:11px; color:rgba(255,255,255,.58); line-height:1.35; }
+
+    /* Start screen overlay */
+    .startScreen{
+      position:absolute;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:18px;
+      background:radial-gradient(1000px 600px at 50% 20%, rgba(255,200,70,.10), rgba(0,0,0,0.78));
+      backdrop-filter: blur(2px);
+    }
+    .startCard{
+      width:min(560px, 96%);
+      border-radius:18px;
+      border:1px solid rgba(255,255,255,.10);
+      background:linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
+      box-shadow: 0 18px 60px rgba(0,0,0,.55);
+      padding:14px;
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+    }
+    .startTitle{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .startTitle h2{
+      margin:0;
+      font-size:15px;
+      letter-spacing:.25px;
+    }
+    .startTitle .miniBrand{
+      font-size:12px;
+      color:rgba(255,210,60,.9);
+      text-shadow:0 0 12px rgba(255,210,60,.18);
+      white-space:nowrap;
+    }
+    .startRow{
+      display:flex;
+      gap:12px;
+      align-items:center;
+      flex-wrap:wrap;
+    }
+    .startPreview{
+      flex:1 1 260px;
+      min-width:240px;
+      border-radius:16px;
+      border:1px solid rgba(255,255,255,.08);
+      background:radial-gradient(420px 380px at 50% 55%, rgba(255,180,60,.10), rgba(0,0,0,0));
+      padding:10px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    .startPreview svg{ width:100%; max-width:260px; height:auto; filter: var(--glow2); }
+    .startCopy{
+      flex: 1 1 220px;
+      min-width:220px;
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+    }
+    .startCopy .big{
+      font-size:12px;
+      color:rgba(255,255,255,.85);
+      line-height:1.35;
+    }
+    .warn{
+      font-size:11px;
+      color:rgba(255,170,170,.95);
+      display:none;
+    }
+
+    .watermark {
+      position:absolute; right:10px; bottom:10px;
+      font: 12px/1.2 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      color: rgba(255,210,40,0.75);
+      text-shadow: 0 0 10px rgba(255,210,40,0.35);
+      pointer-events:none;
+      user-select:none;
+    }
+
+    @media (max-width: 900px){
+      header{flex-direction:column;align-items:flex-start;}
+      header .brand{white-space:normal;}
+      .side{flex: 1 1 340px;}
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <div class="title">
+        <h1>Rednode Excavation — Gesture Controlled Sim</h1>
+        <div class="sub">Pick a rig. Press <b>Start</b>. Scoop & deliver payloads. <span style="opacity:.8">MediaPipe Hands</span> drives ARM/DRIVE.</div>
+      </div>
+      <div class="brand">© Rednode.ai — All rights reserved</div>
+    </header>
+
+    <div class="layout">
+      <aside class="side">
+        <p class="sectionTitle">Choose your rig (4 styles) — each rig switches the scene theme</p>
+
+        <div class="hero">
+          <div class="heroBadge" id="heroBadge"></div>
+          <div class="heroText">
+            <div class="heroName" id="heroName">—</div>
+            <div class="heroScene" id="heroScene">—</div>
+            <div class="heroHint" id="heroHint">Choose a rig, then hit Start.</div>
+          </div>
+        </div>
+
+        <div class="btnRow">
+          <button id="startBtn">Start Run</button>
+          <button class="secondary" id="restartBtn" disabled>Restart</button>
+        </div>
+
+        <div class="tiles" id="tiles"></div>
+
+        <div class="controls">
+          <div><span class="kbd">TAB</span> toggle ARM / DRIVE</div>
+          <div><span class="kbd">[</span> <span class="kbd">]</span> throttle &nbsp; <span class="kbd">SHIFT</span> boost &nbsp; <span class="kbd">R</span> restart (game over)</div>
+          <div class="note">
+            If camera permission is blocked, you can still DRIVE with <span class="kbd">A</span>/<span class="kbd">D</span> and nudge with arrow keys.
+          </div>
+          <div class="warn" id="camWarn">Camera permission blocked — running keyboard-only mode.</div>
+        </div>
+      </aside>
+
+      <main class="stage">
+        <div class="wrap" id="wrap">
+          <canvas id="screen" width="800" height="600"></canvas>
+
+          <!-- Stage SVG overlay (player rig is injected into #excavatorGroup) -->
+          <svg id="excavSVG" viewBox="0 0 800 600" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <defs>
+              <linearGradient id="rnMetal" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0" stop-color="#121316"/>
+                <stop offset="0.55" stop-color="#0a0b0d"/>
+                <stop offset="1" stop-color="#050506"/>
+              </linearGradient>
+
+              <!-- updated at runtime per theme -->
+              <linearGradient id="rnEdge" x1="0" x2="1" y1="0" y2="0">
+                <stop id="edgeStop0" offset="0" stop-color="#ffd54a"/>
+                <stop id="edgeStop1" offset="0.55" stop-color="#ffb800"/>
+                <stop id="edgeStop2" offset="1" stop-color="#ffec7a"/>
+              </linearGradient>
+
+              <filter id="rnGlow" x="-60%" y="-60%" width="220%" height="220%">
+                <feGaussianBlur stdDeviation="2.6" result="b"/>
+                <feMerge>
+                  <feMergeNode in="b"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+
+              <filter id="rnSoft" x="-40%" y="-40%" width="180%" height="180%">
+                <feGaussianBlur stdDeviation="1.25" result="s"/>
+                <feMerge>
+                  <feMergeNode in="s"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+
+              <clipPath id="trackClip">
+                <rect x="-8" y="40" width="78" height="18" rx="8" ry="8"/>
+              </clipPath>
+            </defs>
+
+            <!-- JS updates transforms on these IDs -->
+            <g id="excavatorGroup" transform="translate(0,0) scale(1)"></g>
+
+            <text x="14" y="586" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
+                  font-size="12" fill="rgba(255,210,40,0.55)" filter="url(#rnSoft)">
+              © Rednode.ai — Excavation Sim
+            </text>
+          </svg>
+
+          <div class="watermark">© Rednode.ai</div>
+
+          <!-- Startup overlay -->
+          <div class="startScreen" id="startScreen">
+            <div class="startCard">
+              <div class="startTitle">
+                <h2>Rednode Excavation — Gesture Controlled Sim</h2>
+                <div class="miniBrand">© Rednode.ai</div>
+              </div>
+
+              <div class="startRow">
+                <div class="startPreview" id="startPreview"></div>
+                <div class="startCopy">
+                  <div class="big">
+                    <b id="startRigName">Sentinel Rig</b><br/>
+                    <span id="startRigScene" style="color:rgba(255,255,255,.72)"></span>
+                  </div>
+                  <div class="big" style="color:rgba(255,255,255,.78)">
+                    <span class="kbd">TAB</span> to swap ARM/DRIVE •
+                    <span class="kbd">[</span>/<span class="kbd">]</span> throttle •
+                    <span class="kbd">SHIFT</span> boost
+                  </div>
+                  <div class="big" style="color:rgba(255,255,255,.62)">
+                    Tip: Start will request camera permission for hand control. If denied, keyboard still works.
+                  </div>
+                  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;">
+                    <button id="startBtn2">Start Run</button>
+                    <button class="secondary" id="hideOverlayBtn">Hide Overlay</button>
+                  </div>
+                  <div class="warn" id="camWarn2">Camera permission blocked — running keyboard-only mode.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- MediaPipe Hands -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <video id="video" playsinline style="display:none"></video>
+
+  <script>
+  /* =========================================================
+     0) RIGS (4 SVG excavators) + 4 SCENE THEMES
+     ========================================================= */
+  const RIGS = [
+    {
+      id: "sentinel",
+      name: "Sentinel Rig",
+      tag: "MAIN",
+      sceneName: "Amber Dusk Hills",
+      edgeStops: ["#ffd54a","#ffb800","#ffec7a"],   // yellow/gold
+      basketFill: "rgb(128,0,160)",
+      basketStroke: "rgb(200,140,240)",
+      sceneBands: [
+        [0,   800,  {r:18,g:18,b:28},  {r:30,g:32,b:46}, {r:0,g:120,b:0},     40, 360, 1.00],
+        [800, 1700, {r:20,g:24,b:40},  {r:32,g:36,b:56}, {r:10,g:130,b:15},   44, 342, 1.15],
+        [1700,2600,{r:22,g:26,b:46},   {r:35,g:38,b:60}, {r:15,g:135,b:18},   50, 324, 1.28],
+        [2600,4000,{r:24,g:28,b:52},   {r:38,g:42,b:66}, {r:20,g:140,b:20},   54, 310, 1.35],
+      ]
+    },
+    {
+      id: "ember",
+      name: "Inferno Rig",
+      tag: "ALT",
+      sceneName: "Ember Quarry",
+      edgeStops: ["#ffcf4a","#ff3b3b","#ffb84a"],   // red/yellow
+      basketFill: "rgb(150,30,30)",
+      basketStroke: "rgb(255,200,120)",
+      sceneBands: [
+        [0,   900,  {r:18,g:8,b:10},   {r:38,g:18,b:18}, {r:90,g:55,b:20},    34, 360, 1.02],
+        [900, 1900, {r:22,g:10,b:12},  {r:46,g:22,b:20}, {r:105,g:65,b:22},   40, 330, 1.12],
+        [1900,2800,{r:26,g:12,b:14},   {r:52,g:26,b:22}, {r:120,g:72,b:26},   46, 310, 1.22],
+        [2800,4000,{r:28,g:12,b:16},   {r:58,g:28,b:24}, {r:132,g:80,b:28},   52, 295, 1.32],
+      ]
+    },
+    {
+      id: "aurora",
+      name: "Aurora Rig",
+      tag: "ALT",
+      sceneName: "Aurora Night Drift",
+      edgeStops: ["#7bffda","#3cff7a","#b6a8ff"],   // teal/green/purple
+      basketFill: "rgb(0,110,90)",
+      basketStroke: "rgb(150,255,230)",
+      sceneBands: [
+        [0,   900,  {r:10,g:16,b:22},  {r:12,g:28,b:34}, {r:0,g:85,b:70},     34, 380, 1.00],
+        [900, 1900, {r:10,g:18,b:26},  {r:14,g:32,b:38}, {r:0,g:95,b:75},     40, 350, 1.10],
+        [1900,2800,{r:10,g:20,b:28},   {r:16,g:34,b:42}, {r:0,g:105,b:82},    46, 330, 1.22],
+        [2800,4000,{r:10,g:22,b:30},   {r:18,g:36,b:46}, {r:0,g:115,b:88},    52, 312, 1.33],
+      ]
+    },
+    {
+      id: "ice",
+      name: "Ice Circuit Rig",
+      tag: "ALT",
+      sceneName: "Neon Ice Circuit",
+      edgeStops: ["#7be7ff","#3bb4ff","#e6fbff"],   // cyan
+      basketFill: "rgb(40,80,160)",
+      basketStroke: "rgb(160,220,255)",
+      sceneBands: [
+        [0,   900,  {r:10,g:14,b:30},  {r:18,g:22,b:44}, {r:20,g:105,b:130},  30, 390, 1.03],
+        [900, 1900, {r:12,g:16,b:34},  {r:22,g:26,b:50}, {r:18,g:120,b:150},  38, 360, 1.12],
+        [1900,2800,{r:14,g:18,b:38},   {r:26,g:30,b:56}, {r:16,g:135,b:168},  46, 340, 1.24],
+        [2800,4000,{r:16,g:20,b:42},   {r:30,g:34,b:62}, {r:14,g:150,b:182},  52, 320, 1.34],
+      ]
+    },
+  ];
+
+  // Minimal “badge excavator” used for hero + start preview
+  function badgeIconSVG(stops){
+    const [a,b,c] = stops;
+    return `
+      <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs>
+          <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+            <stop offset="0" stop-color="${a}"/>
+            <stop offset="0.55" stop-color="${b}"/>
+            <stop offset="1" stop-color="${c}"/>
+          </linearGradient>
+          <filter id="gl" x="-60%" y="-60%" width="220%" height="220%">
+            <feGaussianBlur stdDeviation="2.4" result="b"/>
+            <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+        <rect x="10" y="10" width="80" height="80" rx="16" fill="rgba(0,0,0,0.25)" stroke="url(#g)" stroke-width="6" filter="url(#gl)"/>
+        <circle cx="50" cy="50" r="26" fill="none" stroke="url(#g)" stroke-width="6" filter="url(#gl)"/>
+        <g transform="translate(34,44)" fill="none" stroke="url(#g)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" filter="url(#gl)">
+          <path d="M2 6 H18"/>
+          <path d="M7 2 H16 V10 H7 Z"/>
+          <path d="M18 7 L30 4 L36 9"/>
+          <circle cx="35" cy="9" r="1.5" fill="url(#g)"/>
+          <path d="M4 18 H20"/>
+          <circle cx="6" cy="18" r="3.5"/>
+          <circle cx="18" cy="18" r="3.5"/>
+        </g>
+        <text x="50" y="92" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
+              font-size="10" fill="rgba(255,255,255,.75)">© Rednode.ai</text>
+      </svg>
+    `;
+  }
+
+  // Full in-game rig SVG (must include IDs: arm1Group, arm2Group, bucketGroup, treads)
+  function rigMarkup(variant){
+    // small differences per variant: add extra vents / different cab notch / extra plate
+    const extra =
+      variant === "ember" ? `<path d="M10 28 H44" stroke="rgba(255,200,40,0.16)" stroke-width="1.1"/>
+                            <path d="M10 32 H44" stroke="rgba(255,200,40,0.10)" stroke-width="1.1"/>`
+    : variant === "aurora" ? `<path d="M8 22 H46" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>
+                             <circle cx="40" cy="20" r="1.6" fill="rgba(255,255,255,0.12)"/>`
+    : variant === "ice" ? `<path d="M12 8 H44" stroke="rgba(255,255,255,0.10)" stroke-width="1.2"/>
+                           <path d="M12 12 H44" stroke="rgba(255,255,255,0.07)" stroke-width="1.1"/>`
+    : ``;
+
+    const cabShape =
+      variant === "ice" ? `
+        <path d="M10 22 C10 18 13 16 17 16 H28 C32 16 34 18 34 22 V33
+                 C34 36 32 38 29 38 H17 C13 38 10 36 10 32 Z"
+              fill="rgba(0,0,0,0.32)" stroke="rgba(255,200,40,0.18)" stroke-width="1"/>
+      ` : `
+        <path d="M11 26 C11 24 12 23 14 23 H26 C28 23 29 24 29 26 V34
+                 C29 36 28 37 26 37 H14 C12 37 11 36 11 34 Z"
+              fill="rgba(0,0,0,0.30)" stroke="rgba(255,200,40,0.14)" stroke-width="1"/>
+      `;
+
+    return `
+      <g transform="translate(0,0)">
+        <!-- Tracks -->
+        <g transform="translate(0,0)">
+          <g id="tracksGroup" transform="translate(0,0)">
+            <rect x="-8" y="40" width="78" height="18" rx="9" ry="9"
+                  fill="#0a0a0a" stroke="rgba(255,200,40,0.22)" stroke-width="1"/>
+            <rect x="-5.5" y="42.5" width="73" height="13" rx="7" ry="7"
+                  fill="#060606" stroke="rgba(255,200,40,0.12)" stroke-width="1"/>
+
+            <g id="treads" clip-path="url(#trackClip)" transform="translate(0,0)">
+              <g fill="#0f0f10" stroke="rgba(255,200,40,0.10)" stroke-width="0.6">
+                ${Array.from({length:28}).map((_,i)=>{
+                  const x = -10 + i*8;
+                  return `<rect x="${x}" y="44" width="6" height="10" rx="1.6"/>`;
+                }).join("")}
+              </g>
+
+              <g opacity="0.95">
+                <circle cx="6"  cy="49" r="4.2" fill="url(#rnMetal)" stroke="rgba(255,200,40,0.22)" stroke-width="0.8"/>
+                <circle cx="22" cy="49" r="4.2" fill="url(#rnMetal)" stroke="rgba(255,200,40,0.22)" stroke-width="0.8"/>
+                <circle cx="38" cy="49" r="4.2" fill="url(#rnMetal)" stroke="rgba(255,200,40,0.22)" stroke-width="0.8"/>
+                <circle cx="54" cy="49" r="4.2" fill="url(#rnMetal)" stroke="rgba(255,200,40,0.22)" stroke-width="0.8"/>
+              </g>
+            </g>
+
+            <path d="M-3 57 H65" fill="none" stroke="url(#rnEdge)" stroke-width="1.4" opacity="0.24" filter="url(#rnGlow)"/>
+          </g>
+
+          <!-- Body -->
+          <g id="bodyGroup" transform="translate(0,0)">
+            <path
+              d="M2 2
+                 H46
+                 C49 2 50 3 50 6
+                 V44
+                 C50 47 49 48 46 48
+                 H10
+                 C6 48 2 46 2 42
+                 V8
+                 C2 4 3 2 6 2
+                 Z"
+              fill="url(#rnMetal)"
+              stroke="rgba(255,200,40,0.22)"
+              stroke-width="1"
+            />
+            <path d="M6 6 H46 V10 H6 Z" fill="rgba(255,255,255,0.03)"/>
+            <path d="M6 12 H46 V14 H6 Z" fill="rgba(255,255,255,0.02)"/>
+            <path d="M6 34 H46 V36 H6 Z" fill="rgba(0,0,0,0.28)"/>
+            <path d="M6 38 H46 V40 H6 Z" fill="rgba(0,0,0,0.22)"/>
+
+            <path
+              d="M6 6 H44
+                 C46 6 47 7 47 9
+                 V41
+                 C47 43 46 44 44 44
+                 H12
+                 C9 44 6 42 6 39
+                 V11
+                 C6 8 7 6 10 6
+                 Z"
+              fill="none"
+              stroke="url(#rnEdge)"
+              stroke-width="1.6"
+              opacity="0.30"
+              filter="url(#rnGlow)"
+            />
+
+            ${cabShape}
+            ${extra}
+
+            <text x="6" y="56" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
+                  font-size="6.4" fill="rgba(255,220,90,0.72)" filter="url(#rnSoft)">© Rednode.ai</text>
+
+            <g fill="rgba(255,200,40,0.20)" stroke="rgba(255,200,40,0.18)" stroke-width="0.5">
+              <circle cx="6" cy="6" r="1.2"/><circle cx="46" cy="6" r="1.2"/>
+              <circle cx="6" cy="44" r="1.2"/><circle cx="46" cy="44" r="1.2"/>
+              <circle cx="18" cy="6" r="1.0"/><circle cx="34" cy="6" r="1.0"/>
+              <circle cx="18" cy="44" r="1.0"/><circle cx="34" cy="44" r="1.0"/>
+            </g>
+          </g>
+
+          <!-- Arm 1 -->
+          <g id="arm1Group" transform="translate(0,0) rotate(0)">
+            <g>
+              <circle cx="0" cy="0" r="6.2" fill="#080809" stroke="rgba(255,200,40,0.28)" stroke-width="1"/>
+              <circle cx="0" cy="0" r="3.2" fill="rgba(255,210,60,0.22)" stroke="rgba(255,210,60,0.28)" stroke-width="0.8" filter="url(#rnGlow)"/>
+            </g>
+
+            <path
+              d="M2 -6
+                 H78
+                 C86 -6 92 -3 96 0
+                 C92 3 86 6 78 6
+                 H2
+                 C-1 6 -3 4 -3 2
+                 V-2
+                 C-3 -4 -1 -6 2 -6
+                 Z"
+              fill="url(#rnMetal)"
+              stroke="rgba(255,200,40,0.22)"
+              stroke-width="1"
+            />
+            <path d="M5 -3 H75 C81 -3 85 -2 88 0 C85 2 81 3 75 3 H5"
+                  fill="none" stroke="url(#rnEdge)" stroke-width="1.2" opacity="0.22" filter="url(#rnGlow)"/>
+
+            <path d="M18 -2 H42 C44 -2 46 -1 47 0 C46 1 44 2 42 2 H18 Z"
+                  fill="rgba(0,0,0,0.35)" stroke="rgba(255,200,40,0.10)" stroke-width="0.8"/>
+
+            <!-- Arm 2 -->
+            <g id="arm2Group" transform="translate(100,0) rotate(0)">
+              <g>
+                <circle cx="0" cy="0" r="5.4" fill="#080809" stroke="rgba(255,200,40,0.26)" stroke-width="1"/>
+                <circle cx="0" cy="0" r="2.6" fill="rgba(255,210,60,0.18)" stroke="rgba(255,210,60,0.22)" stroke-width="0.8" filter="url(#rnGlow)"/>
+              </g>
+
+              <path
+                d="M2 -5
+                   H60
+                   C66 -5 71 -2 74 0
+                   C71 2 66 5 60 5
+                   H2
+                   C-1 5 -3 3 -3 1
+                   V-1
+                   C-3 -3 -1 -5 2 -5
+                   Z"
+                fill="url(#rnMetal)"
+                stroke="rgba(255,200,40,0.22)"
+                stroke-width="1"
+              />
+              <path d="M6 -2 H56 C60 -2 63 -1 65 0 C63 1 60 2 56 2 H6"
+                    fill="none" stroke="url(#rnEdge)" stroke-width="1.1" opacity="0.20" filter="url(#rnGlow)"/>
+
+              <!-- Bucket -->
+              <g id="bucketGroup" transform="translate(80,0) rotate(90)">
+                <circle cx="0" cy="0" r="4.6" fill="#080809" stroke="rgba(255,200,40,0.24)" stroke-width="1"/>
+                <circle cx="0" cy="0" r="2.2" fill="rgba(255,210,60,0.16)" stroke="rgba(255,210,60,0.20)" stroke-width="0.7" filter="url(#rnGlow)"/>
+
+                <path
+                  d="M2 -6
+                     L16 -6
+                     C18 -6 20 -5 21 -3
+                     L26 6
+                     C24 7 22 7 20 6
+                     L14 4
+                     L10 10
+                     L6 9
+                     L8 4
+                     L2 4
+                     C0 4 -1 3 -1 1
+                     L-1 -3
+                     C-1 -5 0 -6 2 -6
+                     Z"
+                  fill="url(#rnMetal)"
+                  stroke="rgba(255,200,40,0.24)"
+                  stroke-width="1"
+                />
+                <path d="M10 10 L9 14 L12 13 Z" fill="rgba(255,210,60,0.20)" stroke="rgba(255,210,60,0.18)" stroke-width="0.7"/>
+                <path d="M14 9  L13 13 L16 12 Z" fill="rgba(255,210,60,0.20)" stroke="rgba(255,210,60,0.18)" stroke-width="0.7"/>
+                <path d="M18 6  L17 10 L20 9 Z" fill="rgba(255,210,60,0.20)" stroke="rgba(255,210,60,0.18)" stroke-width="0.7"/>
+
+                <path d="M2 -5 H15 C17 -5 18 -4 19 -2 L24 6"
+                      fill="none" stroke="url(#rnEdge)" stroke-width="1.2" opacity="0.22" filter="url(#rnGlow)"/>
+              </g>
+            </g>
+          </g>
+        </g>
+      </g>
+    `;
+  }
+
+  // Tile thumbnail SVG (no IDs)
+  function tileThumbSVG(stops){
+    const [a,b,c] = stops;
+    return `
+      <svg viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs>
+          <linearGradient id="tg" x1="0" x2="1" y1="0" y2="1">
+            <stop offset="0" stop-color="${a}"/>
+            <stop offset="0.55" stop-color="${b}"/>
+            <stop offset="1" stop-color="${c}"/>
+          </linearGradient>
+          <filter id="tgl" x="-60%" y="-60%" width="220%" height="220%">
+            <feGaussianBlur stdDeviation="2.2" result="b"/>
+            <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+
+        <rect x="16" y="16" width="108" height="108" rx="22" fill="rgba(0,0,0,0.22)" stroke="url(#tg)" stroke-width="8" filter="url(#tgl)"/>
+        <circle cx="70" cy="70" r="38" fill="none" stroke="url(#tg)" stroke-width="8" filter="url(#tgl)"/>
+
+        <g transform="translate(42,64)" fill="none" stroke="url(#tg)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" filter="url(#tgl)">
+          <path d="M0 10 H34"/>
+          <path d="M6 0 H22 V18 H6 Z"/>
+          <path d="M34 10 L56 4 L66 14"/>
+          <circle cx="66" cy="14" r="2.5" fill="url(#tg)"/>
+          <path d="M2 32 H36"/>
+          <circle cx="8" cy="32" r="6"/>
+          <circle cx="30" cy="32" r="6"/>
+        </g>
+
+        <text x="70" y="132" text-anchor="middle"
+              font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
+              font-size="11" fill="rgba(255,255,255,.70)">© Rednode.ai</text>
+      </svg>
+    `;
+  }
+
+  /* =========================================================
+     1) UI: Build tiles + selection + start overlay
+     ========================================================= */
+  const tilesEl = document.getElementById("tiles");
+  const heroBadgeEl = document.getElementById("heroBadge");
+  const heroNameEl = document.getElementById("heroName");
+  const heroSceneEl = document.getElementById("heroScene");
+  const heroHintEl = document.getElementById("heroHint");
+
+  const startScreenEl = document.getElementById("startScreen");
+  const startPreviewEl = document.getElementById("startPreview");
+  const startRigNameEl = document.getElementById("startRigName");
+  const startRigSceneEl = document.getElementById("startRigScene");
+
+  const startBtn = document.getElementById("startBtn");
+  const startBtn2 = document.getElementById("startBtn2");
+  const restartBtn = document.getElementById("restartBtn");
+  const hideOverlayBtn = document.getElementById("hideOverlayBtn");
+
+  const camWarn = document.getElementById("camWarn");
+  const camWarn2 = document.getElementById("camWarn2");
+
+  let selectedRigIndex = 0;
+
+  function renderTiles(){
+    tilesEl.innerHTML = "";
+    RIGS.forEach((rig, idx) => {
+      const tile = document.createElement("div");
+      tile.className = "tile" + (idx === selectedRigIndex ? " selected" : "");
+      tile.innerHTML = `
+        <div class="tileTop">
+          <div class="tileName">${rig.name}</div>
+          <div class="tileTag">${rig.tag}</div>
+        </div>
+        <div class="thumb">${tileThumbSVG(rig.edgeStops)}</div>
+      `;
+      tile.addEventListener("click", () => {
+        selectRig(idx);
+      });
+      tilesEl.appendChild(tile);
+    });
+  }
+
+  function selectRig(idx){
+    selectedRigIndex = idx;
+    renderTiles();
+    applyRigTheme(RIGS[selectedRigIndex]);
+    updateRigUI();
+    mountRigToStage(RIGS[selectedRigIndex]);
+  }
+
+  function updateRigUI(){
+    const rig = RIGS[selectedRigIndex];
+    heroBadgeEl.innerHTML = badgeIconSVG(rig.edgeStops);
+    heroNameEl.textContent = rig.name;
+    heroSceneEl.textContent = rig.sceneName;
+    heroHintEl.textContent = started ? "You can swap rigs anytime." : "Choose a rig, then hit Start.";
+
+    startPreviewEl.innerHTML = badgeIconSVG(rig.edgeStops);
+    startRigNameEl.textContent = rig.name;
+    startRigSceneEl.textContent = rig.sceneName;
+  }
+
+  hideOverlayBtn.addEventListener("click", () => {
+    startScreenEl.style.display = "none";
+  });
+
+  /* =========================================================
+     2) GAME (your original logic preserved, with scene swap)
+     ========================================================= */
+  const SCREEN_W = 800, SCREEN_H = 600;
+  const canvas = document.getElementById('screen');
+  const ctx = canvas.getContext('2d', { alpha:false });
+
+  // Stage SVG
+  const excavatorGroup = document.getElementById('excavatorGroup');
+  const edgeStop0 = document.getElementById("edgeStop0");
+  const edgeStop1 = document.getElementById("edgeStop1");
+  const edgeStop2 = document.getElementById("edgeStop2");
+
+  // These are re-bound after rig injection
+  let svgGroup = excavatorGroup;
+  let arm1Group = null;
+  let arm2Group = null;
+  let bucketGroup = null;
+  let treadsGroup = null;
+
+  // Camera / MediaPipe
+  const videoElement = document.getElementById('video');
+  let handsDetector = null;
+  let cameraInstance = null;
+  let lastHands = {left:null, right:null};
+  let cameraOk = false;
+
+  // Input
+  const keysPressed = {};
+  window.addEventListener('keydown', (e)=>{
+    keysPressed[e.code] = true;
+
+    if (e.code === 'Tab'){
+      e.preventDefault();
+      if (!game_over && started) mode = (mode==='arm') ? 'drive' : 'arm';
+    }
+    if (e.code === 'KeyR' && game_over){
+      startRound();
+    }
+    if (e.code === 'BracketLeft'){
+      throttle = Math.max(THROTTLE_MIN, Math.round((throttle - THROTTLE_STEP)*100)/100);
+    }
+    if (e.code === 'BracketRight'){
+      throttle = Math.min(THROTTLE_MAX, Math.round((throttle + THROTTLE_STEP)*100)/100);
+    }
+    if (e.code === 'Digit1') throttle = 0.5;
+    if (e.code === 'Digit2') throttle = 1.0;
+    if (e.code === 'Digit3') throttle = 1.5;
+    if (e.code === 'Digit4') throttle = 2.0;
+    if (e.code === 'Digit5') throttle = 3.0;
+  });
+  window.addEventListener('keyup',(e)=>{ keysPressed[e.code] = false; });
+
+  // World & camera
+  const WORLD_W = 3200;
+  const GROUND_BASE = 550;
+
+  let terrain_amp = 40;
+  let terrain_scale = 360.0;
+  let cam_zoom = 1.0;
+
+  let scene_sky_top = {r:18,g:18,b:28};
+  let scene_sky_bot = {r:30,g:32,b:46};
+  let scene_ground = {r:0,g:120,b:0};
+
+  let target_sky_top = {...scene_sky_top};
+  let target_sky_bot = {...scene_sky_bot};
+  let target_ground = {...scene_ground};
+  let target_amp = terrain_amp;
+  let target_scale = terrain_scale;
+  let target_zoom = cam_zoom;
+
+  let ACTIVE_SCENES = RIGS[0].sceneBands;
+
+  function lerp(a,b,t){return a + (b-a)*t;}
+  function colorLerp(ca, cb, t){
+    return { r:Math.round(lerp(ca.r, cb.r, t)), g:Math.round(lerp(ca.g, cb.g, t)), b:Math.round(lerp(ca.b, cb.b, t)) };
+  }
+  function colorToCss(c){ return `rgb(${c.r},${c.g},${c.b})`; }
+  function groundYAt(xw){ return GROUND_BASE - terrain_amp * Math.sin(xw / terrain_scale); }
+
+  let camera_x = 0.0;
+  function worldToScreen(wx, wy){
+    const cx = camera_x + SCREEN_W*0.5;
+    const sx = (wx - cx) * cam_zoom + SCREEN_W*0.5;
+    const sy = (wy - GROUND_BASE) * cam_zoom + GROUND_BASE;
+    return [sx, sy];
+  }
+
+  function updateSceneTargets(x){
+    for (const [sx,ex, sky_t, sky_b, ground, amp, scale, zoom] of ACTIVE_SCENES){
+      if (sx <= x && x < ex){
+        target_sky_top = sky_t;
+        target_sky_bot = sky_b;
+        target_ground = ground;
+        target_amp = amp;
+        target_scale = scale;
+        target_zoom = zoom;
+        return;
+      }
+    }
+  }
+
+  // Background layers (your original)
+  const LAYERS = [
+    ["sky",       0.20, 0.65],
+    ["clouds",    0.30, 0.55],
+    ["mountains", 0.45, 0.50],
+    ["trees",     0.70, 0.35],
+    ["near",      1.00, 0.18],
+  ];
+  function layerShift(parallax){ return camera_x * (1.0 - parallax); }
+
+  function drawVerticalGradient(ctx, topColor, bottomColor){
+    const grad = ctx.createLinearGradient(0,0,0,SCREEN_H);
+    grad.addColorStop(0, colorToCss(topColor));
+    grad.addColorStop(1, colorToCss(bottomColor));
+    ctx.fillStyle = grad;
+    ctx.fillRect(0,0,SCREEN_W,SCREEN_H);
+  }
+  function seededRng(seed){
+    let s = seed % 2147483647;
+    if (s <= 0) s += 2147483646;
+    return {
+      next(){ s = s * 16807 % 2147483647; return (s - 1) / 2147483646; },
+      randint(min,max){ return Math.floor(this.next()*(max-min+1))+min; }
+    };
+  }
+  function drawClouds(ctx, parallax, tsec){
+    const px = layerShift(parallax);
+    const drift = (tsec * 12) % 800;
+    const rnd = seededRng(Math.floor(px/400));
+    for(let i=0;i<8;i++){
+      const base_x = rnd.randint(-120, SCREEN_W + 120);
+      const x = (base_x + drift) % (SCREEN_W + 240) - 120;
+      const y = rnd.randint(40,140);
+      const w = rnd.randint(100,200);
+      const h = rnd.randint(30,60);
+      const col = colorLerp(scene_sky_top, {r:220,g:220,b:235}, 0.25);
+      ctx.fillStyle = `rgba(${col.r},${col.g},${col.b},0.43)`;
+      ctx.beginPath();
+      ctx.ellipse(x + w/2, y + h/2, w/2, h/2, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  function drawMountains(ctx, parallax){
+    const px = layerShift(parallax);
+    const step = 8;
+    const ridge1 = colorLerp(scene_sky_bot, {r:80,g:90,b:130}, 0.35);
+    const ridge2 = colorLerp(scene_sky_bot, {r:60,g:70,b:110}, 0.25);
+
+    [[0,1.0,ridge1],[80,0.7,ridge2]].forEach(([off,amp,col])=>{
+      ctx.fillStyle = colorToCss(col);
+      ctx.beginPath();
+      for(let sx=-20;sx<=SCREEN_W+40;sx+=step){
+        let wx = Math.max(0, Math.min(WORLD_W, sx + px + off));
+        let y = GROUND_BASE - 160 - 40 * amp * Math.sin(wx / 520.0) - 25 * amp * Math.sin(wx / 210.0);
+        if (sx === -20) ctx.moveTo(sx,y); else ctx.lineTo(sx,y);
+      }
+      ctx.lineTo(SCREEN_W,0);
+      ctx.lineTo(0,0);
+      ctx.closePath();
+      ctx.fill();
+    });
+  }
+  function drawTreeBand(ctx, parallax){
+    const px = layerShift(parallax);
+    const rnd = seededRng(Math.floor(px / 200));
+    for(let i=0;i<18;i++){
+      const sx = rnd.randint(-50, SCREEN_W + 50);
+      const wx = Math.max(0, Math.min(WORLD_W, sx + px));
+      const base_y = GROUND_BASE - 90 - 20 * Math.sin(wx / 310.0);
+      const h = rnd.randint(50,80);
+      ctx.fillStyle = "rgb(70,45,25)";
+      ctx.fillRect(Math.round(sx-3), Math.round(base_y-h), 6, h);
+      ctx.fillStyle = "rgb(32,110,45)";
+      ctx.beginPath();
+      ctx.moveTo(sx, base_y-h-12);
+      ctx.lineTo(sx-22, base_y-32);
+      ctx.lineTo(sx+22, base_y-32);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+  function drawGroundStrip(ctx){
+    const step = 10;
+    const pts = [];
+    const start = Math.floor(camera_x / step) * step - 20;
+    const end = start + SCREEN_W + 40;
+    for(let x=start;x<=end;x+=step){
+      const xw = Math.max(0, Math.min(WORLD_W, x));
+      const [sx, sy] = worldToScreen(xw, groundYAt(xw));
+      pts.push([sx, sy]);
+    }
+    ctx.fillStyle = colorToCss(scene_ground);
+    ctx.beginPath();
+    pts.forEach((p,i)=>{ if(i===0) ctx.moveTo(p[0],p[1]); else ctx.lineTo(p[0],p[1]); });
+    ctx.lineTo(SCREEN_W, SCREEN_H);
+    ctx.lineTo(0, SCREEN_H);
+    ctx.closePath();
+    ctx.fill();
+  }
+  function applyFog(ctx, strength){
+    if (strength <= 0) return;
+    ctx.fillStyle = `rgba(${scene_sky_top.r},${scene_sky_top.g},${scene_sky_top.b},${Math.floor(255*strength*0.22)/255})`;
+    ctx.fillRect(0,0,SCREEN_W,SCREEN_H);
+  }
+  function applyVignette(ctx){
+    const grad = ctx.createRadialGradient(SCREEN_W/2, SCREEN_H/2, 0, SCREEN_W/2, SCREEN_H/2, Math.max(SCREEN_W,SCREEN_H)/1.2);
+    grad.addColorStop(0, 'rgba(0,0,0,0)');
+    grad.addColorStop(1, 'rgba(0,0,0,0.4)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0,0,SCREEN_W,SCREEN_H);
+  }
+  function renderLayers(ctx, tsec){
+    LAYERS.forEach(([name, parallax, fog])=>{
+      if (name === "sky"){
+        drawVerticalGradient(ctx, scene_sky_top, scene_sky_bot);
+        applyFog(ctx, fog);
+      } else if (name === "clouds"){
+        drawClouds(ctx, parallax, tsec);
+        applyFog(ctx, fog);
+      } else if (name === "mountains"){
+        drawMountains(ctx, parallax);
+        applyFog(ctx, fog);
+      } else if (name === "trees"){
+        drawTreeBand(ctx, parallax);
+        applyFog(ctx, fog);
+      } else if (name === "near"){
+        drawGroundStrip(ctx);
+      }
+    });
+  }
+
+  // Balls + basket (original)
+  let balls = [];
+  function spawnBalls(){
+    balls = [];
+    for(let i=0;i<18;i++){
+      const bx = Math.floor(Math.random()*(WORLD_W-160))+80;
+      const by = groundYAt(bx) - 10;
+      balls.push([bx, by]);
+    }
+  }
+  let basketFill = RIGS[0].basketFill;
+  let basketStroke = RIGS[0].basketStroke;
+  const basket = [WORLD_W - 150, groundYAt(WORLD_W - 100) - 50, 100, 50];
+
+  let score = 0;
+  let scooped_ball = null;
+
+  // Excavator motion (original)
+  let excavator_pos = [420.0, groundYAt(420.0) - 50];
+  const EXCAVATOR_SPEED_MAX = 8.0;
+  const EXCAVATOR_ACCEL = 0.65;
+  const EXCAVATOR_DRAG = 0.85;
+  let left_track_v = 0.0;
+  let right_track_v = 0.0;
+
+  // Arm
+  const first_boom_length = 100;
+  const second_boom_length = 80;
+  let first_boom_angle = 0.0;
+  let second_boom_angle = 0.0;
+  const BOOM_CONTROL_RATE_BASE = 0.10;
+  const DEAD_ZONE_WIDTH = 0.15;
+  const BOOM_ANGLE_LIMIT_LEFT = Math.PI / 1;
+  const BOOM_ANGLE_LIMIT_RIGHT = Math.PI / 2;
+  let left_movement = false;
+
+  // Modes
+  let mode = "arm"; // "arm" or "drive"
+
+  // Particles
+  let particles = [];
+  function spawnDust(xw, yw, speed){
+    const count = Math.floor(Math.max(0, Math.min(6, Math.abs(speed) * 0.25)));
+    for(let i=0;i<count;i++){
+      const ang = Math.random() * Math.PI + Math.PI;
+      const v = 0.5 + Math.random() * 1.5;
+      particles.push({
+        x: xw + (Math.random()*20-10),
+        y: yw + 50 + (Math.random()*8 - 5),
+        vx: Math.cos(ang) * v,
+        vy: -Math.abs(Math.sin(ang)) * v * 0.3,
+        life: 0.4 + Math.random() * 0.5
+      });
+    }
+  }
+  function updateParticles(dt){
+    for (let i = particles.length-1; i >=0; --i){
+      const p = particles[i];
+      p.life -= dt;
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += 0.03;
+      if (p.life <= 0) particles.splice(i,1);
+    }
+  }
+  function drawParticles(ctx){
+    for (const p of particles){
+      const a = Math.floor(130 * Math.max(0, Math.min(1, p.life)));
+      ctx.fillStyle = `rgba(90,80,60,${a/255})`;
+      const [sx, sy] = worldToScreen(p.x, p.y);
+      ctx.beginPath();
+      ctx.arc(Math.round(sx), Math.round(sy), Math.max(1, Math.round(2*cam_zoom)), 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+
+  // Throttle
+  const THROTTLE_MIN = 0.25;
+  const THROTTLE_MAX = 4.0;
+  const THROTTLE_STEP = 0.10;
+  const BOOST_MULT = 1.5;
+  let throttle = 1.0;
+  function currentThrottle(keysPressed){
+    const boost = (keysPressed.ShiftLeft || keysPressed.ShiftRight) ? BOOST_MULT : 1.0;
+    return Math.max(THROTTLE_MIN, Math.min(THROTTLE_MAX, throttle)) * boost;
+  }
+
+  // HUD / scores (original)
+  const ROUND_DURATION = 90;
+  const TIME_BONUS_PER_SCORE = 5;
+  const TIME_CAP = 120;
+  const BASE_POINTS = 100;
+  const COMBO_WINDOW = 4.0;
+  const COMBO_STEP = 0.25;
+  const COMBO_MAX_MULT = 3.0;
+  const PRESSURE_MAX_MULT = 3.0;
+
+  let started = false;
+  let game_over = false;
+  let time_bonus_ms = 0;
+  let start_ticks = 0;
+  let last_score_time = null;
+  let combo_count = 0;
+
+  function remaining_time_sec(){
+    if (!started) return ROUND_DURATION;
+    const elapsed_ms = performance.now() - start_ticks;
+    const total_ms = Math.min((ROUND_DURATION * 1000) + time_bonus_ms, TIME_CAP * 1000);
+    return Math.max(0, Math.floor((total_ms - elapsed_ms)/1000));
+  }
+  function time_pressure_multiplier(){
+    const rem = remaining_time_sec();
+    const cap = TIME_CAP;
+    const t = 1.0 - (rem / cap);
+    return 1.0 + t * (PRESSURE_MAX_MULT - 1.0);
+  }
+  function combo_multiplier(now_sec){
+    if (last_score_time === null || (now_sec - last_score_time) > COMBO_WINDOW){
+      combo_count = 1;
+    } else {
+      combo_count += 1;
+    }
+    last_score_time = now_sec;
+    let mult = 1.0 + (combo_count - 1) * COMBO_STEP;
+    return Math.min(mult, COMBO_MAX_MULT);
+  }
+  function add_score_and_time(){
+    const now_sec = performance.now() / 1000.0;
+    const tp = time_pressure_multiplier();
+    const cm = combo_multiplier(now_sec);
+    const gained = Math.floor(BASE_POINTS * tp * cm);
+    score += gained;
+    time_bonus_ms = Math.min(time_bonus_ms + TIME_BONUS_PER_SCORE * 1000, (TIME_CAP - ROUND_DURATION) * 1000);
+    return {gained, tp, cm};
+  }
+
+  function rectsCollide(a,b){ return !(a.x+b.w < b.x || a.x > b.x+b.w || a.y+b.h < b.y || a.y > b.y+b.h); }
+
+  function checkBasketCollision(){
+    if (scooped_ball !== null){
+      const brect = { x: basket[0], y: basket[1], w: basket[2], h: basket[3] };
+      const ball = balls[scooped_ball];
+      if (!ball) { scooped_ball = null; return; }
+      const ballRect = {x: ball[0]-10, y: ball[1]-10, w:20, h:20};
+      if (rectsCollide(brect, ballRect)){
+        add_score_and_time();
+        balls.splice(scooped_ball,1);
+        scooped_ball = null;
+      }
+    }
+  }
+
+  // Hand-driven angles (original)
+  function calculate_main_boom_angle(hand_lm, keysPressed){
+    if (!hand_lm) return 0.0;
+    const rw = hand_lm[0];
+    const ri = hand_lm[8];
+    const dx = (ri.x - rw.x) * SCREEN_W;
+    const dy = (ri.y - rw.y) * SCREEN_H;
+    let ang = Math.atan2(dy, dx);
+    const rate = BOOM_CONTROL_RATE_BASE * currentThrottle(keysPressed);
+
+    if (ri.x < rw.x - DEAD_ZONE_WIDTH){
+      left_movement = true;
+      ang += rate;
+    } else if (ri.x > rw.x + DEAD_ZONE_WIDTH){
+      left_movement = false;
+      ang -= rate;
+    }
+    const limit = left_movement ? BOOM_ANGLE_LIMIT_LEFT : BOOM_ANGLE_LIMIT_RIGHT;
+    return Math.max(-limit, Math.min(limit, ang));
+  }
+  function calculate_second_boom_angle(hand_lm){
+    if (!hand_lm) return 0.0;
+    const ri = hand_lm[8];
+    const rw = hand_lm[0];
+    const dx = rw.x * SCREEN_W - (ri.x * SCREEN_W);
+    const dy = rw.y * SCREEN_H - (ri.y * SCREEN_H);
+    return Math.atan2(dy, dx);
+  }
+  function track_speed_from_hand(hand_lm){
+    if (!hand_lm) return 0.0;
+    const wrist = hand_lm[0];
+    const idx = hand_lm[8];
+    let offset = idx.x - wrist.x;
+    if (Math.abs(offset) < DEAD_ZONE_WIDTH * 0.7) return 0.0;
+    offset = Math.max(-0.5, Math.min(0.5, offset));
+    return offset / 0.5;
+  }
+
+  // Rolling pitch (original)
+  function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+  function radToDeg(r){ return r * 180 / Math.PI; }
+  function groundPitchAt(xw){
+    const d = 18;
+    const y1 = groundYAt(xw - d);
+    const y2 = groundYAt(xw + d);
+    const slope = (y2 - y1) / (2*d);
+    return clamp(Math.atan(slope) * 0.65, -0.28, 0.28);
+  }
+
+  // Round control
+  function startRound(){
+    score = 0; scooped_ball = null;
+    left_track_v = right_track_v = 0.0;
+    first_boom_angle = second_boom_angle = 0.0;
+    excavator_pos = [420.0, groundYAt(420.0) - 50];
+    camera_x = Math.max(0, Math.min(WORLD_W - SCREEN_W, excavator_pos[0] - SCREEN_W * 0.5));
+    spawnBalls(); particles = [];
+    game_over = false;
+    time_bonus_ms = 0;
+    start_ticks = performance.now();
+    last_score_time = null;
+    combo_count = 0;
+  }
+
+  /* =========================================================
+     3) Apply rig theme + mount rig SVG into stage
+     ========================================================= */
+  function applyRigTheme(rig){
+    ACTIVE_SCENES = rig.sceneBands;
+
+    basketFill = rig.basketFill;
+    basketStroke = rig.basketStroke;
+
+    const [s0,s1,s2] = rig.edgeStops;
+    edgeStop0.setAttribute("stop-color", s0);
+    edgeStop1.setAttribute("stop-color", s1);
+    edgeStop2.setAttribute("stop-color", s2);
+
+    // subtle UI accent shift
+    document.documentElement.style.setProperty("--accent", s0);
+    document.documentElement.style.setProperty("--accent2", s1);
+  }
+
+  function mountRigToStage(rig){
+    // Inject rig markup with required IDs
+    excavatorGroup.innerHTML = rigMarkup(rig.id);
+
+    // Re-bind transform targets
+    svgGroup = document.getElementById('excavatorGroup');
+    arm1Group = document.getElementById('arm1Group');
+    arm2Group = document.getElementById('arm2Group');
+    bucketGroup = document.getElementById('bucketGroup');
+    treadsGroup = document.getElementById('treads');
+  }
+
+  /* =========================================================
+     4) MediaPipe: start only after user clicks Start
+     ========================================================= */
+  function onResults(results){
+    lastHands = {left:null, right:null};
+    if (results.multiHandLandmarks && results.multiHandedness){
+      for (let i=0;i<results.multiHandLandmarks.length;i++){
+        const lm = results.multiHandLandmarks[i];
+        const label = results.multiHandedness[i].label;
+        if (label === 'Left') lastHands.left = lm;
+        else lastHands.right = lm;
+      }
+    }
+  }
+
+  async function initHands(){
+    try{
+      handsDetector = new Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+      });
+      handsDetector.setOptions({
+        maxNumHands: 2,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.7,
+        minTrackingConfidence: 0.5
+      });
+      handsDetector.onResults(onResults);
+
+      cameraInstance = new Camera(videoElement, {
+        onFrame: async () => { await handsDetector.send({image: videoElement}); },
+        width: 640, height: 480
+      });
+
+      await cameraInstance.start();
+      cameraOk = true;
+
+      camWarn.style.display = "none";
+      camWarn2.style.display = "none";
+    } catch (err){
+      cameraOk = false;
+      camWarn.style.display = "block";
+      camWarn2.style.display = "block";
+      // keep playing keyboard-only
+      console.warn("Camera init failed:", err);
+    }
+  }
+
+  /* =========================================================
+     5) Start / Restart buttons
+     ========================================================= */
+  async function startGameFlow(){
+    if (started) return;
+
+    started = true;
+    startScreenEl.style.display = "none";
+    restartBtn.disabled = false;
+
+    // Request camera only after user clicks start
+    await initHands();
+    startRound();
+  }
+
+  startBtn.addEventListener("click", startGameFlow);
+  startBtn2.addEventListener("click", startGameFlow);
+
+  restartBtn.addEventListener("click", () => {
+    if (!started) return;
+    startRound();
+    game_over = false;
+  });
+
+  /* =========================================================
+     6) Main loop (original gameplay preserved)
+     ========================================================= */
+  let prevTime = performance.now();
+  function frame(){
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - prevTime) / 1000.0);
+    prevTime = now;
+    const tsec = now / 1000.0;
+
+    // Background
+    renderLayers(ctx, tsec);
+
+    // Basket (theme)
+    const [bx,by] = [basket[0], basket[1]];
+    const sw = basket[2], sh = basket[3];
+    const [sx, sy] = worldToScreen(bx, by);
+    ctx.fillStyle = basketFill;
+    ctx.fillRect(sx, sy, sw*cam_zoom, sh*cam_zoom);
+    ctx.strokeStyle = basketStroke; ctx.lineWidth = 2;
+    ctx.strokeRect(sx, sy, sw*cam_zoom, sh*cam_zoom);
+
+    // Read hands
+    const left_hand_lm = lastHands.left;
+    const right_hand_lm = lastHands.right;
+
+    if (started && !game_over){
+      const th = currentThrottle(keysPressed);
+      const eff_speed = EXCAVATOR_SPEED_MAX * th;
+      const eff_accel = EXCAVATOR_ACCEL * th;
+
+      if (mode === 'arm'){
+        if (left_hand_lm){
+          const main_ang = calculate_main_boom_angle(left_hand_lm, keysPressed);
+          first_boom_angle = Math.max(-BOOM_ANGLE_LIMIT_LEFT, Math.min(BOOM_ANGLE_LIMIT_LEFT, main_ang));
+
+          const lw = left_hand_lm[0], li = left_hand_lm[8];
+          if (li.x < lw.x - DEAD_ZONE_WIDTH){
+            left_track_v = Math.max(left_track_v - eff_accel, -eff_speed);
+            right_track_v = Math.max(right_track_v - eff_accel, -eff_speed);
+          } else if (li.x > lw.x + DEAD_ZONE_WIDTH){
+            left_track_v = Math.min(left_track_v + eff_accel, eff_speed);
+            right_track_v = Math.min(right_track_v + eff_accel, eff_speed);
+          } else {
+            left_track_v *= EXCAVATOR_DRAG;
+            right_track_v *= EXCAVATOR_DRAG;
+          }
+        }
+        if (right_hand_lm){
+          second_boom_angle = calculate_second_boom_angle(right_hand_lm);
+        }
+      } else { // drive
+        let dleft = track_speed_from_hand(left_hand_lm);
+        let dright = track_speed_from_hand(right_hand_lm);
+
+        // keyboard nudges
+        if (keysPressed['ArrowLeft']) { dleft = dright = Math.max(-1.0, dleft - 0.05); }
+        if (keysPressed['ArrowRight']) { dleft = dright = Math.min(1.0, dleft + 0.05); }
+        if (keysPressed['KeyA']) { dleft = Math.max(-1.0, dleft - 0.05); }
+        if (keysPressed['KeyD']) { dright = Math.min(1.0, dright + 0.05); }
+
+        left_track_v += (dleft * eff_speed - left_track_v) * 0.25;
+        right_track_v += (dright * eff_speed - right_track_v) * 0.25;
+
+        first_boom_angle *= 0.98;
+        second_boom_angle *= 0.98;
+      }
+
+      if (mode === 'drive' && !left_hand_lm && !right_hand_lm){
+        left_track_v *= EXCAVATOR_DRAG;
+        right_track_v *= EXCAVATOR_DRAG;
+      }
+
+      // Kinematics
+      const vx = (left_track_v + right_track_v) * 0.5;
+      excavator_pos[0] += vx;
+      excavator_pos[0] = Math.max(0, Math.min(WORLD_W - 50, excavator_pos[0]));
+      excavator_pos[1] = groundYAt(excavator_pos[0]) - 50;
+
+      if (Math.abs(vx) > 0.1) spawnDust(excavator_pos[0], excavator_pos[1], vx);
+      updateParticles(dt);
+
+      camera_x = Math.max(0, Math.min(WORLD_W - SCREEN_W, excavator_pos[0] - SCREEN_W * 0.5));
+      updateSceneTargets(excavator_pos[0]);
+
+      // tween scene params
+      scene_sky_top = colorLerp(scene_sky_top, target_sky_top, 0.03);
+      scene_sky_bot = colorLerp(scene_sky_bot, target_sky_bot, 0.03);
+      scene_ground = {
+        r: Math.round(lerp(scene_ground.r, target_ground.r, 0.05)),
+        g: Math.round(lerp(scene_ground.g, target_ground.g, 0.05)),
+        b: Math.round(lerp(scene_ground.b, target_ground.b, 0.05))
+      };
+      terrain_amp = lerp(terrain_amp, target_amp, 0.03);
+      terrain_scale = lerp(terrain_scale, target_scale, 0.03);
+      cam_zoom = lerp(cam_zoom, target_zoom, 0.04);
+
+      if (remaining_time_sec() <= 0) game_over = true;
+    }
+
+    // Arm geometry (collisions)
+    const a1 = first_boom_angle;
+    const a2_abs = first_boom_angle + second_boom_angle;
+
+    const end_first = [
+      excavator_pos[0] + first_boom_length * Math.cos(a1),
+      excavator_pos[1] + first_boom_length * Math.sin(a1)
+    ];
+    const end_second = [
+      end_first[0] + second_boom_length * Math.cos(a2_abs),
+      end_first[1] + second_boom_length * Math.sin(a2_abs)
+    ];
+    const scooper_pos = [
+      end_second[0] + 22 * Math.cos(a2_abs + Math.PI/2),
+      end_second[1] + 22 * Math.sin(a2_abs + Math.PI/2)
+    ];
+
+    // Update SVG transforms (roll on land)
+    if (svgGroup && arm1Group && arm2Group && bucketGroup && treadsGroup){
+      const [base_sx, base_sy] = worldToScreen(excavator_pos[0], excavator_pos[1]);
+      const pitch = groundPitchAt(excavator_pos[0]);
+      const bob = Math.sin(tsec * 10) * 0.6 * (Math.min(1, Math.abs((left_track_v+right_track_v)*0.08)));
+
+      svgGroup.setAttribute(
+        "transform",
+        `translate(${base_sx.toFixed(2)},${(base_sy + bob).toFixed(2)}) rotate(${radToDeg(pitch).toFixed(2)}) scale(${cam_zoom.toFixed(4)})`
+      );
+
+      arm1Group.setAttribute("transform", `translate(0,0) rotate(${radToDeg(first_boom_angle).toFixed(2)})`);
+      arm2Group.setAttribute("transform", `translate(100,0) rotate(${radToDeg(second_boom_angle).toFixed(2)})`);
+      bucketGroup.setAttribute("transform", `translate(80,0) rotate(90)`);
+
+      const tread_speed = (left_track_v + right_track_v) * 0.9;
+      const tread_offset = ((tsec * tread_speed * 14) % 16);
+      treadsGroup.setAttribute("transform", `translate(${(-tread_offset).toFixed(2)},0)`);
+    }
+
+    // Draw balls
+    for (let i=0;i<balls.length;i++){
+      const ball = balls[i];
+      const [sx2, sy2] = worldToScreen(ball[0], ball[1]);
+      const r = Math.max(3, Math.round(10*cam_zoom));
+      ctx.fillStyle = 'rgb(240,210,60)';
+      ctx.beginPath(); ctx.arc(sx2, sy2, r,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle = 'rgb(255,235,120)';
+      ctx.beginPath(); ctx.arc(sx2, sy2, r,0,Math.PI*2); ctx.stroke();
+      const sweep = Math.round((tsec * 180 + i * 20) % (2*r)) - r;
+      if (Math.abs(sweep) < r){
+        ctx.fillStyle = 'rgba(255,255,200,0.55)';
+        ctx.beginPath(); ctx.arc(sx2 + sweep*0.4, sy2 - sweep*0.3, Math.max(1, Math.floor(r/3)), 0, Math.PI*2); ctx.fill();
+      }
+    }
+
+    if (scooped_ball !== null && balls[scooped_ball]){
+      balls[scooped_ball] = [scooper_pos[0], scooper_pos[1]];
+    }
+
+    // Collisions
+    if (started && !game_over){
+      const srect = {x: scooper_pos[0]-15, y: scooper_pos[1]-15, w:30, h:30};
+      for (let i=0;i<balls.length;i++){
+        const b = balls[i];
+        const brect = {x:b[0]-10, y:b[1]-10, w:20, h:20};
+        if (rectsCollide(srect, brect) && scooped_ball === null){
+          scooped_ball = i;
+          break;
+        }
+      }
+      checkBasketCollision();
+    }
+
+    drawParticles(ctx);
+    applyVignette(ctx);
+
+    // HUD
+    ctx.font = "20px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+    ctx.fillStyle = "rgb(240,240,240)";
+    ctx.fillText("Score: " + score, 10, 28);
+    ctx.fillText("Mode: " + (started ? mode.toUpperCase() : "READY") + " (TAB)", 10, 56);
+
+    const t_left = remaining_time_sec();
+    ctx.fillStyle = (t_left>10) ? "rgb(255,200,140)" : "rgb(255,120,120)";
+    ctx.fillText("Time: " + String(t_left).padStart(2,'0') + "s", SCREEN_W - 140, 28);
+
+    ctx.fillStyle = "rgb(200,255,200)";
+    ctx.fillText("Throttle x" + currentThrottle(keysPressed).toFixed(2) + "  ([ / ] , Shift boost)", 10, 84);
+
+    if (!started){
+      ctx.fillStyle = "rgba(0,0,0,0.40)";
+      ctx.fillRect(0,0,SCREEN_W,SCREEN_H);
+      ctx.fillStyle = "rgba(255,255,255,0.92)";
+      ctx.font = "34px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+      const msg = "CHOOSE A RIG → START";
+      const m = ctx.measureText(msg);
+      ctx.fillText(msg, SCREEN_W/2 - m.width/2, SCREEN_H/2 - 10);
+      ctx.font = "14px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+      const msg2 = "Press Start on the left panel";
+      const m2 = ctx.measureText(msg2);
+      ctx.fillText(msg2, SCREEN_W/2 - m2.width/2, SCREEN_H/2 + 22);
+    }
+
+    if (game_over){
+      ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.fillRect(0,0,SCREEN_W,SCREEN_H);
+      ctx.font = "54px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+      ctx.fillStyle = "rgb(255,230,200)";
+      const msg = "GAME OVER";
+      const metrics = ctx.measureText(msg);
+      ctx.fillText(msg, SCREEN_W/2 - metrics.width/2, SCREEN_H/2 - 30);
+      ctx.font = "18px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+      ctx.fillStyle = "rgb(230,230,240)";
+      const sub = `Final Score: ${score}   |   Press R to Restart`;
+      const sm = ctx.measureText(sub);
+      ctx.fillText(sub, SCREEN_W/2 - sm.width/2, SCREEN_H/2 + 10);
+    }
+
+    requestAnimationFrame(frame);
+  }
+
+  /* =========================================================
+     7) Boot
+     ========================================================= */
+  function boot(){
+    // initial selection
+    renderTiles();
+    selectRig(0);       // mounts rig + applies scene theme
+    updateRigUI();
+
+    // start loop
+    prevTime = performance.now();
+    requestAnimationFrame(frame);
+  }
+
+  boot();
+  </script>
+</body>
+</html>

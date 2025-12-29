@@ -1,0 +1,2540 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Excavator — Terrain Map + Hand-Training Startup Calibration + Micro-Movement Tuner</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root{
+      --panel: rgba(10,12,16,0.74);
+      --panel2: rgba(10,12,16,0.62);
+      --text: rgba(240,240,245,0.92);
+      --muted: rgba(220,220,235,0.70);
+      --y: rgba(255,210,60,0.95);
+      --g: rgba(80,220,120,0.95);
+      --r: rgba(255,60,60,0.90);
+    }
+    html,body{ margin:0; padding:0; height:100%; background:#000; color:var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    body{ display:flex; align-items:center; justify-content:center; }
+    #container{ width:min(1200px, calc(100vw - 24px)); margin: 12px auto; display:flex; flex-direction:column; gap:10px; }
+    #wrap{
+      position:relative; width:100%; aspect-ratio: 920 / 640;
+      max-height: calc(100vh - 140px);
+      border-radius: 14px; overflow:hidden;
+      background: radial-gradient(1100px 700px at 50% 30%, #11131b 0%, #06060a 55%, #000 100%);
+      box-shadow: 0 10px 40px rgba(0,0,0,0.65);
+      border: 1px solid rgba(255,210,60,0.12);
+    }
+    canvas{ width:100%; height:100%; display:block; background:#000; }
+    video{ display:none; }
+
+    #hud{
+      position:absolute; left:10px; right:10px; top:10px;
+      display:flex; gap:10px; pointer-events:none; z-index: 5;
+    }
+    .hudBlock{
+      flex: 1 1 auto;
+      display:flex; gap:12px; align-items:center; justify-content:space-between;
+      padding:10px 12px; border-radius: 12px;
+      background: var(--panel);
+      border: 1px solid rgba(255,210,60,0.14);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 18px rgba(0,0,0,0.35);
+      min-width: 0;
+    }
+    .hudStat{ display:flex; flex-direction:column; gap:2px; line-height:1.1; min-width:0; }
+    .hudLabel{ font-size: 11px; color:var(--muted); }
+    .hudValue{ font-size: 14px; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+    #sidePanel{
+      position:absolute; left:10px; bottom:10px;
+      width: 450px; height: 170px;
+      background: var(--panel);
+      border: 1px solid rgba(255,210,60,0.14);
+      border-radius: 12px;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 18px rgba(0,0,0,0.35);
+      padding: 8px; z-index: 6;
+      pointer-events:none;
+    }
+    #sideHeader{ display:flex; justify-content:space-between; align-items:center; gap:10px; font-size: 11px; color: rgba(255,235,170,0.92); margin-bottom: 6px; }
+    #sideCanvas{
+      width:100%; height: calc(100% - 18px); display:block;
+      border-radius: 10px;
+      background: rgba(0,0,0,0.28);
+      border: 1px solid rgba(255,210,60,0.10);
+    }
+
+    #actPanel{
+      position:absolute; right:10px; top:78px;
+      width: 300px;
+      background: var(--panel);
+      border: 1px solid rgba(255,210,60,0.14);
+      border-radius: 12px;
+      padding: 10px;
+      z-index: 7;
+      pointer-events:none;
+      box-shadow: 0 8px 18px rgba(0,0,0,0.35);
+      backdrop-filter: blur(10px);
+    }
+    #actTitle{ font-size: 11px; color: rgba(255,235,170,0.92); margin-bottom: 8px; }
+    .actRow{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin:6px 0; }
+    .pill{
+      width: 128px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,210,60,0.18);
+      background: rgba(0,0,0,0.33);
+      font-size: 11px;
+      color: rgba(220,220,235,0.85);
+      text-align:center;
+    }
+    .pill.on{
+      border-color: rgba(80,220,120,0.50);
+      color: rgba(80,220,120,0.95);
+      box-shadow: 0 0 0 1px rgba(80,220,120,0.10) inset, 0 0 12px rgba(80,220,120,0.10);
+    }
+    .pill.warn{
+      border-color: rgba(255,210,60,0.55);
+      color: rgba(255,235,170,0.95);
+      box-shadow: 0 0 0 1px rgba(255,210,60,0.10) inset, 0 0 12px rgba(255,210,60,0.10);
+    }
+    .val{ width: 150px; text-align:right; font-size: 11px; color: rgba(220,220,235,0.78); white-space:nowrap; }
+
+    #toastWrap{
+      position:absolute; left:50%; top:64px; transform: translateX(-50%);
+      z-index: 12; pointer-events:none;
+      display:flex; flex-direction:column; gap:8px; align-items:center;
+    }
+    .toast{
+      min-width: 360px;
+      max-width: min(560px, calc(100vw - 40px));
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,210,60,0.18);
+      background: rgba(8,10,14,0.72);
+      box-shadow: 0 12px 28px rgba(0,0,0,0.55);
+      backdrop-filter: blur(10px);
+      color: rgba(235,235,245,0.92);
+      font-size: 12px;
+      display:none;
+    }
+    .toast strong{ color: rgba(255,235,170,0.95); }
+    .bar{
+      margin-top:8px;
+      height: 8px;
+      border-radius: 999px;
+      background: rgba(255,235,170,0.12);
+      overflow:hidden;
+      border: 1px solid rgba(255,210,60,0.10);
+    }
+    .bar > div{
+      height:100%;
+      width:0%;
+      background: linear-gradient(90deg, rgba(255,210,60,0.95), rgba(80,220,120,0.95));
+    }
+
+    #tuner{
+      position:absolute; right:10px; bottom:10px;
+      width: 440px;
+      background: var(--panel2);
+      border: 1px solid rgba(255,210,60,0.14);
+      border-radius: 12px;
+      padding: 10px; z-index: 9;
+      box-shadow: 0 8px 18px rgba(0,0,0,0.35);
+      backdrop-filter: blur(10px);
+      pointer-events:auto; user-select:none;
+    }
+    #tunerHeader{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom: 8px; }
+    #tunerHeader b{ font-size: 12px; color: rgba(255,235,170,0.92); }
+    #toggleTuner{
+      cursor:pointer; padding: 6px 10px; border-radius: 10px;
+      border: 1px solid rgba(255,210,60,0.18);
+      background: rgba(0,0,0,0.35);
+      color: rgba(255,235,170,0.92); font-size: 11px;
+    }
+    #tunerBody{ display:none; max-height: 52vh; overflow:auto; padding-right: 4px; } /* start hidden */
+    .row{ display:grid; grid-template-columns: 1fr 210px; gap:10px; align-items:center; margin:8px 0; }
+    .row label{ font-size: 11px; color: rgba(220,220,235,0.75); }
+    .ctrl{ display:flex; align-items:center; gap:10px; justify-content:flex-end; }
+    input[type="range"]{ width:100%; }
+    .num{ width: 64px; text-align:right; font-size: 11px; color: rgba(220,220,235,0.85); }
+    select{
+      width: 150px; padding: 6px 8px; border-radius: 10px;
+      border: 1px solid rgba(255,210,60,0.18);
+      background: rgba(0,0,0,0.35);
+      color: rgba(220,220,235,0.90);
+      font-size: 11px; outline:none;
+    }
+    .invWrap{
+      display:flex; align-items:center; gap:6px;
+      padding: 6px 8px; border-radius: 10px;
+      border: 1px solid rgba(255,210,60,0.12);
+      background: rgba(0,0,0,0.22);
+      color: rgba(220,220,235,0.80);
+      font-size: 11px; white-space:nowrap;
+    }
+    .invWrap input{ transform: translateY(1px); }
+    .miniBtn{
+      cursor:pointer; padding: 6px 10px; border-radius: 10px;
+      border: 1px solid rgba(255,210,60,0.18);
+      background: rgba(0,0,0,0.30);
+      color: rgba(220,220,235,0.85);
+      font-size: 11px; white-space:nowrap;
+    }
+    .miniBtn.on{ border-color: rgba(80,220,120,0.40); color: rgba(80,220,120,0.95); }
+    .sectionTitle{
+      margin-top: 10px; padding-top: 10px;
+      border-top: 1px solid rgba(255,210,60,0.10);
+      font-size: 11px;
+      color: rgba(255,235,170,0.92);
+    }
+    .hint{ margin-top: 8px; font-size: 10px; color: rgba(220,220,235,0.65); line-height: 1.25; }
+
+    /* START overlay */
+    #start{
+      position:absolute; inset:0;
+      display:flex; align-items:center; justify-content:center;
+      padding: 18px;
+      background:
+        radial-gradient(1200px 800px at 30% 20%, rgba(255,200,60,0.10) 0%, transparent 55%),
+        radial-gradient(900px 700px at 75% 35%, rgba(80,220,120,0.08) 0%, transparent 55%),
+        linear-gradient(180deg, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.68) 100%);
+      z-index: 30;
+      pointer-events:auto;
+    }
+    .card{
+      width:min(1040px, 100%);
+      border-radius: 16px;
+      border: 1px solid rgba(255,210,60,0.16);
+      background: rgba(6,7,10,0.78);
+      box-shadow: 0 18px 60px rgba(0,0,0,0.72);
+      overflow:hidden;
+    }
+    .cardHead{
+      padding: 14px 16px;
+      border-bottom: 1px solid rgba(255,210,60,0.12);
+      background: rgba(0,0,0,0.35);
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+    }
+    .cardHead b{ color: rgba(255,235,170,0.95); font-size: 14px; letter-spacing: 0.4px; }
+    .cardHead span{ display:block; margin-top: 6px; color: rgba(220,220,235,0.72); font-size: 12px; line-height: 1.3; }
+    .startBtn{
+      cursor:pointer;
+      padding: 10px 14px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,210,60,0.20);
+      background: rgba(0,0,0,0.35);
+      color: rgba(255,235,170,0.92);
+      font-size: 12px;
+      white-space:nowrap;
+      align-self:flex-start;
+      pointer-events:auto;
+    }
+    .startBtn[disabled]{ opacity:0.6; cursor:not-allowed; }
+    .cardBody{
+      padding: 14px 16px;
+      display:grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap:12px;
+    }
+    .tile{
+      border-radius: 14px;
+      border: 1px solid rgba(255,210,60,0.14);
+      background: rgba(10,12,18,0.55);
+      padding: 12px;
+      color: rgba(220,220,235,0.78);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .tile b{ color: rgba(255,235,170,0.92); }
+    #startStatus{
+      margin-top:10px;
+      color: rgba(220,220,235,0.75);
+      font-size: 12px;
+    }
+    #startError{
+      margin-top:8px;
+      color: rgba(255,120,120,0.92);
+      font-size: 12px;
+      display:none;
+      white-space:pre-wrap;
+    }
+    .optRow{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:8px; }
+    .radioPill{
+      display:flex; align-items:center; gap:8px;
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,210,60,0.16);
+      background: rgba(0,0,0,0.25);
+      color: rgba(220,220,235,0.82);
+      font-size: 12px;
+      user-select:none;
+    }
+    .radioPill input{ transform: translateY(1px); }
+    .smallNote{ margin-top:8px; font-size: 11px; color: rgba(220,220,235,0.70); line-height: 1.3; }
+    .calBig{
+      margin-top:10px;
+      font-size: 34px;
+      color: rgba(255,235,170,0.95);
+      letter-spacing: 2px;
+    }
+
+    @media (max-width: 980px){
+      .cardBody{ grid-template-columns: 1fr; }
+      #sidePanel{ width: calc(100% - 20px); }
+      #actPanel{ width: 280px; top: 92px; }
+      #tuner{ width: calc(100% - 20px); }
+      .row{ grid-template-columns: 1fr 220px; }
+      select{ width: 160px; }
+      .toast{ min-width: 280px; }
+    }
+  </style>
+</head>
+
+<body>
+  <div id="container">
+    <div id="wrap">
+      <canvas id="top" width="920" height="640"></canvas>
+
+      <div id="hud">
+        <div class="hudBlock">
+          <div class="hudStat">
+            <div class="hudLabel">CONTROL</div>
+            <div class="hudValue" id="hudCtrl">GESTURE</div>
+          </div>
+          <div class="hudStat">
+            <div class="hudLabel">MODE</div>
+            <div class="hudValue" id="hudMode">ARM</div>
+          </div>
+          <div class="hudStat">
+            <div class="hudLabel">THUMBS UP</div>
+            <div class="hudValue" id="hudThumb">NOT STARTED</div>
+          </div>
+          <div class="hudStat">
+            <div class="hudLabel">HANDS</div>
+            <div class="hudValue" id="hudHands">L:—  R:—</div>
+          </div>
+          <div class="hudStat">
+            <div class="hudLabel">AMMO</div>
+            <div class="hudValue" id="hudAmmo">100</div>
+          </div>
+          <div class="hudStat">
+            <div class="hudLabel">NOTE</div>
+            <div class="hudValue" id="hudNote">Open START to enable camera</div>
+          </div>
+        </div>
+
+        <div class="hudBlock">
+          <div class="hudStat">
+            <div class="hudLabel">BASE</div>
+            <div class="hudValue" id="hudBase">x:0 y:0</div>
+          </div>
+          <div class="hudStat">
+            <div class="hudLabel">ROTATE</div>
+            <div class="hudValue" id="hudSwing">0°</div>
+          </div>
+          <div class="hudStat">
+            <div class="hudLabel">BOOM</div>
+            <div class="hudValue" id="hudBoom">0°</div>
+          </div>
+          <div class="hudStat">
+            <div class="hudLabel">STICK</div>
+            <div class="hudValue" id="hudStick">0.00</div>
+          </div>
+          <div class="hudStat">
+            <div class="hudLabel">BUCKET</div>
+            <div class="hudValue" id="hudBucket">0°</div>
+          </div>
+        </div>
+      </div>
+
+      <div id="toastWrap">
+        <div class="toast" id="holdToast">
+          <div><strong>Thumbs Up detected</strong> — hold to toggle <strong>TRACKS</strong> mode</div>
+          <div style="margin-top:6px;color:rgba(220,220,235,0.75);font-size:11px;" id="holdText">0.00 / 2.00s</div>
+          <div class="bar"><div id="holdBar"></div></div>
+        </div>
+        <div class="toast" id="modeToast"></div>
+      </div>
+
+      <div id="sidePanel">
+        <div id="sideHeader">
+          <span>SIDE VIEW (LOCKED): Boom + Bucket</span>
+          <span id="sideReadout" style="color: rgba(220,220,235,0.75);">—</span>
+        </div>
+        <canvas id="sideCanvas" width="820" height="240"></canvas>
+      </div>
+
+      <div id="actPanel">
+        <div id="actTitle">ACTIVATION</div>
+
+        <div class="actRow">
+          <div id="pillLT" class="pill">Left Track</div>
+          <div id="valLT" class="val">0.00</div>
+        </div>
+        <div class="actRow">
+          <div id="pillRT" class="pill">Right Track</div>
+          <div id="valRT" class="val">0.00</div>
+        </div>
+
+        <div style="height:6px"></div>
+
+        <div class="actRow">
+          <div id="pillSwing" class="pill">Rotate</div>
+          <div id="valSwing" class="val">0.00</div>
+        </div>
+        <div class="actRow">
+          <div id="pillBoom" class="pill">Boom</div>
+          <div id="valBoom" class="val">0.00</div>
+        </div>
+        <div class="actRow">
+          <div id="pillStick" class="pill">Stick</div>
+          <div id="valStick" class="val">0.00</div>
+        </div>
+        <div class="actRow">
+          <div id="pillBucket" class="pill">Bucket</div>
+          <div id="valBucket" class="val">0.00</div>
+        </div>
+
+        <div style="height:6px"></div>
+
+        <div class="actRow">
+          <div id="pillDig" class="pill">Dig (pinch)</div>
+          <div id="valDig" class="val">OFF</div>
+        </div>
+        <div class="actRow">
+          <div id="pillThumb" class="pill">Thumbs Up</div>
+          <div id="valThumb" class="val">0.00s</div>
+        </div>
+      </div>
+
+      <!-- LIVE TUNER (starts hidden; Show after startup) -->
+      <div id="tuner">
+        <div id="tunerHeader">
+          <b>TUNERS (live)</b>
+          <div id="toggleTuner">Show</div>
+        </div>
+
+        <div id="tunerBody">
+          <div class="sectionTitle">STARTUP CALIBRATION (MICRO MOVEMENT)</div>
+
+          <div class="row">
+            <label>Micro movement gain (×)</label>
+            <div class="ctrl">
+              <input id="mmGain" type="range" min="0.50" max="10.00" step="0.10" value="5.00">
+              <div class="num" id="mmGainV">5.00</div>
+            </div>
+          </div>
+          <div class="row">
+            <label>Pre-deadzone (raw hand)</label>
+            <div class="ctrl">
+              <input id="mmDead" type="range" min="0.00" max="0.25" step="0.01" value="0.06">
+              <div class="num" id="mmDeadV">0.06</div>
+            </div>
+          </div>
+
+          <div class="row">
+            <label>Left offset X</label>
+            <div class="ctrl">
+              <input id="offLx" type="range" min="-0.40" max="0.40" step="0.01" value="0.00">
+              <div class="num" id="offLxV">0.00</div>
+            </div>
+          </div>
+          <div class="row">
+            <label>Left offset Y</label>
+            <div class="ctrl">
+              <input id="offLy" type="range" min="-0.40" max="0.40" step="0.01" value="0.00">
+              <div class="num" id="offLyV">0.00</div>
+            </div>
+          </div>
+
+          <div class="row">
+            <label>Right offset X</label>
+            <div class="ctrl">
+              <input id="offRx" type="range" min="-0.40" max="0.40" step="0.01" value="0.00">
+              <div class="num" id="offRxV">0.00</div>
+            </div>
+          </div>
+          <div class="row">
+            <label>Right offset Y</label>
+            <div class="ctrl">
+              <input id="offRy" type="range" min="-0.40" max="0.40" step="0.01" value="0.00">
+              <div class="num" id="offRyV">0.00</div>
+            </div>
+          </div>
+
+          <div class="row">
+            <label>Use calibrated centers</label>
+            <div class="ctrl">
+              <label class="invWrap"><input id="useCenters" type="checkbox" checked> enabled</label>
+              <div class="miniBtn" id="btnRecal">Recalibrate</div>
+            </div>
+          </div>
+
+          <div class="sectionTitle">AMMO DIG ASSIST (MAKES AMMO MATTER)</div>
+          <div class="row">
+            <label>Assist enabled</label>
+            <div class="ctrl">
+              <label class="invWrap"><input id="assistOn" type="checkbox" checked> on</label>
+              <div class="miniBtn" id="btnReload">Reload (F)</div>
+            </div>
+          </div>
+          <div class="row">
+            <label>Assist power (hard tiles)</label>
+            <div class="ctrl">
+              <input id="assistPower" type="range" min="0.50" max="1.00" step="0.01" value="0.72">
+              <div class="num" id="assistPowerV">0.72</div>
+            </div>
+          </div>
+          <div class="row">
+            <label>Ammo drain per dig hit</label>
+            <div class="ctrl">
+              <input id="ammoDrain" type="range" min="0.10" max="4.00" step="0.10" value="1.20">
+              <div class="num" id="ammoDrainV">1.20</div>
+            </div>
+          </div>
+
+          <div class="sectionTitle">MAP</div>
+          <div class="row">
+            <label>Regenerate terrain (new layout)</label>
+            <div class="ctrl">
+              <div class="miniBtn" id="btnNewMap">New Map (M)</div>
+              <div class="miniBtn" id="btnResetDig">Reset Dig (R)</div>
+            </div>
+          </div>
+          <div class="hint">
+            <b>Legend:</b> Soil/Mud dig, Road dig hard, Rock dig very hard, Water/Blocks collide.
+          </div>
+
+          <div class="sectionTitle">DETECTION</div>
+          <div class="row">
+            <label>Detection confidence</label>
+            <div class="ctrl">
+              <input id="detConf" type="range" min="0.30" max="0.90" step="0.01" value="0.60">
+              <div class="num" id="detConfV">0.60</div>
+            </div>
+          </div>
+          <div class="row">
+            <label>Tracking confidence</label>
+            <div class="ctrl">
+              <input id="trkConf" type="range" min="0.30" max="0.90" step="0.01" value="0.60">
+              <div class="num" id="trkConfV">0.60</div>
+            </div>
+          </div>
+
+          <div class="sectionTitle">PINCH</div>
+          <div class="row">
+            <label>Pinch ON / OFF thresholds</label>
+            <div class="ctrl" style="gap:8px;">
+              <input id="pinchOn" type="range" min="0.03" max="0.10" step="0.001" value="0.055" style="width:55%;">
+              <div class="num" id="pinchOnV">0.055</div>
+              <input id="pinchOff" type="range" min="0.04" max="0.12" step="0.001" value="0.075" style="width:55%;">
+              <div class="num" id="pinchOffV">0.075</div>
+            </div>
+          </div>
+
+          <div class="sectionTitle">SPEEDS</div>
+          <div class="row">
+            <label>Rotate speed (deg/s)</label>
+            <div class="ctrl">
+              <input id="spdSwing" type="range" min="20" max="240" step="1" value="110">
+              <div class="num" id="spdSwingV">110</div>
+            </div>
+          </div>
+          <div class="row">
+            <label>Boom speed (deg/s)</label>
+            <div class="ctrl">
+              <input id="spdBoom" type="range" min="20" max="240" step="1" value="110">
+              <div class="num" id="spdBoomV">110</div>
+            </div>
+          </div>
+          <div class="row">
+            <label>Stick speed (units/s)</label>
+            <div class="ctrl">
+              <input id="spdStick" type="range" min="0.10" max="1.40" step="0.01" value="0.55">
+              <div class="num" id="spdStickV">0.55</div>
+            </div>
+          </div>
+          <div class="row">
+            <label>Bucket speed (deg/s)</label>
+            <div class="ctrl">
+              <input id="spdBucket" type="range" min="20" max="260" step="1" value="140">
+              <div class="num" id="spdBucketV">140</div>
+            </div>
+          </div>
+          <div class="row">
+            <label>Track speed (world units/s)</label>
+            <div class="ctrl">
+              <input id="spdTrack" type="range" min="40" max="320" step="1" value="170">
+              <div class="num" id="spdTrackV">170</div>
+            </div>
+          </div>
+          <div class="row">
+            <label>Track width (world units)</label>
+            <div class="ctrl">
+              <input id="trkWidth" type="range" min="40" max="160" step="1" value="92">
+              <div class="num" id="trkWidthV">92</div>
+            </div>
+          </div>
+
+          <div class="hint">
+            <b>Keyboard fallback:</b><br/>
+            <span style="color:rgba(220,220,235,0.75)">
+              M new map • R reset dig • SPACE dig • V toggles TRACKS •
+              (ARM) ArrowL/R rotate, ArrowU/D boom, Q/E stick, Z/C bucket •
+              (TRACKS) I/K left track, O/L right track • F reload ammo
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Start overlay (camera + calibration + controller selection + micro tuner) -->
+      <div id="start">
+        <div class="card">
+          <div class="cardHead">
+            <div>
+              <b>START → Camera → Hand Training Calibration → Begin</b>
+              <span>
+                If camera is “blocked”, open this page on <b>https</b> or <b>http://localhost</b> (camera won’t work on file:// in most browsers).
+              </span>
+              <div id="startStatus">Status: waiting for START…</div>
+              <div id="startError"></div>
+            </div>
+            <button class="startBtn" id="btnStart">START (Enable Camera)</button>
+          </div>
+
+          <div class="cardBody">
+            <div class="tile">
+              <b>1) Choose controller</b>
+              <div class="optRow">
+                <label class="radioPill"><input type="radio" name="ctrlMode" id="ctrlGesture" checked> Gesture</label>
+                <label class="radioPill"><input type="radio" name="ctrlMode" id="ctrlKeyboard"> Keyboard</label>
+              </div>
+
+              <div class="sectionTitle" style="margin-top:12px;">Micro movement tuning (startup)</div>
+
+              <div class="row" style="grid-template-columns: 1fr 220px;">
+                <label>Micro gain (×)</label>
+                <div class="ctrl">
+                  <input id="mmGainS" type="range" min="0.50" max="10.00" step="0.10" value="5.00">
+                  <div class="num" id="mmGainSV">5.00</div>
+                </div>
+              </div>
+
+              <div class="row" style="grid-template-columns: 1fr 220px;">
+                <label>Pre-deadzone</label>
+                <div class="ctrl">
+                  <input id="mmDeadS" type="range" min="0.00" max="0.25" step="0.01" value="0.06">
+                  <div class="num" id="mmDeadSV">0.06</div>
+                </div>
+              </div>
+
+              <div class="row" style="grid-template-columns: 1fr 220px;">
+                <label>Use calibrated centers</label>
+                <div class="ctrl">
+                  <label class="invWrap"><input id="useCentersS" type="checkbox" checked> enabled</label>
+                  <button class="startBtn" id="btnCalibrate" style="padding:8px 10px;">Calibrate</button>
+                </div>
+              </div>
+
+              <div class="smallNote">
+                <b>Calibration:</b> raise both hands, hold still. We’ll do <b>3…2…1</b> then center both hands for “micro control”.
+              </div>
+
+              <div class="calBig" id="calCountdown" style="display:none;">3</div>
+            </div>
+
+            <div class="tile">
+              <b>2) What changed (fix + gameplay)</b><br/>
+              • Fixed MediaPipe constructor: no more <b>Holistic.Holistic is not a constructor</b>.<br/>
+              • Buttons are interactable (overlay + tuner pointer events fixed).<br/>
+              • Startup calibration centers hands so you barely move to control.<br/>
+              • Ammo now matters: on hard tiles (road/rock), <b>dig-assist consumes ammo</b> to speed digging.<br/><br/>
+
+              <b>Tip</b><br/>
+              If you previously opened this from a file on disk, run a local server:
+              <div class="smallNote">
+                Example: <span style="color:rgba(255,235,170,0.92)">python -m http.server 8000</span><br/>
+                then open <span style="color:rgba(255,235,170,0.92)">http://localhost:8000</span>
+              </div>
+
+              <div style="margin-top:10px;">
+                <button class="startBtn" id="btnBegin" disabled>BEGIN GAME</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <video id="video" playsinline></video>
+    </div>
+
+    <div style="padding:10px 12px;border-radius:12px;background:rgba(10,12,18,0.55);border:1px solid rgba(255,210,60,0.12);color:rgba(235,235,245,0.86);font:12px ui-monospace,SFMono-Regular,Menlo,monospace;">
+      <span style="color:rgba(220,220,235,0.64)">Mode:</span> <b>Thumbs Up (hold 2.0s)</b> toggles <b>TRACKS override</b> ·
+      <span style="color:rgba(220,220,235,0.64)">Dig:</span> <b>Pinch</b> or <b>SPACE</b> ·
+      <span style="color:rgba(220,220,235,0.64)">Ammo:</span> hard tiles use ammo when assist enabled ·
+      <span style="color:rgba(220,220,235,0.64)">Map:</span> <b>M</b> new layout · <b>R</b> reset dig
+    </div>
+  </div>
+
+  <!-- MediaPipe Holistic -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js"></script>
+
+  <script>
+    // ============================================================
+    // FIXED + UPGRADED:
+    // - Proper Holistic constructor (no Holistic.Holistic error)
+    // - Camera starts, calibration runs, then Begin Game
+    // - Startup micro-movement calibration and live tuner
+    // - Ammo matters: dig-assist consumes ammo on hard tiles
+    // ============================================================
+
+    // ---------- DOM ----------
+    const topCanvas = document.getElementById("top");
+    const ctx = topCanvas.getContext("2d", { alpha: false });
+
+    const sideCanvas = document.getElementById("sideCanvas");
+    const sctx = sideCanvas.getContext("2d", { alpha: true });
+
+    const hudCtrl  = document.getElementById("hudCtrl");
+    const hudMode  = document.getElementById("hudMode");
+    const hudThumb = document.getElementById("hudThumb");
+    const hudHands = document.getElementById("hudHands");
+    const hudAmmo  = document.getElementById("hudAmmo");
+    const hudNote  = document.getElementById("hudNote");
+
+    const hudBase   = document.getElementById("hudBase");
+    const hudSwing  = document.getElementById("hudSwing");
+    const hudBoom   = document.getElementById("hudBoom");
+    const hudStick  = document.getElementById("hudStick");
+    const hudBucket = document.getElementById("hudBucket");
+
+    const sideReadout = document.getElementById("sideReadout");
+
+    const pillLT = document.getElementById("pillLT");
+    const pillRT = document.getElementById("pillRT");
+    const pillSwing  = document.getElementById("pillSwing");
+    const pillBoom   = document.getElementById("pillBoom");
+    const pillStick  = document.getElementById("pillStick");
+    const pillBucket = document.getElementById("pillBucket");
+    const pillDig    = document.getElementById("pillDig");
+    const pillThumb  = document.getElementById("pillThumb");
+
+    const valLT = document.getElementById("valLT");
+    const valRT = document.getElementById("valRT");
+    const valSwing  = document.getElementById("valSwing");
+    const valBoom   = document.getElementById("valBoom");
+    const valStick  = document.getElementById("valStick");
+    const valBucket = document.getElementById("valBucket");
+    const valDig    = document.getElementById("valDig");
+    const valThumb  = document.getElementById("valThumb");
+
+    const holdToast = document.getElementById("holdToast");
+    const holdText  = document.getElementById("holdText");
+    const holdBar   = document.getElementById("holdBar");
+    const modeToast = document.getElementById("modeToast");
+
+    const startOverlay = document.getElementById("start");
+    const btnStart = document.getElementById("btnStart");
+    const btnBegin = document.getElementById("btnBegin");
+    const startStatus = document.getElementById("startStatus");
+    const startError = document.getElementById("startError");
+
+    const ctrlGesture = document.getElementById("ctrlGesture");
+    const ctrlKeyboard = document.getElementById("ctrlKeyboard");
+
+    const btnCalibrate = document.getElementById("btnCalibrate");
+    const calCountdownEl = document.getElementById("calCountdown");
+
+    const mmGainS = document.getElementById("mmGainS");
+    const mmGainSV = document.getElementById("mmGainSV");
+    const mmDeadS = document.getElementById("mmDeadS");
+    const mmDeadSV = document.getElementById("mmDeadSV");
+    const useCentersS = document.getElementById("useCentersS");
+
+    const btnNewMap = document.getElementById("btnNewMap");
+    const btnResetDig = document.getElementById("btnResetDig");
+
+    const video = document.getElementById("video");
+
+    // ---------- LIVE TUNER DOM ----------
+    const tuner = {
+      mmGain: document.getElementById("mmGain"),
+      mmGainV: document.getElementById("mmGainV"),
+      mmDead: document.getElementById("mmDead"),
+      mmDeadV: document.getElementById("mmDeadV"),
+      offLx: document.getElementById("offLx"),
+      offLy: document.getElementById("offLy"),
+      offRx: document.getElementById("offRx"),
+      offRy: document.getElementById("offRy"),
+      offLxV: document.getElementById("offLxV"),
+      offLyV: document.getElementById("offLyV"),
+      offRxV: document.getElementById("offRxV"),
+      offRyV: document.getElementById("offRyV"),
+      useCenters: document.getElementById("useCenters"),
+      btnRecal: document.getElementById("btnRecal"),
+
+      assistOn: document.getElementById("assistOn"),
+      assistPower: document.getElementById("assistPower"),
+      assistPowerV: document.getElementById("assistPowerV"),
+      ammoDrain: document.getElementById("ammoDrain"),
+      ammoDrainV: document.getElementById("ammoDrainV"),
+      btnReload: document.getElementById("btnReload"),
+
+      detConf:  document.getElementById("detConf"),
+      trkConf:  document.getElementById("trkConf"),
+      pinchOn:  document.getElementById("pinchOn"),
+      pinchOff: document.getElementById("pinchOff"),
+      spdSwing: document.getElementById("spdSwing"),
+      spdBoom:  document.getElementById("spdBoom"),
+      spdStick: document.getElementById("spdStick"),
+      spdBucket:document.getElementById("spdBucket"),
+      spdTrack: document.getElementById("spdTrack"),
+      trkWidth: document.getElementById("trkWidth"),
+
+      detConfV:  document.getElementById("detConfV"),
+      trkConfV:  document.getElementById("trkConfV"),
+      pinchOnV:  document.getElementById("pinchOnV"),
+      pinchOffV: document.getElementById("pinchOffV"),
+      spdSwingV: document.getElementById("spdSwingV"),
+      spdBoomV:  document.getElementById("spdBoomV"),
+      spdStickV: document.getElementById("spdStickV"),
+      spdBucketV:document.getElementById("spdBucketV"),
+      spdTrackV: document.getElementById("spdTrackV"),
+      trkWidthV: document.getElementById("trkWidthV"),
+    };
+
+    // ---------- Tuner show/hide ----------
+    const toggleTunerBtn = document.getElementById("toggleTuner");
+    const tunerBody = document.getElementById("tunerBody");
+    let tunerVisible = false;
+    toggleTunerBtn.addEventListener("click", ()=>{
+      tunerVisible = !tunerVisible;
+      tunerBody.style.display = tunerVisible ? "block" : "none";
+      toggleTunerBtn.textContent = tunerVisible ? "Hide" : "Show";
+    });
+
+    function showStartError(msg){
+      startError.style.display = "block";
+      startError.textContent = msg;
+    }
+    function clearStartError(){
+      startError.style.display = "none";
+      startError.textContent = "";
+    }
+
+    // ---------- Helpers ----------
+    const TAU = Math.PI*2;
+    function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+    function lerp(a,b,t){ return a + (b-a)*t; }
+    function emaAlpha(dt, tau){ return (tau <= 0) ? 1 : (1 - Math.exp(-dt / tau)); }
+    function wrapAngle(a){ while (a > Math.PI) a -= TAU; while (a < -Math.PI) a += TAU; return a; }
+    function applyDeadzone(v, dz){
+      const a = Math.abs(v);
+      if (a < dz) return 0;
+      const s = (a - dz) / Math.max(1e-6, (1 - dz));
+      return Math.sign(v) * clamp(s, 0, 1);
+    }
+    function expoCurve(v, expo){
+      const a = Math.abs(v);
+      return Math.sign(v) * Math.pow(a, expo);
+    }
+    function radToDeg(r){ return r * 180 / Math.PI; }
+    function degToRad(d){ return d * Math.PI / 180; }
+    function setPill(pillEl, on){
+      if (on) pillEl.classList.add("on");
+      else pillEl.classList.remove("on");
+    }
+
+    // ---------- Toasts ----------
+    let toastTimer = 0;
+    function showModeToast(text, seconds=1.4){
+      modeToast.style.display = "block";
+      modeToast.textContent = text;
+      toastTimer = seconds;
+    }
+
+    // ---------- Sync startup sliders ----------
+    function syncStartupSliders(){
+      mmGainSV.textContent = (+mmGainS.value).toFixed(2);
+      mmDeadSV.textContent = (+mmDeadS.value).toFixed(2);
+
+      tuner.mmGain.value = mmGainS.value;
+      tuner.mmDead.value = mmDeadS.value;
+      tuner.useCenters.checked = useCentersS.checked;
+      syncLiveTunerLabels();
+    }
+    mmGainS.addEventListener("input", syncStartupSliders);
+    mmDeadS.addEventListener("input", syncStartupSliders);
+    useCentersS.addEventListener("change", syncStartupSliders);
+
+    function syncLiveTunerLabels(){
+      tuner.mmGainV.textContent = (+tuner.mmGain.value).toFixed(2);
+      tuner.mmDeadV.textContent = (+tuner.mmDead.value).toFixed(2);
+
+      tuner.offLxV.textContent = (+tuner.offLx.value).toFixed(2);
+      tuner.offLyV.textContent = (+tuner.offLy.value).toFixed(2);
+      tuner.offRxV.textContent = (+tuner.offRx.value).toFixed(2);
+      tuner.offRyV.textContent = (+tuner.offRy.value).toFixed(2);
+
+      tuner.assistPowerV.textContent = (+tuner.assistPower.value).toFixed(2);
+      tuner.ammoDrainV.textContent   = (+tuner.ammoDrain.value).toFixed(2);
+
+      tuner.detConfV.textContent    = (+tuner.detConf.value).toFixed(2);
+      tuner.trkConfV.textContent    = (+tuner.trkConf.value).toFixed(2);
+      tuner.pinchOnV.textContent    = (+tuner.pinchOn.value).toFixed(3);
+      tuner.pinchOffV.textContent   = (+tuner.pinchOff.value).toFixed(3);
+
+      tuner.spdSwingV.textContent   = String(Math.round(+tuner.spdSwing.value));
+      tuner.spdBoomV.textContent    = String(Math.round(+tuner.spdBoom.value));
+      tuner.spdStickV.textContent   = (+tuner.spdStick.value).toFixed(2);
+      tuner.spdBucketV.textContent  = String(Math.round(+tuner.spdBucket.value));
+      tuner.spdTrackV.textContent   = String(Math.round(+tuner.spdTrack.value));
+      tuner.trkWidthV.textContent   = String(Math.round(+tuner.trkWidth.value));
+    }
+
+    [
+      tuner.mmGain,tuner.mmDead,tuner.offLx,tuner.offLy,tuner.offRx,tuner.offRy,
+      tuner.assistPower,tuner.ammoDrain,
+      tuner.detConf,tuner.trkConf,tuner.pinchOn,tuner.pinchOff,
+      tuner.spdSwing,tuner.spdBoom,tuner.spdStick,tuner.spdBucket,tuner.spdTrack,tuner.trkWidth
+    ].forEach(el => el.addEventListener("input", syncLiveTunerLabels));
+    syncStartupSliders();
+    syncLiveTunerLabels();
+
+    // Keep startup + live in sync (micro movement)
+    tuner.mmGain.addEventListener("input", ()=>{
+      mmGainS.value = tuner.mmGain.value;
+      syncStartupSliders();
+    });
+    tuner.mmDead.addEventListener("input", ()=>{
+      mmDeadS.value = tuner.mmDead.value;
+      syncStartupSliders();
+    });
+    tuner.useCenters.addEventListener("change", ()=>{
+      useCentersS.checked = tuner.useCenters.checked;
+      syncStartupSliders();
+    });
+
+    // ============================================================
+    // WORLD + TERRAIN + PILES
+    // ============================================================
+    const W = topCanvas.width, H = topCanvas.height;
+    const TILE = 56;
+    const WORLD_T = 26;
+    const WORLD_SIZE = WORLD_T * TILE;
+
+    const TERRAIN = { SOIL:0, ROAD:1, ROCK:2, BLOCK:3, WATER:4, MUD:5 };
+    function terrainName(t){
+      switch(t){
+        case TERRAIN.SOIL: return "SOIL";
+        case TERRAIN.ROAD: return "ROAD";
+        case TERRAIN.ROCK: return "ROCK";
+        case TERRAIN.BLOCK:return "BLOCK";
+        case TERRAIN.WATER:return "WATER";
+        case TERRAIN.MUD:  return "MUD";
+        default: return "UNK";
+      }
+    }
+
+    let terrain = new Uint8Array(WORLD_T*WORLD_T);
+    function idx(tx,ty){ return ty*WORLD_T + tx; }
+    function tAt(tx,ty){ return terrain[idx(tx,ty)] ?? TERRAIN.SOIL; }
+    function setT(tx,ty,t){ if(tx>=0&&ty>=0&&tx<WORLD_T&&ty<WORLD_T) terrain[idx(tx,ty)] = t; }
+
+    function hpMaxFor(t){
+      switch(t){
+        case TERRAIN.SOIL: return 6;
+        case TERRAIN.MUD:  return 5;
+        case TERRAIN.ROAD: return 10;
+        case TERRAIN.ROCK: return 18;
+        case TERRAIN.WATER:return 999;
+        case TERRAIN.BLOCK:return 999;
+        default: return 6;
+      }
+    }
+    function digFactorFor(t){
+      switch(t){
+        case TERRAIN.MUD:  return 0.85;
+        case TERRAIN.SOIL: return 1.00;
+        case TERRAIN.ROAD: return 1.85;
+        case TERRAIN.ROCK: return 3.10;
+        default: return 999;
+      }
+    }
+    function isDiggable(t){
+      return (t === TERRAIN.SOIL || t === TERRAIN.MUD || t === TERRAIN.ROAD || t === TERRAIN.ROCK);
+    }
+    function isBlockedForDrive(t){
+      return (t === TERRAIN.BLOCK || t === TERRAIN.WATER || t === TERRAIN.ROCK);
+    }
+
+    function LCG(seed){
+      let s = seed >>> 0;
+      return ()=>{
+        s = (1664525 * s + 1013904223) >>> 0;
+        return s / 4294967296;
+      };
+    }
+
+    let mapSeed = (Date.now() >>> 0);
+
+    function generateTerrain(newSeed){
+      mapSeed = (newSeed >>> 0) || (Date.now() >>> 0);
+      const rnd = LCG(mapSeed);
+
+      for (let ty=0; ty<WORLD_T; ty++){
+        for (let tx=0; tx<WORLD_T; tx++){
+          const n = rnd();
+          const t = (n < 0.06) ? TERRAIN.MUD : TERRAIN.SOIL;
+          setT(tx,ty,t);
+        }
+      }
+
+      const ponds = 2 + Math.floor(rnd()*2);
+      for (let p=0; p<ponds; p++){
+        const cx = 3 + Math.floor(rnd()*(WORLD_T-6));
+        const cy = 3 + Math.floor(rnd()*(WORLD_T-6));
+        const r  = 2 + Math.floor(rnd()*3);
+        for (let y=-r; y<=r; y++){
+          for (let x=-r; x<=r; x++){
+            const d = Math.hypot(x,y);
+            if (d <= r - 0.2 + rnd()*0.6){
+              setT(cx+x, cy+y, TERRAIN.WATER);
+              if (d >= r-1.2 && rnd() < 0.35) setT(cx+x, cy+y, TERRAIN.MUD);
+            }
+          }
+        }
+      }
+
+      const mid = Math.floor(WORLD_T/2);
+      const w = 2;
+      const hRow = mid + Math.floor((rnd()-0.5)*4);
+      const vCol = mid + Math.floor((rnd()-0.5)*4);
+
+      for (let ty=0; ty<WORLD_T; ty++){
+        for (let dx=-w; dx<=w; dx++){
+          setT(vCol+dx, ty, TERRAIN.ROAD);
+        }
+      }
+      for (let tx=0; tx<WORLD_T; tx++){
+        for (let dy=-w; dy<=w; dy++){
+          setT(tx, hRow+dy, TERRAIN.ROAD);
+        }
+      }
+
+      if (rnd() < 0.85){
+        let x = 2 + Math.floor(rnd()*4);
+        let y = WORLD_T-3 - Math.floor(rnd()*4);
+        const steps = WORLD_T + Math.floor(rnd()*8);
+        for (let i=0;i<steps;i++){
+          for (let ox=-1; ox<=1; ox++){
+            for (let oy=-1; oy<=1; oy++){
+              if (Math.abs(ox)+Math.abs(oy) <= 2) setT(x+ox, y+oy, TERRAIN.ROAD);
+            }
+          }
+          x += 1;
+          y -= (rnd() < 0.55) ? 1 : 0;
+          if (x >= WORLD_T-2 || y <= 1) break;
+        }
+      }
+
+      const rockClusters = 4 + Math.floor(rnd()*4);
+      for (let c=0; c<rockClusters; c++){
+        const cx = 2 + Math.floor(rnd()*(WORLD_T-4));
+        const cy = 2 + Math.floor(rnd()*(WORLD_T-4));
+        const r = 2 + Math.floor(rnd()*3);
+        for (let y=-r; y<=r; y++){
+          for (let x=-r; x<=r; x++){
+            if (Math.hypot(x,y) <= r - 0.15 + rnd()*0.7){
+              if (tAt(cx+x, cy+y) === TERRAIN.ROAD && rnd() < 0.80) continue;
+              if (tAt(cx+x, cy+y) === TERRAIN.WATER) continue;
+              setT(cx+x, cy+y, TERRAIN.ROCK);
+            }
+          }
+        }
+      }
+
+      const blockGroups = 4 + Math.floor(rnd()*5);
+      for (let g=0; g<blockGroups; g++){
+        let tx = Math.floor(rnd()*WORLD_T);
+        let ty = Math.floor(rnd()*WORLD_T);
+        for (let tries=0; tries<60; tries++){
+          tx = Math.floor(rnd()*WORLD_T);
+          ty = Math.floor(rnd()*WORLD_T);
+          if (tAt(tx,ty) === TERRAIN.ROAD) break;
+        }
+        const ox = (rnd()<0.5) ? (3 + Math.floor(rnd()*3)) : (-3 - Math.floor(rnd()*3));
+        const oy = (rnd()<0.5) ? (3 + Math.floor(rnd()*3)) : (-3 - Math.floor(rnd()*3));
+        const bx = clamp(tx + ox, 2, WORLD_T-3);
+        const by = clamp(ty + oy, 2, WORLD_T-3);
+
+        const bw = 1 + Math.floor(rnd()*3);
+        const bh = 1 + Math.floor(rnd()*3);
+        for (let y=0; y<bh; y++){
+          for (let x=0; x<bw; x++){
+            const xx = bx+x, yy = by+y;
+            if (tAt(xx,yy) === TERRAIN.ROAD) continue;
+            if (tAt(xx,yy) === TERRAIN.WATER) continue;
+            setT(xx,yy, TERRAIN.BLOCK);
+          }
+        }
+      }
+
+      const spawnTx = Math.floor(WORLD_T/2);
+      const spawnTy = Math.floor(WORLD_T/2);
+      for (let y=-2;y<=2;y++){
+        for (let x=-2;x<=2;x++){
+          const tt = tAt(spawnTx+x, spawnTy+y);
+          if (tt === TERRAIN.WATER || tt === TERRAIN.BLOCK || tt === TERRAIN.ROCK){
+            setT(spawnTx+x, spawnTy+y, TERRAIN.SOIL);
+          }
+        }
+      }
+    }
+
+    const tileHealth = new Map();
+    function kxy(tx,ty){ return tx + "," + ty; }
+    function hpMaxAt(tx,ty){ return hpMaxFor(tAt(tx,ty)); }
+    function getHP(tx,ty){
+      const v = tileHealth.get(kxy(tx,ty));
+      return (v === undefined) ? hpMaxAt(tx,ty) : v;
+    }
+    function setHP(tx,ty,hp){
+      const max = hpMaxAt(tx,ty);
+      const hh = clamp(Math.round(hp), 0, max);
+      if (hh === max) tileHealth.delete(kxy(tx,ty));
+      else tileHealth.set(kxy(tx,ty), hh);
+    }
+    function depth01(tx,ty){
+      const max = hpMaxAt(tx,ty);
+      if (max >= 999) return 0;
+      const hp = getHP(tx,ty);
+      return clamp((max - hp)/max, 0, 1);
+    }
+
+    const pile = new Map();
+    function getPile(tx,ty){ return pile.get(kxy(tx,ty)) ?? 0; }
+    function setPile(tx,ty,v){
+      const vv = Math.max(0, v);
+      if (vv <= 0.001) pile.delete(kxy(tx,ty));
+      else pile.set(kxy(tx,ty), Math.min(vv, 10.0));
+    }
+    function addPile(tx,ty,amt){
+      if (tx<0||ty<0||tx>=WORLD_T||ty>=WORLD_T) return;
+      setPile(tx,ty, getPile(tx,ty) + amt);
+    }
+
+    // excavator position used in diffuse
+    let ex = WORLD_SIZE*0.5;
+    let ey = WORLD_SIZE*0.5;
+
+    function diffusePiles(dt){
+      const rate = 0.55;
+      if (pile.size === 0) return;
+
+      const deltas = new Map();
+      function addDelta(tx,ty,amt){
+        const k = kxy(tx,ty);
+        deltas.set(k, (deltas.get(k) ?? 0) + amt);
+      }
+
+      for (const [key, v] of pile.entries()){
+        const [txs, tys] = key.split(",");
+        const tx = +txs, ty = +tys;
+        const amount = v;
+        if (amount < 0.02) continue;
+
+        const share = Math.min(amount * rate * dt, 0.08);
+        if (share <= 0) continue;
+
+        const cx = (tx + 0.5)*TILE, cy = (ty + 0.5)*TILE;
+        const dx = cx - ex, dy = cy - ey;
+        const d = Math.hypot(dx,dy) + 1e-6;
+        const ox = dx/d, oy = dy/d;
+
+        const neigh = [
+          [tx+1, ty, 0.25 + 0.15*Math.max(0, ox)],
+          [tx-1, ty, 0.25 + 0.15*Math.max(0,-ox)],
+          [tx, ty+1, 0.25 + 0.15*Math.max(0, oy)],
+          [tx, ty-1, 0.25 + 0.15*Math.max(0,-oy)],
+        ];
+
+        let wsum = 0;
+        for (const n of neigh) wsum += n[2];
+
+        addDelta(tx,ty,-share);
+        for (const [nx,ny,w] of neigh){
+          if (nx<0||ny<0||nx>=WORLD_T||ny>=WORLD_T) continue;
+          addDelta(nx,ny, share * (w/wsum));
+        }
+      }
+
+      for (const [key, dv] of deltas.entries()){
+        const [txs, tys] = key.split(",");
+        const tx = +txs, ty = +tys;
+        setPile(tx,ty, getPile(tx,ty) + dv);
+      }
+    }
+
+    const soilParticles = [];
+    function spawnSoilBurst(wx, wy, dirX, dirY, intensity, kind){
+      const n = Math.round(10 + intensity*12);
+      for (let i=0;i<n;i++){
+        const a = (Math.random()*TAU);
+        const side = (Math.random() < 0.5) ? -1 : 1;
+        const mag = (80 + Math.random()*120) * (0.55 + intensity*0.75);
+
+        const sx = -dirY * side;
+        const sy =  dirX * side;
+
+        const vx = (sx * mag) + (dirX * mag*0.18) + Math.cos(a)*20;
+        const vy = (sy * mag) + (dirY * mag*0.18) + Math.sin(a)*20;
+
+        soilParticles.push({
+          x: wx + (Math.random()-0.5)*10,
+          y: wy + (Math.random()-0.5)*10,
+          vx, vy,
+          life: 1.2 + Math.random()*1.0,
+          settle: 0.0,
+          kind: kind || TERRAIN.SOIL
+        });
+      }
+    }
+
+    function updateSoil(dt){
+      const DRAG = 0.88;
+      const SETTLE_SPEED = 26;
+      const MAX = 280;
+
+      for (let i=soilParticles.length-1;i>=0;i--){
+        const p = soilParticles[i];
+        p.life -= dt;
+        p.vx *= Math.pow(DRAG, dt*60);
+        p.vy *= Math.pow(DRAG, dt*60);
+
+        const dx = p.x - ex;
+        const dy = p.y - ey;
+        const d = Math.hypot(dx,dy) + 1e-6;
+        p.vx += (dx/d) * 14 * dt;
+        p.vy += (dy/d) * 14 * dt;
+
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+
+        p.x = clamp(p.x, 0, WORLD_SIZE);
+        p.y = clamp(p.y, 0, WORLD_SIZE);
+
+        const sp = Math.hypot(p.vx, p.vy);
+        if (sp < SETTLE_SPEED) p.settle += dt; else p.settle = 0;
+
+        if (p.settle > 0.16 || p.life <= 0){
+          const tx = clamp(Math.floor(p.x / TILE), 0, WORLD_T-1);
+          const ty = clamp(Math.floor(p.y / TILE), 0, WORLD_T-1);
+          addPile(tx, ty, 0.18 + Math.random()*0.38);
+          soilParticles.splice(i,1);
+        }
+      }
+
+      if (soilParticles.length > MAX){
+        soilParticles.splice(0, soilParticles.length - MAX);
+      }
+    }
+
+    function resetDigOnly(){
+      tileHealth.clear();
+      pile.clear();
+      soilParticles.length = 0;
+    }
+
+    function newMap(){
+      generateTerrain((Date.now() ^ (Math.random()*1e9)) >>> 0);
+      resetDigOnly();
+      ex = WORLD_SIZE*0.5;
+      ey = WORLD_SIZE*0.5;
+      camX = ex; camY = ey;
+      showModeToast("New map generated (roads/blocks/rocks/water/mud).", 1.6);
+    }
+
+    // ============================================================
+    // EXCAVATOR STATE
+    // ============================================================
+    let baseYaw = 0.0;
+    let swingYaw = 0.0;
+    let boomPitch = degToRad(35);
+    let stickExtend = 0.60;
+    let bucketCurl = degToRad(-35);
+
+    const LIM = {
+      swing:  {min: degToRad(-180), max: degToRad(180)},
+      boom:   {min: degToRad(-5),   max: degToRad(75)},
+      stick:  {min: 0.15,           max: 1.00},
+      bucket: {min: degToRad(-110), max: degToRad(45)}
+    };
+    const G = { boom1: 92, boom2Min: 55, boom2Max: 170, tip: 26 };
+
+    function bucketWorldPoint(){
+      const yawAbs = wrapAngle(baseYaw + swingYaw);
+      const boom2 = lerp(G.boom2Min, G.boom2Max, stickExtend);
+
+      const baseX = ex, baseY = ey;
+      const elbowX = baseX + Math.cos(yawAbs) * G.boom1;
+      const elbowY = baseY + Math.sin(yawAbs) * G.boom1;
+
+      const endX = elbowX + Math.cos(yawAbs) * boom2;
+      const endY = elbowY + Math.sin(yawAbs) * boom2;
+
+      const tipX = endX + Math.cos(yawAbs) * G.tip;
+      const tipY = endY + Math.sin(yawAbs) * G.tip;
+
+      return { baseX, baseY, elbowX, elbowY, endX, endY, tipX, tipY, yawAbs };
+    }
+
+    function bucketTileInfo(){
+      const bp = bucketWorldPoint();
+      const tx = clamp(Math.floor(bp.tipX / TILE), 0, WORLD_T-1);
+      const ty = clamp(Math.floor(bp.tipY / TILE), 0, WORLD_T-1);
+      const tt = tAt(tx,ty);
+      return { bp, tx, ty, t: tt, hp: getHP(tx,ty), d: depth01(tx,ty), pile: getPile(tx,ty) };
+    }
+
+    // ---------- camera follow ----------
+    let camX = ex, camY = ey;
+    function worldToScreen(wx,wy){
+      return [
+        (wx - camX) + W*0.5,
+        (wy - camY) + H*0.5
+      ];
+    }
+
+    // ============================================================
+    // AMMO + DIG ASSIST
+    // ============================================================
+    let ammoMax = 100;
+    let ammo = ammoMax;
+
+    function reloadAmmo(){
+      ammo = ammoMax;
+      showModeToast("Ammo reloaded.", 1.1);
+    }
+    tuner.btnReload.addEventListener("click", reloadAmmo);
+
+    // ============================================================
+    // DIGGING
+    // ============================================================
+    let digActive = false;
+    let digPulse = 0.0;
+    let digAccum = 0.0;
+    const DIG_TICK_BASE = 0.14;
+
+    function digAllowed(){ return boomPitch < degToRad(38); }
+
+    function digHit(tx,ty, t, usedAssist){
+      if (!isDiggable(t)) return;
+
+      const hp = getHP(tx,ty);
+      const max = hpMaxAt(tx,ty);
+      if (hp <= 0 || max >= 999) return;
+
+      setHP(tx,ty, hp - 1);
+      digPulse = 0.18;
+
+      const { bp } = bucketTileInfo();
+      const dirX = Math.cos(bp.yawAbs);
+      const dirY = Math.sin(bp.yawAbs);
+      const intensity = clamp(1 - (hp / Math.max(1, max)), 0.12, 1.0);
+
+      spawnSoilBurst(bp.tipX, bp.tipY, dirX, dirY, intensity, t);
+
+      const ox = Math.round(dirX*1.2 + (Math.random()-0.5)*0.6);
+      const oy = Math.round(dirY*1.2 + (Math.random()-0.5)*0.6);
+      addPile(clamp(tx+ox,0,WORLD_T-1), clamp(ty+oy,0,WORLD_T-1), usedAssist ? 0.75 : 0.50);
+      addPile(clamp(tx-oy,0,WORLD_T-1), clamp(ty+ox,0,WORLD_T-1), usedAssist ? 0.35 : 0.22);
+    }
+
+    function updateDig(dt){
+      if (!digActive || !digAllowed()) { digAccum = 0; return; }
+
+      const info = bucketTileInfo();
+      if (!isDiggable(info.t)) return;
+
+      const cx = info.tx*TILE + TILE*0.5;
+      const cy = info.ty*TILE + TILE*0.5;
+      const distN = Math.hypot(info.bp.tipX - cx, info.bp.tipY - cy) / (TILE*0.5);
+      if (distN > 0.95) return;
+
+      let factor = digFactorFor(info.t);
+      const hard = (info.t === TERRAIN.ROAD || info.t === TERRAIN.ROCK);
+
+      // If assist enabled + hard terrain + ammo available → speed up digging (lower factor), consume ammo per hit.
+      const assistEnabled = tuner.assistOn.checked;
+      const assistPower = +tuner.assistPower.value; // 0.50..1.00 (lower = stronger)
+      const drain = +tuner.ammoDrain.value;
+
+      // If hard, reduce factor only when ammo exists; otherwise normal slow dig
+      const canAssist = assistEnabled && hard && ammo > 0.1;
+      if (canAssist){
+        factor = Math.max(0.65, factor * assistPower);
+      }
+
+      const tick = DIG_TICK_BASE * factor;
+
+      digAccum += dt;
+      while (digAccum >= tick){
+        digAccum -= tick;
+
+        // Decide if this hit uses ammo assist
+        let usedAssist = false;
+        if (canAssist && ammo > 0.1){
+          ammo = Math.max(0, ammo - drain);
+          usedAssist = true;
+        }
+        digHit(info.tx, info.ty, info.t, usedAssist);
+      }
+    }
+
+    // ============================================================
+    // RENDERING
+    // ============================================================
+    function clearTop(){
+      ctx.fillStyle = "rgb(10,12,18)";
+      ctx.fillRect(0,0,W,H);
+    }
+    function drawVignette(){
+      const g = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, Math.max(W,H)/1.15);
+      g.addColorStop(0, "rgba(0,0,0,0)");
+      g.addColorStop(1, "rgba(0,0,0,0.55)");
+      ctx.fillStyle = g;
+      ctx.fillRect(0,0,W,H);
+    }
+    function hash2(tx,ty){
+      let h = (tx*374761393 + ty*668265263) >>> 0;
+      h = (h ^ (h >>> 13)) * 1274126177 >>> 0;
+      return (h >>> 0) / 4294967296;
+    }
+    function drawRoadDetails(sx,sy){
+      ctx.strokeStyle = "rgba(235,235,245,0.10)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(sx+TILE*0.52, sy+6);
+      ctx.lineTo(sx+TILE*0.52, sy+TILE-6);
+      ctx.stroke();
+
+      ctx.strokeStyle = "rgba(255,235,170,0.08)";
+      ctx.beginPath(); ctx.moveTo(sx+6, sy+6); ctx.lineTo(sx+TILE-6, sy+6); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(sx+6, sy+TILE-6); ctx.lineTo(sx+TILE-6, sy+TILE-6); ctx.stroke();
+
+      ctx.strokeStyle = "rgba(0,0,0,0.22)";
+      ctx.lineWidth = 1;
+      const x0 = sx + 10 + hash2((sx)|0,(sy)|0)* (TILE-20);
+      const y0 = sy + 10 + hash2((sx+9)|0,(sy+3)|0)* (TILE-20);
+      ctx.beginPath();
+      ctx.moveTo(x0,y0);
+      ctx.lineTo(x0 + (hash2(7,0)-0.5)*18, y0 + (hash2(0,7)-0.5)*18);
+      ctx.stroke();
+    }
+    function drawBlockDetails(sx,sy){
+      ctx.fillStyle = "rgba(255,235,170,0.10)";
+      ctx.fillRect(sx+6, sy+6, TILE-12, TILE-12);
+      ctx.strokeStyle = "rgba(255,210,60,0.20)";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(sx+6, sy+6, TILE-12, TILE-12);
+
+      ctx.strokeStyle = "rgba(255,60,60,0.16)";
+      ctx.lineWidth = 3;
+      for (let i=0;i<6;i++){
+        ctx.beginPath();
+        ctx.moveTo(sx+8+i*10, sy+TILE-10);
+        ctx.lineTo(sx+18+i*10, sy+TILE-20);
+        ctx.stroke();
+      }
+    }
+    function drawWaterDetails(sx,sy){
+      ctx.fillStyle = "rgba(120,200,255,0.10)";
+      ctx.beginPath();
+      ctx.arc(sx+TILE*0.45, sy+TILE*0.55, TILE*0.30, 0, TAU);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(120,200,255,0.16)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(sx+TILE*0.55, sy+TILE*0.50, TILE*0.36, 0, TAU);
+      ctx.stroke();
+    }
+    function drawRockDetails(sx,sy, tx,ty){
+      const h = hash2(tx,ty);
+      ctx.fillStyle = "rgba(255,235,170,0.06)";
+      ctx.beginPath();
+      ctx.arc(sx+TILE*(0.35+h*0.25), sy+TILE*(0.40+(1-h)*0.25), TILE*(0.18+h*0.10), 0, TAU);
+      ctx.fill();
+
+      ctx.fillStyle = "rgba(0,0,0,0.22)";
+      ctx.beginPath();
+      ctx.arc(sx+TILE*(0.62-h*0.20), sy+TILE*(0.55+h*0.18), TILE*(0.14+h*0.08), 0, TAU);
+      ctx.fill();
+    }
+
+    function drawTiles(){
+      const left = camX - W*0.5 - TILE;
+      const top  = camY - H*0.5 - TILE;
+      const right= camX + W*0.5 + TILE;
+      const bot  = camY + H*0.5 + TILE;
+
+      const tx0 = clamp(Math.floor(left / TILE), 0, WORLD_T-1);
+      const ty0 = clamp(Math.floor(top  / TILE), 0, WORLD_T-1);
+      const tx1 = clamp(Math.floor(right/ TILE), 0, WORLD_T-1);
+      const ty1 = clamp(Math.floor(bot  / TILE), 0, WORLD_T-1);
+
+      for (let ty=ty0; ty<=ty1; ty++){
+        for (let txi=tx0; txi<=tx1; txi++){
+          const wx = txi*TILE, wy = ty*TILE;
+          const [sx,sy] = worldToScreen(wx,wy);
+
+          const tt = tAt(txi,ty);
+          const d = depth01(txi,ty);
+          const hp = getHP(txi,ty);
+          const p = getPile(txi,ty);
+
+          let base = [18,78,36];
+          if (tt === TERRAIN.SOIL) base = [18,78,36];
+          if (tt === TERRAIN.MUD)  base = [38,52,28];
+          if (tt === TERRAIN.ROAD) base = [28,28,34];
+          if (tt === TERRAIN.ROCK) base = [46,48,54];
+          if (tt === TERRAIN.WATER)base = [18,34,62];
+          if (tt === TERRAIN.BLOCK)base = [58,56,60];
+
+          const digDark = (tt === TERRAIN.ROAD || tt === TERRAIN.ROCK) ? 0.55 : 0.45;
+          const baseR = Math.round(base[0]*(1-d*digDark) + 34*d*(1-digDark));
+          const baseG = Math.round(base[1]*(1-d*digDark) + 48*d*(1-digDark));
+          const baseB = Math.round(base[2]*(1-d*digDark) + 22*d*(1-digDark));
+          ctx.fillStyle = `rgb(${baseR},${baseG},${baseB})`;
+          ctx.fillRect(sx,sy,TILE,TILE);
+
+          if (tt === TERRAIN.ROAD) drawRoadDetails(sx,sy);
+          if (tt === TERRAIN.BLOCK) drawBlockDetails(sx,sy);
+          if (tt === TERRAIN.WATER) drawWaterDetails(sx,sy);
+          if (tt === TERRAIN.ROCK)  drawRockDetails(sx,sy,txi,ty);
+
+          if (d > 0.01 && isDiggable(tt)){
+            const cx = sx+TILE*0.5, cy = sy+TILE*0.5;
+            const rad = TILE*0.58;
+            const g = ctx.createRadialGradient(cx, cy, TILE*0.12, cx, cy, rad);
+            g.addColorStop(0, `rgba(0,0,0,${0.20 + d*0.38})`);
+            g.addColorStop(1, "rgba(0,0,0,0)");
+            ctx.fillStyle = g;
+            ctx.beginPath(); ctx.arc(cx,cy,rad,0,TAU); ctx.fill();
+
+            ctx.strokeStyle = `rgba(255,235,170,${0.04 + d*0.10})`;
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(cx,cy,rad*0.92,0,TAU); ctx.stroke();
+            ctx.lineWidth = 1;
+          }
+
+          if (p > 0.02){
+            const cx = sx+TILE*0.5, cy = sy+TILE*0.5;
+            const m = clamp(p/10, 0, 1);
+            const rad = TILE*(0.18 + m*0.42);
+            const g = ctx.createRadialGradient(cx - rad*0.15, cy - rad*0.20, 0, cx, cy, rad);
+            g.addColorStop(0, `rgba(255,235,170,${0.10 + m*0.24})`);
+            g.addColorStop(0.55, `rgba(120,92,44,${0.20 + m*0.50})`);
+            g.addColorStop(1, "rgba(0,0,0,0)");
+            ctx.fillStyle = g;
+            ctx.beginPath(); ctx.arc(cx,cy,rad,0,TAU); ctx.fill();
+
+            ctx.strokeStyle = `rgba(255,210,60,${0.05 + m*0.12})`;
+            ctx.beginPath(); ctx.arc(cx,cy,rad*0.92,0,TAU); ctx.stroke();
+          }
+
+          ctx.strokeStyle = "rgba(0,0,0,0.18)";
+          ctx.strokeRect(sx+0.5, sy+0.5, TILE, TILE);
+
+          const max = hpMaxAt(txi,ty);
+          if (isDiggable(tt) && hp < max && hp > 0){
+            const pct = hp/max;
+            ctx.fillStyle = "rgba(0,0,0,0.35)";
+            ctx.fillRect(sx+5, sy+5, TILE-10, 4);
+            ctx.fillStyle = `rgba(255,210,60,${0.20 + (1-pct)*0.38})`;
+            ctx.fillRect(sx+5, sy+5, Math.max(0,(TILE-10)*pct), 4);
+          }
+        }
+      }
+    }
+
+    function drawSoil(){
+      for (const p of soilParticles){
+        const [sx,sy] = worldToScreen(p.x,p.y);
+        let col = "rgba(255,210,60,0.28)";
+        if (p.kind === TERRAIN.ROAD) col = "rgba(190,190,210,0.20)";
+        if (p.kind === TERRAIN.ROCK) col = "rgba(200,200,210,0.18)";
+        if (p.kind === TERRAIN.MUD)  col = "rgba(180,140,70,0.22)";
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.arc(sx,sy,2.2,0,TAU);
+        ctx.fill();
+      }
+    }
+
+    function pathRoundRect(c,x,y,w,h,r){
+      const rr = Math.max(0, Math.min(r, Math.min(w,h)/2));
+      c.beginPath();
+      c.moveTo(x+rr, y);
+      c.arcTo(x+w, y, x+w, y+h, rr);
+      c.arcTo(x+w, y+h, x, y+h, rr);
+      c.arcTo(x, y+h, x, y, rr);
+      c.arcTo(x, y, x+w, y, rr);
+      c.closePath();
+    }
+
+    function drawExcavatorTop(){
+      const bp = bucketWorldPoint();
+      const [bx,by] = worldToScreen(ex,ey);
+
+      ctx.save();
+      ctx.translate(bx,by);
+      ctx.rotate(baseYaw);
+      ctx.fillStyle = "rgba(0,0,0,0.28)";
+      pathRoundRect(ctx, -44, -28, 88, 56, 18);
+      ctx.fill();
+      ctx.restore();
+
+      ctx.save();
+      ctx.translate(bx,by);
+      ctx.rotate(baseYaw);
+
+      const trackW = 18, trackH = 60, gap = 50;
+      const txL = -gap/2 - trackW, txR = gap/2;
+      const ty = -trackH/2;
+
+      ctx.fillStyle = "rgba(0,0,0,0.40)";
+      ctx.strokeStyle = "rgba(255,210,60,0.16)";
+      ctx.lineWidth = 2;
+      pathRoundRect(ctx, txL, ty, trackW, trackH, 9); ctx.fill(); ctx.stroke();
+      pathRoundRect(ctx, txR, ty, trackW, trackH, 9); ctx.fill(); ctx.stroke();
+
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(255,235,170,0.10)";
+      for (let i=0;i<11;i++){
+        const yy = ty + 6 + i*4.8;
+        ctx.beginPath(); ctx.moveTo(txL+2, yy); ctx.lineTo(txL+trackW-2, yy); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(txR+2, yy); ctx.lineTo(txR+trackW-2, yy); ctx.stroke();
+      }
+
+      ctx.fillStyle = "rgba(0,0,0,0.45)";
+      ctx.strokeStyle = "rgba(255,210,60,0.22)";
+      ctx.lineWidth = 2;
+      pathRoundRect(ctx, -40, -24, 80, 48, 16);
+      ctx.fill(); ctx.stroke();
+
+      ctx.fillStyle = "rgba(255,210,60,0.18)";
+      ctx.strokeStyle = "rgba(255,210,60,0.22)";
+      pathRoundRect(ctx, -10, -20, 28, 26, 8);
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "rgba(120,200,255,0.12)";
+      pathRoundRect(ctx, -6, -17, 18, 16, 6);
+      ctx.fill();
+
+      ctx.fillStyle = "rgba(255,210,60,0.12)";
+      ctx.strokeStyle = "rgba(255,235,170,0.16)";
+      pathRoundRect(ctx, -34, -12, 18, 24, 9);
+      ctx.fill(); ctx.stroke();
+
+      ctx.strokeStyle = "rgba(255,235,170,0.70)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(6, 0);
+      ctx.lineTo(52, 0);
+      ctx.stroke();
+
+      ctx.restore();
+
+      ctx.fillStyle = "rgba(255,235,170,0.10)";
+      ctx.strokeStyle = "rgba(255,210,60,0.22)";
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(bx,by,18,0,TAU); ctx.fill(); ctx.stroke();
+
+      const [b0x,b0y] = worldToScreen(bp.baseX, bp.baseY);
+      const [e1x,e1y] = worldToScreen(bp.elbowX, bp.elbowY);
+      const [e2x,e2y] = worldToScreen(bp.endX,  bp.endY);
+      const [tx,ty2]  = worldToScreen(bp.tipX,  bp.tipY);
+
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+
+      ctx.strokeStyle = "rgba(255,210,60,0.92)";
+      ctx.lineWidth = 11;
+      ctx.beginPath(); ctx.moveTo(b0x,b0y); ctx.lineTo(e1x,e1y); ctx.stroke();
+
+      ctx.strokeStyle = "rgba(255,110,80,0.80)";
+      ctx.lineWidth = 10;
+      ctx.beginPath(); ctx.moveTo(e1x,e1y); ctx.lineTo(e2x,e2y); ctx.stroke();
+
+      const pulseA = clamp(digPulse/0.18, 0, 1);
+      const r = digActive ? (8 + 6*(1-pulseA)) : 8;
+      ctx.fillStyle = digActive ? `rgba(255,60,60,${0.40+0.35*pulseA})` : "rgba(255,210,60,0.65)";
+      ctx.beginPath(); ctx.arc(tx, ty2, r, 0, TAU); ctx.fill();
+
+      ctx.font = "13px ui-monospace, SFMono-Regular, Menlo, monospace";
+      ctx.fillStyle = "rgba(255,235,170,0.90)";
+      ctx.fillText("TOP VIEW (LOCKED): Base drive + rotate + reach. Terrain: roads/blocks/rocks/water/mud", 12, 126);
+    }
+
+    function drawSide(){
+      const W2 = sideCanvas.width, H2 = sideCanvas.height;
+      sctx.clearRect(0,0,W2,H2);
+
+      sctx.fillStyle = "rgba(0,0,0,0.20)";
+      sctx.fillRect(0,0,W2,H2);
+
+      sctx.strokeStyle = "rgba(255,210,60,0.06)";
+      sctx.lineWidth = 1;
+      for (let x=0;x<=W2;x+=70){ sctx.beginPath(); sctx.moveTo(x+0.5,0); sctx.lineTo(x+0.5,H2); sctx.stroke(); }
+      for (let y=0;y<=H2;y+=35){ sctx.beginPath(); sctx.moveTo(0,y+0.5); sctx.lineTo(W2,y+0.5); sctx.stroke(); }
+
+      const groundY = H2*0.80;
+      sctx.strokeStyle = "rgba(220,220,235,0.20)";
+      sctx.beginPath();
+      sctx.moveTo(16, groundY+0.5);
+      sctx.lineTo(W2-16, groundY+0.5);
+      sctx.stroke();
+
+      const boomA = boomPitch;
+      const armRel = (-0.55 + stickExtend*0.95);
+      const armA  = boomA + armRel;
+      const buckA = armA + bucketCurl;
+
+      const L1 = 210;
+      const L2 = 140 + stickExtend*60;
+      const L3 = 58;
+
+      const baseX = 90;
+      const baseY = groundY - 18;
+
+      const elbowX = baseX + Math.cos(boomA)*L1;
+      const elbowY = baseY - Math.sin(boomA)*L1;
+
+      const endX = elbowX + Math.cos(armA)*L2;
+      const endY = elbowY - Math.sin(armA)*L2;
+
+      const tipX = endX + Math.cos(buckA)*L3;
+      const tipY = endY - Math.sin(buckA)*L3;
+
+      sctx.fillStyle = "rgba(255,235,170,0.14)";
+      sctx.strokeStyle = "rgba(255,210,60,0.22)";
+      sctx.lineWidth = 2;
+      pathRoundRect(sctx, baseX-32, baseY-20, 64, 40, 12);
+      sctx.fill(); sctx.stroke();
+
+      sctx.lineCap = "round";
+      sctx.lineJoin = "round";
+
+      sctx.strokeStyle = "rgba(255,210,60,0.88)";
+      sctx.lineWidth = 12;
+      sctx.beginPath(); sctx.moveTo(baseX,baseY); sctx.lineTo(elbowX,elbowY); sctx.stroke();
+
+      sctx.strokeStyle = "rgba(255,60,60,0.78)";
+      sctx.lineWidth = 11;
+      sctx.beginPath(); sctx.moveTo(elbowX,elbowY); sctx.lineTo(endX,endY); sctx.stroke();
+
+      sctx.strokeStyle = "rgba(255,235,170,0.86)";
+      sctx.lineWidth = 9;
+      sctx.beginPath(); sctx.moveTo(endX,endY); sctx.lineTo(tipX,tipY); sctx.stroke();
+
+      sctx.fillStyle = "rgba(0,0,0,0.40)";
+      sctx.strokeStyle = "rgba(255,210,60,0.30)";
+      sctx.lineWidth = 2;
+      for (const [jx,jy] of [[baseX,baseY],[elbowX,elbowY],[endX,endY]]){
+        sctx.beginPath(); sctx.arc(jx,jy,8,0,TAU); sctx.fill(); sctx.stroke();
+      }
+
+      const pulseA = clamp(digPulse/0.18, 0, 1);
+      sctx.fillStyle = digActive ? `rgba(255,60,60,${0.45+0.35*pulseA})` : "rgba(255,210,60,0.55)";
+      sctx.beginPath(); sctx.arc(tipX, tipY, digActive ? (8 + 6*(1-pulseA)) : 8, 0, TAU); sctx.fill();
+
+      const info = bucketTileInfo();
+      sideReadout.textContent =
+        `boom:${radToDeg(boomPitch).toFixed(0)}°  stick:${stickExtend.toFixed(2)}  bucket:${radToDeg(bucketCurl).toFixed(0)}°  dig:${(digAllowed()&&isDiggable(info.t))?'OK':'NO'}  tile:${terrainName(info.t)}  mode:${tracksOverride?'TRACKS':'ARM'}`;
+    }
+
+    // ============================================================
+    // INPUT: Keyboard fallback + reload
+    // ============================================================
+    const keys = {};
+    window.addEventListener("keydown", (e)=>{
+      keys[e.code] = true;
+
+      if (e.code === "KeyR"){ resetDigOnly(); showModeToast("Reset dig damage + piles.", 1.2); }
+      if (e.code === "KeyM"){ newMap(); }
+      if (e.code === "KeyV") { tracksOverride = !tracksOverride; onModeToggled(); }
+      if (e.code === "KeyF") { reloadAmmo(); }
+    });
+    window.addEventListener("keyup", (e)=> keys[e.code] = false);
+
+    function keyboardRawAxes(){
+      let lx=0, ly=0, rx=0, ry=0;
+
+      if (!tracksOverride){
+        if (keys.ArrowLeft)  lx -= 1;
+        if (keys.ArrowRight) lx += 1;
+        if (keys.ArrowUp)    ly += 1;
+        if (keys.ArrowDown)  ly -= 1;
+
+        if (keys.KeyZ) rx -= 1;
+        if (keys.KeyC) rx += 1;
+
+        if (keys.KeyQ) ry -= 1;
+        if (keys.KeyE) ry += 1;
+      } else {
+        if (keys.KeyI) ly += 1;
+        if (keys.KeyK) ly -= 1;
+
+        if (keys.KeyO) ry += 1;
+        if (keys.KeyL) ry -= 1;
+      }
+      return { lx, ly, rx, ry };
+    }
+
+    btnNewMap.addEventListener("click", newMap);
+    btnResetDig.addEventListener("click", ()=>{ resetDigOnly(); showModeToast("Reset dig damage + piles.", 1.2); });
+
+    // ============================================================
+    // MEDIAPIPE HOLISTIC (INIT AFTER START CLICK)
+    // ============================================================
+    let holistic = null;
+    let stream = null;
+    let processingLoopRunning = false;
+
+    let lastResults = null;
+    let started = false;
+
+    function onResults(results){
+      lastResults = results;
+    }
+
+    function mkHolistic(){
+      // FIX: accept either window.Holistic (constructor) OR window.Holistic.Holistic
+      const HolisticCtor =
+        (window.Holistic && window.Holistic.Holistic) ? window.Holistic.Holistic :
+        window.Holistic;
+
+      if (typeof HolisticCtor !== "function"){
+        throw new Error("MediaPipe Holistic not loaded. Check the <script src> for @mediapipe/holistic.");
+      }
+
+      if (holistic){
+        try{ holistic.close(); }catch(e){}
+        holistic = null;
+      }
+
+      holistic = new HolisticCtor({
+        locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${f}`
+      });
+
+      holistic.setOptions({
+        modelComplexity: 1,
+        smoothLandmarks: true,
+        refineFaceLandmarks: false,
+        minDetectionConfidence: +tuner.detConf.value,
+        minTrackingConfidence: +tuner.trkConf.value
+      });
+
+      holistic.onResults(onResults);
+    }
+
+    async function startCamera(){
+      // NOTE: browser security requirement
+      const isLocalhost = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+      const isSecure = window.isSecureContext || location.protocol === "https:" || isLocalhost;
+
+      if (!isSecure){
+        throw new Error(
+          "Camera requires a secure context.\n\n" +
+          "Open via https, or run a local server and open http://localhost.\n" +
+          "Avoid file://."
+        );
+      }
+
+      if (!navigator.mediaDevices?.getUserMedia){
+        throw new Error("getUserMedia not supported. Use a modern browser (Chrome/Edge).");
+      }
+
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: {ideal: 640}, height: {ideal: 480}, facingMode: "user" },
+        audio: false
+      });
+      video.srcObject = stream;
+      await video.play();
+    }
+
+    function stopCamera(){
+      if (stream){
+        for (const t of stream.getTracks()) t.stop();
+        stream = null;
+      }
+      video.srcObject = null;
+    }
+
+    async function startProcessingLoop(){
+      if (processingLoopRunning) return;
+      processingLoopRunning = true;
+
+      const loop = async ()=>{
+        if (!processingLoopRunning) return;
+
+        try{
+          if (holistic && video.readyState >= 2){
+            await holistic.send({ image: video });
+          }
+        }catch(e){
+          processingLoopRunning = false;
+          console.error(e);
+          showModeToast("Vision processing stopped (error). Keyboard fallback still works.", 2.0);
+        }
+
+        requestAnimationFrame(loop);
+      };
+      requestAnimationFrame(loop);
+    }
+
+    function scheduleHolisticRebuild(){
+      if (!started) return;
+      try{
+        mkHolistic();
+        showModeToast("Rebuilt tracker with new confidence settings.", 1.2);
+      }catch(e){
+        console.error(e);
+      }
+    }
+    tuner.detConf.addEventListener("change", scheduleHolisticRebuild);
+    tuner.trkConf.addEventListener("change", scheduleHolisticRebuild);
+
+    // ============================================================
+    // HAND SIGNALS + CALIBRATION (MICRO MOVEMENT)
+    // ============================================================
+    const POSE_L_SHOULDER = 11, POSE_R_SHOULDER = 12, POSE_L_WRIST = 15, POSE_R_WRIST = 16;
+
+    function posePt(idx){
+      const pose = lastResults?.poseLandmarks;
+      if (!pose) return null;
+      const p = pose[idx];
+      if (!p) return null;
+      return { x: p.x, y: p.y, z: p.z, v: p.visibility ?? 0 };
+    }
+
+    function palmCenter(handLm){
+      const pts = [handLm[0], handLm[5], handLm[9], handLm[13], handLm[17]];
+      let x=0,y=0;
+      for (const p of pts){ x += p.x; y += p.y; }
+      return { x: x/pts.length, y: y/pts.length };
+    }
+
+    // Normalized hand signal dx/dy relative to shoulder span (same idea as your previous version)
+    function normHandSignal(side){
+      const ls = posePt(POSE_L_SHOULDER);
+      const rs = posePt(POSE_R_SHOULDER);
+      const lw = posePt(POSE_L_WRIST);
+      const rw = posePt(POSE_R_WRIST);
+
+      let span = 0.34;
+      if (ls && rs){
+        span = Math.hypot(rs.x - ls.x, rs.y - ls.y);
+        span = clamp(span, 0.18, 0.60);
+      }
+
+      let sh = null, p = null, ok=false, source="NONE";
+      if (side === "left"){
+        sh = ls || rs;
+        const handLm = lastResults?.leftHandLandmarks;
+        if (handLm){ p = palmCenter(handLm); ok=true; source="HAND"; }
+        else if (lw){ p = {x:lw.x,y:lw.y}; ok=true; source="POSE"; }
+      } else {
+        sh = rs || ls;
+        const handLm = lastResults?.rightHandLandmarks;
+        if (handLm){ p = palmCenter(handLm); ok=true; source="HAND"; }
+        else if (rw){ p = {x:rw.x,y:rw.y}; ok=true; source="POSE"; }
+      }
+      if (!sh || !p) return { dx:0, dy:0, ok:false, source:"NONE", span };
+
+      let dx = (p.x - sh.x) / span;
+      let dy = (sh.y - p.y) / span;
+      dx = clamp(dx, -1, 1);
+      dy = clamp(dy, -1, 1);
+      return { dx, dy, ok, source, span };
+    }
+
+    // Calibration state: centers for left/right
+    const cal = {
+      state: "idle", // idle | countdown | sampling | done
+      t: 0,
+      countdown: 3,
+      sampleSec: 0.75,
+      // sums
+      sumLx:0, sumLy:0, nL:0,
+      sumRx:0, sumRy:0, nR:0,
+      // centers
+      left:  { cx:0, cy:0, ok:false },
+      right: { cx:0, cy:0, ok:false }
+    };
+
+    function resetCalSums(){
+      cal.sumLx=cal.sumLy=cal.nL=0;
+      cal.sumRx=cal.sumRy=cal.nR=0;
+    }
+
+    function startCalibration(){
+      if (!started) return;
+      cal.state = "countdown";
+      cal.countdown = 3;
+      cal.t = 0;
+      resetCalSums();
+      cal.left.ok = false;
+      cal.right.ok = false;
+      btnBegin.disabled = true;
+
+      calCountdownEl.style.display = "block";
+      calCountdownEl.textContent = "3";
+      showModeToast("Calibration starting: raise both hands…", 1.2);
+    }
+
+    btnCalibrate.addEventListener("click", startCalibration);
+    tuner.btnRecal.addEventListener("click", ()=>{
+      // If overlay hidden, do it live; just show toast
+      startCalibration();
+    });
+
+    // Pinch detection
+    let pinch = { left:false, right:false };
+    function pinchDist(handLm){
+      if (!handLm) return null;
+      const t = handLm[4], i = handLm[8];
+      return Math.hypot(t.x - i.x, t.y - i.y);
+    }
+    function updatePinch(handLm, prevDown){
+      const d = pinchDist(handLm);
+      if (d == null) return false;
+      const on  = +tuner.pinchOn.value;
+      const off = +tuner.pinchOff.value;
+      if (!prevDown) return d < on;
+      return d < off;
+    }
+
+    // Thumbs up
+    function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+    function isThumbsUp(handLm){
+      if (!handLm) return false;
+      const wrist = handLm[0];
+      const midMCP = handLm[9];
+      const palm = Math.max(1e-6, dist(wrist, midMCP));
+
+      const thumbTip = handLm[4];
+      const thumbMCP = handLm[2];
+
+      const thumbExtended = dist(thumbTip, wrist) > (1.15 * palm);
+      const thumbUp = (thumbTip.y + 0.01) < thumbMCP.y;
+
+      const idxFold = dist(handLm[8], handLm[5]) < (0.75 * palm);
+      const midFold = dist(handLm[12], handLm[9]) < (0.75 * palm);
+      const rngFold = dist(handLm[16], handLm[13]) < (0.78 * palm);
+      const pkyFold = dist(handLm[20], handLm[17]) < (0.82 * palm);
+
+      return thumbExtended && thumbUp && idxFold && midFold && rngFold && pkyFold;
+    }
+
+    // Micro-movement transform of raw hand axes
+    function microTransform(side, dx, dy){
+      const useCenters = tuner.useCenters.checked;
+      const gain = +tuner.mmGain.value;
+      const dz = +tuner.mmDead.value;
+
+      let x = dx, y = dy;
+
+      if (useCenters){
+        if (side === "left" && cal.left.ok){
+          x -= cal.left.cx;
+          y -= cal.left.cy;
+        }
+        if (side === "right" && cal.right.ok){
+          x -= cal.right.cx;
+          y -= cal.right.cy;
+        }
+      }
+
+      // offsets (user can set before/after)
+      if (side === "left"){
+        x += (+tuner.offLx.value);
+        y += (+tuner.offLy.value);
+      } else {
+        x += (+tuner.offRx.value);
+        y += (+tuner.offRy.value);
+      }
+
+      // micro gain: make small real movement produce full axis range
+      x *= gain;
+      y *= gain;
+
+      // pre deadzone
+      x = applyDeadzone(clamp(x, -1, 1), dz);
+      y = applyDeadzone(clamp(y, -1, 1), dz);
+
+      return { x: clamp(x, -1, 1), y: clamp(y, -1, 1) };
+    }
+
+    // ============================================================
+    // CONTROL SETS (simple default mapping, no remap UI here)
+    // ============================================================
+    // We keep your two-mode system:
+    // - ARM uses Lx/Ly/Rx/Ry for rotate/boom/bucket/stick
+    // - TRACKS override uses Ly for leftTrack and Ry for rightTrack
+    let tracksOverride = false;
+
+    function applyControls(dt, rawAxes){
+      // Basic tune curve (light)
+      const dz = 0.08, expo = 1.35;
+      function curve(v){
+        return clamp(expoCurve(applyDeadzone(v, dz), expo), -1, 1);
+      }
+
+      const cmd = { leftTrack:0, rightTrack:0, rotate:0, boom:0, stick:0, bucket:0 };
+
+      if (tracksOverride){
+        // TRACKS override: Ly and Ry drive tracks
+        cmd.leftTrack = curve(rawAxes.ly);
+        cmd.rightTrack = curve(rawAxes.ry);
+        updateBaseOnTracks(cmd.leftTrack, cmd.rightTrack, dt);
+      } else {
+        // ARM: Lx rotate, Ly boom, Rx bucket, Ry stick
+        cmd.rotate = curve(rawAxes.lx);
+        cmd.boom   = curve(rawAxes.ly);
+        cmd.bucket = curve(rawAxes.rx);
+        cmd.stick  = curve(rawAxes.ry);
+        updateUpper(cmd, dt);
+      }
+
+      return cmd;
+    }
+
+    // ============================================================
+    // TRACK DRIVE + JOINTS + COLLISION
+    // ============================================================
+    function driveCollision(nx, ny){
+      const tx = clamp(Math.floor(nx / TILE), 0, WORLD_T-1);
+      const ty = clamp(Math.floor(ny / TILE), 0, WORLD_T-1);
+      const tt = tAt(tx,ty);
+      return isBlockedForDrive(tt);
+    }
+
+    function updateBaseOnTracks(leftCmd, rightCmd, dt){
+      const speed = +tuner.spdTrack.value;
+      const width = Math.max(1e-6, +tuner.trkWidth.value);
+
+      const vL = leftCmd * speed;
+      const vR = rightCmd * speed;
+
+      const v = (vL + vR) * 0.5;
+      const w = (vR - vL) / width;
+
+      const nextYaw = wrapAngle(baseYaw + w * dt);
+
+      const nx = ex + Math.cos(nextYaw) * v * dt;
+      const ny = ey + Math.sin(nextYaw) * v * dt;
+
+      const pad = TILE*0.8;
+      const cx = clamp(nx, pad, WORLD_SIZE - pad);
+      const cy = clamp(ny, pad, WORLD_SIZE - pad);
+
+      const hit = driveCollision(cx,cy);
+
+      if (!hit){
+        baseYaw = nextYaw;
+        ex = cx; ey = cy;
+      } else {
+        const sx = clamp(ex + Math.cos(nextYaw) * v * dt, pad, WORLD_SIZE - pad);
+        const sy = clamp(ey + Math.sin(nextYaw) * v * dt, pad, WORLD_SIZE - pad);
+
+        const tryX = !driveCollision(sx, ey);
+        const tryY = !driveCollision(ex, sy);
+
+        baseYaw = nextYaw;
+        if (tryX) ex = sx;
+        if (tryY) ey = sy;
+
+        showModeToast("Collision: obstacle (block/water/rock). Drive around.", 0.9);
+      }
+    }
+
+    function updateUpper(cmd, dt){
+      const spRotate = +tuner.spdSwing.value;
+      const spBoom   = +tuner.spdBoom.value;
+      const spStick  = +tuner.spdStick.value;
+      const spBucket = +tuner.spdBucket.value;
+
+      swingYaw     += degToRad(spRotate) * cmd.rotate * dt;
+      boomPitch    += degToRad(spBoom)   * cmd.boom   * dt;
+      stickExtend  += spStick            * cmd.stick  * dt;
+      bucketCurl   += degToRad(spBucket) * cmd.bucket * dt;
+
+      swingYaw = wrapAngle(swingYaw);
+      swingYaw = clamp(swingYaw, LIM.swing.min, LIM.swing.max);
+      boomPitch = clamp(boomPitch, LIM.boom.min, LIM.boom.max);
+      stickExtend = clamp(stickExtend, LIM.stick.min, LIM.stick.max);
+      bucketCurl = clamp(bucketCurl, LIM.bucket.min, LIM.bucket.max);
+    }
+
+    // ============================================================
+    // THUMBS UP MODE TOGGLE (TRACKS OVERRIDE)
+    // ============================================================
+    const THUMB_HOLD_SEC = 2.0;
+    let thumbHoldT = 0.0;
+    let thumbCooldown = 0.0;
+    let thumbsUpNow = false;
+
+    function onModeToggled(){
+      hudMode.textContent = tracksOverride ? "TRACKS" : "ARM";
+      showModeToast(tracksOverride ? "TRACKS ENABLED — driving override" : "ARM ENABLED — arm controls active", 1.6);
+    }
+
+    function updateThumbsMode(dt){
+      if (!started){
+        hudThumb.textContent = "NOT STARTED";
+        holdToast.style.display = "none";
+        setPill(pillThumb,false);
+        pillThumb.classList.remove("warn");
+        valThumb.textContent = "0.00s";
+        return;
+      }
+
+      const lHand = lastResults?.leftHandLandmarks;
+      const rHand = lastResults?.rightHandLandmarks;
+
+      thumbsUpNow = isThumbsUp(lHand) || isThumbsUp(rHand);
+      thumbCooldown = Math.max(0, thumbCooldown - dt);
+
+      if (thumbsUpNow && thumbCooldown <= 0){
+        thumbHoldT += dt;
+      } else {
+        thumbHoldT = Math.max(0, thumbHoldT - dt*1.8);
+      }
+
+      const pct = clamp(thumbHoldT / THUMB_HOLD_SEC, 0, 1);
+
+      if (thumbsUpNow && thumbCooldown <= 0){
+        holdToast.style.display = "block";
+        holdText.textContent = `${thumbHoldT.toFixed(2)} / ${THUMB_HOLD_SEC.toFixed(2)}s`;
+        holdBar.style.width = `${(pct*100).toFixed(0)}%`;
+      } else {
+        holdToast.style.display = "none";
+      }
+
+      if (thumbHoldT >= THUMB_HOLD_SEC && thumbCooldown <= 0){
+        tracksOverride = !tracksOverride;
+        thumbHoldT = 0;
+        thumbCooldown = 0.85;
+        onModeToggled();
+      }
+
+      hudThumb.textContent =
+        (thumbCooldown > 0)
+          ? `COOLDOWN ${(thumbCooldown).toFixed(1)}s`
+          : (thumbsUpNow ? `HOLD ${(pct*100).toFixed(0)}%` : `READY`);
+
+      setPill(pillThumb, thumbsUpNow);
+      if (thumbsUpNow && pct > 0.05) pillThumb.classList.add("warn");
+      else pillThumb.classList.remove("warn");
+
+      valThumb.textContent = `${thumbHoldT.toFixed(2)} / ${THUMB_HOLD_SEC.toFixed(2)}s`;
+
+      if (toastTimer > 0){
+        toastTimer -= dt;
+        if (toastTimer <= 0) modeToast.style.display = "none";
+      }
+    }
+
+    // ============================================================
+    // ACTIVATION PANEL PAINT
+    // ============================================================
+    function paintActivation(cmd){
+      const TH = 0.12;
+
+      valLT.textContent = cmd.leftTrack.toFixed(2);
+      valRT.textContent = cmd.rightTrack.toFixed(2);
+      setPill(pillLT, Math.abs(cmd.leftTrack) > TH);
+      setPill(pillRT, Math.abs(cmd.rightTrack) > TH);
+
+      valSwing.textContent  = cmd.rotate.toFixed(2);
+      valBoom.textContent   = cmd.boom.toFixed(2);
+      valStick.textContent  = cmd.stick.toFixed(2);
+      valBucket.textContent = cmd.bucket.toFixed(2);
+
+      setPill(pillSwing,  Math.abs(cmd.rotate) > TH);
+      setPill(pillBoom,   Math.abs(cmd.boom)   > TH);
+      setPill(pillStick,  Math.abs(cmd.stick)  > TH);
+      setPill(pillBucket, Math.abs(cmd.bucket) > TH);
+
+      if (tracksOverride){
+        pillSwing.classList.remove("on");
+        pillBoom.classList.remove("on");
+        pillStick.classList.remove("on");
+        pillBucket.classList.remove("on");
+      }
+
+      const info = bucketTileInfo();
+      const digOk = digAllowed() && isDiggable(info.t);
+      valDig.textContent = digActive ? (digOk ? "ON" : "ON (NO DIG)") : "OFF";
+      setPill(pillDig, digActive && digOk);
+    }
+
+    // ============================================================
+    // STARTUP CALIBRATION TICK
+    // ============================================================
+    function updateCalibration(dt){
+      if (!started) return;
+
+      if (cal.state === "idle") return;
+
+      // countdown
+      if (cal.state === "countdown"){
+        cal.t += dt;
+        const remain = 3 - Math.floor(cal.t);
+        calCountdownEl.textContent = String(Math.max(1, remain));
+        if (cal.t >= 3.0){
+          cal.state = "sampling";
+          cal.t = cal.sampleSec;
+          resetCalSums();
+          calCountdownEl.textContent = "●";
+          showModeToast("Sampling hands… hold still", 0.9);
+        }
+        return;
+      }
+
+      // sampling
+      if (cal.state === "sampling"){
+        const L = normHandSignal("left");
+        const R = normHandSignal("right");
+        if (L.ok){
+          cal.sumLx += L.dx; cal.sumLy += L.dy; cal.nL++;
+        }
+        if (R.ok){
+          cal.sumRx += R.dx; cal.sumRy += R.dy; cal.nR++;
+        }
+
+        cal.t -= dt;
+        if (cal.t <= 0){
+          // need at least some frames per hand
+          const minFrames = 6;
+          if (cal.nL >= minFrames){
+            cal.left.cx = cal.sumLx / cal.nL;
+            cal.left.cy = cal.sumLy / cal.nL;
+            cal.left.ok = true;
+          } else {
+            cal.left.ok = false;
+          }
+          if (cal.nR >= minFrames){
+            cal.right.cx = cal.sumRx / cal.nR;
+            cal.right.cy = cal.sumRy / cal.nR;
+            cal.right.ok = true;
+          } else {
+            cal.right.ok = false;
+          }
+
+          cal.state = "done";
+          calCountdownEl.style.display = "none";
+
+          if (cal.left.ok && cal.right.ok){
+            showModeToast("Calibration complete ✅ Centers locked.", 1.4);
+            btnBegin.disabled = false;
+          } else {
+            showModeToast("Calibration incomplete — raise both hands and try again.", 2.0);
+            btnBegin.disabled = true;
+          }
+        }
+        return;
+      }
+
+      // done: nothing
+    }
+
+    // ============================================================
+    // MAIN LOOP
+    // ============================================================
+    let prevT = performance.now();
+    function tick(){
+      requestAnimationFrame(tick);
+
+      const now = performance.now();
+      const dt = Math.min(0.05, (now - prevT)/1000);
+      prevT = now;
+
+      // controller mode
+      const ctrlMode = ctrlKeyboard.checked ? "KEYBOARD" : "GESTURE";
+      hudCtrl.textContent = ctrlMode;
+
+      updateThumbsMode(dt);
+      updateCalibration(dt);
+
+      // raw axes
+      let rawAxes = keyboardRawAxes();
+      let leftStatus="KEY", rightStatus="KEY";
+
+      // gesture mode only if selected
+      const gestureMode = ctrlGesture.checked;
+
+      if (started && gestureMode){
+        const L = normHandSignal("left");
+        const R = normHandSignal("right");
+
+        if (L.ok){
+          const mt = microTransform("left", L.dx, L.dy);
+          rawAxes.lx = mt.x;
+          rawAxes.ly = mt.y;
+          leftStatus = L.source + (cal.left.ok && tuner.useCenters.checked ? "✓" : "");
+        } else {
+          leftStatus = "NONE";
+        }
+
+        if (R.ok){
+          const mt = microTransform("right", R.dx, R.dy);
+          rawAxes.rx = mt.x;
+          rawAxes.ry = mt.y;
+          rightStatus = R.source + (cal.right.ok && tuner.useCenters.checked ? "✓" : "");
+        } else {
+          rightStatus = "NONE";
+        }
+      }
+
+      hudHands.textContent = `L:${leftStatus}  R:${rightStatus}`;
+
+      // pinch
+      if (started && gestureMode){
+        pinch.left  = updatePinch(lastResults?.leftHandLandmarks, pinch.left);
+        pinch.right = updatePinch(lastResults?.rightHandLandmarks, pinch.right);
+      } else {
+        pinch.left = pinch.right = false;
+      }
+
+      // dig
+      digActive = keys.Space || pinch.left || pinch.right;
+
+      // apply controls
+      const cmd = applyControls(dt, rawAxes);
+
+      // dig + particles
+      updateDig(dt);
+      digPulse = Math.max(0, digPulse - dt);
+
+      updateSoil(dt);
+      diffusePiles(dt);
+
+      // camera follow
+      const followA = emaAlpha(dt, 0.18);
+      camX = lerp(camX, ex, followA);
+      camY = lerp(camY, ey, followA);
+
+      // render
+      clearTop();
+      drawTiles();
+      drawSoil();
+      drawExcavatorTop();
+      drawSide();
+      drawVignette();
+
+      // HUD numbers
+      hudMode.textContent = tracksOverride ? "TRACKS" : "ARM";
+      hudAmmo.textContent = `${Math.round(ammo)}`;
+      hudBase.textContent = `x:${ex.toFixed(0)} y:${ey.toFixed(0)}`;
+      hudSwing.textContent  = `${radToDeg(swingYaw).toFixed(0)}°`;
+      hudBoom.textContent   = `${radToDeg(boomPitch).toFixed(0)}°`;
+      hudStick.textContent  = `${stickExtend.toFixed(2)}`;
+      hudBucket.textContent = `${radToDeg(bucketCurl).toFixed(0)}°`;
+
+      paintActivation(cmd);
+
+      const info = bucketTileInfo();
+      ctx.font = "12px ui-monospace, SFMono-Regular, Menlo, monospace";
+      ctx.fillStyle = "rgba(220,220,235,0.72)";
+      ctx.fillText(
+        `Ctrl:${ctrlMode} | Mode:${tracksOverride?"TRACKS":"ARM"} | Ammo:${Math.round(ammo)} | Tile ${info.tx},${info.ty} ${terrainName(info.t)} hp:${(hpMaxAt(info.tx,info.ty)>=999?"—":info.hp)} | M map | R reset | F reload`,
+        12, H-14
+      );
+    }
+
+    // ============================================================
+    // START BUTTON → camera + tracker + auto calibration prompt
+    // ============================================================
+    let booting = false;
+    btnStart.addEventListener("click", async ()=>{
+      if (booting || started) return;
+      booting = true;
+      clearStartError();
+      btnStart.disabled = true;
+      btnStart.textContent = "STARTING…";
+      startStatus.textContent = "Status: requesting camera permission…";
+
+      try{
+        await startCamera();
+        startStatus.textContent = "Status: initializing MediaPipe Holistic…";
+
+        mkHolistic();
+        await startProcessingLoop();
+
+        started = true;
+        hudNote.textContent = "Hold 👍 2s to toggle TRACKS override";
+        startStatus.textContent = "Status: camera running ✅ (now calibrate)";
+        showModeToast("Camera ready. Click CALIBRATE then BEGIN.", 1.8);
+
+        // Try to auto-start calibration
+        startCalibration();
+
+      }catch(e){
+        console.error(e);
+        stopCamera();
+        btnStart.disabled = false;
+        btnStart.textContent = "START (Enable Camera)";
+        startStatus.textContent = "Status: failed to start ❌";
+        showStartError(
+          "START failed.\n\n" +
+          "Common causes:\n" +
+          "• Page opened via file:// (use a local server or https).\n" +
+          "• Browser blocked camera permission.\n" +
+          "• No camera device.\n\n" +
+          "Error:\n" + (e?.message ?? String(e))
+        );
+        hudNote.textContent = "Camera not running (keyboard fallback works)";
+        showModeToast("Camera start failed — use keyboard fallback.", 2.0);
+      } finally {
+        booting = false;
+      }
+    });
+
+    // BEGIN GAME hides overlay (camera already running)
+    btnBegin.addEventListener("click", ()=>{
+      startOverlay.style.display = "none";
+      // Start with tuner hidden (as requested), but available via Show
+      tunerVisible = false;
+      tunerBody.style.display = "none";
+      toggleTunerBtn.textContent = "Show";
+      showModeToast("Running ✅  (Show tuners anytime).", 1.4);
+    });
+
+    window.addEventListener("beforeunload", ()=>{
+      processingLoopRunning = false;
+      stopCamera();
+      if (holistic){
+        try{ holistic.close(); }catch(e){}
+      }
+    });
+
+    // Preflight + init map
+    (function init(){
+      const isFile = location.protocol === "file:";
+      if (isFile){
+        startStatus.textContent = "Status: ⚠ file:// detected — camera likely blocked. Use http://localhost or https.";
+      }
+      generateTerrain(mapSeed);
+      resetDigOnly();
+      tick();
+    })();
+  </script>
+</body>
+</html>

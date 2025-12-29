@@ -1,0 +1,1787 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Rednode Sentinel — Drone Dig + Pile + Boom Side View (Hands Full Control)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root{
+      --panel: rgba(10,12,16,0.72);
+      --text: rgba(240,240,245,0.92);
+      --muted: rgba(220,220,235,0.70);
+    }
+    html,body{ margin:0; padding:0; background:#000; height:100%; color:var(--text); }
+    body{ display:flex; align-items:center; justify-content:center; }
+    #container{
+      width:min(1100px, calc(100vw - 24px));
+      margin: 12px auto;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+    }
+    #wrap{
+      position:relative;
+      width:100%;
+      aspect-ratio: 800 / 600;
+      max-height: calc(100vh - 150px);
+      background: radial-gradient(1100px 700px at 50% 30%, #11131b 0%, #06060a 55%, #000 100%);
+      border-radius: 14px;
+      overflow:hidden;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+      border: 1px solid rgba(255,210,60,0.12);
+    }
+    canvas{ width:100%; height:100%; display:block; background:#000; }
+    svg{ position:absolute; inset:0; width:100%; height:100%; pointer-events:none; overflow:visible; }
+    video{ display:none; }
+
+    #hud{
+      position:absolute;
+      left:10px; right:10px; top:10px;
+      display:flex;
+      gap:10px;
+      align-items:stretch;
+      justify-content:space-between;
+      pointer-events:none;
+      z-index: 5;
+    }
+    .hudBlock{
+      flex: 1 1 auto;
+      display:flex;
+      gap:10px;
+      align-items:center;
+      justify-content:flex-start;
+      padding:10px 12px;
+      border-radius: 12px;
+      background: var(--panel);
+      border: 1px solid rgba(255,210,60,0.14);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 18px rgba(0,0,0,0.35);
+      min-width: 0;
+    }
+    .hudRight{ justify-content:flex-end; }
+    .hudStat{ display:flex; flex-direction:column; line-height:1.1; min-width:0; }
+    .hudLabel{ font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; color:var(--muted); }
+    .hudValue{ font: 14px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+    #hintBar{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      padding:10px 12px;
+      border-radius: 12px;
+      background: rgba(10,12,18,0.55);
+      border: 1px solid rgba(255,210,60,0.12);
+      font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: rgba(235,235,245,0.86);
+    }
+    #hintBar .muted{ color: rgba(220,220,235,0.64); }
+    #hintBar kbd{
+      padding:2px 6px;
+      border-radius: 8px;
+      border: 1px solid rgba(255,210,60,0.18);
+      background: rgba(0,0,0,0.35);
+      color: rgba(255,235,160,0.92);
+      font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    /* Boom side-view panel */
+    #boomPanel{
+      position:absolute;
+      left:10px;
+      bottom:10px;
+      width: 380px;
+      height: 140px;
+      background: rgba(10,12,16,0.72);
+      border: 1px solid rgba(255,210,60,0.14);
+      border-radius: 12px;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 18px rgba(0,0,0,0.35);
+      padding: 8px;
+      z-index: 6;
+      pointer-events:none;
+    }
+    #boomPanelHeader{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+      font: 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: rgba(255,235,170,0.92);
+      margin-bottom: 6px;
+    }
+    #boomCanvas{
+      width:100%;
+      height: calc(100% - 18px);
+      display:block;
+      border-radius: 10px;
+      background: rgba(0,0,0,0.30);
+      border: 1px solid rgba(255,210,60,0.10);
+    }
+
+    /* Start screen */
+    #startScreen{
+      position:absolute;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding: 18px;
+      background:
+        radial-gradient(1200px 800px at 30% 20%, rgba(255,200,60,0.10) 0%, transparent 55%),
+        radial-gradient(900px 700px at 75% 35%, rgba(255,60,60,0.10) 0%, transparent 55%),
+        linear-gradient(180deg, rgba(0,0,0,0.80) 0%, rgba(0,0,0,0.68) 100%);
+      z-index: 10;
+    }
+    .startCard{
+      width:min(920px, 100%);
+      border-radius: 16px;
+      border: 1px solid rgba(255,210,60,0.16);
+      background: rgba(6,7,10,0.78);
+      box-shadow: 0 18px 60px rgba(0,0,0,0.72);
+      overflow:hidden;
+    }
+    .startHead{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      padding: 14px 16px;
+      background: rgba(0,0,0,0.35);
+      border-bottom: 1px solid rgba(255,210,60,0.12);
+    }
+    .brand{ display:flex; align-items:center; gap:12px; min-width:0; }
+    .brandTitle{ display:flex; flex-direction:column; min-width:0; }
+    .brandTitle b{
+      font: 14px/1.15 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: 0.6px;
+      color: rgba(255,235,170,0.95);
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
+    .brandTitle span{
+      font: 12px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: rgba(220,220,235,0.70);
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
+    .grid{
+      display:grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      padding: 14px;
+    }
+    @media (max-width: 760px){
+      .grid{ grid-template-columns: 1fr; }
+      #boomPanel{ width: calc(100% - 20px); }
+    }
+    .tile{
+      display:flex;
+      gap:12px;
+      align-items:center;
+      padding: 12px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,210,60,0.14);
+      background: rgba(10,12,18,0.55);
+      cursor:pointer;
+      user-select:none;
+      transition: transform 0.08s ease, border-color 0.08s ease, background 0.08s ease;
+      min-width:0;
+    }
+    .tile:hover{
+      transform: translateY(-1px);
+      border-color: rgba(255,210,60,0.26);
+      background: rgba(12,14,22,0.68);
+    }
+    .tileIcon{
+      width:84px; height:84px;
+      flex: 0 0 auto;
+      border-radius: 14px;
+      background: radial-gradient(60px 60px at 35% 30%, rgba(255,210,60,0.12) 0%, transparent 60%),
+                  radial-gradient(60px 60px at 75% 70%, rgba(255,60,60,0.10) 0%, transparent 60%),
+                  rgba(0,0,0,0.35);
+      border: 1px solid rgba(255,210,60,0.12);
+      display:flex; align-items:center; justify-content:center;
+      overflow:hidden;
+    }
+    .tileMeta{ display:flex; flex-direction:column; gap:6px; min-width:0; }
+    .tileMeta b{
+      font: 13px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: rgba(255,235,170,0.95);
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
+    .tileMeta span{
+      font: 12px/1.25 ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: rgba(220,220,235,0.70);
+      display:-webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow:hidden;
+    }
+    .tileCTA{
+      margin-left:auto;
+      padding: 8px 10px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,210,60,0.20);
+      background: rgba(0,0,0,0.35);
+      font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: rgba(255,235,170,0.92);
+      flex: 0 0 auto;
+    }
+    .badge{
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,210,60,0.18);
+      background: rgba(0,0,0,0.35);
+      font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: rgba(255,235,170,0.9);
+      white-space:nowrap;
+    }
+    .watermark{
+      position:absolute; right:10px; bottom:10px;
+      font: 12px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: rgba(255,210,40,0.68);
+      text-shadow: 0 0 14px rgba(255,210,40,0.22);
+      pointer-events:none; user-select:none;
+      z-index: 2;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="container">
+    <div id="wrap">
+      <canvas id="screen" width="800" height="600"></canvas>
+
+      <!-- BOOM SIDE VIEW -->
+      <div id="boomPanel">
+        <div id="boomPanelHeader">
+          <span>BOOM CAM (SIDE VIEW)</span>
+          <span id="boomReadout" style="color: rgba(220,220,235,0.75);">—</span>
+        </div>
+        <canvas id="boomCanvas" width="760" height="210"></canvas>
+      </div>
+
+      <!-- TOP-DOWN EXCAVATOR SVG OVERLAY -->
+      <svg id="excavSVG" viewBox="0 0 800 600" xmlns="http://www.w3.org/2000/svg" aria-label="Rednode Sentinel Excavator Top Down">
+        <defs>
+          <linearGradient id="rnMetal" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0" stop-color="#14161c"/>
+            <stop offset="0.55" stop-color="#0b0c10"/>
+            <stop offset="1" stop-color="#060608"/>
+          </linearGradient>
+          <linearGradient id="rnEdgeY" x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0" stop-color="#ffe07a"/>
+            <stop offset="0.55" stop-color="#ffb400"/>
+            <stop offset="1" stop-color="#fff1a0"/>
+          </linearGradient>
+          <linearGradient id="rnEdgeR" x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0" stop-color="#ff6b6b"/>
+            <stop offset="0.55" stop-color="#ff2a2a"/>
+            <stop offset="1" stop-color="#ff9b9b"/>
+          </linearGradient>
+          <filter id="rnGlowY" x="-60%" y="-60%" width="220%" height="220%">
+            <feGaussianBlur stdDeviation="3.0" result="b"/>
+            <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+          <filter id="rnGlowR" x="-60%" y="-60%" width="220%" height="220%">
+            <feGaussianBlur stdDeviation="3.0" result="r"/>
+            <feMerge><feMergeNode in="r"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+          <filter id="rnSoft" x="-40%" y="-40%" width="180%" height="180%">
+            <feGaussianBlur stdDeviation="1.2" result="s"/>
+            <feMerge><feMergeNode in="s"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+          <clipPath id="trackClipL"><rect x="-34" y="-18" width="18" height="36" rx="7" ry="7"/></clipPath>
+          <clipPath id="trackClipR"><rect x="16" y="-18" width="18" height="36" rx="7" ry="7"/></clipPath>
+        </defs>
+
+        <g id="excavatorGroup" transform="translate(400,300) rotate(0) scale(1)">
+          <!-- Tracks -->
+          <g id="tracksGroup">
+            <g id="trackLeft">
+              <rect x="-34" y="-18" width="18" height="36" rx="8" ry="8" fill="#070708" stroke="rgba(255,200,40,0.22)" stroke-width="1"/>
+              <rect x="-32" y="-16" width="14" height="32" rx="7" ry="7" fill="#040405" stroke="rgba(255,200,40,0.10)" stroke-width="1"/>
+              <g clip-path="url(#trackClipL)" opacity="0.95">
+                <g id="treadsL" transform="translate(0,0)" fill="#0f1013" stroke="rgba(255,200,40,0.10)" stroke-width="0.6">
+                  <rect x="-32" y="-40" width="14" height="6" rx="1.6"/>
+                  <rect x="-32" y="-30" width="14" height="6" rx="1.6"/>
+                  <rect x="-32" y="-20" width="14" height="6" rx="1.6"/>
+                  <rect x="-32" y="-10" width="14" height="6" rx="1.6"/>
+                  <rect x="-32" y="0"   width="14" height="6" rx="1.6"/>
+                  <rect x="-32" y="10"  width="14" height="6" rx="1.6"/>
+                  <rect x="-32" y="20"  width="14" height="6" rx="1.6"/>
+                  <rect x="-32" y="30"  width="14" height="6" rx="1.6"/>
+                  <rect x="-32" y="40"  width="14" height="6" rx="1.6"/>
+                </g>
+              </g>
+              <path d="M-31 -16 V16" fill="none" stroke="url(#rnEdgeY)" stroke-width="1.2" opacity="0.18" filter="url(#rnGlowY)"/>
+              <path d="M-20 -16 V16" fill="none" stroke="url(#rnEdgeR)" stroke-width="1.2" opacity="0.12" filter="url(#rnGlowR)"/>
+            </g>
+            <g id="trackRight">
+              <rect x="16" y="-18" width="18" height="36" rx="8" ry="8" fill="#070708" stroke="rgba(255,200,40,0.22)" stroke-width="1"/>
+              <rect x="18" y="-16" width="14" height="32" rx="7" ry="7" fill="#040405" stroke="rgba(255,200,40,0.10)" stroke-width="1"/>
+              <g clip-path="url(#trackClipR)" opacity="0.95">
+                <g id="treadsR" transform="translate(0,0)" fill="#0f1013" stroke="rgba(255,200,40,0.10)" stroke-width="0.6">
+                  <rect x="18" y="-40" width="14" height="6" rx="1.6"/>
+                  <rect x="18" y="-30" width="14" height="6" rx="1.6"/>
+                  <rect x="18" y="-20" width="14" height="6" rx="1.6"/>
+                  <rect x="18" y="-10" width="14" height="6" rx="1.6"/>
+                  <rect x="18" y="0"   width="14" height="6" rx="1.6"/>
+                  <rect x="18" y="10"  width="14" height="6" rx="1.6"/>
+                  <rect x="18" y="20"  width="14" height="6" rx="1.6"/>
+                  <rect x="18" y="30"  width="14" height="6" rx="1.6"/>
+                  <rect x="18" y="40"  width="14" height="6" rx="1.6"/>
+                </g>
+              </g>
+              <path d="M19 -16 V16" fill="none" stroke="url(#rnEdgeY)" stroke-width="1.2" opacity="0.18" filter="url(#rnGlowY)"/>
+              <path d="M30 -16 V16" fill="none" stroke="url(#rnEdgeR)" stroke-width="1.2" opacity="0.12" filter="url(#rnGlowR)"/>
+            </g>
+          </g>
+
+          <!-- Body -->
+          <g id="bodyGroup">
+            <path
+              d="M-20 -22
+                 H20
+                 C25 -22 28 -19 28 -14
+                 V14
+                 C28 19 25 22 20 22
+                 H-20
+                 C-25 22 -28 19 -28 14
+                 V-14
+                 C-28 -19 -25 -22 -20 -22
+                 Z"
+              fill="url(#rnMetal)"
+              stroke="rgba(255,200,40,0.22)"
+              stroke-width="1"
+            />
+            <path d="M-20 -22 H20" fill="none" stroke="url(#rnEdgeY)" stroke-width="1.6" opacity="0.24" filter="url(#rnGlowY)"/>
+            <path d="M-18 22 H18" fill="none" stroke="url(#rnEdgeR)" stroke-width="1.2" opacity="0.18" filter="url(#rnGlowR)"/>
+            <rect x="-10" y="-10" width="20" height="20" rx="6" fill="rgba(0,0,0,0.35)" stroke="rgba(255,210,60,0.16)"/>
+            <text x="0" y="3.5" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="7.4" fill="rgba(255,235,170,0.92)" filter="url(#rnSoft)">RN</text>
+            <path d="M0 -18 L-6 -8 H6 Z" fill="rgba(255,220,120,0.18)" stroke="rgba(255,220,120,0.22)" stroke-width="0.8" filter="url(#rnGlowY)"/>
+          </g>
+
+          <!-- Arm system (top-down) -->
+          <g id="armBaseGroup" transform="translate(0,-6) rotate(0)">
+            <circle cx="0" cy="0" r="6.2" fill="#08090c" stroke="rgba(255,200,40,0.24)" stroke-width="1"/>
+            <circle cx="0" cy="0" r="3.0" fill="rgba(255,60,60,0.16)" stroke="rgba(255,60,60,0.22)" stroke-width="0.9" filter="url(#rnGlowR)"/>
+
+            <g id="arm1Group" transform="translate(0,0) rotate(0)">
+              <path d="M2 -4 H82 C88 -4 92 -1 94 0 C92 1 88 4 82 4 H2 C-1 4 -3 2 -3 0 C-3 -2 -1 -4 2 -4 Z"
+                    fill="url(#rnMetal)" stroke="rgba(255,200,40,0.20)" stroke-width="1"/>
+              <path d="M6 -2 H78" fill="none" stroke="url(#rnEdgeY)" stroke-width="1.2" opacity="0.22" filter="url(#rnGlowY)"/>
+
+              <g id="arm2Group" transform="translate(96,0) rotate(0)">
+                <circle cx="0" cy="0" r="5.6" fill="#08090c" stroke="rgba(255,200,40,0.24)" stroke-width="1"/>
+                <circle cx="0" cy="0" r="2.6" fill="rgba(255,60,60,0.14)" stroke="rgba(255,60,60,0.20)" stroke-width="0.8" filter="url(#rnGlowR)"/>
+
+                <path d="M2 -3.6 H62 C66 -3.6 70 -1.6 72 0 C70 1.6 66 3.6 62 3.6 H2 C-1 3.6 -3 2 -3 0 C-3 -2 -1 -3.6 2 -3.6 Z"
+                      fill="url(#rnMetal)" stroke="rgba(255,200,40,0.20)" stroke-width="1"/>
+                <path d="M6 -1.5 H58" fill="none" stroke="url(#rnEdgeR)" stroke-width="1.1" opacity="0.18" filter="url(#rnGlowR)"/>
+
+                <g id="bucketGroup" transform="translate(78,0) rotate(0)">
+                  <circle cx="0" cy="0" r="4.6" fill="#08090c" stroke="rgba(255,200,40,0.22)" stroke-width="1"/>
+                  <path d="M2 -6 L14 -6 C16 -6 18 -5 19 -3 L26 10 C24 11 22 11 20 10 L14 7 L10 14 L5 12 L8 7 H2 C0 7 -1 6 -1 4 V-3 C-1 -5 0 -6 2 -6 Z"
+                        fill="url(#rnMetal)" stroke="rgba(255,200,40,0.22)" stroke-width="1"/>
+                  <path d="M2 -5 H13 C16 -5 17 -4 18 -2 L24 9"
+                        fill="none" stroke="url(#rnEdgeY)" stroke-width="1.2" opacity="0.22" filter="url(#rnGlowY)"/>
+                </g>
+              </g>
+            </g>
+          </g>
+        </g>
+
+        <text x="14" y="586" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12"
+              fill="rgba(255,210,40,0.55)" filter="url(#rnSoft)">
+          © Rednode.ai — Drone Dig + Pile Demo
+        </text>
+      </svg>
+
+      <div id="hud">
+        <div class="hudBlock">
+          <div class="hudStat">
+            <div class="hudLabel">SCORE</div>
+            <div class="hudValue" id="hudScore">0</div>
+          </div>
+          <div class="hudStat">
+            <div class="hudLabel">TIME</div>
+            <div class="hudValue" id="hudTime">--</div>
+          </div>
+          <div class="hudStat">
+            <div class="hudLabel">MODE</div>
+            <div class="hudValue" id="hudMode">ARM</div>
+          </div>
+          <div class="hudStat">
+            <div class="hudLabel">TILE</div>
+            <div class="hudValue" id="hudTile">—</div>
+          </div>
+        </div>
+
+        <div class="hudBlock hudRight">
+          <div class="hudStat">
+            <div class="hudLabel">THROTTLE</div>
+            <div class="hudValue" id="hudThrottle">x1.00</div>
+          </div>
+          <div class="hudStat">
+            <div class="hudLabel">DIG</div>
+            <div class="hudValue" id="hudDig">OFF</div>
+          </div>
+          <div class="hudStat">
+            <div class="hudLabel">LOAD</div>
+            <div class="hudValue" id="hudLoad">0.00</div>
+          </div>
+          <div class="hudStat">
+            <div class="hudLabel">SCENE</div>
+            <div class="hudValue" id="hudScene">—</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="watermark">© Rednode.ai</div>
+
+      <!-- STARTUP / SCENE SELECT -->
+      <div id="startScreen">
+        <div class="startCard">
+          <div class="startHead">
+            <div class="brand">
+              <div class="tileIcon" style="width:44px;height:44px;border-radius:12px;">
+                <svg width="34" height="34" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <defs>
+                    <filter id="sGlowY" x="-60%" y="-60%" width="220%" height="220%">
+                      <feGaussianBlur stdDeviation="2.8" result="b"/>
+                      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+                    </filter>
+                    <filter id="sGlowR" x="-60%" y="-60%" width="220%" height="220%">
+                      <feGaussianBlur stdDeviation="2.8" result="r"/>
+                      <feMerge><feMergeNode in="r"/><feMergeNode in="SourceGraphic"/></feMerge>
+                    </filter>
+                  </defs>
+                  <rect x="10" y="10" width="44" height="44" rx="12" fill="rgba(0,0,0,0.35)" stroke="rgba(255,210,60,0.25)"/>
+                  <path d="M22 42 V22 H34 C40 22 44 26 44 32 C44 38 40 42 34 42 Z"
+                        fill="none" stroke="rgba(255,190,40,0.9)" stroke-width="3.4" filter="url(#sGlowY)"/>
+                  <path d="M22 22 L42 42"
+                        fill="none" stroke="rgba(255,40,40,0.85)" stroke-width="2.8" filter="url(#sGlowR)"/>
+                </svg>
+              </div>
+              <div class="brandTitle">
+                <b>REDNODE SENTINEL</b>
+                <span>Hands full control • dig feedback • bucket curl • boom cam shows scoop</span>
+              </div>
+            </div>
+            <div class="badge">Pick a scene to start</div>
+          </div>
+
+          <div class="grid">
+            <div class="tile" data-scene="0">
+              <div class="tileIcon">
+                <svg width="78" height="78" viewBox="0 0 90 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <g transform="translate(45,45)">
+                    <rect x="-22" y="-26" width="16" height="52" rx="7" fill="#0a0a0b" stroke="rgba(255,210,60,0.18)"/>
+                    <rect x="6" y="-26" width="16" height="52" rx="7" fill="#0a0a0b" stroke="rgba(255,210,60,0.18)"/>
+                    <rect x="-18" y="-20" width="36" height="40" rx="10" fill="#0c0d10" stroke="rgba(255,210,60,0.22)"/>
+                    <path d="M0 -6 L26 -18" stroke="rgba(255,190,40,0.85)" stroke-width="3.2"/>
+                    <path d="M26 -18 L45 -10" stroke="rgba(255,40,40,0.85)" stroke-width="2.6"/>
+                  </g>
+                </svg>
+              </div>
+              <div class="tileMeta">
+                <b>Scene 1 — Forest Dig</b>
+                <span>Soft soil + hidden ore. Great for learning dig + dump piles.</span>
+              </div>
+              <div class="tileCTA">START</div>
+            </div>
+
+            <div class="tile" data-scene="1">
+              <div class="tileIcon">
+                <svg width="78" height="78" viewBox="0 0 90 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <g transform="translate(45,45)">
+                    <circle r="28" fill="rgba(0,0,0,0.25)" stroke="rgba(255,210,60,0.18)"/>
+                    <path d="M0 0 L26 -10" stroke="rgba(255,190,40,0.9)" stroke-width="3"/>
+                    <path d="M0 0 L-18 16" stroke="rgba(255,40,40,0.8)" stroke-width="2.6"/>
+                  </g>
+                </svg>
+              </div>
+              <div class="tileMeta">
+                <b>Scene 2 — Quarry Grid</b>
+                <span>Harder rock tiles. Dig takes longer, piles look chunkier.</span>
+              </div>
+              <div class="tileCTA">START</div>
+            </div>
+
+            <div class="tile" data-scene="2">
+              <div class="tileIcon">
+                <svg width="78" height="78" viewBox="0 0 90 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <g transform="translate(45,45) rotate(-18)">
+                    <rect x="-28" y="-10" width="46" height="20" rx="8" fill="rgba(0,0,0,0.35)" stroke="rgba(255,210,60,0.18)"/>
+                    <path d="M18 -8 L34 0 L18 8 Z" fill="rgba(255,190,40,0.22)" stroke="rgba(255,190,40,0.7)"/>
+                  </g>
+                </svg>
+              </div>
+              <div class="tileMeta">
+                <b>Scene 3 — Night Ops</b>
+                <span>Stronger depth radiance. Deeper pits glow richer for realism.</span>
+              </div>
+              <div class="tileCTA">START</div>
+            </div>
+
+            <div class="tile" data-scene="3">
+              <div class="tileIcon">
+                <svg width="78" height="78" viewBox="0 0 90 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <g transform="translate(45,45)">
+                    <rect x="-30" y="-18" width="16" height="36" rx="7" fill="#0a0a0b" stroke="rgba(255,210,60,0.18)"/>
+                    <rect x="14" y="-18" width="16" height="36" rx="7" fill="#0a0a0b" stroke="rgba(255,210,60,0.18)"/>
+                    <rect x="-20" y="-14" width="40" height="28" rx="10" fill="rgba(0,0,0,0.35)" stroke="rgba(255,210,60,0.22)"/>
+                    <path d="M0 -2 L28 -10" stroke="rgba(255,40,40,0.85)" stroke-width="3"/>
+                  </g>
+                </svg>
+              </div>
+              <div class="tileMeta">
+                <b>Scene 4 — Ice Yard</b>
+                <span>Slippery drift. Dig 5 hits to remove a tile. Dump to build ramps.</span>
+              </div>
+              <div class="tileCTA">START</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="hintBar">
+      <div>
+        <span class="muted">Toggle:</span> <kbd>TAB</kbd> drive/arm
+        <span class="muted">Throttle:</span> <kbd>[</kbd>/<kbd>]</kbd> <kbd>SHIFT</kbd> boost
+        <span class="muted">Drive:</span> <kbd>WASD</kbd> (or hands)
+        <span class="muted">Arm:</span> <kbd>A/D</kbd> yaw <kbd>W/S</kbd> extend <kbd>Q/E</kbd> curl
+        <span class="muted">Dig:</span> <kbd>SPACE</kbd> or <span class="muted">LEFT pinch</span>
+        <span class="muted">Dump:</span> <kbd>F</kbd> (or open bucket wide for a moment)
+      </div>
+      <div class="muted">R restart • Tile health: 5 hits to remove</div>
+    </div>
+  </div>
+
+  <!-- MediaPipe Hands -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <video id="video" playsinline></video>
+
+  <script>
+  // ============================================================
+  //  Rednode Sentinel — Full Updated Script
+  //  - Drone top-down dig/pile tiles (5 hits per tile -> removed)
+  //  - Depth radiance: deeper = richer/brighter; shallow = duller
+  //  - Boom side view shows: digging pulse, bucket curl, scoop fill, tile health
+  //  - Hands FULL control:
+  //    DRIVE: BOTH hands control tracks (forward/back + left/right influence)
+  //    ARM:   Left hand = yaw+extend joystick; Right hand pinch distance = bucket curl
+  //          Dig = LEFT pinch (or Space). Dump = F or hold bucket open wide briefly.
+  // ============================================================
+
+  const canvas = document.getElementById('screen');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const SCREEN_W = 800, SCREEN_H = 600;
+
+  const boomCanvas = document.getElementById('boomCanvas');
+  const bctx = boomCanvas.getContext('2d', { alpha: true });
+  const boomReadout = document.getElementById('boomReadout');
+
+  const svgGroup = document.getElementById('excavatorGroup');
+  const armBaseGroup = document.getElementById('armBaseGroup');
+  const arm1Group = document.getElementById('arm1Group');
+  const arm2Group = document.getElementById('arm2Group');
+  const bucketGroup = document.getElementById('bucketGroup');
+  const treadsL = document.getElementById('treadsL');
+  const treadsR = document.getElementById('treadsR');
+
+  const hudScore = document.getElementById('hudScore');
+  const hudTime = document.getElementById('hudTime');
+  const hudMode = document.getElementById('hudMode');
+  const hudThrottle = document.getElementById('hudThrottle');
+  const hudDig = document.getElementById('hudDig');
+  const hudLoad = document.getElementById('hudLoad');
+  const hudScene = document.getElementById('hudScene');
+  const hudTile = document.getElementById('hudTile');
+
+  const startScreen = document.getElementById('startScreen');
+
+  const TAU = Math.PI * 2;
+  function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+  function lerp(a,b,t){ return a + (b-a)*t; }
+  function radToDeg(r){ return r * 180 / Math.PI; }
+  function wrapAngle(a){
+    while (a > Math.PI) a -= TAU;
+    while (a < -Math.PI) a += TAU;
+    return a;
+  }
+  function collideRect(ax,ay,aw,ah, bx,by,bw,bh){
+    return !(ax+aw < bx || ax > bx+bw || ay+ah < by || ay > by+bh);
+  }
+
+  // Safe rounded rect path (works even if roundRect not supported)
+  function pathRoundRect(c, x, y, w, h, r){
+    const rr = Math.max(0, Math.min(r, Math.min(w,h)/2));
+    c.beginPath();
+    c.moveTo(x+rr, y);
+    c.arcTo(x+w, y, x+w, y+h, rr);
+    c.arcTo(x+w, y+h, x, y+h, rr);
+    c.arcTo(x, y+h, x, y, rr);
+    c.arcTo(x, y, x+w, y, rr);
+    c.closePath();
+  }
+
+  // ---------- Hash/Noise ----------
+  function hash2i(x,y,seed){
+    let h = (x * 73856093) ^ (y * 19349663) ^ (seed * 83492791);
+    h = (h ^ (h >>> 13)) * 1274126177;
+    h = (h ^ (h >>> 16));
+    return h >>> 0;
+  }
+  function hashFloat01(x,y,seed){
+    return (hash2i(x,y,seed) % 1000000) / 1000000;
+  }
+
+  // ---------- Scenes ----------
+  const SCENES = [
+    { id:0, name:"Forest Dig", seed:1337,
+      palette:{ soil:[24,84,46], soil2:[20,72,40], rock:[70,80,88], rock2:[56,64,72], ore:[240,210,60],
+        hole0:[6,7,9], hole1:[12,14,18], glowY:[255,190,40], glowR:[255,45,45], fog:[14,16,22] },
+      friction:0.90, drift:0.10, rockRate:0.12 },
+    { id:1, name:"Quarry Grid", seed:2029,
+      palette:{ soil:[64,70,76], soil2:[54,60,66], rock:[90,96,104], rock2:[78,84,92], ore:[245,200,55],
+        hole0:[8,9,10], hole1:[18,20,24], glowY:[255,190,40], glowR:[255,45,45], fog:[16,16,20] },
+      friction:0.88, drift:0.16, rockRate:0.24 },
+    { id:2, name:"Night Ops", seed:9091,
+      palette:{ soil:[18,28,44], soil2:[14,22,36], rock:[52,62,80], rock2:[44,52,68], ore:[255,220,70],
+        hole0:[3,4,6], hole1:[10,12,16], glowY:[255,210,60], glowR:[255,60,60], fog:[8,10,16] },
+      friction:0.92, drift:0.08, rockRate:0.18 },
+    { id:3, name:"Ice Yard", seed:7712,
+      palette:{ soil:[120,140,160], soil2:[108,128,150], rock:[80,92,108], rock2:[70,82,96], ore:[255,210,70],
+        hole0:[10,12,16], hole1:[22,26,32], glowY:[255,190,40], glowR:[255,45,45], fog:[20,24,30] },
+      friction:0.82, drift:0.26, rockRate:0.10 },
+  ];
+  let scene = SCENES[0];
+
+  // ---------- World / Tiles ----------
+  const TILE = 60;
+  const WORLD_TILES = 44;
+  const WORLD_SIZE = WORLD_TILES * TILE;
+
+  const TILE_HEALTH_MAX = 5;
+  const tileHealth = new Map(); // "x,y" => 0..5
+  const pileMap = new Map();    // "x,y" => 0..1.3
+
+  function keyXY(tx,ty){ return tx + "," + ty; }
+  function getHealth(tx,ty){
+    const v = tileHealth.get(keyXY(tx,ty));
+    return (v === undefined) ? TILE_HEALTH_MAX : v;
+  }
+  function setHealth(tx,ty,h){
+    const k = keyXY(tx,ty);
+    const hh = clamp(Math.round(h), 0, TILE_HEALTH_MAX);
+    if (hh === TILE_HEALTH_MAX) tileHealth.delete(k);
+    else tileHealth.set(k, hh);
+  }
+  function tileRemoved(tx,ty){ return getHealth(tx,ty) <= 0; }
+  function getDepth(tx,ty){
+    const h = getHealth(tx,ty);
+    return clamp((TILE_HEALTH_MAX - h) / TILE_HEALTH_MAX, 0, 1);
+  }
+  function getPile(tx,ty){ return pileMap.get(keyXY(tx,ty)) || 0; }
+  function setPile(tx,ty,v){
+    const k = keyXY(tx,ty);
+    const nv = clamp(v, 0, 1.3);
+    if (nv <= 0.001) pileMap.delete(k);
+    else pileMap.set(k, nv);
+  }
+  function tileType(tx,ty){
+    const n = hashFloat01(tx,ty,scene.seed);
+    return (n < scene.rockRate) ? 1 : 0; // 1 rock, 0 soil
+  }
+  function baseTileColor(tx,ty){
+    const pal = scene.palette;
+    const t = tileType(tx,ty);
+    const n = hashFloat01(tx,ty,scene.seed + 99);
+    const base = (t === 1) ? (n < 0.5 ? pal.rock : pal.rock2) : (n < 0.5 ? pal.soil : pal.soil2);
+    return base.slice();
+  }
+
+  // ---------- Camera ----------
+  let camX = WORLD_SIZE * 0.5;
+  let camY = WORLD_SIZE * 0.5;
+  let camZoom = 1.0;
+  function worldToScreen(wx,wy){
+    return [
+      (wx - camX) * camZoom + SCREEN_W*0.5,
+      (wy - camY) * camZoom + SCREEN_H*0.5
+    ];
+  }
+
+  // ---------- Base / Ore / Score ----------
+  let base = { x: WORLD_SIZE - 220, y: WORLD_SIZE - 220, w: 160, h: 120 };
+  let oreNodes = [];
+  function spawnOre(){
+    oreNodes = [];
+    for (let i=0;i<18;i++){
+      const tx = 3 + Math.floor(Math.random()*(WORLD_TILES-6));
+      const ty = 3 + Math.floor(Math.random()*(WORLD_TILES-6));
+      const required = 0.40 + Math.random()*0.35;
+      oreNodes.push({
+        tx,ty,
+        x: tx*TILE + TILE*0.5 + (Math.random()*12 - 6),
+        y: ty*TILE + TILE*0.5 + (Math.random()*12 - 6),
+        requiredDepth: required,
+        collected: false,
+        carried: false
+      });
+    }
+  }
+
+  let score = 0;
+  const ROUND_DURATION = 90;
+  const TIME_BONUS_PER_SCORE = 5;
+  const TIME_CAP = 120;
+  const BASE_POINTS = 100;
+  const COMBO_WINDOW = 4.0;
+  const COMBO_STEP = 0.25;
+  const COMBO_MAX_MULT = 3.0;
+  const PRESSURE_MAX_MULT = 3.0;
+  let game_over = false;
+  let time_bonus_ms = 0;
+  let start_ticks = 0;
+  let last_score_time = null;
+  let combo_count = 0;
+
+  function remaining_time_sec(){
+    const elapsed_ms = performance.now() - start_ticks;
+    const total_ms = Math.min((ROUND_DURATION * 1000) + time_bonus_ms, TIME_CAP * 1000);
+    return Math.max(0, Math.floor((total_ms - elapsed_ms) / 1000));
+  }
+  function time_pressure_multiplier(){
+    const rem = remaining_time_sec();
+    const t = 1.0 - (rem / TIME_CAP);
+    return 1.0 + t * (PRESSURE_MAX_MULT - 1.0);
+  }
+  function combo_multiplier(now_sec){
+    if (last_score_time === null || (now_sec - last_score_time) > COMBO_WINDOW) combo_count = 1;
+    else combo_count += 1;
+    last_score_time = now_sec;
+    const mult = 1.0 + (combo_count - 1) * COMBO_STEP;
+    return Math.min(mult, COMBO_MAX_MULT);
+  }
+  function add_score_and_time(){
+    const now_sec = performance.now()/1000.0;
+    const tp = time_pressure_multiplier();
+    const cm = combo_multiplier(now_sec);
+    const gained = Math.floor(BASE_POINTS * tp * cm);
+    score += gained;
+    time_bonus_ms = Math.min(
+      time_bonus_ms + TIME_BONUS_PER_SCORE * 1000,
+      (TIME_CAP - ROUND_DURATION) * 1000
+    );
+    return gained;
+  }
+
+  // ---------- Excavator ----------
+  let mode = "arm"; // "arm" or "drive"
+  const keysPressed = {};
+
+  const THROTTLE_MIN = 0.25, THROTTLE_MAX = 4.0, THROTTLE_STEP = 0.10, BOOST_MULT = 1.5;
+  let throttle = 1.0;
+  function currentThrottle(){
+    const boost = (keysPressed.ShiftLeft || keysPressed.ShiftRight) ? BOOST_MULT : 1.0;
+    return clamp(throttle, THROTTLE_MIN, THROTTLE_MAX) * boost;
+  }
+
+  const SPEED_MAX = 180;
+  const ACCEL = 680;
+  let left_track_v = 0.0, right_track_v = 0.0;
+
+  let ex = WORLD_SIZE*0.18;
+  let ey = WORLD_SIZE*0.18;
+  let heading = 0.0;
+
+  let armYaw = 0.0;         // relative to heading
+  let armExtend = 0.75;     // 0.2..1.0
+  let bucketAngle = 0.0;    // -0.9..0.9 (curl negative = scoop, positive = open/dump)
+  const ARM_YAW_RATE = 2.0;
+  const ARM_EXTEND_RATE = 0.70;
+  const BUCKET_RATE = 2.6;
+
+  const BOOM1 = 92;
+  const BOOM2_BASE = 74;
+
+  // Digging & Piling
+  let digActive = false;
+  const DIG_TICK_SECONDS = 0.18;
+  let digTickAccum = 0.0;
+  let lastDigKey = null;
+
+  let soilLoad = 0.0;        // 0..1.25
+  const SOIL_LOAD_MAX = 1.25;
+  const SOIL_PER_HIT = 0.10;
+
+  let carriedOre = null;
+
+  // Dig visualization feedback for boom cam
+  let digPulse = 0.0; // seconds
+  let lastDigTile = { tx:-1, ty:-1, h:TILE_HEALTH_MAX, removed:false };
+
+  // Auto-dump by "open bucket wide briefly"
+  let dumpOpenHold = 0.0;
+
+  // Particles
+  let particles = [];
+  function spawnDirt(wx,wy,amount){
+    const count = Math.max(1, Math.floor(amount));
+    for(let i=0;i<count;i++){
+      const a = Math.random()*TAU;
+      const v = 40 + Math.random()*90;
+      particles.push({
+        x: wx + (Math.random()*10-5),
+        y: wy + (Math.random()*10-5),
+        vx: Math.cos(a)*v,
+        vy: Math.sin(a)*v,
+        life: 0.25 + Math.random()*0.35
+      });
+    }
+  }
+  function updateParticles(dt){
+    for(let i=particles.length-1;i>=0;i--){
+      const p = particles[i];
+      p.life -= dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vx *= 0.84;
+      p.vy *= 0.84;
+      if (p.life <= 0) particles.splice(i,1);
+    }
+  }
+
+  // ---------- Input ----------
+  window.addEventListener('keydown', (e)=>{
+    keysPressed[e.code] = true;
+
+    if (e.code === 'Tab'){
+      e.preventDefault();
+      if (!game_over) mode = (mode === 'arm') ? 'drive' : 'arm';
+    }
+    if (e.code === 'KeyR' && game_over){ startRound(); }
+
+    if (e.code === 'BracketLeft') throttle = Math.max(THROTTLE_MIN, Math.round((throttle - THROTTLE_STEP)*100)/100);
+    if (e.code === 'BracketRight') throttle = Math.min(THROTTLE_MAX, Math.round((throttle + THROTTLE_STEP)*100)/100);
+
+    if (e.code === 'Digit1') throttle = 0.5;
+    if (e.code === 'Digit2') throttle = 1.0;
+    if (e.code === 'Digit3') throttle = 1.5;
+    if (e.code === 'Digit4') throttle = 2.0;
+    if (e.code === 'Digit5') throttle = 3.0;
+
+    if (e.code === 'Space') digActive = true;
+    if (e.code === 'KeyF') dumpSoil();
+  });
+  window.addEventListener('keyup', (e)=>{
+    keysPressed[e.code] = false;
+    if (e.code === 'Space') digActive = false;
+  });
+
+  // ---------- MediaPipe Hands ----------
+  const videoElement = document.getElementById('video');
+  let handsDetector = null;
+  let cameraInstance = null;
+  let lastHands = {left:null, right:null};
+
+  function onResults(results){
+    lastHands = {left:null, right:null};
+    if (results.multiHandLandmarks && results.multiHandedness){
+      for (let i=0;i<results.multiHandLandmarks.length;i++){
+        const lm = results.multiHandLandmarks[i];
+        const label = results.multiHandedness[i].label;
+        if (label === 'Left') lastHands.left = lm;
+        else lastHands.right = lm;
+      }
+    }
+  }
+
+  function pinchDistance(hand_lm){
+    if (!hand_lm) return null;
+    const t = hand_lm[4], i = hand_lm[8];
+    return Math.hypot(t.x - i.x, t.y - i.y);
+  }
+  function pinchDown(hand_lm){
+    const d = pinchDistance(hand_lm);
+    return (d !== null) && (d < 0.055);
+  }
+
+  // Drive control from a hand: uses BOTH forward/back AND left/right for each hand.
+  // dy controls forward/back, dx biases left/right (fine steering & "both directions" feel).
+  function handTrackCommand(hand_lm){
+    if (!hand_lm) return null;
+    const wrist = hand_lm[0];
+    const idx = hand_lm[8];
+
+    const dx = clamp(idx.x - wrist.x, -0.55, 0.55);
+    const dy = clamp(idx.y - wrist.y, -0.55, 0.55);
+
+    // Deadzones
+    const dz = 0.06;
+    const ndx = (Math.abs(dx) < dz) ? 0 : (dx > 0 ? (dx - dz) : (dx + dz));
+    const ndy = (Math.abs(dy) < dz) ? 0 : (dy > 0 ? (dy - dz) : (dy + dz));
+
+    // Normalize: dy (up) -> forward (+), dy (down) -> backward (-)
+    let f = clamp((-ndy) / 0.35, -1, 1);
+
+    // x bias: move hand right to push speed slightly up, left to pull down
+    // this gives you a smooth "left/right of the hand matters" without breaking tank logic.
+    const bias = clamp((ndx) / 0.45, -1, 1) * 0.35;
+
+    f = clamp(f + bias, -1, 1);
+    return { f, dx: ndx, dy: ndy };
+  }
+
+  // Arm joystick from left hand: dx -> yaw, dy -> extend
+  function leftArmJoystick(hand_lm){
+    if (!hand_lm) return null;
+    const w = hand_lm[0], i = hand_lm[8];
+    const dx = clamp(i.x - w.x, -0.55, 0.55);
+    const dy = clamp(i.y - w.y, -0.55, 0.55);
+
+    const dz = 0.05;
+    const ndx = (Math.abs(dx) < dz) ? 0 : (dx > 0 ? (dx - dz) : (dx + dz));
+    const ndy = (Math.abs(dy) < dz) ? 0 : (dy > 0 ? (dy - dz) : (dy + dz));
+
+    const yawCmd = clamp(ndx / 0.35, -1, 1);
+    const extCmd = clamp((-ndy) / 0.35, -1, 1); // up extends
+    return { yawCmd, extCmd };
+  }
+
+  // Right hand pinch distance controls bucket curl continuously
+  function bucketAngleFromPinchDist(d){
+    // d small = tight pinch = CURL (scoop). d large = OPEN (dump)
+    if (d === null) return null;
+    const dMin = 0.025;
+    const dMax = 0.125;
+    const t = clamp((d - dMin) / (dMax - dMin), 0, 1);
+    // map: -0.80 .. +0.65
+    return lerp(-0.80, 0.65, t);
+  }
+
+  async function initHands(){
+    handsDetector = new Hands({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+    handsDetector.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.7,
+      minTrackingConfidence: 0.5
+    });
+    handsDetector.onResults(onResults);
+
+    cameraInstance = new Camera(videoElement, {
+      onFrame: async () => { await handsDetector.send({ image: videoElement }); },
+      width: 640, height: 480
+    });
+    await cameraInstance.start();
+  }
+
+  // ---------- Bucket world point ----------
+  function bucketWorldPoint(){
+    const baseOff = 10;
+    const baseX = ex + Math.cos(heading) * baseOff;
+    const baseY = ey + Math.sin(heading) * baseOff;
+
+    const yawAbs = heading + armYaw;
+    const boom2 = BOOM2_BASE * armExtend;
+
+    const elbowX = baseX + Math.cos(yawAbs) * BOOM1;
+    const elbowY = baseY + Math.sin(yawAbs) * BOOM1;
+
+    const endX = elbowX + Math.cos(yawAbs + bucketAngle*0.12) * boom2;
+    const endY = elbowY + Math.sin(yawAbs + bucketAngle*0.12) * boom2;
+
+    const tipX = endX + Math.cos(yawAbs + bucketAngle) * 22;
+    const tipY = endY + Math.sin(yawAbs + bucketAngle) * 22;
+
+    return { baseX, baseY, elbowX, elbowY, endX, endY, tipX, tipY, yawAbs };
+  }
+
+  // ---------- Dig logic (5 hits remove a tile) ----------
+  function digHitAt(tx,ty, wx,wy){
+    if (tx < 0 || ty < 0 || tx >= WORLD_TILES || ty >= WORLD_TILES) return;
+    if (tileRemoved(tx,ty)) return;
+
+    const ttype = tileType(tx,ty);
+    const rockMult = (ttype === 1) ? 0.65 : 1.0;
+
+    const h = getHealth(tx,ty);
+    const nh = h - 1;
+    setHealth(tx,ty, nh);
+
+    // Scoop capture depends on bucket curl:
+    // bucketAngle <= -0.45 => best capture; bucketAngle >= 0.20 => almost no capture
+    const capture = clamp((0.20 - bucketAngle) / 0.65, 0, 1); // 0..1
+
+    // Soil gained (still dig even if not curled, but you don't "fill" as much)
+    const gain = SOIL_PER_HIT * rockMult * (0.25 + 0.75*capture);
+    soilLoad = clamp(soilLoad + gain, 0, SOIL_LOAD_MAX);
+
+    spawnDirt(wx, wy, 10 * rockMult);
+    digPulse = 0.18;
+
+    lastDigTile.tx = tx;
+    lastDigTile.ty = ty;
+    lastDigTile.h = Math.max(0, nh);
+    lastDigTile.removed = (nh <= 0);
+
+    if (nh <= 0){
+      spawnDirt(wx, wy, 22);
+      for (let oy=-1; oy<=1; oy++){
+        for (let ox=-1; ox<=1; ox++){
+          if (ox === 0 && oy === 0) continue;
+          const ntx = tx + ox, nty = ty + oy;
+          if (ntx<0||nty<0||ntx>=WORLD_TILES||nty>=WORLD_TILES) continue;
+          const p = getPile(ntx,nty);
+          setPile(ntx,nty, p + (0.02 * Math.random()));
+        }
+      }
+    }
+  }
+
+  function applyDigTicks(dt){
+    if (!digActive) { digTickAccum = 0; lastDigKey = null; return; }
+
+    const bp = bucketWorldPoint();
+    const wx = bp.tipX, wy = bp.tipY;
+
+    const tx = clamp(Math.floor(wx / TILE), 0, WORLD_TILES-1);
+    const ty = clamp(Math.floor(wy / TILE), 0, WORLD_TILES-1);
+
+    const cx = tx*TILE + TILE*0.5;
+    const cy = ty*TILE + TILE*0.5;
+    const distN = Math.hypot(wx - cx, wy - cy) / (TILE*0.5);
+    if (distN > 0.95) return;
+
+    const k = keyXY(tx,ty);
+    if (lastDigKey !== k){ digTickAccum = 0; lastDigKey = k; }
+
+    digTickAccum += dt;
+
+    while (digTickAccum >= DIG_TICK_SECONDS){
+      digTickAccum -= DIG_TICK_SECONDS;
+      digHitAt(tx,ty, wx,wy);
+    }
+  }
+
+  // ---------- Dump soil to piles ----------
+  function dumpSoil(){
+    if (soilLoad <= 0.001 || game_over) return;
+
+    const bp = bucketWorldPoint();
+    const wx = bp.tipX, wy = bp.tipY;
+
+    const tx = clamp(Math.floor(wx / TILE), 0, WORLD_TILES-1);
+    const ty = clamp(Math.floor(wy / TILE), 0, WORLD_TILES-1);
+
+    let dtx = tx, dty = ty;
+    if (tileRemoved(dtx,dty)){
+      let found = false;
+      for (let r=1; r<=2 && !found; r++){
+        for (let oy=-r; oy<=r && !found; oy++){
+          for (let ox=-r; ox<=r && !found; ox++){
+            const ntx = tx+ox, nty = ty+oy;
+            if (ntx<0||nty<0||ntx>=WORLD_TILES||nty>=WORLD_TILES) continue;
+            if (!tileRemoved(ntx,nty)){ dtx = ntx; dty = nty; found = true; }
+          }
+        }
+      }
+      if (!found) return;
+    }
+
+    const add = soilLoad * 0.55;
+    setPile(dtx,dty, getPile(dtx,dty) + add);
+
+    for (let oy=-1; oy<=1; oy++){
+      for (let ox=-1; ox<=1; ox++){
+        if (ox === 0 && oy === 0) continue;
+        const ntx = dtx + ox, nty = dty + oy;
+        if (ntx<0||nty<0||ntx>=WORLD_TILES||nty>=WORLD_TILES) continue;
+        if (tileRemoved(ntx,nty)) continue;
+        const spread = add * 0.20 * (1 - (Math.abs(ox)+Math.abs(oy))*0.25);
+        setPile(ntx,nty, getPile(ntx,nty) + spread * Math.random());
+      }
+    }
+
+    spawnDirt(wx, wy, 26);
+    soilLoad = 0.0;
+  }
+
+  // ---------- Ore scoop + base drop ----------
+  function tryScoopOre(){
+    if (carriedOre !== null) return;
+
+    // Require bucket curled enough to "scoop"
+    if (bucketAngle > -0.05) return;
+
+    const bp = bucketWorldPoint();
+    const sx = bp.tipX, sy = bp.tipY;
+
+    for (let i=0;i<oreNodes.length;i++){
+      const o = oreNodes[i];
+      if (o.collected || o.carried) continue;
+      const depth = getDepth(o.tx,o.ty);
+      if (depth < o.requiredDepth) continue;
+
+      const dist = Math.hypot(o.x - sx, o.y - sy);
+      if (dist < 26){
+        carriedOre = i;
+        o.carried = true;
+        return;
+      }
+    }
+  }
+
+  function checkBaseDrop(){
+    if (carriedOre === null) return;
+    const o = oreNodes[carriedOre];
+    if (!o) { carriedOre = null; return; }
+
+    const rectA = {x: base.x, y: base.y, w: base.w, h: base.h};
+    const rectB = {x: o.x - 10, y: o.y - 10, w: 20, h: 20};
+
+    if (collideRect(rectA.x,rectA.y,rectA.w,rectA.h, rectB.x,rectB.y,rectB.w,rectB.h)){
+      o.collected = true;
+      o.carried = false;
+      carriedOre = null;
+      add_score_and_time();
+    }
+  }
+
+  // ---------- Rendering ----------
+  function clearBackground(){
+    const fog = scene.palette.fog;
+    ctx.fillStyle = `rgb(${fog[0]},${fog[1]},${fog[2]})`;
+    ctx.fillRect(0,0,SCREEN_W,SCREEN_H);
+  }
+
+  function drawTiles(){
+    const left = camX - (SCREEN_W*0.5)/camZoom - TILE;
+    const top  = camY - (SCREEN_H*0.5)/camZoom - TILE;
+    const right= camX + (SCREEN_W*0.5)/camZoom + TILE;
+    const bot  = camY + (SCREEN_H*0.5)/camZoom + TILE;
+
+    const tx0 = clamp(Math.floor(left / TILE), 0, WORLD_TILES-1);
+    const ty0 = clamp(Math.floor(top  / TILE), 0, WORLD_TILES-1);
+    const tx1 = clamp(Math.floor(right/ TILE), 0, WORLD_TILES-1);
+    const ty1 = clamp(Math.floor(bot  / TILE), 0, WORLD_TILES-1);
+
+    const pal = scene.palette;
+    ctx.lineWidth = 1;
+
+    for (let ty=ty0; ty<=ty1; ty++){
+      for (let tx=tx0; tx<=tx1; tx++){
+        const wx = tx*TILE, wy = ty*TILE;
+        const [sx,sy] = worldToScreen(wx,wy);
+        const s = TILE * camZoom;
+
+        const removed = tileRemoved(tx,ty);
+        const depth = getDepth(tx,ty);
+        const pile = getPile(tx,ty);
+
+        if (removed){
+          const g = ctx.createRadialGradient(
+            sx + s*0.50, sy + s*0.50, 0,
+            sx + s*0.50, sy + s*0.50, s*0.65
+          );
+          const h0 = pal.hole0, h1 = pal.hole1;
+          g.addColorStop(0.0, `rgb(${h0[0]},${h0[1]},${h0[2]})`);
+          g.addColorStop(1.0, `rgb(${h1[0]},${h1[1]},${h1[2]})`);
+          ctx.fillStyle = g;
+          ctx.fillRect(sx, sy, s, s);
+
+          const gy = pal.glowY;
+          ctx.strokeStyle = `rgba(${gy[0]},${gy[1]},${gy[2]},0.10)`;
+          ctx.lineWidth = 2;
+          ctx.strokeRect(sx+1.5, sy+1.5, s-3, s-3);
+          ctx.lineWidth = 1;
+        } else {
+          const base = baseTileColor(tx,ty);
+
+          if (depth > 0.001 || pile > 0.001){
+            const dullK = clamp(depth * 0.65, 0, 0.65);
+            const dull = [
+              Math.round(base[0] * (1 - dullK)),
+              Math.round(base[1] * (1 - dullK)),
+              Math.round(base[2] * (1 - dullK))
+            ];
+
+            const gy = pal.glowY;
+            const richK = clamp(depth * 0.55, 0, 0.55);
+            const rich = [
+              Math.round(lerp(dull[0], gy[0], richK)),
+              Math.round(lerp(dull[1], gy[1], richK)),
+              Math.round(lerp(dull[2], gy[2], richK))
+            ];
+
+            const pileK = clamp(pile / 1.3, 0, 1);
+            const pileBright = [
+              Math.round(lerp(rich[0], 230, 0.18*pileK)),
+              Math.round(lerp(rich[1], 230, 0.18*pileK)),
+              Math.round(lerp(rich[2], 230, 0.18*pileK))
+            ];
+
+            const rg = ctx.createRadialGradient(
+              sx + s*0.52, sy + s*0.48, s*0.12,
+              sx + s*0.50, sy + s*0.50, s*0.72
+            );
+            const center = pileK > 0.01 ? pileBright : rich;
+            rg.addColorStop(0.0, `rgb(${center[0]},${center[1]},${center[2]})`);
+            rg.addColorStop(1.0, `rgb(${dull[0]},${dull[1]},${dull[2]})`);
+
+            ctx.fillStyle = rg;
+            ctx.fillRect(sx, sy, s, s);
+
+            if (pileK > 0.01){
+              ctx.strokeStyle = `rgba(0,0,0,${0.10 + 0.18*pileK})`;
+              ctx.lineWidth = 2;
+              ctx.strokeRect(sx+2, sy+2, s-4, s-4);
+              ctx.lineWidth = 1;
+            }
+          } else {
+            ctx.fillStyle = `rgb(${base[0]},${base[1]},${base[2]})`;
+            ctx.fillRect(sx, sy, s, s);
+          }
+
+          const speck = hashFloat01(tx,ty,scene.seed+7);
+          if (speck < 0.18){
+            ctx.fillStyle = `rgba(255,255,255,0.04)`;
+            ctx.fillRect(sx + (speck*31)%s, sy + (speck*53)%s, 2, 2);
+          }
+        }
+
+        ctx.strokeStyle = `rgba(0,0,0,0.14)`;
+        ctx.strokeRect(sx+0.5, sy+0.5, s, s);
+
+        const h = getHealth(tx,ty);
+        if (!removed && h < TILE_HEALTH_MAX){
+          const pct = h / TILE_HEALTH_MAX;
+          const barW = (s - 10) * pct;
+          ctx.fillStyle = "rgba(0,0,0,0.35)";
+          ctx.fillRect(sx+5, sy+5, s-10, 4);
+          ctx.fillStyle = `rgba(255,210,60,${0.25 + (1-pct)*0.35})`;
+          ctx.fillRect(sx+5, sy+5, Math.max(0,barW), 4);
+        }
+      }
+    }
+  }
+
+  function drawBase(){
+    const [sx,sy] = worldToScreen(base.x, base.y);
+    const w = base.w * camZoom, h = base.h * camZoom;
+    ctx.fillStyle = `rgba(140,20,170,0.85)`;
+    ctx.fillRect(sx, sy, w, h);
+    ctx.strokeStyle = `rgba(230,190,255,0.85)`;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(sx, sy, w, h);
+    ctx.fillStyle = "rgba(255,255,255,0.10)";
+    ctx.fillRect(sx+10, sy+10, Math.max(12,w-20), 10);
+    ctx.font = "14px ui-monospace, SFMono-Regular, Menlo, monospace";
+    ctx.fillStyle = "rgba(255,240,210,0.92)";
+    ctx.fillText("DROP ZONE", sx + 12, sy + 34);
+  }
+
+  function drawOre(){
+    const pal = scene.palette;
+    for (const o of oreNodes){
+      if (o.collected) continue;
+      const depth = getDepth(o.tx,o.ty);
+      const visible = (depth >= o.requiredDepth) || o.carried;
+      if (!visible) continue;
+      const [sx,sy] = worldToScreen(o.x, o.y);
+      const r = 10 * camZoom;
+      ctx.fillStyle = `rgb(${pal.ore[0]},${pal.ore[1]},${pal.ore[2]})`;
+      ctx.beginPath(); ctx.arc(sx, sy, r, 0, TAU); ctx.fill();
+      ctx.strokeStyle = "rgba(255,235,120,0.85)";
+      ctx.beginPath(); ctx.arc(sx, sy, r, 0, TAU); ctx.stroke();
+      ctx.fillStyle = "rgba(255,255,220,0.40)";
+      ctx.beginPath(); ctx.arc(sx + r*0.25, sy - r*0.25, Math.max(1.5, r*0.35), 0, TAU); ctx.fill();
+    }
+  }
+
+  function drawParticles(){
+    const fog = scene.palette.fog;
+    for (const p of particles){
+      const a = clamp(p.life / 0.6, 0, 1) * 0.40;
+      const [sx,sy] = worldToScreen(p.x,p.y);
+      ctx.fillStyle = `rgba(${fog[0]},${fog[1]},${fog[2]},${a})`;
+      ctx.beginPath();
+      ctx.arc(sx, sy, 2.0*camZoom + 0.5, 0, TAU);
+      ctx.fill();
+    }
+  }
+
+  function drawVignette(){
+    const grad = ctx.createRadialGradient(SCREEN_W/2, SCREEN_H/2, 0, SCREEN_W/2, SCREEN_H/2, Math.max(SCREEN_W,SCREEN_H)/1.15);
+    grad.addColorStop(0, 'rgba(0,0,0,0)');
+    grad.addColorStop(1, 'rgba(0,0,0,0.46)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0,0,SCREEN_W,SCREEN_H);
+  }
+
+  // ---------- Boom side view (shows digging + scoop fill + tile health) ----------
+  function drawBoomSideView(){
+    const W = boomCanvas.width, H = boomCanvas.height;
+    bctx.clearRect(0,0,W,H);
+
+    // background
+    bctx.fillStyle = "rgba(0,0,0,0.20)";
+    bctx.fillRect(0,0,W,H);
+
+    // grid
+    bctx.strokeStyle = "rgba(255,210,60,0.07)";
+    bctx.lineWidth = 1;
+    for (let x=0; x<=W; x+=60){ bctx.beginPath(); bctx.moveTo(x+0.5, 0); bctx.lineTo(x+0.5, H); bctx.stroke(); }
+    for (let y=0; y<=H; y+=30){ bctx.beginPath(); bctx.moveTo(0, y+0.5); bctx.lineTo(W, y+0.5); bctx.stroke(); }
+
+    // ground line
+    const groundY = H * 0.78;
+    bctx.strokeStyle = "rgba(220,220,235,0.20)";
+    bctx.beginPath();
+    bctx.moveTo(16, groundY+0.5);
+    bctx.lineTo(W-16, groundY+0.5);
+    bctx.stroke();
+
+    // side-view mapping (readable, not physically perfect):
+    const boomPitch  = clamp(armYaw, -1.0, 1.0) * 0.50;
+    const stickPitch = boomPitch + bucketAngle * 0.38;
+    const buckPitch  = stickPitch + bucketAngle * 0.68;
+
+    const L1 = 190;
+    const L2 = 145 * armExtend;
+    const L3 = 52;
+
+    const baseX = 80;
+    const baseY = groundY - 20;
+
+    const elbowX = baseX + Math.cos(boomPitch) * L1;
+    const elbowY = baseY - Math.sin(boomPitch) * L1;
+
+    const endX = elbowX + Math.cos(stickPitch) * L2;
+    const endY = elbowY - Math.sin(stickPitch) * L2;
+
+    const tipX = endX + Math.cos(buckPitch) * L3;
+    const tipY = endY - Math.sin(buckPitch) * L3;
+
+    // chassis anchor
+    bctx.fillStyle = "rgba(255,235,170,0.16)";
+    bctx.strokeStyle = "rgba(255,210,60,0.22)";
+    bctx.lineWidth = 2;
+    pathRoundRect(bctx, baseX-30, baseY-20, 60, 40, 12);
+    bctx.fill(); bctx.stroke();
+
+    // boom segments
+    bctx.lineCap = "round";
+    bctx.lineJoin = "round";
+
+    bctx.strokeStyle = "rgba(255,210,60,0.85)";
+    bctx.lineWidth = 11;
+    bctx.beginPath(); bctx.moveTo(baseX, baseY); bctx.lineTo(elbowX, elbowY); bctx.stroke();
+
+    bctx.strokeStyle = "rgba(255,60,60,0.78)";
+    bctx.lineWidth = 10;
+    bctx.beginPath(); bctx.moveTo(elbowX, elbowY); bctx.lineTo(endX, endY); bctx.stroke();
+
+    // bucket "arm"
+    bctx.strokeStyle = "rgba(255,235,170,0.85)";
+    bctx.lineWidth = 8;
+    bctx.beginPath(); bctx.moveTo(endX, endY); bctx.lineTo(tipX, tipY); bctx.stroke();
+
+    // bucket cup (visual curl & scoop)
+    const cupW = 26, cupH = 18;
+    const cupCx = tipX, cupCy = tipY;
+
+    bctx.save();
+    bctx.translate(cupCx, cupCy);
+    bctx.rotate(-buckPitch); // rotate to draw a consistent cup
+    bctx.translate(-cupCx, -cupCy);
+
+    // cup outline
+    bctx.strokeStyle = "rgba(255,210,60,0.70)";
+    bctx.fillStyle = "rgba(0,0,0,0.26)";
+    bctx.lineWidth = 2;
+    pathRoundRect(bctx, cupCx - cupW, cupCy - cupH*0.5, cupW*1.2, cupH, 8);
+    bctx.fill(); bctx.stroke();
+
+    // fill inside cup = soilLoad (clear indicator of scooping)
+    const fillT = clamp(soilLoad / SOIL_LOAD_MAX, 0, 1);
+    if (fillT > 0.01){
+      bctx.fillStyle = `rgba(255,210,60,${0.12 + 0.26*fillT})`;
+      pathRoundRect(bctx, cupCx - cupW + 3, cupCy - cupH*0.5 + 4, (cupW*1.2 - 6)*fillT, cupH - 8, 6);
+      bctx.fill();
+    }
+
+    // ore indicator inside cup if carrying
+    if (carriedOre !== null){
+      bctx.fillStyle = "rgba(255,235,170,0.55)";
+      bctx.beginPath();
+      bctx.arc(cupCx - 6, cupCy, 5, 0, TAU);
+      bctx.fill();
+      bctx.strokeStyle = "rgba(255,235,170,0.85)";
+      bctx.stroke();
+    }
+
+    bctx.restore();
+
+    // joints
+    bctx.fillStyle = "rgba(0,0,0,0.40)";
+    bctx.strokeStyle = "rgba(255,210,60,0.30)";
+    bctx.lineWidth = 2;
+    for (const [jx,jy] of [[baseX,baseY],[elbowX,elbowY],[endX,endY]]){
+      bctx.beginPath(); bctx.arc(jx, jy, 8, 0, TAU); bctx.fill(); bctx.stroke();
+    }
+
+    // tip marker + dig pulse + "DIGGING" label
+    const tipPulseA = clamp(digPulse / 0.18, 0, 1);
+    if (digActive){
+      bctx.fillStyle = `rgba(255,60,60,${0.45 + 0.35*tipPulseA})`;
+      bctx.beginPath(); bctx.arc(tipX, tipY, 8 + 6*(1-tipPulseA), 0, TAU); bctx.fill();
+      bctx.fillStyle = "rgba(255,60,60,0.92)";
+      bctx.font = "12px ui-monospace, SFMono-Regular, Menlo, monospace";
+      bctx.fillText("DIGGING", Math.min(W-90, tipX + 12), Math.max(18, tipY - 10));
+      // vibration lines
+      bctx.strokeStyle = `rgba(255,60,60,${0.20 + 0.35*tipPulseA})`;
+      bctx.lineWidth = 2;
+      bctx.beginPath();
+      bctx.moveTo(tipX + 10, tipY - 12); bctx.lineTo(tipX + 18, tipY - 20);
+      bctx.moveTo(tipX + 12, tipY + 12); bctx.lineTo(tipX + 20, tipY + 20);
+      bctx.stroke();
+    } else {
+      bctx.fillStyle = "rgba(255,210,60,0.55)";
+      bctx.beginPath(); bctx.arc(tipX, tipY, 7, 0, TAU); bctx.fill();
+    }
+
+    // Tile health display (5 pips) for the last tile you dug
+    const infoX = W - 170;
+    const infoY = 18;
+
+    bctx.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
+    bctx.fillStyle = "rgba(220,220,235,0.75)";
+    const label = (lastDigTile.tx >= 0) ? `TILE ${lastDigTile.tx},${lastDigTile.ty}` : "TILE —";
+    bctx.fillText(label, infoX, infoY);
+
+    const h = lastDigTile.h ?? TILE_HEALTH_MAX;
+    for (let i=0;i<TILE_HEALTH_MAX;i++){
+      const px = infoX + i*16;
+      const py = infoY + 10;
+      bctx.fillStyle = (i < h) ? "rgba(255,210,60,0.55)" : "rgba(255,60,60,0.35)";
+      pathRoundRect(bctx, px, py, 12, 8, 3);
+      bctx.fill();
+      bctx.strokeStyle = "rgba(0,0,0,0.30)";
+      bctx.stroke();
+    }
+    if (lastDigTile.removed){
+      bctx.fillStyle = "rgba(255,60,60,0.85)";
+      bctx.fillText("REMOVED", infoX, infoY + 38);
+    }
+
+    // Readout text
+    boomReadout.textContent =
+      `yaw:${radToDeg(armYaw).toFixed(0)}° ext:${armExtend.toFixed(2)} curl:${radToDeg(bucketAngle).toFixed(0)}° load:${soilLoad.toFixed(2)}`;
+  }
+
+  // ---------- SVG transforms ----------
+  function updateSVG(dt, tsec){
+    const [sx,sy] = worldToScreen(ex, ey);
+    svgGroup.setAttribute(
+      "transform",
+      `translate(${sx.toFixed(2)},${sy.toFixed(2)}) rotate(${radToDeg(heading).toFixed(2)}) scale(${(camZoom*1.05).toFixed(4)})`
+    );
+    armBaseGroup.setAttribute("transform", `translate(0,-6) rotate(${radToDeg(armYaw).toFixed(2)})`);
+    arm1Group.setAttribute("transform", `translate(0,0) rotate(0)`);
+    arm2Group.setAttribute("transform", `translate(96,0) rotate(${radToDeg(bucketAngle*0.18).toFixed(2)})`);
+    bucketGroup.setAttribute("transform", `translate(78,0) rotate(${radToDeg(bucketAngle).toFixed(2)})`);
+
+    const speed = (left_track_v + right_track_v) * 0.5;
+    const off = (tsec * speed * 22) % 20;
+    treadsL.setAttribute("transform", `translate(0,${(-off).toFixed(2)})`);
+    treadsR.setAttribute("transform", `translate(0,${(-off).toFixed(2)})`);
+  }
+
+  // ---------- Game loop ----------
+  let prevTime = performance.now();
+
+  function startRound(){
+    score = 0;
+    game_over = false;
+    time_bonus_ms = 0;
+    start_ticks = performance.now();
+    last_score_time = null;
+    combo_count = 0;
+
+    tileHealth.clear();
+    pileMap.clear();
+    spawnOre();
+
+    ex = WORLD_SIZE*0.18;
+    ey = WORLD_SIZE*0.18;
+    heading = 0.0;
+    armYaw = 0.0;
+    armExtend = 0.75;
+    bucketAngle = 0.0;
+    left_track_v = right_track_v = 0.0;
+
+    base = { x: WORLD_SIZE - 240, y: WORLD_SIZE - 220, w: 170, h: 120 };
+    particles = [];
+    carriedOre = null;
+
+    soilLoad = 0.0;
+    digTickAccum = 0.0;
+    lastDigKey = null;
+    digPulse = 0.0;
+    lastDigTile = { tx:-1, ty:-1, h:TILE_HEALTH_MAX, removed:false };
+    dumpOpenHold = 0.0;
+
+    camX = ex; camY = ey;
+    camZoom = (scene.id === 2) ? 1.05 : (scene.id === 1 ? 0.98 : 1.0);
+  }
+
+  function update(dt){
+    if (game_over) return;
+
+    const leftHand = lastHands.left;
+    const rightHand = lastHands.right;
+
+    // Dig only meaningful in ARM mode:
+    const leftPinchDig = pinchDown(leftHand);
+    digActive = (mode === "arm") && (keysPressed.Space || leftPinchDig);
+
+    // Auto-dump if bucket is opened wide for a moment while carrying soil (hands-only option)
+    const pinchDistR = pinchDistance(rightHand);
+    const openWide = (pinchDistR !== null) && (pinchDistR > 0.115);
+    if (mode === "arm" && soilLoad > 0.10 && openWide && bucketAngle > 0.35){
+      dumpOpenHold += dt;
+      if (dumpOpenHold > 0.22){
+        dumpSoil();
+        dumpOpenHold = 0.0;
+      }
+    } else {
+      dumpOpenHold = 0.0;
+    }
+
+    // Throttle
+    const th = currentThrottle();
+    let maxSpeed = SPEED_MAX * th;
+
+    const cxTile = clamp(Math.floor(ex / TILE), 0, WORLD_TILES-1);
+    const cyTile = clamp(Math.floor(ey / TILE), 0, WORLD_TILES-1);
+    const onHole = tileRemoved(cxTile, cyTile);
+    const pileHere = getPile(cxTile, cyTile);
+    if (onHole) maxSpeed *= 0.35;
+    if (pileHere > 0.4) maxSpeed *= 0.85;
+
+    // -------- DRIVE MODE --------
+    if (mode === "drive"){
+      // Hands take priority if BOTH hands are present (full control feel).
+      const cmdL = handTrackCommand(leftHand);
+      const cmdR = handTrackCommand(rightHand);
+
+      let tL = null, tR = null;
+
+      if (cmdL && cmdR){
+        tL = cmdL.f;
+        tR = cmdR.f;
+      } else {
+        // Keyboard fallback
+        let fwd = 0;
+        if (keysPressed.KeyW || keysPressed.ArrowUp) fwd += 1;
+        if (keysPressed.KeyS || keysPressed.ArrowDown) fwd -= 1;
+
+        let turn = 0;
+        if (keysPressed.KeyA || keysPressed.ArrowLeft) turn -= 1;
+        if (keysPressed.KeyD || keysPressed.ArrowRight) turn += 1;
+
+        const tl = clamp(fwd - turn*0.75, -1, 1);
+        const tr = clamp(fwd + turn*0.75, -1, 1);
+        tL = tl; tR = tr;
+      }
+
+      const targetVL = tL * maxSpeed;
+      const targetVR = tR * maxSpeed;
+
+      const a = ACCEL * th;
+      left_track_v  += clamp(targetVL - left_track_v,  -a*dt, a*dt);
+      right_track_v += clamp(targetVR - right_track_v, -a*dt, a*dt);
+
+    // -------- ARM MODE --------
+    } else {
+      // slow tracks while using arm
+      left_track_v *= 0.90;
+      right_track_v *= 0.90;
+
+      // Keyboard controls always work
+      if (keysPressed.KeyA) armYaw -= ARM_YAW_RATE * dt;
+      if (keysPressed.KeyD) armYaw += ARM_YAW_RATE * dt;
+      if (keysPressed.KeyW) armExtend += ARM_EXTEND_RATE * dt;
+      if (keysPressed.KeyS) armExtend -= ARM_EXTEND_RATE * dt;
+      if (keysPressed.KeyQ) bucketAngle -= BUCKET_RATE * dt;
+      if (keysPressed.KeyE) bucketAngle += BUCKET_RATE * dt;
+
+      // Hands: Left hand joystick => yaw + extend
+      const joy = leftArmJoystick(leftHand);
+      if (joy){
+        armYaw += joy.yawCmd * ARM_YAW_RATE * dt * 1.15;
+        armExtend += joy.extCmd * ARM_EXTEND_RATE * dt * 1.20;
+      }
+
+      // Hands: Right hand pinch distance => bucket curl
+      const bA = bucketAngleFromPinchDist(pinchDistR);
+      if (bA !== null){
+        bucketAngle = lerp(bucketAngle, bA, 0.18); // smooth
+      }
+
+      armYaw = wrapAngle(armYaw);
+      armExtend = clamp(armExtend, 0.20, 1.00);
+      bucketAngle = clamp(bucketAngle, -0.90, 0.90);
+    }
+
+    // friction
+    const friction = scene.friction;
+    left_track_v  *= Math.pow(friction, dt*60);
+    right_track_v *= Math.pow(friction, dt*60);
+
+    // kinematics
+    const v = (left_track_v + right_track_v) * 0.5;
+    const w = (right_track_v - left_track_v) / 54;
+
+    heading = wrapAngle(heading + w * dt);
+
+    const drift = scene.drift;
+    const vx = Math.cos(heading) * v;
+    const vy = Math.sin(heading) * v;
+
+    ex += (vx - Math.sin(heading)*v*drift*Math.abs(w)*0.5) * dt;
+    ey += (vy + Math.cos(heading)*v*drift*Math.abs(w)*0.5) * dt;
+
+    ex = clamp(ex, 30, WORLD_SIZE - 30);
+    ey = clamp(ey, 30, WORLD_SIZE - 30);
+
+    camX = lerp(camX, ex, 0.10);
+    camY = lerp(camY, ey, 0.10);
+
+    // Carry ore at bucket tip
+    if (carriedOre !== null){
+      const bp = bucketWorldPoint();
+      const o = oreNodes[carriedOre];
+      if (o){ o.x = bp.tipX; o.y = bp.tipY; }
+    }
+
+    // Dig hits
+    applyDigTicks(dt);
+
+    // Scoop ore (only if not actively digging)
+    if (!digActive) tryScoopOre();
+    checkBaseDrop();
+
+    // Dig pulse decay
+    digPulse = Math.max(0, digPulse - dt);
+
+    // particles
+    if (Math.abs(v) > 35) spawnDirt(ex, ey, 1 + Math.abs(v)*0.01);
+    updateParticles(dt);
+
+    if (remaining_time_sec() <= 0) game_over = true;
+
+    // HUD tile under bucket tip for user awareness
+    const bp = bucketWorldPoint();
+    const btx = clamp(Math.floor(bp.tipX / TILE), 0, WORLD_TILES-1);
+    const bty = clamp(Math.floor(bp.tipY / TILE), 0, WORLD_TILES-1);
+    const h = getHealth(btx,bty);
+    hudTile.textContent = `${btx},${bty} (hp:${h})`;
+  }
+
+  function render(dt, tsec){
+    clearBackground();
+    drawTiles();
+    drawBase();
+    drawOre();
+    drawParticles();
+    drawVignette();
+
+    // Bucket marker (dig point) + small arc showing curl state
+    const bp = bucketWorldPoint();
+    const [bx,by] = worldToScreen(bp.tipX, bp.tipY);
+    ctx.fillStyle = (digActive ? "rgba(255,60,60,0.70)" : "rgba(255,200,60,0.55)");
+    ctx.beginPath(); ctx.arc(bx, by, 6, 0, TAU); ctx.fill();
+
+    ctx.strokeStyle = "rgba(255,235,170,0.40)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(bx, by, 12, -Math.PI*0.25, -Math.PI*0.25 + clamp((bucketAngle+0.9)/1.8,0,1)*Math.PI*1.5);
+    ctx.stroke();
+
+    // Heading marker
+    const [sx,sy] = worldToScreen(ex,ey);
+    ctx.strokeStyle = "rgba(255,235,160,0.35)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(sx + Math.cos(heading)*30, sy + Math.sin(heading)*30);
+    ctx.stroke();
+
+    // Game over overlay
+    if (game_over){
+      ctx.fillStyle = "rgba(0,0,0,0.62)";
+      ctx.fillRect(0,0,SCREEN_W,SCREEN_H);
+      ctx.font = "54px ui-monospace, SFMono-Regular, Menlo, monospace";
+      ctx.fillStyle = "rgb(255,230,200)";
+      const msg = "GAME OVER";
+      ctx.fillText(msg, SCREEN_W/2 - ctx.measureText(msg).width/2, SCREEN_H/2 - 30);
+      ctx.font = "18px ui-monospace, SFMono-Regular, Menlo, monospace";
+      ctx.fillStyle = "rgb(230,230,240)";
+      const sub = `Final Score: ${score}   |   Press R to Restart`;
+      ctx.fillText(sub, SCREEN_W/2 - ctx.measureText(sub).width/2, SCREEN_H/2 + 12);
+    }
+
+    updateSVG(dt, tsec);
+    drawBoomSideView();
+
+    // HUD
+    hudScore.textContent = String(score);
+    hudTime.textContent = String(remaining_time_sec()).padStart(2,'0') + "s";
+    hudMode.textContent = mode.toUpperCase();
+    hudThrottle.textContent = "x" + currentThrottle().toFixed(2);
+    hudDig.textContent = digActive ? "ON" : "OFF";
+    hudLoad.textContent = soilLoad.toFixed(2);
+    hudScene.textContent = scene.name;
+  }
+
+  function frame(){
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - prevTime)/1000);
+    prevTime = now;
+    const tsec = now/1000;
+
+    update(dt);
+    render(dt, tsec);
+
+    requestAnimationFrame(frame);
+  }
+
+  function startScene(sceneId){
+    scene = SCENES[sceneId] || SCENES[0];
+    hudScene.textContent = scene.name;
+    startScreen.style.display = "none";
+    startRound();
+  }
+
+  document.querySelectorAll('.tile').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const id = parseInt(el.getAttribute('data-scene') || "0", 10);
+      startScene(id);
+    });
+  });
+
+  (async ()=>{
+    await initHands();
+    prevTime = performance.now();
+    requestAnimationFrame(frame);
+  })();
+  </script>
+</body>
+</html>

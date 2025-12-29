@@ -1,0 +1,1129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Excavator Job Site — Hand Gesture Demo</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    html,body { margin:0; padding:0; background:#111; height:100%; font-family:Arial,Helvetica,sans-serif; color:#eee; }
+    #container { position:relative; width:900px; margin:14px auto; text-align:center; }
+    #canvasWrap { position:relative; margin:0 auto; width:800px; height:600px; }
+    canvas { display:block; background:#000; border-radius:6px; box-shadow:0 6px 20px rgba(0,0,0,0.6); }
+    #hud { margin-top:8px; color:#ddd; font-size:13px; }
+    #inventory { margin-top:6px; }
+    #controls { margin-top:8px; color:#bbb; font-size:13px; }
+    video { display:none; }
+    button{background:#333;color:#fff;border:1px solid #555;padding:6px 10px;border-radius:6px;margin:2px}
+    .small { font-size:12px; color:#bbb }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <h3>Excavator Job Site — Gesture Driven</h3>
+    <div id="canvasWrap">
+      <canvas id="screen" width="800" height="600"></canvas>
+    </div>
+    <div id="hud">
+      <div id="score">Score: 0</div>
+      <div id="inventory" class="small">Inventory: 0 grains</div>
+    </div>
+    <div id="controls">
+      <button id="spawnPilesBtn">Spawn Piles</button>
+      <button id="clearInventory">Clear Inventory</button>
+      <span class="small">
+        TAB toggles ARM/DRIVE, 👍 (thumbs-up hold) toggles too, R restart, [ / ] throttle, SHIFT boost, 1-5 presets
+      </span>
+    </div>
+  </div>
+
+  <!-- MediaPipe Hands -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <video id="video" playsinline></video>
+
+<script>
+/* =========================================================
+   EXCAVATOR JOB SITE — FULL SCRIPT (with 👍 thumbs-up toggle)
+   - Thumbs-up hold toggles ARM/DRIVE with on-screen timer + acknowledge
+   - Adds cab yaw "spin" (visual 360 rotation) from differential tracks
+   - Adds terrain digging: if scooper penetrates ground, it generates dirt grains
+   - Adds smoothing on boom angles so controls feel less twitchy
+   ========================================================= */
+
+/* ---------- Setup and world ---------- */
+const SCREEN_W = 800, SCREEN_H = 600;
+const canvas = document.getElementById('screen');
+const ctx = canvas.getContext('2d', { alpha: false });
+
+const WORLD_W = 3200;
+const GROUND_BASE = 550;
+const GROUND_AMP_BASE = 40;
+const GROUND_SCALE_BASE = 360.0;
+
+let scene_sky_top = {r:18,g:18,b:28};
+let scene_sky_bot = {r:30,g:32,b:46};
+let scene_ground = {r:0,g:120,b:0};
+let terrain_amp = GROUND_AMP_BASE;
+let terrain_scale = GROUND_SCALE_BASE;
+let cam_zoom = 1.0;
+
+let target_sky_top = {...scene_sky_top};
+let target_sky_bot = {...scene_sky_bot};
+let target_ground = {...scene_ground};
+let target_amp = terrain_amp;
+let target_scale = terrain_scale;
+let target_zoom = cam_zoom;
+
+function lerp(a,b,t){ return a + (b-a)*t; }
+function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
+function colorLerp(ca, cb, t){
+  return { r: Math.round(lerp(ca.r, cb.r, t)), g: Math.round(lerp(ca.g, cb.g, t)), b: Math.round(lerp(ca.b, cb.b, t)) };
+}
+function colorToCss(c){ return `rgb(${c.r},${c.g},${c.b})`; }
+function groundYAt(xw){ return GROUND_BASE - terrain_amp * Math.sin(xw / terrain_scale); }
+
+let camera_x = 0.0;
+function worldToScreen(wx, wy){
+  const cx = camera_x + SCREEN_W*0.5;
+  const sx = (wx - cx) * cam_zoom + SCREEN_W*0.5;
+  const sy = (wy - GROUND_BASE) * cam_zoom + GROUND_BASE;
+  return [sx, sy];
+}
+
+/* ---------- Deterministic PRNG (to reduce flicker) ---------- */
+function hash01(a, b, c){
+  // small deterministic hash -> [0,1)
+  let x = (a*374761393 + b*668265263 + c*2147483647) >>> 0;
+  x ^= x << 13; x ^= x >>> 17; x ^= x << 5;
+  return (x >>> 0) / 4294967296;
+}
+
+/* ---------- Pixel Layers ---------- */
+function drawPixelLayer(ctx, parallax, tint, blockSize, density, tsec) {
+  const px = camera_x * (1.0 - parallax);
+  const cols = Math.ceil(SCREEN_W / blockSize) + 2;
+  const rows = Math.ceil(SCREEN_H / blockSize) + 2;
+  const seedBase = Math.floor(px / 80);
+
+  ctx.save();
+  ctx.globalAlpha = 0.85;
+
+  for (let y=0;y<rows;y++){
+    for (let x=0;x<cols;x++){
+      const r0 = hash01(seedBase, x, y);
+      if (r0 < density) {
+        const rx = (x*blockSize - (px%blockSize));
+        const wob = Math.sin((x+y+tsec*2)*0.3)*2;
+        const ry = y*blockSize + wob;
+
+        const jitter = (hash01(seedBase+17, x, y) * 30 - 15);
+        const r = clamp(Math.round(tint.r + jitter), 0, 255);
+        const g = clamp(Math.round(tint.g + jitter), 0, 255);
+        const b = clamp(Math.round(tint.b + jitter), 0, 255);
+
+        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        ctx.fillRect(Math.round(rx), Math.round(ry), blockSize, blockSize);
+      }
+    }
+  }
+
+  ctx.restore();
+}
+
+/* ---------- Existing layers + pixel layers integration ---------- */
+const LAYERS = [
+  ["pixel_far", 0.12, 0.25],
+  ["sky",       0.20, 0.65],
+  ["clouds",    0.30, 0.55],
+  ["mountains", 0.45, 0.50],
+  ["pixel_mid", 0.55, 0.30],
+  ["trees",     0.70, 0.35],
+  ["near",      1.00, 0.18],
+  ["pixel_front", 1.00, 0.08]
+];
+
+function layerShift(parallax){ return camera_x * (1.0 - parallax); }
+
+function drawVerticalGradient(ctx, topColor, bottomColor){
+  const grad = ctx.createLinearGradient(0,0,0,SCREEN_H);
+  grad.addColorStop(0, colorToCss(topColor));
+  grad.addColorStop(1, colorToCss(bottomColor));
+  ctx.fillStyle = grad;
+  ctx.fillRect(0,0,SCREEN_W,SCREEN_H);
+}
+
+function drawClouds(ctx, parallax, tsec){
+  const px = layerShift(parallax);
+  const drift = (tsec * 12) % 800;
+  const seed = Math.floor(px/250);
+  for (let i=0;i<8;i++){
+    const base_x = Math.floor(hash01(seed, i, 1) * (SCREEN_W+240)) - 120;
+    const x = (base_x + drift) % (SCREEN_W + 240) - 120;
+    const y = 40 + hash01(seed, i, 2)*100;
+    const w = 100 + hash01(seed, i, 3)*100;
+    const h = 30 + hash01(seed, i, 4)*30;
+    const col = colorLerp(scene_sky_top, {r:220,g:220,b:235}, 0.25);
+    ctx.fillStyle = `rgba(${col.r},${col.g},${col.b},0.43)`;
+    ctx.beginPath();
+    ctx.ellipse(x + w/2, y + h/2, w/2, h/2, 0, 0, Math.PI*2);
+    ctx.fill();
+  }
+}
+
+function drawMountains(ctx, parallax){
+  const px = layerShift(parallax);
+  const step = 8;
+  const ridge1 = colorLerp(scene_sky_bot, {r:80,g:90,b:130}, 0.35);
+  const ridge2 = colorLerp(scene_sky_bot, {r:60,g:70,b:110}, 0.25);
+  [[0,1.0,ridge1],[80,0.7,ridge2]].forEach(([off,amp,col])=>{
+    ctx.fillStyle = colorToCss(col);
+    ctx.beginPath();
+    for (let sx=-20;sx<=SCREEN_W+40;sx+=step){
+      const wx = Math.max(0, Math.min(WORLD_W, sx + px + off));
+      const y = GROUND_BASE - 160 - 40 * amp * Math.sin(wx / 520.0) - 25 * amp * Math.sin(wx / 210.0);
+      if (sx === -20) ctx.moveTo(sx,y); else ctx.lineTo(sx,y);
+    }
+    ctx.lineTo(SCREEN_W, 0);
+    ctx.lineTo(0,0);
+    ctx.closePath();
+    ctx.fill();
+  });
+}
+
+function drawTreeBand(ctx, parallax){
+  const px = layerShift(parallax);
+  const seed = Math.floor(px/220);
+  for (let i=0;i<18;i++){
+    const sx = Math.floor(hash01(seed, i, 1)*(SCREEN_W+100))-50;
+    const wx = Math.max(0, Math.min(WORLD_W, sx + px));
+    const base_y = GROUND_BASE - 90 - 20 * Math.sin(wx / 310.0);
+    const h = 50 + hash01(seed, i, 2)*30;
+    ctx.fillStyle = "rgb(70,45,25)";
+    ctx.fillRect(Math.round(sx-3), Math.round(base_y-h), 6, h);
+    ctx.fillStyle = "rgb(32,110,45)";
+    ctx.beginPath();
+    ctx.moveTo(sx, base_y-h-12);
+    ctx.lineTo(sx-22, base_y-32);
+    ctx.lineTo(sx+22, base_y-32);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+function drawGroundStrip(ctx){
+  const step = 10;
+  ctx.fillStyle = colorToCss(scene_ground);
+  ctx.beginPath();
+  let started = false;
+  const start = Math.floor(camera_x/step)*step - 20;
+  const end = start + SCREEN_W + 40;
+  for (let x=start;x<=end;x+=step){
+    const xw = Math.max(0, Math.min(WORLD_W, x));
+    const [sx, sy] = worldToScreen(xw, groundYAt(xw));
+    if (!started){ ctx.moveTo(sx, sy); started=true; } else ctx.lineTo(sx, sy);
+  }
+  ctx.lineTo(SCREEN_W, SCREEN_H);
+  ctx.lineTo(0, SCREEN_H);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function applyVignette(ctx){
+  const grad = ctx.createRadialGradient(SCREEN_W/2, SCREEN_H/2, 0, SCREEN_W/2, SCREEN_H/2, Math.max(SCREEN_W, SCREEN_H)/1.2);
+  grad.addColorStop(0, 'rgba(0,0,0,0)');
+  grad.addColorStop(1, 'rgba(0,0,0,0.35)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0,0,SCREEN_W,SCREEN_H);
+}
+
+function renderLayers(ctx, tsec){
+  for (const [name, parallax, fog] of LAYERS){
+    if (name === "pixel_far") {
+      drawPixelLayer(ctx, parallax, colorLerp(scene_sky_top, scene_sky_bot, 0.3), 8, 0.06, tsec);
+    } else if (name === "sky") {
+      drawVerticalGradient(ctx, scene_sky_top, scene_sky_bot);
+    } else if (name === "clouds") {
+      drawClouds(ctx, parallax, tsec);
+    } else if (name === "mountains") {
+      drawMountains(ctx, parallax);
+    } else if (name === "pixel_mid") {
+      drawPixelLayer(ctx, parallax, {r:40,g:70,b:100}, 6, 0.04, tsec);
+    } else if (name === "trees") {
+      drawTreeBand(ctx, parallax);
+    } else if (name === "near") {
+      drawGroundStrip(ctx);
+    } else if (name === "pixel_front") {
+      drawPixelLayer(ctx, parallax, {r:40,g:100,b:40}, 4, 0.03, tsec);
+    }
+  }
+}
+
+/* ---------- Game objects and piles ---------- */
+let balls = [];
+function spawnBalls(){
+  balls = [];
+  for (let i=0;i<18;i++){
+    const bx = Math.floor(Math.random()*(WORLD_W-160))+80;
+    const by = groundYAt(bx)-10;
+    balls.push([bx, by]);
+  }
+}
+
+const basket = [WORLD_W - 150, groundYAt(WORLD_W - 100) - 50, 100, 50];
+let score = 0;
+
+/* ---------- Excavator physics ---------- */
+let excavator_pos = [420.0, groundYAt(420.0)-50];
+const EXCAVATOR_SPEED_MAX = 8.0;
+const EXCAVATOR_ACCEL = 0.65;
+const EXCAVATOR_DRAG = 0.85;
+let left_track_v = 0.0, right_track_v = 0.0;
+
+/* ---------- 360 spin / cab yaw (visual) ---------- */
+let cab_yaw = 0.0; // radians, wraps
+const CAB_YAW_GAIN = 0.020; // how strongly diff tracks create yaw
+
+/* ---------- Arm angles ---------- */
+const first_boom_length = 100, second_boom_length = 80;
+let first_boom_angle = 0.0, second_boom_angle = 0.0;
+let target_first_boom_angle = 0.0, target_second_boom_angle = 0.0;
+
+const BOOM_CONTROL_RATE_BASE = 0.10;
+const DEAD_ZONE_WIDTH = 0.15;
+let left_movement = false;
+
+let mode = "arm";
+
+/* ---------- Scenes ---------- */
+const SCENES = [
+  [0,   800,  {r:18,g:18,b:28},  {r:30,g:32,b:46}, {r:0,g:120,b:0},     GROUND_AMP_BASE,      GROUND_SCALE_BASE,      1.00],
+  [800, 1700, {r:20,g:24,b:40},  {r:32,g:36,b:56}, {r:10,g:130,b:15},   GROUND_AMP_BASE*1.1,  GROUND_SCALE_BASE*0.95, 1.15],
+  [1700,2600,{r:22,g:26,b:46},  {r:35,g:38,b:60}, {r:15,g:135,b:18},   GROUND_AMP_BASE*1.25, GROUND_SCALE_BASE*0.90, 1.28],
+  [2600,4000,{r:24,g:28,b:52},  {r:38,g:42,b:66}, {r:20,g:140,b:20},   GROUND_AMP_BASE*1.35, GROUND_SCALE_BASE*0.86, 1.35]
+];
+
+function updateSceneTargets(x){
+  for (const [sx,ex, sky_t, sky_b, ground, amp, scale, zoom] of SCENES){
+    if (sx <= x && x < ex){
+      target_sky_top = sky_t; target_sky_bot = sky_b; target_ground = ground;
+      target_amp = amp; target_scale = scale; target_zoom = zoom;
+      return;
+    }
+  }
+}
+
+/* ---------- Particles & dust ---------- */
+let particles = [];
+function spawnDust(xw, yw, speed){
+  const count = Math.floor(Math.max(0, Math.min(8, Math.abs(speed) * 0.30)));
+  for (let i=0;i<count;i++){
+    const ang = Math.random()*Math.PI + Math.PI;
+    const v = 0.6 + Math.random()*1.8;
+    particles.push({
+      x: xw + (Math.random()*20-10),
+      y: yw + 50 + (Math.random()*8 - 5),
+      vx: Math.cos(ang)*v,
+      vy: -Math.abs(Math.sin(ang))*v*0.35,
+      life: 0.35 + Math.random()*0.6
+    });
+  }
+}
+function updateParticles(dt){
+  for (let i=particles.length-1;i>=0;i--){
+    const p = particles[i];
+    p.life -= dt;
+    p.x += p.vx; p.y += p.vy; p.vy += 0.03;
+    if (p.life <= 0) particles.splice(i,1);
+  }
+}
+function drawParticles(ctx){
+  for (const p of particles){
+    const a = Math.floor(130 * clamp(p.life, 0, 1));
+    ctx.fillStyle = `rgba(90,80,60,${a/255})`;
+    const [sx, sy] = worldToScreen(p.x, p.y);
+    ctx.beginPath();
+    ctx.arc(Math.round(sx), Math.round(sy), Math.max(1, Math.round(2*cam_zoom)), 0, Math.PI*2);
+    ctx.fill();
+  }
+}
+
+/* ---------- Material piles: grains + targets ---------- */
+let piles = [];
+let targetZones = [];
+
+function spawnPiles(count=4){
+  piles = [];
+  targetZones = [];
+  for (let i=0;i<count;i++){
+    const px = 140 + i*( (WORLD_W-280)/count ) + (Math.random()*80-40);
+    const py = groundYAt(px) - 10;
+    const color = {r:140+Math.random()*60|0, g:90+Math.random()*40|0, b:30+Math.random()*20|0};
+    const grains = [];
+    const grainCount = 140 + Math.floor(Math.random()*60);
+    for (let g=0; g<grainCount; g++){
+      const a = Math.random()*Math.PI*2;
+      const rDist = Math.pow(Math.random(),0.6) * 60;
+      const gx = px + Math.cos(a)*rDist + (Math.random()*20-10);
+      const gy = py - Math.abs(Math.sin(a))*rDist*0.4 + (Math.random()*12-6);
+      grains.push({x:gx, y:gy, r: 2 + Math.random()*2, color});
+    }
+    piles.push({id:i, x:px, y:py, grains, color, target:false, dragging:false});
+  }
+
+  for (let t=0;t<3;t++){
+    const tx = WORLD_W - 350 + t*80;
+    const ty = groundYAt(tx) - 10;
+    targetZones.push({id:t, x:tx, y:ty, grains: [], color: {r:100,g:180,b:100}});
+  }
+}
+
+function drawPile(ctx, pile){
+  for (const g of pile.grains){
+    const [sx, sy] = worldToScreen(g.x, g.y);
+    ctx.beginPath();
+    ctx.fillStyle = `rgb(${g.color.r},${g.color.g},${g.color.b})`;
+    ctx.arc(sx, sy, Math.max(1, Math.round(g.r * cam_zoom)), 0, Math.PI*2);
+    ctx.fill();
+  }
+  const [scenterX, scenterY] = worldToScreen(pile.x, pile.y);
+  ctx.fillStyle = 'rgba(40,30,30,0.15)';
+  ctx.beginPath();
+  ctx.ellipse(scenterX, scenterY - 10*cam_zoom, 80*cam_zoom, 30*cam_zoom, 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+function drawTargetZone(ctx, zone){
+  const [sx, sy] = worldToScreen(zone.x, zone.y);
+  ctx.fillStyle = 'rgba(140,180,140,0.45)';
+  ctx.beginPath();
+  ctx.ellipse(sx, sy-10*cam_zoom, 48*cam_zoom, 18*cam_zoom, 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+  ctx.lineWidth=1;
+  ctx.stroke();
+
+  for (const g of zone.grains){
+    const [gx, gy] = worldToScreen(g.x, g.y);
+    ctx.fillStyle = `rgb(${g.color.r},${g.color.g},${g.color.b})`;
+    ctx.beginPath();
+    ctx.arc(gx, gy, Math.max(1, Math.round(g.r*cam_zoom)), 0, Math.PI*2);
+    ctx.fill();
+  }
+}
+
+/* ---------- Scooping & Cargo ---------- */
+let scooped_grains = []; // attached to scooper offsets
+const SCOOP_CAP = 900;
+
+function scooperCollect(scooper_world){
+  const radius = 22;
+  for (const pile of piles){
+    for (let i=pile.grains.length-1;i>=0;i--){
+      if (scooped_grains.length >= SCOOP_CAP) break;
+      const g = pile.grains[i];
+      const dx = g.x - scooper_world[0], dy = g.y - scooper_world[1];
+      if (Math.hypot(dx,dy) < radius){
+        pile.grains.splice(i,1);
+        scooped_grains.push({ox: g.x - scooper_world[0], oy: g.y - scooper_world[1], r: g.r, color: g.color});
+      }
+    }
+  }
+
+  // legacy balls -> grains
+  for (let i=balls.length-1;i>=0;i--){
+    if (scooped_grains.length >= SCOOP_CAP) break;
+    const b = balls[i];
+    const dx = b[0] - scooper_world[0], dy = b[1] - scooper_world[1];
+    if (Math.hypot(dx,dy) < radius){
+      scooped_grains.push({ox: b[0] - scooper_world[0], oy: b[1] - scooper_world[1], r: 5, color: {r:240,g:210,b:60}});
+      balls.splice(i,1);
+    }
+  }
+}
+
+function updateScoopedPositions(scooper_world){
+  for (const g of scooped_grains){
+    g.x = scooper_world[0] + g.ox;
+    g.y = scooper_world[1] + g.oy;
+    g.ox += (Math.random()*0.5-0.25);
+    g.oy += (Math.random()*0.5-0.18);
+  }
+}
+
+/* --- Terrain digging (NEW): if scooper penetrates ground, generate dirt grains --- */
+function terrainDigging(scooper_world, dt){
+  if (scooped_grains.length >= SCOOP_CAP) return;
+  const gx = scooper_world[0];
+  const gy = groundYAt(gx);
+  const penetration = scooper_world[1] - (gy - 2); // positive -> below ground line
+  if (penetration > 6){
+    const intensity = clamp(penetration, 0, 18);
+    const grainsPerSec = 25 + intensity * 18;
+    const n = Math.min(30, Math.floor(grainsPerSec * dt));
+    const dirt = {r:120, g:90, b:55};
+    for (let i=0;i<n;i++){
+      if (scooped_grains.length >= SCOOP_CAP) break;
+      scooped_grains.push({
+        ox: (Math.random()*16-8),
+        oy: (Math.random()*10-6),
+        r: 2 + Math.random()*2,
+        color: dirt
+      });
+    }
+    spawnDust(gx, gy, penetration*1.6);
+  }
+}
+
+function rectContainsWorld(rect, wx, wy){
+  return wx >= rect.x && wx <= rect.x + rect.w && wy >= rect.y && wy <= rect.y + rect.h;
+}
+
+function depositToBasketOrTarget(scooper_world, allowTargetDeposit){
+  const basketRect = {x:basket[0], y:basket[1], w:basket[2], h:basket[3]};
+  if (rectContainsWorld(basketRect, scooper_world[0], scooper_world[1])) {
+    if (scooped_grains.length > 0){
+      score += scooped_grains.length * 10;
+      scooped_grains = [];
+      updateScoreHUD();
+    }
+    return;
+  }
+
+  if (!allowTargetDeposit) return;
+
+  for (const zone of targetZones){
+    const dist = Math.hypot(zone.x - scooper_world[0], zone.y - scooper_world[1]);
+    if (dist < 60 && scooped_grains.length > 0){
+      const moved = scooped_grains.splice(0);
+      for (const g of moved){
+        const a = Math.random()*Math.PI*2;
+        const r = Math.random()*24;
+        zone.grains.push({x: zone.x + Math.cos(a)*r, y: zone.y - Math.abs(Math.sin(a))*r*0.4, r: g.r, color: g.color});
+      }
+      updateScoreHUD();
+      return;
+    }
+  }
+}
+
+/* ---------- THROTTLE / keyboard ---------- */
+const THROTTLE_MIN = 0.25, THROTTLE_MAX = 4.0, THROTTLE_STEP = 0.10, BOOST_MULT = 1.5;
+let throttle = 1.0;
+function currentThrottle(keysPressed){
+  const boost = (keysPressed['ShiftLeft'] || keysPressed['ShiftRight']) ? BOOST_MULT : 1.0;
+  return clamp(throttle, THROTTLE_MIN, THROTTLE_MAX) * boost;
+}
+
+/* ---------- Score/timer (kept) ---------- */
+const ROUND_DURATION = 90, TIME_BONUS_PER_SCORE = 5, TIME_CAP = 120, BASE_POINTS = 100, COMBO_WINDOW = 4.0, COMBO_STEP = 0.25, COMBO_MAX_MULT = 3.0, PRESSURE_MAX_MULT = 3.0;
+let game_over = false, time_bonus_ms = 0, start_ticks = 0, last_score_time = null, combo_count = 0;
+
+function remaining_time_sec(){
+  const elapsed_ms = performance.now() - start_ticks;
+  const total_ms = Math.min((ROUND_DURATION*1000) + time_bonus_ms, TIME_CAP*1000);
+  return Math.max(0, Math.floor((total_ms - elapsed_ms)/1000));
+}
+function time_pressure_multiplier(){
+  const rem = remaining_time_sec();
+  const t = 1.0 - (rem / TIME_CAP);
+  return 1.0 + t * (PRESSURE_MAX_MULT - 1.0);
+}
+function combo_multiplier(now_sec){
+  if (last_score_time === null || (now_sec - last_score_time) > COMBO_WINDOW) combo_count = 1;
+  else combo_count += 1;
+  last_score_time = now_sec;
+  return Math.min(1.0 + (combo_count-1)*COMBO_STEP, COMBO_MAX_MULT);
+}
+function updateScoreHUD(){
+  document.getElementById('score').innerText = `Score: ${score}`;
+  document.getElementById('inventory').innerText = `Inventory: ${scooped_grains.length} grains`;
+}
+
+/* ---------- Hand control math ---------- */
+function calculate_main_boom_angle(hand_lm, keysPressed){
+  if (!hand_lm) return target_first_boom_angle;
+  const rw = hand_lm[0], ri = hand_lm[8];
+  const dx = (ri.x - rw.x);
+  const dy = (ri.y - rw.y);
+  let ang = Math.atan2(dy*SCREEN_H, dx*SCREEN_W);
+
+  // bias/snap to reduce twitch
+  const rate = BOOM_CONTROL_RATE_BASE * currentThrottle(keysPressed);
+
+  if (ri.x < rw.x - DEAD_ZONE_WIDTH){
+    left_movement = true;
+    ang += rate;
+  } else if (ri.x > rw.x + DEAD_ZONE_WIDTH){
+    left_movement = false;
+    ang -= rate;
+  }
+  const limit = left_movement ? Math.PI : Math.PI/2;
+  return clamp(ang, -limit, limit);
+}
+
+function calculate_second_boom_angle(hand_lm){
+  if (!hand_lm) return target_second_boom_angle;
+  const ri = hand_lm[8], rw = hand_lm[0];
+  const dx = (rw.x - ri.x)*SCREEN_W;
+  const dy = (rw.y - ri.y)*SCREEN_H;
+  return Math.atan2(dy, dx);
+}
+
+function track_speed_from_hand(hand_lm){
+  if (!hand_lm) return 0.0;
+  const wrist = hand_lm[0], idx = hand_lm[8];
+  let offset = idx.x - wrist.x;
+  if (Math.abs(offset) < DEAD_ZONE_WIDTH*0.7) return 0.0;
+  offset = clamp(offset, -0.5, 0.5);
+  return offset/0.5;
+}
+
+/* ---------- 👍 Thumbs-up toggle (NEW) ---------- */
+const THUMBS_HOLD_SEC = 0.45;       // hold time to toggle
+const THUMBS_COOLDOWN_SEC = 1.20;   // prevents rapid toggles
+const ACK_SHOW_SEC = 1.15;
+
+let thumbsHoldStart = null; // seconds
+let lastModeToggleAt = -999; // seconds
+let ackText = "";
+let ackUntil = 0;
+
+function dist2(a,b){
+  const dx = a.x - b.x, dy = a.y - b.y;
+  return dx*dx + dy*dy;
+}
+
+function isThumbsUp(lm){
+  if (!lm) return false;
+  const wrist = lm[0];
+  const thumb_tip = lm[4], thumb_ip = lm[3], thumb_mcp = lm[2];
+  const index_tip = lm[8], index_pip = lm[6];
+  const middle_tip = lm[12], middle_pip = lm[10];
+  const ring_tip = lm[16], ring_pip = lm[14];
+  const pinky_tip = lm[20], pinky_pip = lm[18];
+
+  // thumb up: tip above ip above mcp (y smaller is higher)
+  const thumbUp = (thumb_tip.y < thumb_ip.y) && (thumb_ip.y < thumb_mcp.y);
+
+  // other fingers folded (tips below their PIP)
+  const indexFold = index_tip.y > index_pip.y;
+  const middleFold = middle_tip.y > middle_pip.y;
+  const ringFold = ring_tip.y > ring_pip.y;
+  const pinkyFold = pinky_tip.y > pinky_pip.y;
+
+  // thumb separated from index tip a bit (avoid accidental)
+  const sep = dist2(thumb_tip, index_tip);
+  const separated = sep > 0.0065; // tuned for normalized coords
+
+  // also ensure thumb is above wrist a bit (so it's not sideways)
+  const aboveWrist = thumb_tip.y < wrist.y - 0.03;
+
+  return thumbUp && indexFold && middleFold && ringFold && pinkyFold && separated && aboveWrist;
+}
+
+function processThumbsUpToggle(nowSec){
+  const thumbsUp = isThumbsUp(lastHands.left) || isThumbsUp(lastHands.right);
+  const canToggle = (nowSec - lastModeToggleAt) > THUMBS_COOLDOWN_SEC;
+
+  if (thumbsUp && canToggle){
+    if (thumbsHoldStart === null) thumbsHoldStart = nowSec;
+    const held = nowSec - thumbsHoldStart;
+    if (held >= THUMBS_HOLD_SEC){
+      mode = (mode === 'arm') ? 'drive' : 'arm';
+      lastModeToggleAt = nowSec;
+      thumbsHoldStart = null;
+
+      ackText = `👍 Mode switched to ${mode.toUpperCase()}`;
+      ackUntil = nowSec + ACK_SHOW_SEC;
+    }
+  } else {
+    thumbsHoldStart = null;
+  }
+}
+
+/* ---------- Round control ---------- */
+function startRound(){
+  score = 0;
+  scooped_grains = [];
+  left_track_v = right_track_v = 0.0;
+
+  first_boom_angle = second_boom_angle = 0.0;
+  target_first_boom_angle = target_second_boom_angle = 0.0;
+
+  cab_yaw = 0.0;
+
+  excavator_pos = [420.0, groundYAt(420.0)-50];
+  camera_x = Math.max(0, Math.min(WORLD_W - SCREEN_W, excavator_pos[0] - SCREEN_W*0.5));
+  spawnBalls();
+  particles = [];
+  spawnPiles(4);
+
+  game_over = false;
+  time_bonus_ms = 0;
+  start_ticks = performance.now();
+  last_score_time = null;
+  combo_count = 0;
+
+  thumbsHoldStart = null;
+  lastModeToggleAt = -999;
+  ackText = "";
+  ackUntil = 0;
+
+  updateScoreHUD();
+}
+
+/* ---------- Drawing helpers ---------- */
+function drawLine(ctx, a, b, width=1, color='white'){
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(1,width);
+  ctx.beginPath();
+  ctx.moveTo(a[0],a[1]);
+  ctx.lineTo(b[0],b[1]);
+  ctx.stroke();
+}
+
+function drawBoom(ctx, base_world, length, angle, color='rgb(255,80,80)', width=5){
+  const end_x = base_world[0] + length * Math.cos(angle);
+  const end_y = base_world[1] + length * Math.sin(angle);
+  const a = worldToScreen(base_world[0], base_world[1]);
+  const b = worldToScreen(end_x, end_y);
+  drawLine(ctx, a, b, Math.max(1, Math.round(width*cam_zoom)), color);
+  drawLine(ctx, [a[0]+1,a[1]+1], [b[0]+1,b[1]+1], 1, 'rgba(255,255,255,0.4)');
+  return [end_x, end_y];
+}
+
+function drawScooper(ctx, base_world, length, angle, color='rgb(0,0,255)', width=5){
+  const end_x = base_world[0] + length * Math.cos(angle);
+  const end_y = base_world[1] + length * Math.sin(angle);
+  const a = worldToScreen(base_world[0], base_world[1]);
+  const b = worldToScreen(end_x, end_y);
+  drawLine(ctx, a, b, Math.max(1, Math.round(width*cam_zoom)), color);
+  drawLine(ctx, [b[0]-1,b[1]-1], [b[0]+1,b[1]+1], 1, 'rgba(230,230,255,0.9)');
+  return [end_x, end_y];
+}
+
+/* ---------- Input, MediaPipe & main loop ---------- */
+const videoElement = document.getElementById('video');
+let handsDetector = null, cameraInstance = null, lastHands = {left:null, right:null};
+const keysPressed = {};
+
+window.addEventListener('keydown', (e)=>{
+  keysPressed[e.code] = true;
+
+  if (e.code === 'Tab'){
+    e.preventDefault();
+    if(!game_over){
+      mode = (mode==='arm')?'drive':'arm';
+      // show ack for keyboard toggle too
+      const nowSec = performance.now()/1000.0;
+      ackText = `Mode switched to ${mode.toUpperCase()} (TAB)`;
+      ackUntil = nowSec + 0.9;
+    }
+  }
+
+  if (e.code === 'KeyR' && game_over) startRound();
+  if (e.code === 'BracketLeft') throttle = Math.max(THROTTLE_MIN, Math.round((throttle - THROTTLE_STEP)*100)/100);
+  if (e.code === 'BracketRight') throttle = Math.min(THROTTLE_MAX, Math.round((throttle + THROTTLE_STEP)*100)/100);
+
+  if (e.code === 'Digit1') throttle = 0.5;
+  if (e.code === 'Digit2') throttle = 1.0;
+  if (e.code === 'Digit3') throttle = 1.5;
+  if (e.code === 'Digit4') throttle = 2.0;
+  if (e.code === 'Digit5') throttle = 3.0;
+});
+
+window.addEventListener('keyup',(e)=>{ keysPressed[e.code]=false; });
+
+function onResults(results){
+  lastHands = {left:null,right:null};
+  if (results.multiHandLandmarks && results.multiHandedness){
+    for (let i=0;i<results.multiHandLandmarks.length;i++){
+      const lm = results.multiHandLandmarks[i].map(p => ({x:p.x, y:p.y, z:p.z}));
+      const label = results.multiHandedness[i].label;
+      if (label === 'Left') lastHands.left = lm; else lastHands.right = lm;
+    }
+  }
+}
+
+/* ---------- Mouse pile dragging (kept, simplified conversion) ---------- */
+let draggingPile = null;
+let dragOffset = {dx:0};
+
+canvas.addEventListener('mousedown', (e)=>{
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+
+  for (const pile of piles){
+    const [pxs, pys] = worldToScreen(pile.x, pile.y);
+    const d = Math.hypot(pxs - mx, pys - my);
+    if (d < 80){
+      draggingPile = pile;
+      pile.dragging = true;
+      // invert worldToScreen: wx = ((sx - SCREEN_W/2)/zoom) + (camera_x + SCREEN_W/2)
+      const wx = ((mx - SCREEN_W*0.5)/cam_zoom) + (camera_x + SCREEN_W*0.5);
+      dragOffset.dx = pile.x - wx;
+      break;
+    }
+  }
+});
+
+window.addEventListener('mousemove',(e)=>{
+  if (!draggingPile) return;
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const wx = ((mx - SCREEN_W*0.5)/cam_zoom) + (camera_x + SCREEN_W*0.5);
+  draggingPile.x = clamp(wx + dragOffset.dx, 10, WORLD_W-10);
+  draggingPile.y = groundYAt(draggingPile.x) - 10;
+});
+
+window.addEventListener('mouseup',()=>{
+  if (draggingPile){
+    draggingPile.dragging = false;
+    draggingPile = null;
+  }
+});
+
+/* ---------- Main loop ---------- */
+let prevTime = performance.now();
+
+function frame(){
+  const now = performance.now();
+  const dt = Math.min(0.05, (now - prevTime)/1000.0);
+  prevTime = now;
+  const tsec = now/1000.0;
+
+  // background
+  renderLayers(ctx, tsec);
+
+  // basket
+  const [bx,by] = [basket[0], basket[1]];
+  const sw = basket[2], sh = basket[3];
+  const [bsx, bsy] = worldToScreen(bx, by);
+  ctx.fillStyle = 'rgb(128,0,160)';
+  ctx.fillRect(bsx, bsy, sw*cam_zoom, sh*cam_zoom);
+  ctx.strokeStyle = 'rgb(200,140,240)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(bsx, bsy, sw*cam_zoom, sh*cam_zoom);
+
+  // read hands
+  const left_hand_lm = lastHands.left;
+  const right_hand_lm = lastHands.right;
+
+  // thumbs-up toggling (works in both modes)
+  processThumbsUpToggle(tsec);
+
+  // world update
+  if (!game_over){
+    const th = currentThrottle(keysPressed);
+    const eff_speed = EXCAVATOR_SPEED_MAX * th;
+    const eff_accel = EXCAVATOR_ACCEL * th;
+
+    if (mode === 'arm'){
+      // ARM mode: left hand influences track forward/back and main boom direction
+      if (left_hand_lm){
+        target_first_boom_angle = calculate_main_boom_angle(left_hand_lm, keysPressed);
+
+        const lw = left_hand_lm[0], li = left_hand_lm[8];
+        if (li.x < lw.x - DEAD_ZONE_WIDTH){
+          left_track_v = Math.max(left_track_v - eff_accel, -eff_speed);
+          right_track_v = Math.max(right_track_v - eff_accel, -eff_speed);
+        } else if (li.x > lw.x + DEAD_ZONE_WIDTH){
+          left_track_v = Math.min(left_track_v + eff_accel, eff_speed);
+          right_track_v = Math.min(right_track_v + eff_accel, eff_speed);
+        } else {
+          left_track_v *= EXCAVATOR_DRAG;
+          right_track_v *= EXCAVATOR_DRAG;
+        }
+      } else {
+        left_track_v *= EXCAVATOR_DRAG;
+        right_track_v *= EXCAVATOR_DRAG;
+      }
+
+      if (right_hand_lm){
+        target_second_boom_angle = calculate_second_boom_angle(right_hand_lm);
+      }
+
+    } else {
+      // DRIVE mode: differential tracks from both hands
+      const desired_left = track_speed_from_hand(left_hand_lm);
+      const desired_right = track_speed_from_hand(right_hand_lm);
+
+      let dleft = desired_left;
+      let dright = desired_right;
+
+      // optional keyboard nudges
+      if (keysPressed['KeyA']) dleft = Math.max(-1.0, dleft - 0.08);
+      if (keysPressed['KeyD']) dright = Math.min(1.0, dright + 0.08);
+
+      left_track_v += (dleft * eff_speed - left_track_v) * 0.22;
+      right_track_v += (dright * eff_speed - right_track_v) * 0.22;
+
+      // arms relax
+      target_first_boom_angle *= 0.97;
+      target_second_boom_angle *= 0.97;
+    }
+
+    // smooth arm angles (less twitch)
+    first_boom_angle = lerp(first_boom_angle, target_first_boom_angle, 0.18);
+    second_boom_angle = lerp(second_boom_angle, target_second_boom_angle, 0.18);
+
+    // excavator motion
+    const vx = (left_track_v + right_track_v) * 0.5;
+    excavator_pos[0] += vx;
+    excavator_pos[0] = clamp(excavator_pos[0], 0, WORLD_W - 50);
+    excavator_pos[1] = groundYAt(excavator_pos[0]) - 50;
+
+    // 360 spin (visual) from differential tracks
+    const spin = (right_track_v - left_track_v);
+    cab_yaw += spin * CAB_YAW_GAIN;
+    // wrap [-pi, pi]
+    if (cab_yaw > Math.PI) cab_yaw -= Math.PI*2;
+    if (cab_yaw < -Math.PI) cab_yaw += Math.PI*2;
+
+    if (Math.abs(vx) > 0.1) spawnDust(excavator_pos[0], excavator_pos[1], vx);
+    updateParticles(dt);
+
+    // camera & scene transitions
+    camera_x = Math.max(0, Math.min(WORLD_W - SCREEN_W, excavator_pos[0] - SCREEN_W*0.5));
+    updateSceneTargets(excavator_pos[0]);
+
+    scene_sky_top = colorLerp(scene_sky_top, target_sky_top, 0.03);
+    scene_sky_bot = colorLerp(scene_sky_bot, target_sky_bot, 0.03);
+    scene_ground = {
+      r: Math.round(lerp(scene_ground.r, target_ground.r,0.05)),
+      g: Math.round(lerp(scene_ground.g, target_ground.g,0.05)),
+      b: Math.round(lerp(scene_ground.b, target_ground.b,0.05))
+    };
+    terrain_amp = lerp(terrain_amp, target_amp, 0.03);
+    terrain_scale = lerp(terrain_scale, target_scale, 0.03);
+    cam_zoom = lerp(cam_zoom, target_zoom, 0.04);
+
+    if (remaining_time_sec() <= 0) game_over = true;
+  }
+
+  /* ---------- Draw excavator body (rotated) ---------- */
+  const [body_sx, body_sy] = worldToScreen(excavator_pos[0], excavator_pos[1]);
+
+  // shadow
+  ctx.save();
+  ctx.globalAlpha = 0.7;
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.beginPath();
+  ctx.ellipse(body_sx - 15*cam_zoom, body_sy + 42*cam_zoom, 40*cam_zoom, 12*cam_zoom, 0,0,Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+
+  // body
+  const body_w = 52 * cam_zoom, body_h = 46 * cam_zoom;
+  const centerX = body_sx + body_w*0.5, centerY = body_sy + body_h*0.5;
+
+  ctx.save();
+  ctx.translate(centerX, centerY);
+  ctx.rotate(cab_yaw);
+  ctx.translate(-centerX, -centerY);
+
+  ctx.fillStyle = 'rgb(0,128,255)';
+  ctx.fillRect(body_sx, body_sy, body_w, body_h);
+  ctx.strokeStyle = 'rgba(230,245,255,0.9)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(body_sx, body_sy, body_w, body_h);
+
+  // tracks (also rotate with body)
+  const trackRect = {x: body_sx - 5*cam_zoom, y: body_sy + 38*cam_zoom, width: 64*cam_zoom, height: 14*cam_zoom};
+  ctx.fillStyle = 'rgb(60,60,60)';
+  ctx.fillRect(trackRect.x, trackRect.y, trackRect.width, trackRect.height);
+
+  const tread_offset = Math.round((left_track_v + right_track_v)*2) % 8;
+  ctx.strokeStyle='rgb(90,90,90)';
+  ctx.lineWidth=2;
+  for (let i=0;i<trackRect.width;i+=8){
+    const x1 = trackRect.x + i + tread_offset;
+    ctx.beginPath();
+    ctx.moveTo(x1, trackRect.y + 2);
+    ctx.lineTo(x1, trackRect.y + trackRect.height - 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  /* ---------- Arm & scooper (boom angles include cab_yaw) ---------- */
+  const boomA = cab_yaw + first_boom_angle;
+  const boomB = cab_yaw + first_boom_angle + second_boom_angle;
+
+  const end_first = drawBoom(ctx, excavator_pos, first_boom_length, boomA, 'rgb(255,80,80)');
+  const end_second = drawBoom(ctx, end_first, second_boom_length, boomB, 'rgb(255,150,70)');
+  const scooper_world = drawScooper(ctx, end_second, 22, boomB + Math.PI/2);
+
+  /* ---------- Draw piles, targets, legacy balls ---------- */
+  for (const pile of piles) drawPile(ctx, pile);
+  for (const zone of targetZones) drawTargetZone(ctx, zone);
+
+  for (let i=0;i<balls.length;i++){
+    const ball = balls[i];
+    const [sx2, sy2] = worldToScreen(ball[0], ball[1]);
+    const r = Math.max(3, Math.round(10*cam_zoom));
+    ctx.fillStyle='rgb(240,210,60)';
+    ctx.beginPath(); ctx.arc(sx2, sy2, r,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle='rgb(255,235,120)';
+    ctx.beginPath(); ctx.arc(sx2, sy2, r,0,Math.PI*2); ctx.stroke();
+  }
+
+  /* ---------- Scooping, digging, deposit ---------- */
+  // collect from piles/balls
+  scooperCollect(scooper_world);
+
+  // terrain digging (NEW)
+  terrainDigging(scooper_world, dt);
+
+  // update scooped grain positions (follow scooper)
+  updateScoopedPositions(scooper_world);
+
+  // draw scooped grains
+  for (const g of scooped_grains){
+    const [px, py] = worldToScreen(g.x || (scooper_world[0]+g.ox), g.y || (scooper_world[1]+g.oy));
+    ctx.fillStyle = `rgb(${g.color.r},${g.color.g},${g.color.b})`;
+    ctx.beginPath();
+    ctx.arc(px, py, Math.max(1, Math.round(g.r*cam_zoom)), 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  // deposit:
+  // - ALWAYS deposit into basket when in basket area
+  // - deposit into target zones only when user taps E (so it’s not too “auto”)
+  depositToBasketOrTarget(scooper_world, false);
+  if (keysPressed['KeyE']) {
+    depositToBasketOrTarget(scooper_world, true);
+    keysPressed['KeyE'] = false;
+  }
+
+  /* ---------- Particles ---------- */
+  drawParticles(ctx);
+
+  /* ---------- Post FX ---------- */
+  applyVignette(ctx);
+
+  /* ---------- HUD overlay ---------- */
+  ctx.font = "18px monospace";
+  ctx.fillStyle = "rgb(240,240,240)";
+  ctx.fillText("Score: " + score, 10, 26);
+  ctx.fillText("Mode: " + mode.toUpperCase() + " (TAB or 👍)", 10, 54);
+
+  const t_left = remaining_time_sec();
+  ctx.fillStyle = (t_left>10) ? "rgb(255,200,140)" : "rgb(255,120,120)";
+  ctx.fillText("Time: " + String(t_left).padStart(2,'0') + "s", SCREEN_W-140, 26);
+
+  ctx.fillStyle = "rgb(200,240,200)";
+  const th_disp = currentThrottle(keysPressed);
+  ctx.fillText("Throttle x" + th_disp.toFixed(2) + "  ([ / ] , Shift boost)", 10, 82);
+
+  ctx.fillStyle = "rgb(200,255,200)";
+  ctx.fillText("Inventory: " + scooped_grains.length + " grains   (E to dump into targets)", 10, 106);
+
+  // show cab yaw
+  ctx.fillStyle = "rgba(220,220,255,0.9)";
+  const yawDeg = Math.round((cab_yaw * 180/Math.PI + 360) % 360);
+  ctx.fillText("Cab yaw: " + yawDeg + "°", SCREEN_W-170, 54);
+
+  // 👍 hold-to-toggle UI + acknowledgement
+  const nowSec = tsec;
+
+  // Acknowledge text
+  if (ackText && nowSec < ackUntil){
+    ctx.save();
+    ctx.globalAlpha = 0.92;
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillRect(10, 118, 520, 28);
+    ctx.fillStyle = "rgb(240,240,255)";
+    ctx.fillText(ackText, 18, 138);
+    ctx.restore();
+  }
+
+  // Hold progress bar
+  const canToggle = (nowSec - lastModeToggleAt) > THUMBS_COOLDOWN_SEC;
+  if (thumbsHoldStart !== null && canToggle){
+    const held = nowSec - thumbsHoldStart;
+    const p = clamp(held / THUMBS_HOLD_SEC, 0, 1);
+
+    ctx.save();
+    ctx.globalAlpha = 0.92;
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillRect(10, 148, 520, 36);
+
+    ctx.fillStyle = "rgb(240,240,255)";
+    const remain = Math.max(0, (THUMBS_HOLD_SEC - held));
+    ctx.fillText(`👍 Thumbs-up detected — hold ${remain.toFixed(2)}s to switch`, 18, 172);
+
+    // progress bar
+    ctx.fillStyle = "rgba(255,255,255,0.25)";
+    ctx.fillRect(18, 178, 500, 6);
+    ctx.fillStyle = "rgba(180,255,180,0.85)";
+    ctx.fillRect(18, 178, 500*p, 6);
+    ctx.restore();
+  } else if (!canToggle){
+    // cooldown hint (brief)
+    const cd = THUMBS_COOLDOWN_SEC - (nowSec - lastModeToggleAt);
+    if (cd > 0 && cd < 0.8){
+      ctx.save();
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = "rgba(0,0,0,0.45)";
+      ctx.fillRect(10, 148, 300, 28);
+      ctx.fillStyle = "rgb(220,220,240)";
+      ctx.fillText(`👍 toggle cooldown: ${cd.toFixed(2)}s`, 18, 168);
+      ctx.restore();
+    }
+  }
+
+  /* ---------- Game over overlay ---------- */
+  if (game_over){
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillRect(0,0,SCREEN_W,SCREEN_H);
+    ctx.font = "54px monospace";
+    ctx.fillStyle = "rgb(255,230,200)";
+    const msg = "GAME OVER";
+    const metrics = ctx.measureText(msg);
+    ctx.fillText(msg, SCREEN_W/2 - metrics.width/2, SCREEN_H/2 - 30);
+    ctx.font = "18px monospace";
+    ctx.fillStyle = "rgb(230,230,240)";
+    const sub = `Final Score: ${score}   |   Press R to Restart  •  ESC to Quit`;
+    const sm = ctx.measureText(sub);
+    ctx.fillText(sub, SCREEN_W/2 - sm.width/2, SCREEN_H/2 + 10);
+  }
+
+  requestAnimationFrame(frame);
+}
+
+/* ---------- MediaPipe init ---------- */
+async function initHands(){
+  handsDetector = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+  handsDetector.setOptions({
+    maxNumHands:2,
+    modelComplexity:1,
+    minDetectionConfidence:0.7,
+    minTrackingConfidence:0.5
+  });
+  handsDetector.onResults(onResults);
+
+  cameraInstance = new Camera(videoElement, {
+    onFrame: async ()=>{ await handsDetector.send({image: videoElement}); },
+    width:640, height:480
+  });
+
+  await cameraInstance.start();
+}
+
+/* ---------- Buttons ---------- */
+document.getElementById('spawnPilesBtn').addEventListener('click', ()=>{ spawnPiles(4); });
+document.getElementById('clearInventory').addEventListener('click', ()=>{ scooped_grains = []; updateScoreHUD(); });
+
+/* ---------- Start ---------- */
+(async ()=>{
+  await initHands();
+  startRound();
+  prevTime = performance.now();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
