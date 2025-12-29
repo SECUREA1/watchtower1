@@ -15,7 +15,6 @@ import requests
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 # -------------------------------------------------------------------------
@@ -40,6 +39,12 @@ if not STATIC_DIR.exists():
     alt_static = Path("/app/site").resolve()
     if alt_static.exists():
         STATIC_DIR = alt_static
+SERVE_ROOTS: List[Path] = []
+if STATIC_DIR.exists():
+    SERVE_ROOTS.append(STATIC_DIR)
+# Always include the repo root so newly added HTML pages in the repository root are served.
+SERVE_ROOTS.append(REPO_ROOT)
+SERVE_ROOTS = [root.resolve() for root in SERVE_ROOTS]
 
 MAX_UPLOAD_BYTES = int(
     os.getenv("MAX_UPLOAD_BYTES", os.getenv("MAX_IMAGE_SIZE_BYTES", str(2 * 1024 * 1024)))
@@ -202,6 +207,75 @@ def validate_upload(content_type: str, data: bytes) -> None:
         raise HTTPException(status_code=415, detail="Unsupported image type.")
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="Upload exceeds size limit.")
+
+
+# -------------------------------------------------------------------------
+# Static asset helpers (serve repo-root and site/ HTML files)
+# -------------------------------------------------------------------------
+HTML_ALIASES = {
+    "/slots": "RedNode Slots.html",
+    "/blackjack": "RedNode Blackjack — Secure Login.html",
+    "/chess": "RedNode Chess — Secure Login.html",
+    "/eye-pro": "RedNode — Eye Pro (Fleet XR Console).html",
+    "/node-eye": "RedNode — Node Eye Console.html",
+    "/abyss": "RedNode.ai — Abyss Pilot (Submarine Viewport HUD).html",
+    "/redar": "RedAR + IonEye — Multi-Cam + Face_Object + Sentinel + WebXR.html",
+    "/drone-dig": "DRONE DIG + SCOOP — DUAL HAND ISO CONTROLS.html",
+    "/gesture-sim": "Rednode Excavation — Gesture Controlled Sim.html",
+    "/sentinel-side": "Rednode Sentinel — Drone Dig + Pile + Boom Side View.html",
+    "/sentinel-side-full": "Rednode Sentinel — Drone Dig + Pile + Boom Side View (Hands Full Control).html",
+    "/excavator-job": "Excavator Job Site — Gesture Driven.html",
+    "/excavator-trainer": "Excavator — Terrain Map + Hand-Training Startup Calibration + Micro-Movement Tuner.html",
+    "/locked-views": "RedNode — Locked Views Excavator (2-Hand ISO Controls + Sensitivity Tuners).html",
+    "/indoor-ops": "RedNode Dashboard — Indoor Ops · Sentinel · Demo.html",
+    "/dadda": "dadda - Copy - Copy.html",
+    "/market": "market.html",
+    "/rednode-dashboard-demo": "RedNode Dashboard — Full Demo.html",
+    "/ar-dashboard": "RedNode Dashboard — Full Demo.html",
+    "/ar-dashboard.html": "RedNode Dashboard — Full Demo.html",
+    "/rednode-dashboard": "RedNode Dashboard — Full Demo.html",
+    "/rednode-dashboard.html": "RedNode Dashboard — Full Demo.html",
+}
+
+HOME_PATHS = {"/home", "/home.html"}
+SECURE_PATHS = {"/secure", "/secure/", "/secure.html"}
+REDNODE_PATHS = {"/rednode", "/rednode.html"}
+DASHBOARD_PATHS = {"/dashboard", "/dashboard.html", "/dashboard1", "/dashboard1.html"}
+CHAINES_PATHS = {
+    "/CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll",
+    "/CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll/",
+    "/CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll/index.html",
+}
+LIVE_PATHS = {"/live", "/live/", "/live/index.html"}
+
+
+def _resolve_path(relative: str) -> Optional[Path]:
+    """Return a safe, existing path from any configured serve root."""
+    clean = relative.lstrip("/\\")
+    for base in SERVE_ROOTS:
+        candidate = (base / clean).resolve()
+        try:
+            candidate.relative_to(base)
+        except ValueError:
+            continue
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def serve_file(relative: str) -> Optional[FileResponse]:
+    path = _resolve_path(relative)
+    if path:
+        return FileResponse(str(path))
+    return None
+
+
+def alias_response(url_path: str) -> Optional[FileResponse]:
+    alias_key = url_path[:-1] if url_path.endswith("/") and url_path != "/" else url_path
+    target = HTML_ALIASES.get(alias_key)
+    if not target:
+        return None
+    return serve_file(target)
 
 
 def build_image_path(face_id: str, content_type: str) -> Path:
@@ -697,23 +771,79 @@ async def healthz():
 async def health():
     return {"ok": True}
 
-if STATIC_DIR.exists():
-    app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
-else:
-
-    @app.get("/", response_class=HTMLResponse)
-    def index_missing():
-        return "<html><body><h1>RedNode UI not found</h1></body></html>"
+def _fallback_ui() -> Optional[FileResponse]:
+    """Return a usable UI when the requested path is missing."""
+    for candidate in ("rednode.html", "start.html", "index.html"):
+        response = serve_file(candidate)
+        if response:
+            return response
+    return None
 
 
 @app.get("/{full_path:path}", response_class=HTMLResponse)
-async def spa_fallback(full_path: str):
-    fallback = STATIC_DIR / "rednode.html"
-    if fallback.exists():
-        return FileResponse(str(fallback))
-    fallback2 = STATIC_DIR / "index.html"
-    if fallback2.exists():
-        return FileResponse(str(fallback2))
+async def serve_frontend(full_path: str, request: Request):
+    url_path = request.url.path
+    if request.method not in {"GET", "HEAD"}:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    if url_path in {"/", "/index.html"}:
+        # Prefer redirect to the modern landing page when it exists.
+        if serve_file("start.html"):
+            return RedirectResponse(url="/start.html", status_code=302)
+
+    if url_path in {"/start", "/start.html"}:
+        response = serve_file("start.html")
+        if response:
+            return response
+
+    if url_path in HOME_PATHS:
+        response = serve_file("home.html")
+        if response:
+            return response
+
+    if url_path in SECURE_PATHS:
+        response = serve_file("secure.html")
+        if response:
+            return response
+
+    if url_path in REDNODE_PATHS:
+        response = serve_file("rednode.html")
+        if response:
+            return response
+
+    if url_path in DASHBOARD_PATHS:
+        response = serve_file("dashboard1.html")
+        if response:
+            return response
+
+    if url_path in CHAINES_PATHS:
+        response = serve_file("CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll/index.html")
+        if response:
+            return response
+
+    if url_path in LIVE_PATHS:
+        response = serve_file("live/index.html")
+        if response:
+            return response
+
+    alias_resp = alias_response(url_path)
+    if alias_resp:
+        return alias_resp
+
+    if full_path:
+        direct_response = serve_file(full_path)
+        if direct_response:
+            return direct_response
+        # Allow extensionless routes to resolve to .html files
+        if not Path(full_path).suffix:
+            html_response = serve_file(f"{full_path}.html")
+            if html_response:
+                return html_response
+
+    fallback = _fallback_ui()
+    if fallback:
+        return fallback
+
     raise HTTPException(status_code=404, detail="Not found")
 
 
@@ -722,7 +852,7 @@ async def spa_fallback_handler(request: Request, exc: HTTPException):
     path = request.url.path
     if path.startswith("/api") or path in {"/healthz", "/health"}:
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
-    try:
-        return await spa_fallback(path.lstrip("/"))
-    except HTTPException as inner_exc:
-        return JSONResponse(status_code=inner_exc.status_code, content={"detail": inner_exc.detail})
+    fallback = _fallback_ui()
+    if fallback:
+        return fallback
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
