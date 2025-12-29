@@ -117,6 +117,8 @@ const htmlAliases = new Map([
   ["/indoor-ops", "RedNode Dashboard — Indoor Ops · Sentinel · Demo.html"],
   ["/dadda", "dadda - Copy - Copy.html"],
   ["/market", "market.html"],
+  ["/ar-dashboard", "RedNode Dashboard — Full Demo.html"],
+  ["/rednode-dashboard", "RedNode Dashboard — Full Demo.html"],
   ["/rednode-dashboard-demo", "RedNode Dashboard — Full Demo.html"],
 ]);
 
@@ -229,8 +231,10 @@ const server = http.createServer(async (req, res) => {
   const arDashboardPaths = new Set([
     "/ar-dashboard",
     "/ar-dashboard.html",
+    "/ar-dashboard/",
     "/rednode-dashboard",
     "/rednode-dashboard.html",
+    "/rednode-dashboard/",
   ]);
   if ((req.method === "GET" || req.method === "HEAD") && arDashboardPaths.has(urlPath)) {
     const served = await tryServeFile(res, "RedNode Dashboard — Full Demo.html", req.method);
