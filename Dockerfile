@@ -1,27 +1,35 @@
-# Dockerfile (nginx static site) — fixed for PORT substitution
+# Dockerfile (nginx static site) — fixed for PORT substitution and new pages
 FROM nginx:alpine
 
 LABEL maintainer="RedNode <ops@rednode.ai>"
 
+# Ensure a default runtime PORT is available if the platform doesn't set one.
+# Render/others will typically inject a PORT env; if not, 80 will be used.
+ENV PORT=80
+
 WORKDIR /usr/share/nginx/html
 
-# Copy all site assets (HTML, JS, SVG, and folders) to the web root
-COPY site/ /usr/share/nginx/html/
-# Include root-level HTML dashboards (e.g., /ar-dashboard) that live outside site/
-COPY *.html /usr/share/nginx/html/
-# Include supporting experience folders that aren't nested under site/
-COPY CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll/ /usr/share/nginx/html/CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll/
+# Copy full repo into a temporary build area so we can safely pick files/folders.
+# This avoids COPY wildcard failures when some files may be absent.
+COPY . /tmp/build_context/
 
-# Duplicate start page for the root index route
-RUN cp /usr/share/nginx/html/start.html /usr/share/nginx/html/index.html
+# Create web root and populate it from known locations.
+# Use shell guards to avoid build failures when files/folders are missing.
+RUN mkdir -p /usr/share/nginx/html \
+ && sh -c 'if [ -d /tmp/build_context/site ]; then cp -a /tmp/build_context/site/. /usr/share/nginx/html/; fi' \
+ && sh -c 'cp /tmp/build_context/*.html /usr/share/nginx/html/ 2>/dev/null || true' \
+ && sh -c 'if [ -d "/tmp/build_context/CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll" ]; then cp -a "/tmp/build_context/CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll" /usr/share/nginx/html/; fi' \
+ && rm -rf /tmp/build_context
 
-# Ensure correct ownership/permissions (nginx runs as nginx user)
+# Duplicate start page for the root index route if start.html exists
+RUN if [ -f /usr/share/nginx/html/start.html ]; then cp /usr/share/nginx/html/start.html /usr/share/nginx/html/index.html; fi
+
+# Ensure ownership/permissions (nginx runs as nginx user)
 RUN chown -R nginx:nginx /usr/share/nginx/html \
  && find /usr/share/nginx/html -type d -exec chmod 755 {} \; \
  && find /usr/share/nginx/html -type f -exec chmod 644 {} \;
 
-# Create nginx config template at build-time
-# NOTE: template uses ${PORT} only (no default operator).
+# Create nginx config template at build-time. Template uses ${PORT} so it can be replaced at container start.
 RUN cat > /etc/nginx/conf.d/default.conf.template <<'EOF_CONF'
 server {
     listen ${PORT};
@@ -67,12 +75,14 @@ EOF_CONF
 # Install curl so HEALTHCHECK can probe /healthz
 RUN apk add --no-cache curl
 
+# Informal port hint. We expose the default HTTP port (container env PORT may vary at runtime).
 EXPOSE 80
 
 # Healthcheck uses PORT env fallback to 80 (shell expression allowed here)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
   CMD sh -c 'curl -fsS --connect-timeout 2 "http://127.0.0.1:${PORT:-80}/healthz" || exit 1'
 
-# Start: set default PORT if unset, render the template and launch nginx in foreground.
-# The shell sets PORT variable to ${PORT:-80} before envsubst replacement.
+# Start: render template with the runtime PORT and launch nginx in foreground.
+# We set a default PORT value (from ENV), export it so envsubst can use it,
+# and then envsubst will replace ${PORT} in the template.
 CMD ["sh", "-c", "PORT=${PORT:-80}; export PORT; envsubst '${PORT}' < /etc/nginx/conf.d/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
