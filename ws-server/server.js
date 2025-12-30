@@ -135,7 +135,22 @@ async function tryServeFile(res, relativePath, method) {
       res.writeHead(200, headers);
 
       if (method === "GET") {
-        const data = await readFile(normalized);
+        let data = await readFile(normalized);
+        if (ext === ".html") {
+          const injection = `\n<!-- Live presence counter -->\n<script src="/static/js/live-counter.js"></script>\n`;
+          try {
+            const text = data.toString();
+            if (!text.includes("live-counter.js")) {
+              const needsAppend = !text.includes("</body>");
+              const updated = needsAppend
+                ? text + injection
+                : text.replace("</body>", `${injection}</body>`);
+              data = Buffer.from(updated);
+            }
+          } catch {
+            // If decoding fails, just serve original data
+          }
+        }
         res.end(data);
       } else {
         res.end();
