@@ -1313,17 +1313,22 @@
       <div class="gate-header">
         <span class="gate-pill">Token Gated</span>
         <h2 class="gate-title" id="gate-title">Secure access for RedNode Start</h2>
-        <p class="gate-subtitle">Verify with your access token or wallet identifier to unlock personalized paths, session tools, and streaming surfaces.</p>
-        <div class="gate-status" id="gate-status">Awaiting verification</div>
+        <p class="gate-subtitle">Token is required unless you verify with a connected wallet or a trusted access code already issued to you.</p>
+        <div class="gate-status" id="gate-status">Token required to proceed</div>
       </div>
       <div class="gate-form">
         <label for="gate-token">Access token</label>
         <input id="gate-token" name="gate-token" placeholder="Paste your RedNode access token" autocomplete="off" />
         <label for="gate-wallet">Wallet / Node ID</label>
         <input id="gate-wallet" name="gate-wallet" placeholder="0x or node-handle" autocomplete="off" />
+        <button id="gate-guest-toggle" type="button" class="ghost-btn" aria-expanded="false" aria-controls="gate-guest-wrap">I have an access code</button>
+        <div id="gate-guest-wrap" class="gate-guest" hidden>
+          <label for="gate-guest">Guest access code</label>
+          <input id="gate-guest" name="gate-guest" type="password" placeholder="Enter access code" autocomplete="current-password" />
+          <small class="muted">Use only if provided privately by an administrator.</small>
+        </div>
         <div class="gate-actions">
           <button id="gate-accept" type="button">Unlock experience</button>
-          <button id="gate-preview" type="button" class="ghost-btn">Preview without token</button>
           <button id="gate-clear" type="button" class="ghost-btn">Reset token</button>
         </div>
         <small style="color:#f6e9c5">Tokens are stored locally to keep your gateway fast and private. You can update or clear them anytime.</small>
@@ -2044,8 +2049,9 @@
       const gateStatus = document.getElementById('gate-status');
       const tokenInput = document.getElementById('gate-token');
       const walletInput = document.getElementById('gate-wallet');
+      const guestInput = document.getElementById('gate-guest');
+      const guestToggle = document.getElementById('gate-guest-toggle');
       const acceptBtn = document.getElementById('gate-accept');
-      const previewBtn = document.getElementById('gate-preview');
       const clearBtn = document.getElementById('gate-clear');
       const manageBtn = document.getElementById('gate-manage');
 
@@ -2054,13 +2060,19 @@
       const WALLET_KEY = 'mixer_current_wallet';
       const CHAIN_KEY = 'mixer_current_chain';
       const CURRENCY_KEY = 'mixer_current_currency';
+      const GUEST_SESSION_KEY = 'rednode_guest_access';
+      const GUEST_CODE = 'boots';
 
-      const setContext = (token, wallet) => {
+      let guestUnlocked = false;
+
+      const setContext = (token, wallet, isGuest = false) => {
         const ctx = (window.APP_CONTEXT = window.APP_CONTEXT || {});
-        ctx.username = wallet || '';
-        ctx.wallet = wallet || '';
+        ctx.username = wallet || (isGuest ? 'guest' : '');
+        ctx.wallet = wallet || (isGuest ? 'guest' : '');
         ctx.accessToken = token || '';
       };
+
+      const hasGuestCode = (code) => (code || '').trim().toLowerCase() === GUEST_CODE;
 
       const updateStatus = (text, success = false) => {
         if (!gateStatus) return;
@@ -2069,8 +2081,8 @@
         gateStatus.style.color = success ? '#d7ffe1' : '#f6e9c5';
       };
 
-      const persist = (token, wallet) => {
-        setContext(token, wallet);
+      const persist = (token, wallet, { guest = false } = {}) => {
+        setContext(token, wallet, guest);
         try {
           if (token) localStorage.setItem(ACCESS_KEY, token);
           else localStorage.removeItem(ACCESS_KEY);
@@ -2081,27 +2093,34 @@
           localStorage.setItem(CHAIN_KEY, 'RedChain');
           localStorage.setItem(CURRENCY_KEY, 'RED');
 
-          if (token || wallet) {
+          if (token || wallet || guest) {
             localStorage.setItem(SESSION_KEY, JSON.stringify({ username: wallet || 'guest', accessToken: token || '' }));
           }
+
+          if (guest) sessionStorage.setItem(GUEST_SESSION_KEY, '1');
+          else sessionStorage.removeItem(GUEST_SESSION_KEY);
         } catch (err) {
           console.warn('Unable to persist token gate state', err);
         }
       };
 
-      const unlock = (token, wallet) => {
-        persist(token, wallet);
+      const unlock = (token, wallet, { guest = false } = {}) => {
+        guestUnlocked = guest;
+        persist(token, wallet, { guest });
         if (gate) gate.style.display = 'none';
         document.body.classList.remove('gate-locked');
         manageBtn.style.display = 'block';
-        updateStatus(wallet ? `Access unlocked for ${wallet}` : 'Access unlocked for guest', true);
+        const statusLabel = guest ? 'Guest access granted' : wallet ? `Access unlocked for ${wallet}` : 'Access unlocked with token';
+        updateStatus(statusLabel, true);
       };
 
       const lock = () => {
+        guestUnlocked = false;
         if (gate) gate.style.display = 'grid';
         document.body.classList.add('gate-locked');
         manageBtn.style.display = 'none';
-        updateStatus('Awaiting verification');
+        sessionStorage.removeItem(GUEST_SESSION_KEY);
+        updateStatus('Token required to proceed');
       };
 
       const hydrate = () => {
@@ -2110,11 +2129,14 @@
         try {
           storedToken = localStorage.getItem(ACCESS_KEY) || '';
           storedWallet = localStorage.getItem(WALLET_KEY) || '';
+          guestUnlocked = sessionStorage.getItem(GUEST_SESSION_KEY) === '1';
         } catch {}
         if (storedToken || storedWallet) {
           tokenInput.value = storedToken;
           walletInput.value = storedWallet;
           unlock(storedToken, storedWallet);
+        } else if (guestUnlocked) {
+          unlock('', 'guest', { guest: true });
         } else {
           lock();
         }
@@ -2123,7 +2145,13 @@
       const ensureMobileUnlock = (source = 'mobile') => {
         const isMobile = window.matchMedia('(max-width: 768px)').matches;
         if (!isMobile || !document.body.classList.contains('gate-locked')) return;
-        unlock(tokenInput.value.trim(), walletInput.value.trim() || source);
+        const hasStoredToken = !!(tokenInput.value.trim() || localStorage.getItem(ACCESS_KEY));
+        const hasStoredWallet = !!(walletInput.value.trim() || localStorage.getItem(WALLET_KEY));
+        const canAutoUnlock = hasStoredToken || hasStoredWallet || guestUnlocked;
+        if (!canAutoUnlock) return;
+        const token = tokenInput.value.trim() || localStorage.getItem(ACCESS_KEY) || '';
+        const wallet = walletInput.value.trim() || localStorage.getItem(WALLET_KEY) || (guestUnlocked ? 'guest' : source);
+        unlock(token, wallet, { guest: guestUnlocked && !token && !wallet });
       };
 
       const bindPress = (el, handler) => {
@@ -2152,17 +2180,19 @@
       bindPress(acceptBtn, () => {
         const token = tokenInput.value.trim();
         const wallet = walletInput.value.trim();
-        if (!token && !wallet) {
-          updateStatus('Please add a token or wallet to continue');
+        const guestCode = guestInput?.value.trim() || '';
+
+        if (token || wallet) {
+          unlock(token, wallet);
           return;
         }
-        unlock(token, wallet);
-      });
 
-      bindPress(previewBtn, () => {
-        const wallet = walletInput.value.trim();
-        persist('', wallet);
-        unlock('', wallet || 'guest');
+        if (hasGuestCode(guestCode)) {
+          unlock('', 'guest', { guest: true });
+          return;
+        }
+
+        updateStatus('Token required unless you verify with wallet or access code');
       });
 
       bindPress(clearBtn, () => {
@@ -2170,10 +2200,21 @@
           localStorage.removeItem(ACCESS_KEY);
           localStorage.removeItem(WALLET_KEY);
           localStorage.removeItem(SESSION_KEY);
+          sessionStorage.removeItem(GUEST_SESSION_KEY);
         } catch {}
         tokenInput.value = '';
         walletInput.value = '';
+        if (guestInput) guestInput.value = '';
         lock();
+      });
+
+      bindPress(guestToggle, () => {
+        if (!guestToggle || !guestInput) return;
+        const expanded = guestToggle.getAttribute('aria-expanded') === 'true';
+        guestToggle.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+        const wrap = document.getElementById('gate-guest-wrap');
+        if (wrap) wrap.hidden = expanded;
+        if (!expanded) guestInput.focus();
       });
 
       bindPress(manageBtn, () => {
