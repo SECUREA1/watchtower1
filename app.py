@@ -12,9 +12,10 @@ from typing import Dict, List, Optional
 from uuid import uuid4
 
 import requests
+import cv2
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -76,6 +77,38 @@ logger = logging.getLogger("rednode")
 
 app = FastAPI(title="RedNode Storage API")
 
+# -------------------------------------------------------------------------
+# Camera streaming (Jetson multi-camera)
+# -------------------------------------------------------------------------
+CAMERA_CONFIG_PATH = Path(os.getenv("CAMERA_CONFIG", REPO_ROOT / "config" / "cameras.yaml"))
+camera_manager = None
+try:
+    from camera.manager import CameraManager
+
+    camera_manager = CameraManager.from_config_path(CAMERA_CONFIG_PATH)
+except Exception as exc:
+    logger.warning("Camera manager disabled: %s", exc)
+
+
+def _frame_stream(camera_id: str):
+    boundary = b"frame"
+    while True:
+        if not camera_manager:
+            time.sleep(0.2)
+            continue
+        frame = camera_manager.latest_frame(camera_id)
+        if frame is None:
+            time.sleep(0.02)
+            continue
+        ret, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+        if not ret:
+            time.sleep(0.01)
+            continue
+        yield (
+            b"--" + boundary + b"\r\n"
+            b"Content-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
+        )
+
 # CORS
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "")
 if ALLOWED_ORIGINS:
@@ -90,6 +123,35 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "same-origin"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "img-src 'self' data: blob:; "
+        "script-src 'self'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'; "
+    )
+    return response
+
+
+@app.on_event("startup")
+def start_camera_manager() -> None:
+    if camera_manager:
+        camera_manager.start()
+
+
+@app.on_event("shutdown")
+def stop_camera_manager() -> None:
+    if camera_manager:
+        camera_manager.stop()
 
 # -------------------------------------------------------------------------
 # Models
@@ -240,6 +302,8 @@ HTML_ALIASES = {
     "/ar-dashboard.html": "RedNode Dashboard — Full Demo.html",
     "/rednode-dashboard": "RedNode Dashboard — Full Demo.html",
     "/rednode-dashboard.html": "RedNode Dashboard — Full Demo.html",
+    "/multi-camera": "site/multi_camera.html",
+    "/multi-camera.html": "site/multi_camera.html",
 }
 
 HOME_PATHS = {"/home", "/home.html"}
@@ -281,6 +345,23 @@ def alias_response(url_path: str) -> Optional[FileResponse]:
     if not target:
         return None
     return serve_file(target)
+
+
+@app.get("/api/cameras")
+def list_cameras() -> JSONResponse:
+    if not camera_manager:
+        return JSONResponse({"ok": False, "error": "camera manager not available"}, status_code=503)
+    return JSONResponse({"ok": True, "cameras": camera_manager.status()})
+
+
+@app.get("/api/cameras/{camera_id}/mjpeg")
+def stream_camera(camera_id: str) -> StreamingResponse:
+    if not camera_manager:
+        raise HTTPException(status_code=503, detail="camera manager not available")
+    return StreamingResponse(
+        _frame_stream(camera_id),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
 
 
 def build_image_path(face_id: str, content_type: str) -> Path:
