@@ -1328,7 +1328,7 @@
           <small class="muted">Use only if provided privately by an administrator.</small>
         </div>
         <div class="gate-actions">
-          <button id="gate-accept" type="button">Unlock experience</button>
+          <button id="gate-accept" type="button">Unlock with token</button>
           <button id="gate-clear" type="button" class="ghost-btn">Reset token</button>
         </div>
         <small style="color:#f6e9c5">Tokens are stored locally to keep your gateway fast and private. You can update or clear them anytime.</small>
@@ -1978,9 +1978,6 @@
       const gate = document.getElementById('token-gate');
       const gateStatus = document.getElementById('gate-status');
       const tokenInput = document.getElementById('gate-token');
-      const walletInput = document.getElementById('gate-wallet');
-      const guestInput = document.getElementById('gate-guest');
-      const guestToggle = document.getElementById('gate-guest-toggle');
       const acceptBtn = document.getElementById('gate-accept');
       const clearBtn = document.getElementById('gate-clear');
       const manageBtn = document.getElementById('gate-manage');
@@ -1995,14 +1992,12 @@
 
       let guestUnlocked = false;
 
-      const setContext = (token, wallet, isGuest = false) => {
+      const setContext = (token) => {
         const ctx = (window.APP_CONTEXT = window.APP_CONTEXT || {});
-        ctx.username = wallet || (isGuest ? 'guest' : '');
-        ctx.wallet = wallet || (isGuest ? 'guest' : '');
+        ctx.username = token ? 'token-user' : '';
+        ctx.wallet = '';
         ctx.accessToken = token || '';
       };
-
-      const hasGuestCode = (code) => (code || '').trim().toLowerCase() === GUEST_CODE;
 
       const updateStatus = (text, success = false) => {
         if (!gateStatus) return;
@@ -2011,64 +2006,51 @@
         gateStatus.style.color = success ? '#d7ffe1' : '#f6e9c5';
       };
 
-      const persist = (token, wallet, { guest = false } = {}) => {
-        setContext(token, wallet, guest);
+      const persist = (token) => {
+        setContext(token);
         try {
           if (token) localStorage.setItem(ACCESS_KEY, token);
           else localStorage.removeItem(ACCESS_KEY);
 
-          if (wallet) localStorage.setItem(WALLET_KEY, wallet);
-          else localStorage.removeItem(WALLET_KEY);
-
-          localStorage.setItem(CHAIN_KEY, 'RedChain');
-          localStorage.setItem(CURRENCY_KEY, 'RED');
-
-          if (token || wallet || guest) {
-            localStorage.setItem(SESSION_KEY, JSON.stringify({ username: wallet || 'guest', accessToken: token || '' }));
+          if (token) {
+            localStorage.setItem(SESSION_KEY, JSON.stringify({ username: 'token-user', accessToken: token }));
+          } else {
+            localStorage.removeItem(SESSION_KEY);
           }
-
-          if (guest) sessionStorage.setItem(GUEST_SESSION_KEY, '1');
-          else sessionStorage.removeItem(GUEST_SESSION_KEY);
         } catch (err) {
           console.warn('Unable to persist token gate state', err);
         }
       };
 
-      const unlock = (token, wallet, { guest = false } = {}) => {
-        guestUnlocked = guest;
-        persist(token, wallet, { guest });
+      const unlock = (token) => {
+        persist(token);
         if (gate) gate.style.display = 'none';
         document.body.classList.remove('gate-locked');
         manageBtn.style.display = 'block';
-        const statusLabel = guest ? 'Guest access granted' : wallet ? `Access unlocked for ${wallet}` : 'Access unlocked with token';
+        const statusLabel = 'Access unlocked with token';
         updateStatus(statusLabel, true);
       };
 
       const lock = () => {
-        guestUnlocked = false;
+        setContext('');
         if (gate) gate.style.display = 'grid';
         document.body.classList.add('gate-locked');
         manageBtn.style.display = 'none';
-        sessionStorage.removeItem(GUEST_SESSION_KEY);
-        updateStatus('Token required to proceed');
+        updateStatus('Token required to proceed.');
       };
 
       const hydrate = () => {
         let storedToken = '';
-        let storedWallet = '';
         try {
           storedToken = localStorage.getItem(ACCESS_KEY) || '';
-          storedWallet = localStorage.getItem(WALLET_KEY) || '';
         } catch {}
 
-        guestUnlocked = false;
         if (tokenInput) tokenInput.value = storedToken;
-        if (walletInput) walletInput.value = storedWallet;
 
         lock();
 
-        if (storedToken || storedWallet) {
-          updateStatus('Stored credentials found. Confirm token or wallet to unlock.');
+        if (storedToken) {
+          updateStatus('Stored token found. Confirm to unlock.');
         }
       };
 
@@ -2079,7 +2061,7 @@
           gate.style.display = 'grid';
           gate.scrollIntoView({ behavior: 'smooth' });
         }
-        updateStatus('Token or wallet required to continue.');
+        updateStatus('Token required to continue.');
       };
 
       const bindPress = (el, handler) => {
@@ -2107,42 +2089,22 @@
 
       bindPress(acceptBtn, () => {
         const token = tokenInput.value.trim();
-        const wallet = walletInput.value.trim();
-        const guestCode = guestInput?.value.trim() || '';
 
-        if (token || wallet) {
-          unlock(token, wallet);
+        if (token) {
+          unlock(token);
           return;
         }
 
-        if (hasGuestCode(guestCode)) {
-          unlock('', 'guest', { guest: true });
-          return;
-        }
-
-        updateStatus('Token required unless you verify with wallet or access code');
+        updateStatus('Token required to continue.');
       });
 
       bindPress(clearBtn, () => {
         try {
           localStorage.removeItem(ACCESS_KEY);
-          localStorage.removeItem(WALLET_KEY);
           localStorage.removeItem(SESSION_KEY);
-          sessionStorage.removeItem(GUEST_SESSION_KEY);
         } catch {}
         tokenInput.value = '';
-        walletInput.value = '';
-        if (guestInput) guestInput.value = '';
         lock();
-      });
-
-      bindPress(guestToggle, () => {
-        if (!guestToggle || !guestInput) return;
-        const expanded = guestToggle.getAttribute('aria-expanded') === 'true';
-        guestToggle.setAttribute('aria-expanded', expanded ? 'false' : 'true');
-        const wrap = document.getElementById('gate-guest-wrap');
-        if (wrap) wrap.hidden = expanded;
-        if (!expanded) guestInput.focus();
       });
 
       bindPress(manageBtn, () => {
