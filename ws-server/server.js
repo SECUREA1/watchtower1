@@ -330,6 +330,7 @@ const wss = new WebSocketServer({ server, path: "/ws" });
 const clients = new Map();
 const broadcasters = new Map();
 const thumbnails = new Map();
+const cameraFrames = new Map();
 // track viewers per broadcaster
 const listeners = new Map(); // hostId -> Set of watcherIds
 const watching = new Map();  // watcherId -> Set of hostIds
@@ -364,6 +365,22 @@ function sendListenerCount(id){
   }
 }
 
+function broadcastCameraList() {
+  const cameras = [];
+  for (const [id, data] of cameraFrames.entries()) {
+    cameras.push({
+      id,
+      label: data?.label || id,
+      source: data?.source || null,
+      ts: data?.ts || null,
+    });
+  }
+  const payload = JSON.stringify({ type: "camera-list", cameras });
+  for (const client of wss.clients) {
+    if (client.readyState === 1) client.send(payload);
+  }
+}
+
 wss.on("connection", (ws) => {
   ws.id = uid();
   clients.set(ws.id, ws);
@@ -373,6 +390,33 @@ wss.on("connection", (ws) => {
   broadcastUsers();
   for(const [id, thumb] of thumbnails.entries()){
     ws.send(JSON.stringify({ type: "thumb", id, thumb }));
+  }
+  if (cameraFrames.size) {
+    ws.send(
+      JSON.stringify({
+        type: "camera-list",
+        cameras: Array.from(cameraFrames.entries()).map(([id, data]) => ({
+          id,
+          label: data?.label || id,
+          source: data?.source || null,
+          ts: data?.ts || null,
+        })),
+      })
+    );
+    for (const [id, data] of cameraFrames.entries()) {
+      if (data?.image) {
+        ws.send(
+          JSON.stringify({
+            type: "camera-frame",
+            cameraId: id,
+            image: data.image,
+            ts: data.ts || Date.now(),
+            source: data.source || null,
+            label: data.label || id,
+          })
+        );
+      }
+    }
   }
   ws.on("close", () => {
     clients.delete(ws.id);
@@ -509,6 +553,57 @@ wss.on("connection", (ws) => {
             const watcher = clients.get(watcherId);
             if(watcher && watcher.readyState === 1) watcher.send(payload);
           }
+        }
+        return;
+      }
+      case "camera-start": {
+        if (!msg.cameraId) return;
+        const existing = cameraFrames.get(msg.cameraId) || {};
+        cameraFrames.set(msg.cameraId, {
+          ...existing,
+          ts: msg.ts || existing.ts || Date.now(),
+          label: msg.label || existing.label || msg.cameraId,
+          source: msg.source || existing.source || null,
+        });
+        broadcastCameraList();
+        return;
+      }
+      case "camera-stop": {
+        if (!msg.cameraId) return;
+        if (cameraFrames.has(msg.cameraId)) {
+          cameraFrames.delete(msg.cameraId);
+          broadcastCameraList();
+        }
+        const payload = JSON.stringify({ type: "camera-stop", cameraId: msg.cameraId });
+        for (const client of wss.clients) {
+          if (client.readyState === 1) client.send(payload);
+        }
+        return;
+      }
+      case "camera-frame": {
+        if (!msg.cameraId || typeof msg.image !== "string") return;
+        if (!msg.image.startsWith("data:image/")) return;
+        if (msg.image.length > 3_000_000) return;
+        const existing = cameraFrames.get(msg.cameraId) || {};
+        const payload = {
+          type: "camera-frame",
+          cameraId: msg.cameraId,
+          image: msg.image,
+          ts: msg.ts || Date.now(),
+          source: msg.source || existing.source || null,
+          label: msg.label || existing.label || msg.cameraId,
+        };
+        cameraFrames.set(msg.cameraId, {
+          image: payload.image,
+          ts: payload.ts,
+          source: payload.source,
+          label: payload.label,
+        });
+        for (const client of wss.clients) {
+          if (client.readyState === 1) client.send(JSON.stringify(payload));
+        }
+        if (!existing?.image) {
+          broadcastCameraList();
         }
         return;
       }
