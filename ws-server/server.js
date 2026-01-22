@@ -137,10 +137,16 @@ async function tryServeFile(res, relativePath, method) {
       if (method === "GET") {
         let data = await readFile(normalized);
         if (ext === ".html") {
-          const injection = `\n<!-- Live presence counter -->\n<script src="/static/js/live-counter.js"></script>\n`;
           try {
             const text = data.toString();
-            if (!text.includes("live-counter.js")) {
+            const hasWsConfig = text.includes("ws-config.js");
+            const hasLiveCounter = text.includes("live-counter.js");
+            if (!hasWsConfig || !hasLiveCounter) {
+              const injection = `\n<!-- Live presence counter -->\n${
+                hasWsConfig ? "" : '<script src="/static/js/ws-config.js"></script>\n'
+              }${
+                hasLiveCounter ? "" : '<script src="/static/js/live-counter.js"></script>\n'
+              }`;
               const needsAppend = !text.includes("</body>");
               const updated = needsAppend
                 ? text + injection
