@@ -304,6 +304,10 @@ HTML_ALIASES = {
     "/rednode-dashboard.html": "RedNode Dashboard — Full Demo.html",
     "/multi-camera": "site/multi_camera.html",
     "/multi-camera.html": "site/multi_camera.html",
+    "/omconsole": "site/omconsole_render_single.html",
+    "/omconsole.html": "site/omconsole_render_single.html",
+    "/omconsole-routing": "site/omconsole_render_single_games_ROUTING.html",
+    "/omconsole-routing.html": "site/omconsole_render_single_games_ROUTING.html",
 }
 
 HOME_PATHS = {"/home", "/home.html"}
