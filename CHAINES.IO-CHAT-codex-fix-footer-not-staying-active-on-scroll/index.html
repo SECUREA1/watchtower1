@@ -354,7 +354,7 @@
           <button class="chip" id="camera-flip-btn" title="Switch camera">🔁 Flip</button>
           <button class="chip" id="fullscreen-btn" title="Toggle fullscreen">⛶ Fullscreen</button>
           <a href="/home.html#contact" class="chip">Contact</a>
-          <button id="mode-toggle" class="chip" title="Switch between cloud or local modes" hidden></button>
+          <button id="mode-toggle" class="chip" title="Switch between cloud or local modes"></button>
           <button id="cc-settings" class="chip" title="Caption settings" hidden>CC</button>
         </div>
       </header>
@@ -444,6 +444,7 @@
     </div>
   </div>
 
+    <script src="/static/js/ws-config.js"></script>
     <script src="static/workstream.js"></script>
     <script>
   ;(() => {
@@ -479,6 +480,7 @@
     const wsEdit = el('#ws-edit');
     const wsCfg = el('#ws-config');
     const wsUrlInput = el('#ws-url');
+    const wsConfig = window.rednodeWsConfig || {};
     const liveChip = el('#live-chip');
     const themeToggle = el('#theme-toggle');
     const modeToggle = el('#mode-toggle');
@@ -547,11 +549,12 @@
         catch {}
       },
       get wsURL() {
-        try { return localStorage.getItem('chaines_ws_url') || defaultWS(); }
-        catch { return defaultWS(); }
+        try { return normalizeWsUrl(getStoredWsUrl()) || defaultWsUrl(); }
+        catch { return defaultWsUrl(); }
       },
       set wsURL(v) {
-        try { v ? localStorage.setItem('chaines_ws_url', v) : localStorage.removeItem('chaines_ws_url'); }
+        const normalized = normalizeWsUrl(v);
+        try { normalized ? localStorage.setItem('rednode_ws_url', normalized) : localStorage.removeItem('rednode_ws_url'); }
         catch {}
       },
       get theme() {
@@ -840,13 +843,43 @@
       try { socket && socket.readyState === 1 && socket.send(JSON.stringify({ type:'join', user: store.user })); } catch {}
     }
 
-    function defaultWS(){
-      const host = (location.hostname && !/localhost|127\\.0\\.0\\.1/.test(location.hostname))
-        ? 'chaines-io-chat.onrender.com'
-        : location.host;
-      const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
-      return proto + host + '/ws';
-    }
+    const normalizeWsUrl = (value) =>
+      typeof wsConfig.normalizeWsUrl === 'function' ? wsConfig.normalizeWsUrl(value) : (value || '');
+
+    const defaultWsUrl = () => {
+      if (typeof wsConfig.defaultWsUrl === 'function') return wsConfig.defaultWsUrl();
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      return `${proto}://${location.host}/ws`;
+    };
+
+    const syncWsPlaceholder = () => {
+      if (!wsUrlInput) return;
+      wsUrlInput.placeholder = `Auto: ${defaultWsUrl()}`;
+    };
+
+    const getStoredWsUrl = () => {
+      const primary = localStorage.getItem('rednode_ws_url');
+      if (primary) return primary;
+      const legacy = localStorage.getItem('chaines_ws_url');
+      if (legacy) {
+        try { localStorage.setItem('rednode_ws_url', legacy); } catch {}
+        return legacy;
+      }
+      return '';
+    };
+
+    const pruneLocalWsOverride = () => {
+      const stored = normalizeWsUrl(getStoredWsUrl());
+      if (!stored) {
+        try { localStorage.removeItem('rednode_ws_url'); } catch {}
+      }
+      try { localStorage.removeItem('chaines_ws_url'); } catch {}
+    };
+
+    pruneLocalWsOverride();
+    syncWsPlaceholder();
+
+    const defaultWS = () => defaultWsUrl();
 
     function setStatus(mode){
       onlineMode = mode;
@@ -958,10 +991,14 @@
     wsEdit.addEventListener('click', () => {
       wsCfg.style.display = wsCfg.style.display==='none' ? 'grid' : 'none';
       wsUrlInput.value = store.wsURL;
+      syncWsPlaceholder();
     });
     el('#save-ws').addEventListener('click', (e) => {
       e.preventDefault();
-      store.wsURL = wsUrlInput.value.trim();
+      const normalized = normalizeWsUrl(wsUrlInput.value.trim());
+      store.wsURL = normalized;
+      wsUrlInput.value = normalized;
+      syncWsPlaceholder();
       alert('Saved WebSocket URL.');
     });
 
