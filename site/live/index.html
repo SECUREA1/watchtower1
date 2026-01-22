@@ -943,6 +943,7 @@
     const ccFont = el('#cc-font');
     const ccColor = el('#cc-color');
     const ccApply = el('#cc-apply');
+    const wsConfig = window.rednodeWsConfig || {};
     const videoContainer = el('#video-container');
     const streamsEl = el('#streams');
     const streams = {};
@@ -1081,6 +1082,39 @@
         try { localStorage.removeItem('rednode_messages'); } catch {}
       }
     };
+
+    const isLocalHost = (host) => {
+      if (!host) return false;
+      const normalized = host.toLowerCase();
+      return normalized === 'localhost' || normalized === '127.0.0.1' || normalized.endsWith('.local');
+    };
+    const safeHostname = (url) => {
+      try { return new URL(url).hostname; } catch { return ''; }
+    };
+    const normalizeWsUrl = (value) =>
+      typeof wsConfig.normalizeWsUrl === 'function' ? wsConfig.normalizeWsUrl(value) : (value || '');
+    const defaultWsUrl = () => {
+      if (typeof wsConfig.defaultWsUrl === 'function') return wsConfig.defaultWsUrl();
+      if (location.protocol.startsWith('http')) {
+        const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+        return `${proto}://${location.host}/ws`;
+      }
+      return 'wss://watchtower-kw2o.onrender.com/ws';
+    };
+    const syncWsPlaceholder = () => {
+      if (!wsUrlInput) return;
+      wsUrlInput.placeholder = `Auto: ${defaultWsUrl()}`;
+    };
+    const pruneLocalWsOverride = () => {
+      const stored = normalizeWsUrl(localStorage.getItem('rednode_ws_url') || '');
+      if (!stored) return;
+      const storedHost = safeHostname(stored);
+      if (isLocalHost(storedHost) && !isLocalHost(location.hostname)) {
+        try { localStorage.removeItem('rednode_ws_url'); } catch {}
+      }
+    };
+    pruneLocalWsOverride();
+    syncWsPlaceholder();
 
     const walletWaiters = [];
     const hasEthers = typeof window !== 'undefined' && typeof window.ethers !== 'undefined';
@@ -1786,10 +1820,13 @@
     wsEdit.addEventListener('click', () => {
       wsCfg.style.display = wsCfg.style.display==='none' ? 'grid' : 'none';
       wsUrlInput.value = store.wsURL;
+      syncWsPlaceholder();
     });
     el('#save-ws').addEventListener('click', (e) => {
       e.preventDefault();
-      store.wsURL = wsUrlInput.value.trim();
+      const normalized = normalizeWsUrl(wsUrlInput.value.trim());
+      store.wsURL = normalized;
+      wsUrlInput.value = normalized;
       alert('Saved WebSocket URL.');
     });
 
