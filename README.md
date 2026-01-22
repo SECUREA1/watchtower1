@@ -101,6 +101,19 @@ All frontend assets now live in the repo-level `site/` directory and are served 
 
 Open `http://127.0.0.1:8000/multi-camera` to see all configured camera streams and status.
 
+### WebSocket live broadcast (Secure feed + chat)
+
+The `ws-server` service exposes a WebSocket endpoint at `/ws` that powers the live chat room and Secure broadcast feeds. Watchtower Secure (`/secure.html`) publishes frames over this socket so `/live/`, `/multi_camera.html`, and the startup page can render the same live feed.
+
+**Camera feed messages:**
+
+- `camera-start` → announce a new camera stream (includes `cameraId`, `label`, `source`, `ts`).
+- `camera-frame` → base64 JPEG frames for a camera (`cameraId`, `image`, `label`, `source`, `ts`).
+- `camera-stop` → indicate a camera feed stopped.
+- `camera-list` → list active cameras for new clients.
+
+The chat room and broadcast viewers listen for these messages to keep the live feed in sync across all connected operators.
+
 ### Legacy nginx image
 
 The root-level `Dockerfile` builds the former nginx-only static site. Deployment now relies on the combined FastAPI container (see `Dockerfile.api`), but the nginx Dockerfile is retained for reference or bespoke builds.
