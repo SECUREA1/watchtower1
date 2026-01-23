@@ -67,7 +67,7 @@
     @media(max-width:900px){#model-viewer-wrap{height:260px}}
   </style>
 </head>
-<body>
+<body data-github-repo="muzikaz/Watchtower" data-github-branch="main" data-github-path="">
   <div class="header">
     <a class="brand" href="/start.html">
       <img src="static/watchtown-wood-logo.svg" alt="Watchtower logo" />
@@ -204,7 +204,7 @@
        - QR image via https://api.qrserver.com so QR always shows on desktop
     */
 
-    const COMMIT_GROUP_GLB = [
+    let COMMIT_GROUP_GLB = [
       {
         title: "Commit Group: 2026-01-18",
         description: "Primary commit group capture (2026-01-18).",
@@ -416,6 +416,89 @@
       }
     ];
 
+    const GITHUB_GLB_SETTINGS = {
+      repo: document.body.dataset.githubRepo || '',
+      branch: document.body.dataset.githubBranch || 'main',
+      path: document.body.dataset.githubPath || ''
+    };
+
+    function inferGithubRepo(){
+      if (GITHUB_GLB_SETTINGS.repo) return GITHUB_GLB_SETTINGS.repo;
+      const host = window.location.hostname || '';
+      if (host.endsWith('github.io')) {
+        const owner = host.split('.')[0];
+        const repo = window.location.pathname.split('/').filter(Boolean)[0];
+        if (owner && repo) return `${owner}/${repo}`;
+      }
+      return '';
+    }
+
+    async function fetchGithubGlbs(){
+      const repo = inferGithubRepo();
+      if (!repo) return [];
+      const [owner, name] = repo.split('/');
+      if (!owner || !name) return [];
+      const path = (GITHUB_GLB_SETTINGS.path || '').replace(/^\/+|\/+$/g, '');
+      const url = `https://api.github.com/repos/${owner}/${name}/contents/${path}?ref=${encodeURIComponent(GITHUB_GLB_SETTINGS.branch)}`;
+      try{
+        const res = await fetch(url);
+        if (!res.ok) return [];
+        const data = await res.json();
+        if (!Array.isArray(data)) return [];
+        return data
+          .filter(item => item && item.type === 'file' && /\.(glb|gltf)$/i.test(item.name))
+          .map(item => ({
+            fileName: item.name,
+            rawUrl: item.download_url || item.html_url
+          }));
+      } catch (e){
+        console.warn('Failed to load GitHub GLBs', e);
+        return [];
+      }
+    }
+
+    function buildCommitGroupEntries(glbFiles){
+      return glbFiles.map(item => {
+        const base = item.fileName.replace(/\.(glb|gltf)$/i, '');
+        return {
+          title: `Commit Group: ${base}`,
+          description: `Commit group capture (${base}).`,
+          glb: item.rawUrl || item.fileName
+        };
+      });
+    }
+
+    function mergeSpacesWithGlbs(glbFiles){
+      const existing = new Set(SPACES.map(space => normalizeGlbName(space.glb)));
+      const additions = glbFiles
+        .filter(item => !existing.has(normalizeGlbName(item.fileName)))
+        .map(item => {
+          const base = item.fileName.replace(/\.(glb|gltf)$/i, '');
+          return {
+            id: genId(),
+            title: `Main Space — ${base}`,
+            description: `Auto-imported commit group capture for ${base}.`,
+            category: "automation",
+            devices: ["commit-group"],
+            securityLevel: "Medium",
+            lastUpdated: new Date().toLocaleString(),
+            thumb: "https://dummyimage.com/800x450/241309/f5c65a.png&text=Watchtower+Space",
+            glb: item.rawUrl || item.fileName,
+            video: "",
+            audio: ""
+          };
+        });
+      if (additions.length) {
+        SPACES = [...additions, ...SPACES];
+      }
+    }
+
+    function normalizeGlbName(glb){
+      if (!glb) return '';
+      const decoded = decodeURIComponent(glb.split('/').pop() || '');
+      return decoded.toLowerCase();
+    }
+
     const spacesGrid = document.getElementById('spacesGrid');
     const commitGroupGrid = document.getElementById('commitGroupGrid');
     const modalBG = document.getElementById('modalBG');
@@ -468,6 +551,8 @@
         card.className = 'space-card';
         const thumbHtml = glbUrl
           ? `<div class="thumb-wrap"><model-viewer id="thumb-mv-${idx}" src="${escapeHtml(glbUrl)}" camera-controls auto-rotate interaction-prompt shadow-intensity="1" style="width:100%;height:100%;"></model-viewer></div>`
+        const thumbHtml = s.glb
+          ? `<div class="thumb-wrap"><model-viewer id="thumb-mv-${idx}" src="${escapeHtml(resolveGlbUrl(s.glb))}" camera-controls auto-rotate interaction-prompt shadow-intensity="1" style="width:100%;height:100%;"></model-viewer></div>`
           : `<div class="thumb-wrap"><img src="${escapeHtml(s.thumb || '')}" alt="${escapeHtml(s.title)}" onerror="this.src='https://dummyimage.com/800x450/241309/f5c65a.png&text=Watchtower+Space'"></div>`;
 
         card.innerHTML = `
@@ -510,6 +595,7 @@
         card.className = 'space-card';
         card.innerHTML = `
           <div class="thumb-wrap"><model-viewer src="${escapeHtml(glbUrl)}" camera-controls auto-rotate interaction-prompt shadow-intensity="1" style="width:100%;height:100%;"></model-viewer></div>
+          <div class="thumb-wrap"><model-viewer src="${escapeHtml(resolveGlbUrl(model.glb))}" camera-controls auto-rotate interaction-prompt shadow-intensity="1" style="width:100%;height:100%;"></model-viewer></div>
           <div class="space-title">${escapeHtml(model.title)}</div>
           <div class="space-desc">${escapeHtml(model.description)}</div>
           <div class="meta-row">
@@ -575,6 +661,14 @@
       if (glbUrl && /^https?:\/\//i.test(glbUrl)) {
         const fallback = window.location.href.split('#')[0] + '#space-' + encodeURIComponent(sp.id);
         const arUrl = 'https://arvr.google.com/scene-viewer/1.0?file=' + encodeURIComponent(glbUrl) + '&mode=ar_preferred&link=' + encodeURIComponent(fallback);
+      const resolvedGlb = resolveGlbUrl(sp.glb);
+      modelWrap.innerHTML = getSpaceLiveSceneHTML({ video: sp.video, glb: resolvedGlb, audio: sp.audio, image: sp.thumb });
+
+      arMessage.textContent = '';
+      qrCodeBox.innerHTML = '';
+      if (resolvedGlb && /^https?:\/\//i.test(resolvedGlb) && window.location.protocol === 'https:') {
+        const fallback = window.location.href.split('#')[0] + '#space-' + encodeURIComponent(sp.id);
+        const arUrl = 'https://arvr.google.com/scene-viewer/1.0?file=' + encodeURIComponent(resolvedGlb) + '&mode=ar_preferred&link=' + encodeURIComponent(fallback);
         const qrSrc = 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' + encodeURIComponent(arUrl);
         qrCodeBox.innerHTML = `<img src="${qrSrc}" alt="AR QR">`;
         openArBtn.href = arUrl;
@@ -585,11 +679,19 @@
         arMessage.innerHTML = 'Scan QR or tap "Open AR on Mobile". Android (ARCore) opens Scene Viewer. iOS Quick Look needs USDZ (ios-src).';
         arShare.style.display = 'flex';
       } else if (glbUrl && /^blob:/i.test(glbUrl)) {
+      } else if (resolvedGlb && /^blob:/i.test(resolvedGlb)) {
         qrCodeBox.innerHTML = `<div style="padding:12px;text-align:center;color:#222;">Local preview only.<br>Upload the .glb to a public host/IPFS to enable AR sharing.</div>`;
         openArBtn.href = '#';
         openArBtn.onclick = (e) => { e.preventDefault(); arMessage.textContent = 'Local model: host the GLB publicly to use Scene Viewer/QR.'; };
         copyArBtn.onclick = () => { arMessage.textContent = 'Local model — cannot create cross-device AR link.'; };
         arMessage.innerHTML = 'Local model preview. To share AR across devices host/pin the GLB and set the space glb to the public HTTPS URL.';
+        arShare.style.display = 'flex';
+      } else if (resolvedGlb) {
+        qrCodeBox.innerHTML = `<div style="padding:12px;text-align:center;color:#222;">AR sharing requires HTTPS hosting.<br>View in AR using the in-viewer button on supported devices.</div>`;
+        openArBtn.href = '#';
+        openArBtn.onclick = (e) => { e.preventDefault(); arMessage.textContent = 'Use the View in AR button in the model preview. HTTPS hosting enables QR sharing.'; };
+        copyArBtn.onclick = () => { arMessage.textContent = 'Enable HTTPS hosting to generate a shareable AR link.'; };
+        arMessage.innerHTML = 'AR share link unavailable without HTTPS. The model viewer AR button still works for WebXR-supported devices.';
         arShare.style.display = 'flex';
       } else {
         arShare.style.display = 'none';
@@ -774,8 +876,23 @@
     function genId(){ return 'sp_' + Math.random().toString(36).slice(2,9); }
     function capitalize(s){ return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
     function escapeHtml(unsafe){ if(!unsafe) return ''; return String(unsafe).replace(/[&<"'>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
+    function resolveGlbUrl(glb){
+      if(!glb) return '';
+      if(/^https?:\/\//i.test(glb) || /^blob:/i.test(glb)) return glb;
+      try{
+        const url = new URL(glb, window.location.href);
+        return url.href;
+      } catch (e){
+        return glb;
+      }
+    }
 
-    document.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('DOMContentLoaded', async () => {
+      const glbFiles = await fetchGithubGlbs();
+      if (glbFiles.length) {
+        COMMIT_GROUP_GLB = buildCommitGroupEntries(glbFiles);
+        mergeSpacesWithGlbs(glbFiles);
+      }
       renderCommitGroup();
       renderSpaces();
       renderAssetShelf();
