@@ -133,12 +133,10 @@ async def add_security_headers(request: Request, call_next):
     response.headers["Referrer-Policy"] = "same-origin"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        "img-src 'self' data: blob: https://images.unsplash.com https://dummyimage.com https://api.qrserver.com; "
-        "script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; "
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data: blob:; "
+        "script-src 'self'; "
+        "style-src 'self' 'unsafe-inline'; "
         "connect-src 'self'; "
-        "media-src 'self' blob:; "
         "frame-ancestors 'none'; "
     )
     return response
