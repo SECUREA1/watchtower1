@@ -1,14 +1,63 @@
+# Dockerfile - Python FastAPI app for Watchtower / RedNode
 FROM python:3.11-slim
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+
+# keep pycache out of the image and force unbuffered logs
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    # Match app.py defaults; can be overridden at runtime in Render
+    DATA_DIR=/opt/rednode/data \
+    STATIC_DIR=/app/site
+
 WORKDIR /app
-# Runtime secrets (set via deploy environment, not baked into the image):
-# ADMIN_TOKEN, GITHUB_ENABLED, GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO, GITHUB_BRANCH, GITHUB_PR_FLOW
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential gcc && rm -rf /var/lib/apt/lists/*
+
+# Install system deps:
+#  - build-essential/gcc for any packages that need compilation
+#  - libglib2.0 & libgl & X libs for opencv headless
+#  - gstreamer runtime / plugins so cv2 GStreamer backend can work if required
+#  - curl used by healthcheck and other scripts
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+    build-essential \
+    gcc \
+    libglib2.0-0 \
+    libsm6 \
+    libxrender1 \
+    libxext6 \
+    libgl1 \
+    gstreamer1.0-tools \
+    gstreamer1.0-plugins-base \
+    gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-bad \
+    gstreamer1.0-plugins-ugly \
+    gstreamer1.0-libav \
+    curl \
+ && rm -rf /var/lib/apt/lists/*
+
+# Copy and install Python deps
 COPY requirements.txt /app/
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt \
+ && pip install --no-cache-dir opencv-python-headless
+
+# Copy app code
 COPY . /app
-RUN mkdir -p /opt/rednode/data && chown -R root:root /opt/rednode
-RUN useradd -m -d /home/rednode -s /bin/false rednode || true && chown -R rednode:rednode /app /opt/rednode
+
+# Create persistent data directory and ensure permissions
+RUN mkdir -p ${DATA_DIR} \
+ && chown -R root:root /opt/rednode || true
+
+# Create non-root runtime user and set ownership for app & data
+RUN useradd -m -d /home/rednode -s /usr/sbin/nologin rednode || true \
+ && chown -R rednode:rednode /app ${DATA_DIR}
+
+# Switch to non-root user for runtime
 USER rednode
+
+# Expose the default dev port (uvicorn uses 8000 by default)
 EXPOSE 8000
+
+# Healthcheck — Render will provide $PORT at runtime; use fallback 8000 for local tests.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD sh -c 'curl -fsS --connect-timeout 2 "http://127.0.0.1:${PORT:-8000}/healthz" || exit 1'
+
+# Start uvicorn. Render will inject $PORT; local fallback is 8000.
 CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
