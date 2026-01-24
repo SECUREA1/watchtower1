@@ -164,10 +164,8 @@
   };
 
   const connect = () => {
-    const resolver = window.rednodeWsConfig?.resolveWsUrl;
-    const url = typeof resolver === "function"
-      ? resolver()
-      : `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws`;
+    const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+    const url = `${protocol}//${location.host}/ws`;
     try {
       ws = new WebSocket(url);
     } catch (e) {
