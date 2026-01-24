@@ -1,71 +1,49 @@
-// server.js - updated for Watchtower deploy
+// server.js
 import http from "http";
-import fs from "fs";
 import { readFile, stat } from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 import { WebSocketServer } from "ws";
 import Database from "better-sqlite3";
 
-const PORT = Number(process.env.PORT || 10000); // Render provides PORT
-const WS_PATH = String(process.env.WS_PATH || "/ws").trim();
+const PORT = process.env.PORT || 10000; // Render provides PORT
 
 // Locate repo root to serve the client HTML
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 const SITE_ROOT = path.join(ROOT, "site");
+const SERVE_ROOTS = [ROOT, SITE_ROOT];
 
-// Prefer STATIC_DIR env (keeps parity with app.py). If absent, fall back to site/ then repo root.
-const STATIC_DIR = process.env.STATIC_DIR ? path.resolve(process.env.STATIC_DIR) : SITE_ROOT;
-const SERVE_ROOTS = [STATIC_DIR, ROOT].map((r) => path.resolve(r));
-
-// DATA_DIR / DB defaults (match app.py defaults)
-const DATA_DIR = process.env.DATA_DIR || "/opt/rednode/data";
-const DB_PATH = process.env.DB_PATH || path.join(DATA_DIR, "app.db");
-
-// Ensure DATA_DIR exists (best-effort)
-try {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-} catch (err) {
-  // continue; Database open will fail later if necessary
-}
-
-// Initialize DB (fail-fast if DB can't be opened)
-let db;
-try {
-  db = new Database(DB_PATH);
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS chat_messages (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user TEXT,
-      room TEXT,
-      message TEXT,
-      image TEXT,
-      file TEXT,
-      file_name TEXT,
-      file_type TEXT,
-      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE TABLE IF NOT EXISTS comments (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      message_id INTEGER,
-      user TEXT,
-      text TEXT,
-      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE TABLE IF NOT EXISTS likes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      message_id INTEGER,
-      user TEXT,
-      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(message_id, user)
-    );
-  `);
-  try { db.exec("ALTER TABLE chat_messages ADD COLUMN room TEXT"); } catch {}
-} catch (err) {
-  console.error("Failed to open or initialize DB at", DB_PATH, err);
-  process.exit(1);
-}
+const DB_PATH = process.env.DB_PATH || path.join(ROOT, "app.db");
+const db = new Database(DB_PATH);
+db.exec(`
+  CREATE TABLE IF NOT EXISTS chat_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user TEXT,
+    room TEXT,
+    message TEXT,
+    image TEXT,
+    file TEXT,
+    file_name TEXT,
+    file_type TEXT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS comments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id INTEGER,
+    user TEXT,
+    text TEXT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS likes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id INTEGER,
+    user TEXT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(message_id, user)
+  );
+`);
+try { db.exec("ALTER TABLE chat_messages ADD COLUMN room TEXT"); } catch {}
 
 function loadHistory() {
   const rows = db
@@ -142,9 +120,6 @@ const htmlAliases = new Map([
   ["/ar-dashboard", "RedNode Dashboard — Full Demo.html"],
   ["/rednode-dashboard", "RedNode Dashboard — Full Demo.html"],
   ["/rednode-dashboard-demo", "RedNode Dashboard — Full Demo.html"],
-  // Keep alias for multi-camera path
-  ["/multi-camera", "site/multi_camera.html"],
-  ["/multi-camera.html", "site/multi_camera.html"],
 ]);
 
 async function tryServeFile(res, relativePath, method) {
@@ -195,10 +170,9 @@ async function tryServeFile(res, relativePath, method) {
 }
 
 const server = http.createServer(async (req, res) => {
-  // Respond JSON to health checks
   if (req.url === "/healthz") {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true }));
+    res.writeHead(200);
+    res.end("ok");
     return;
   }
 
@@ -244,7 +218,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Security page (handles both /secure and /secure.html)
+    // Security page (handles both /secure and /secure.html)
   const securePaths = new Set(["/secure", "/secure/", "/secure.html"]);
   if ((req.method === "GET" || req.method === "HEAD") && securePaths.has(urlPath)) {
     const served = await tryServeFile(res, "secure.html", req.method);
@@ -358,8 +332,7 @@ const server = http.createServer(async (req, res) => {
   res.end("Not found");
 });
 
-// Create WebSocket server at configurable path
-const wss = new WebSocketServer({ server, path: WS_PATH });
+const wss = new WebSocketServer({ server, path: "/ws" });
 const clients = new Map();
 const broadcasters = new Map();
 const thumbnails = new Map();
@@ -417,42 +390,37 @@ function broadcastCameraList() {
 wss.on("connection", (ws) => {
   ws.id = uid();
   clients.set(ws.id, ws);
-  // Use Watchtower name so UI matches origin
-  try { ws.send(JSON.stringify({ type: "system", text: "Connected to Watchtower WS" })); } catch {}
-  try { ws.send(JSON.stringify({ type: "history", messages: loadHistory() })); } catch {}
-  try { ws.send(JSON.stringify({ type: "id", id: ws.id })); } catch {}
+  ws.send(JSON.stringify({ type: "system", text: "Connected to RedNode Excavation WS" }));
+  ws.send(JSON.stringify({ type: "history", messages: loadHistory() }));
+  ws.send(JSON.stringify({ type: "id", id: ws.id }));
   broadcastUsers();
   for(const [id, thumb] of thumbnails.entries()){
-    try { ws.send(JSON.stringify({ type: "thumb", id, thumb })); } catch {}
+    ws.send(JSON.stringify({ type: "thumb", id, thumb }));
   }
   if (cameraFrames.size) {
-    try {
-      ws.send(
-        JSON.stringify({
-          type: "camera-list",
-          cameras: Array.from(cameraFrames.entries()).map(([id, data]) => ({
-            id,
-            label: data?.label || id,
-            source: data?.source || null,
-            ts: data?.ts || null,
-          })),
-        })
-      );
-    } catch {}
+    ws.send(
+      JSON.stringify({
+        type: "camera-list",
+        cameras: Array.from(cameraFrames.entries()).map(([id, data]) => ({
+          id,
+          label: data?.label || id,
+          source: data?.source || null,
+          ts: data?.ts || null,
+        })),
+      })
+    );
     for (const [id, data] of cameraFrames.entries()) {
       if (data?.image) {
-        try {
-          ws.send(
-            JSON.stringify({
-              type: "camera-frame",
-              cameraId: id,
-              image: data.image,
-              ts: data.ts || Date.now(),
-              source: data.source || null,
-              label: data.label || id,
-            })
-          );
-        } catch {}
+        ws.send(
+          JSON.stringify({
+            type: "camera-frame",
+            cameraId: id,
+            image: data.image,
+            ts: data.ts || Date.now(),
+            source: data.source || null,
+            label: data.label || id,
+          })
+        );
       }
     }
   }
@@ -567,7 +535,7 @@ wss.on("connection", (ws) => {
         }
         const list = watching.get(ws.id);
         if(list){
-          list.delete(ws.id);
+          list.delete(msg.id);
           if(list.size === 0) watching.delete(ws.id);
         }
         return;
@@ -738,32 +706,6 @@ wss.on("connection", (ws) => {
   });
 });
 
-// Start server
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Watchtower WS listening on ${PORT} (ws path: ${WS_PATH})`);
-});
-
-// Graceful shutdown
-function shutdown() {
-  console.log("Shutting down Watchtower WS...");
-  try {
-    wss.clients.forEach((c) => { try { c.close(); } catch {} });
-    wss.close();
-  } catch (err) { console.error("Error closing wss:", err); }
-  try {
-    server.close(() => {
-      console.log("HTTP server closed.");
-      process.exit(0);
-    });
-    // Force exit after timeout
-    setTimeout(() => {
-      console.warn("Forcing exit.");
-      process.exit(0);
-    }, 5000).unref();
-  } catch (err) {
-    console.error("Error closing server:", err);
-    process.exit(1);
-  }
-}
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+server.listen(PORT, "0.0.0.0", () =>
+  console.log(`listening on ${PORT}`)
+);
