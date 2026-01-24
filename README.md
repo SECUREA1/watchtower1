@@ -134,6 +134,12 @@ cameras:
     height: 720
     fps: 30
     flip: 0
+auto_discover_usb: true
+usb_defaults:
+  width: 1280
+  height: 720
+  fps: 30
+  flip: 0
 ```
 
 ---
