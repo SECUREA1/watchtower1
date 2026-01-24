@@ -304,8 +304,6 @@ HTML_ALIASES = {
     "/rednode-dashboard.html": "RedNode Dashboard — Full Demo.html",
     "/multi-camera": "site/multi_camera.html",
     "/multi-camera.html": "site/multi_camera.html",
-    "/chains-ops": "CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll/ops.html",
-    "/chains-ops.html": "CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll/ops.html",
     "/omconsole": "site/omconsole_render_single.html",
     "/omconsole.html": "site/omconsole_render_single.html",
     "/omconsole-routing": "site/omconsole_render_single_games_ROUTING.html",
