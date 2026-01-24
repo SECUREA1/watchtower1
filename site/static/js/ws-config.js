@@ -21,9 +21,21 @@
     return ensureWsPath(`${proto}://${raw}`);
   };
 
+  const readInlineOverride = () => {
+    const globalOverride = normalizeWsUrl(
+      window.REDNODE_WS_URL || window.WATCHTOWER_WS_URL || ""
+    );
+    if (globalOverride) return globalOverride;
+    const meta = document.querySelector('meta[name="rednode-ws-url"]');
+    if (meta?.content) return normalizeWsUrl(meta.content);
+    return "";
+  };
+
   const defaultWsUrl = () => {
     const stored = normalizeWsUrl(localStorage.getItem("rednode_ws_url"));
     if (stored) return stored;
+    const inlineOverride = readInlineOverride();
+    if (inlineOverride) return inlineOverride;
 
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const sameOrigin = ensureWsPath(`${proto}://${location.host}`);
