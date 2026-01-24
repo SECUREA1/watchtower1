@@ -12,27 +12,12 @@ from typing import Dict, List, Optional
 from uuid import uuid4
 
 import requests
+import cv2
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-
-# ----------------------------
-# Logging first so we can warn if imports fail
-# ----------------------------
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO), format="[%(levelname)s] %(message)s")
-logger = logging.getLogger("rednode")
-
-# Try to import cv2 (OpenCV); it's optional in some deployments
-try:
-    import cv2  # type: ignore
-    HAS_CV2 = True
-except Exception as exc:
-    cv2 = None  # type: ignore
-    HAS_CV2 = False
-    logger.warning("OpenCV (cv2) not available: %s — camera functions will be disabled.", exc)
 
 # -------------------------------------------------------------------------
 # Paths & Environment
@@ -48,7 +33,8 @@ LOGS_DIR = DATA_DIR / "logs"
 PENDING_DIR = DATA_DIR / "pending_commits"
 
 # Prefer an explicit STATIC_DIR, then the repo's bundled site/, and finally
-# the container-friendly /app/site location.
+# the container-friendly /app/site location. This avoids "UI not found" when
+# running locally without a mounted site directory.
 STATIC_DIR_ENV = os.getenv("STATIC_DIR")
 STATIC_DIR = (Path(STATIC_DIR_ENV) if STATIC_DIR_ENV else REPO_ROOT / "site").resolve()
 if not STATIC_DIR.exists():
@@ -60,7 +46,9 @@ if not STATIC_DIR.exists():
 SERVE_ROOTS: List[Path] = []
 if STATIC_DIR.exists():
     SERVE_ROOTS.append(STATIC_DIR)
+# Always include the repo root so newly added HTML pages in the repository root are served.
 SERVE_ROOTS.append(REPO_ROOT)
+# Normalize
 SERVE_ROOTS = [root.resolve() for root in SERVE_ROOTS]
 
 MAX_UPLOAD_BYTES = int(
@@ -81,25 +69,28 @@ GITHUB_PR_FLOW = os.getenv("GITHUB_PR_FLOW", "0").lower() in {"1", "true", "yes"
 INDEX_LOCK = threading.Lock()
 
 # -------------------------------------------------------------------------
-# FastAPI app + camera manager placeholder
+# Logging & FastAPI app
 # -------------------------------------------------------------------------
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO), format="[%(levelname)s] %(message)s")
+logger = logging.getLogger("rednode")
+
 app = FastAPI(title="RedNode Storage API")
 
-# Camera manager is optional (Jetson). Import if available.
+# -------------------------------------------------------------------------
+# Camera streaming (Jetson multi-camera)
+# -------------------------------------------------------------------------
 CAMERA_CONFIG_PATH = Path(os.getenv("CAMERA_CONFIG", REPO_ROOT / "config" / "cameras.yaml"))
 camera_manager = None
-if HAS_CV2:
-    try:
-        from camera.manager import CameraManager  # type: ignore
+try:
+    from camera.manager import CameraManager
 
-        camera_manager = CameraManager.from_config_path(CAMERA_CONFIG_PATH)
-    except Exception as exc:
-        logger.warning("Camera manager disabled: %s", exc)
-else:
-    logger.info("Skipping camera manager because OpenCV is not available.")
+    camera_manager = CameraManager.from_config_path(CAMERA_CONFIG_PATH)
+except Exception as exc:
+    logger.warning("Camera manager disabled: %s", exc)
+
 
 def _frame_stream(camera_id: str):
-    """Yield MJPEG boundary frames from camera_manager.latest_frame()."""
     boundary = b"frame"
     while True:
         if not camera_manager:
@@ -140,7 +131,6 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "same-origin"
-    # keep 'connect-src' strict but allow same-origin
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
         "img-src 'self' data: blob:; "
@@ -151,11 +141,51 @@ async def add_security_headers(request: Request, call_next):
     )
     return response
 
+
+@app.on_event("startup")
+def start_camera_manager() -> None:
+    if camera_manager:
+        camera_manager.start()
+
+
+@app.on_event("shutdown")
+def stop_camera_manager() -> None:
+    if camera_manager:
+        camera_manager.stop()
+
+# -------------------------------------------------------------------------
+# Models
+# -------------------------------------------------------------------------
+class FaceAddResponse(BaseModel):
+    ok: bool
+    face_id: str
+    image_path: str
+    image_url: str
+    committed_to_github: bool
+    github_commit_sha: Optional[str] = None
+    pr_url: Optional[str] = None
+    message: Optional[str] = None
+
+
+class FaceSyncResult(BaseModel):
+    face_id: str
+    status: str
+    image_url: Optional[str] = None
+    committed_to_github: Optional[bool] = None
+    github_commit_sha: Optional[str] = None
+    pr_url: Optional[str] = None
+    message: Optional[str] = None
+
+
+class LogsPayload(BaseModel):
+    logs: List[dict] = Field(default_factory=list)
+    source_device_id: Optional[str] = None
+    captured_at: Optional[str] = None
+
 # -------------------------------------------------------------------------
 # Filesystem helpers
 # -------------------------------------------------------------------------
 def ensure_dirs() -> None:
-    """Create required directories and try to set tight permissions."""
     IMAGES_DIR.mkdir(parents=True, exist_ok=True)
     META_DIR.mkdir(parents=True, exist_ok=True)
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -168,8 +198,10 @@ def ensure_dirs() -> None:
     except PermissionError:
         pass
 
-# Ensure fs structure exists early
+
+# Ensure filesystem structure exists at startup
 ensure_dirs()
+
 
 def load_index() -> List[dict]:
     if not INDEX_PATH.exists():
@@ -179,6 +211,7 @@ def load_index() -> List[dict]:
     except json.JSONDecodeError:
         logger.exception("Index JSON corrupted; returning empty index")
         return []
+
 
 def save_index(index: List[dict]) -> None:
     INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -199,6 +232,7 @@ def save_index(index: List[dict]) -> None:
 def b64_encode_bytes(data: bytes) -> str:
     return base64.b64encode(data).decode("utf-8")
 
+
 def b64_decode_bytes(data: str) -> bytes:
     return base64.b64decode(data.encode("utf-8"))
 
@@ -213,6 +247,7 @@ def parse_token(request: Request) -> str:
         return auth.split(" ", 1)[1]
     return auth
 
+
 def require_admin(request: Request) -> None:
     if ALLOW_PUBLIC_INGEST:
         return
@@ -221,6 +256,7 @@ def require_admin(request: Request) -> None:
     token = parse_token(request)
     if token != ADMIN_TOKEN:
         raise HTTPException(status_code=401, detail="Unauthorized.")
+
 
 def require_consent(metadata: dict) -> None:
     if ALLOW_PUBLIC_INGEST:
@@ -231,27 +267,17 @@ def require_consent(metadata: dict) -> None:
     if not consent:
         raise HTTPException(status_code=400, detail="Consent is required for uploads.")
 
+
 def validate_upload(content_type: str, data: bytes) -> None:
     if content_type not in ALLOWED_MIME:
         raise HTTPException(status_code=415, detail="Unsupported image type.")
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="Upload exceeds size limit.")
 
+
 # -------------------------------------------------------------------------
 # Static asset helpers (serve repo-root and site/ HTML files)
 # -------------------------------------------------------------------------
-MIME_TYPES = {
-    ".js": "text/javascript",
-    ".css": "text/css",
-    ".svg": "image/svg+xml",
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".gif": "image/gif",
-    ".vtt": "text/vtt",
-    ".html": "text/html",
-}
-
 # Friendly route aliases for long filenames (request paths with or without trailing slash)
 HTML_ALIASES = {
     "/slots": "RedNode Slots.html",
@@ -259,7 +285,7 @@ HTML_ALIASES = {
     "/chess": "RedNode Chess — Secure Login.html",
     "/eye-pro": "RedNode — Eye Pro (Fleet XR Console).html",
     "/node-eye": "RedNode — Node Eye Console.html",
-    "/abyss": "RedNode.ai — Abyss Pilot (Fleet XR Console).html",
+    "/abyss": "RedNode.ai — Abyss Pilot (Submarine Viewport HUD).html",
     "/redar": "RedAR + IonEye — Multi-Cam + Face_Object + Sentinel + WebXR.html",
     "/drone-dig": "DRONE DIG + SCOOP — DUAL HAND ISO CONTROLS.html",
     "/gesture-sim": "Rednode Excavation — Gesture Controlled Sim.html",
@@ -271,9 +297,11 @@ HTML_ALIASES = {
     "/indoor-ops": "RedNode Dashboard — Indoor Ops · Sentinel · Demo.html",
     "/dadda": "dadda - Copy - Copy.html",
     "/market": "market.html",
-    "/ar-dashboard": "RedNode Dashboard — Full Demo.html",
-    "/rednode-dashboard": "RedNode Dashboard — Full Demo.html",
     "/rednode-dashboard-demo": "RedNode Dashboard — Full Demo.html",
+    "/ar-dashboard": "RedNode Dashboard — Full Demo.html",
+    "/ar-dashboard.html": "RedNode Dashboard — Full Demo.html",
+    "/rednode-dashboard": "RedNode Dashboard — Full Demo.html",
+    "/rednode-dashboard.html": "RedNode Dashboard — Full Demo.html",
     "/multi-camera": "site/multi_camera.html",
     "/multi-camera.html": "site/multi_camera.html",
     "/chains-ops": "CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll/ops.html",
@@ -295,6 +323,7 @@ CHAINES_PATHS = {
 }
 LIVE_PATHS = {"/live", "/live/", "/live/index.html"}
 
+
 def _resolve_path(relative: str) -> Optional[Path]:
     """Return a safe, existing path from any configured serve root."""
     clean = relative.lstrip("/\\")
@@ -308,11 +337,13 @@ def _resolve_path(relative: str) -> Optional[Path]:
             return candidate
     return None
 
+
 def serve_file(relative: str) -> Optional[FileResponse]:
-    p = _resolve_path(relative)
-    if p:
-        return FileResponse(str(p))
+    path = _resolve_path(relative)
+    if path:
+        return FileResponse(str(path))
     return None
+
 
 def alias_response(url_path: str) -> Optional[FileResponse]:
     alias_key = url_path[:-1] if url_path.endswith("/") and url_path != "/" else url_path
@@ -321,16 +352,44 @@ def alias_response(url_path: str) -> Optional[FileResponse]:
         return None
     return serve_file(target)
 
+
+@app.get("/api/cameras")
+def list_cameras() -> JSONResponse:
+    if not camera_manager:
+        return JSONResponse({"ok": False, "error": "camera manager not available"}, status_code=503)
+    return JSONResponse({"ok": True, "cameras": camera_manager.status()})
+
+
+@app.get("/api/cameras/{camera_id}/mjpeg")
+def stream_camera(camera_id: str) -> StreamingResponse:
+    if not camera_manager:
+        raise HTTPException(status_code=503, detail="camera manager not available")
+    return StreamingResponse(
+        _frame_stream(camera_id),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
+
+
+def build_image_path(face_id: str, content_type: str) -> Path:
+    ext = "jpg"
+    if content_type == "image/png":
+        ext = "png"
+    elif content_type == "image/webp":
+        ext = "webp"
+    return IMAGES_DIR / f"{face_id}.{ext}"
+
 # -------------------------------------------------------------------------
-# GitHub helpers (requests only) - unchanged core logic
+# GitHub helpers (requests only)
 # -------------------------------------------------------------------------
 def github_headers() -> Dict[str, str]:
     if not GITHUB_TOKEN:
         logger.error("GITHUB_TOKEN is not set")
     return {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github+json"}
 
+
 def github_api(path: str) -> str:
     return f"https://api.github.com{path}"
+
 
 def create_blob(content: bytes) -> str:
     response = requests.post(
@@ -343,12 +402,14 @@ def create_blob(content: bytes) -> str:
         raise HTTPException(status_code=response.status_code, detail=f"GitHub blob error: {response.text}")
     return response.json()["sha"]
 
+
 def get_ref_sha(branch: str) -> str:
     response = requests.get(github_api(f"/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/ref/heads/{branch}"),
                             headers=github_headers(), timeout=20)
     if response.status_code >= 300:
         raise HTTPException(status_code=response.status_code, detail=f"GitHub ref error: {response.text}")
     return response.json()["object"]["sha"]
+
 
 def get_commit_tree(sha: str) -> str:
     response = requests.get(github_api(f"/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/commits/{sha}"),
@@ -357,12 +418,14 @@ def get_commit_tree(sha: str) -> str:
         raise HTTPException(status_code=response.status_code, detail=f"GitHub commit error: {response.text}")
     return response.json()["tree"]["sha"]
 
+
 def create_tree(base_tree: str, items: List[dict]) -> str:
     response = requests.post(github_api(f"/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/trees"),
                              headers=github_headers(), json={"base_tree": base_tree, "tree": items}, timeout=20)
     if response.status_code >= 300:
         raise HTTPException(status_code=response.status_code, detail=f"GitHub tree error: {response.text}")
     return response.json()["sha"]
+
 
 def create_commit(message: str, tree_sha: str, parents: List[str]) -> str:
     response = requests.post(github_api(f"/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/commits"),
@@ -372,11 +435,13 @@ def create_commit(message: str, tree_sha: str, parents: List[str]) -> str:
         raise HTTPException(status_code=502, detail=f"GitHub commit error: {response.text}")
     return response.json()["sha"]
 
+
 def update_ref(branch: str, sha: str) -> None:
     response = requests.patch(github_api(f"/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/refs/heads/{branch}"),
                               headers=github_headers(), json={"sha": sha, "force": False}, timeout=20)
     if response.status_code >= 300:
         raise HTTPException(status_code=502, detail=f"GitHub update ref error: {response.text}")
+
 
 def create_branch(branch_name: str, base_sha: str) -> None:
     response = requests.post(github_api(f"/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/refs"),
@@ -388,6 +453,7 @@ def create_branch(branch_name: str, base_sha: str) -> None:
     if response.status_code >= 300:
         raise HTTPException(status_code=502, detail=f"GitHub create branch error: {response.text}")
 
+
 def open_pull_request(branch_name: str, title: str, body: str) -> str:
     response = requests.post(github_api(f"/repos/{GITHUB_OWNER}/{GITHUB_REPO}/pulls"),
                              headers=github_headers(), json={"title": title, "head": branch_name, "base": GITHUB_BRANCH, "body": body},
@@ -395,6 +461,7 @@ def open_pull_request(branch_name: str, title: str, body: str) -> str:
     if response.status_code >= 300:
         raise HTTPException(status_code=502, detail=f"GitHub PR error: {response.text}")
     return response.json()["html_url"]
+
 
 def commit_files_to_github(files: Dict[str, bytes], message: str, branch: Optional[str] = None) -> str:
     if not GITHUB_ENABLED:
@@ -432,23 +499,22 @@ def commit_files_to_github(files: Dict[str, bytes], message: str, branch: Option
         raise last_exc
     raise HTTPException(status_code=500, detail="Unknown commit failure.")
 
+
 def raw_github_url(path: str, branch: Optional[str] = None) -> str:
     branch = branch or GITHUB_BRANCH
     return f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/{branch}/{path}"
 
-# -------------------------------------------------------------------------
-# Pending commit processor (runs in background)
-# -------------------------------------------------------------------------
-def process_pending_commits_loop(stop_event: threading.Event) -> None:
+
+def process_pending_commits_loop() -> None:
     backoff = 5.0
-    while not stop_event.is_set():
+    while True:
         try:
             if not GITHUB_ENABLED:
-                stop_event.wait(20)
+                time.sleep(20)
                 continue
             pending_files = list(PENDING_DIR.glob("pending-*.json"))
             if not pending_files:
-                stop_event.wait(random.uniform(10, 30))
+                time.sleep(random.uniform(10, 30))
                 continue
             pending_entries = []
             for pending_path in pending_files:
@@ -466,8 +532,6 @@ def process_pending_commits_loop(stop_event: threading.Event) -> None:
                     created_at_dt = None
                 pending_entries.append((created_at_dt or datetime.utcnow(), pending_path, data))
             for _, pending_path, data in sorted(pending_entries, key=lambda item: item[0]):
-                if stop_event.is_set():
-                    break
                 pending_id = data.get("id") or pending_path.stem
                 files_payload = data.get("files") or {}
                 files_bytes = {path: b64_decode_bytes(content) for path, content in files_payload.items()}
@@ -493,20 +557,20 @@ def process_pending_commits_loop(stop_event: threading.Event) -> None:
                     status = exc.status_code or 500
                     if status == 429 or status >= 500 or status in (409, 422):
                         logger.warning("Pending commit %s transient failure (%s); will retry later", pending_id, status)
-                        stop_event.wait(min(30, backoff))
+                        time.sleep(min(30, backoff))
                         backoff = min(60.0, backoff * 1.5)
                         continue
                     logger.error("Pending commit %s failed irrecoverably: %s", pending_id, exc.detail)
         except Exception as loop_exc:
             logger.error("Pending commit loop error: %s", loop_exc)
-            stop_event.wait(5)
+            time.sleep(5)
 
-# Thread control
-_pending_thread: Optional[threading.Thread] = None
-_pending_stop: Optional[threading.Event] = None
+
+# Start background worker at import time
+threading.Thread(target=process_pending_commits_loop, daemon=True).start()
 
 # -------------------------------------------------------------------------
-# Index helpers & ingestion (unchanged)
+# Index helpers & ingestion
 # -------------------------------------------------------------------------
 def prepare_index_record(metadata: dict, image_path: Path, committed: bool, github_sha: Optional[str], github_url: Optional[str], pr_url: Optional[str]) -> dict:
     storage_value = (metadata.get("storage") or "server").lower()
@@ -528,8 +592,10 @@ def prepare_index_record(metadata: dict, image_path: Path, committed: bool, gith
         "source": metadata.get("source"),
     }
 
+
 def ingest_file(content: bytes, content_type: str, metadata: dict) -> dict:
     validate_upload(content_type, content)
+    # consent will be enforced by caller when needed
     face_id = metadata.get("id") or str(uuid4())
     metadata["id"] = face_id
     metadata.setdefault("created_at", datetime.utcnow().isoformat())
@@ -544,6 +610,7 @@ def ingest_file(content: bytes, content_type: str, metadata: dict) -> dict:
         pass
     return {"face_id": face_id, "image_path": image_path, "meta_path": meta_path, "metadata": metadata}
 
+
 def update_index_with_record(record: dict, committed: bool, github_sha: Optional[str], github_url: Optional[str], pr_url: Optional[str]) -> dict:
     index_record = prepare_index_record(record["metadata"], record["image_path"], committed, github_sha, github_url, pr_url)
     with INDEX_LOCK:
@@ -554,6 +621,7 @@ def update_index_with_record(record: dict, committed: bool, github_sha: Optional
         index.append(index_record)
         save_index(index)
     return index_record
+
 
 def update_index_commit_info(face_id: str, committed: bool, github_sha: Optional[str], github_url: Optional[str], pr_url: Optional[str]) -> None:
     with INDEX_LOCK:
@@ -567,10 +635,12 @@ def update_index_commit_info(face_id: str, committed: bool, github_sha: Optional
                 save_index(index)
                 break
 
+
 def face_exists(face_id: str) -> Optional[dict]:
     with INDEX_LOCK:
         index = load_index()
     return next((item for item in index if item.get("id") == face_id), None)
+
 
 def enqueue_pending_commit(files: Dict[str, bytes], message: str, branch: Optional[str], face_ids: List[str]) -> None:
     ensure_dirs()
@@ -592,6 +662,7 @@ def enqueue_pending_commit(files: Dict[str, bytes], message: str, branch: Option
     except PermissionError:
         pass
     logger.info("Enqueued pending commit %s for faces: %s", pending_id, face_ids)
+
 
 def commit_to_github(files: Dict[str, bytes], face_id: str, prefer_pr: bool = False, face_ids: Optional[List[str]] = None, branch: Optional[str] = None) -> Dict[str, Optional[str]]:
     if not GITHUB_ENABLED:
@@ -619,32 +690,8 @@ def commit_to_github(files: Dict[str, bytes], face_id: str, prefer_pr: bool = Fa
         return {"committed": False, "sha": None, "pr_url": None, "branch": branch_name, "message": "Commit queued"}
 
 # -------------------------------------------------------------------------
-# Routes (API) - unchanged semantics, but kept as functions here
+# Routes (API)
 # -------------------------------------------------------------------------
-class FaceAddResponse(BaseModel):
-    ok: bool
-    face_id: str
-    image_path: str
-    image_url: str
-    committed_to_github: bool
-    github_commit_sha: Optional[str] = None
-    pr_url: Optional[str] = None
-    message: Optional[str] = None
-
-class FaceSyncResult(BaseModel):
-    face_id: str
-    status: str
-    image_url: Optional[str] = None
-    committed_to_github: Optional[bool] = None
-    github_commit_sha: Optional[str] = None
-    pr_url: Optional[str] = None
-    message: Optional[str] = None
-
-class LogsPayload(BaseModel):
-    logs: List[dict] = Field(default_factory=list)
-    source_device_id: Optional[str] = None
-    captured_at: Optional[str] = None
-
 @app.post("/api/faces/add", response_model=FaceAddResponse)
 async def add_face(request: Request, image: UploadFile = File(...), metadata: str = Form(...)):
     ensure_dirs()
@@ -655,13 +702,18 @@ async def add_face(request: Request, image: UploadFile = File(...), metadata: st
         metadata_obj = json.loads(metadata)
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid metadata JSON.")
+    # per-upload storage: local | server | server_review
     upload_storage = (metadata_obj.get("storage") or "server").lower()
+    # require consent only for server/cloud uploads
     if upload_storage in ("server", "server_review"):
         require_consent(metadata_obj)
+    # ingest (saves local copy)
     record = ingest_file(content, image.content_type or "image/jpeg", metadata_obj)
     index_record = update_index_with_record(record, False, None, None, None)
     logger.info("Stored face %s from device %s", record["face_id"], metadata_obj.get("device_id"))
+    # ensure metadata has server_url
     metadata_obj["image_url"] = f"/api/faces/image/{record['face_id']}"
+    # prepare commit files (images + meta + index)
     files_to_commit = {
         f"data/faces/images/{record['image_path'].name}": record["image_path"].read_bytes(),
         f"data/faces/meta/{record['meta_path'].name}": record["meta_path"].read_bytes(),
@@ -752,6 +804,7 @@ async def sync_faces(request: Request, images: Optional[List[UploadFile]] = File
             image_name_map[record["face_id"]] = record["image_path"].name
     if files_to_commit and GITHUB_ENABLED:
         files_to_commit["data/faces/index.json"] = INDEX_PATH.read_bytes()
+        # prefer PR if global PR flow or if metadata requested review
         prefer_pr = GITHUB_PR_FLOW
         commit_info = commit_to_github(files_to_commit, created_face_ids[0], prefer_pr=prefer_pr, face_ids=created_face_ids)
         for face_id in created_face_ids:
@@ -804,19 +857,23 @@ async def add_logs(payload: LogsPayload, request: Request):
 
 @app.get("/healthz")
 async def healthz():
-    return JSONResponse({"ok": True})
+    return {"ok": True}
 
 @app.get("/health")
 async def health():
-    return JSONResponse({"ok": True})
+    return {"ok": True}
 
 # -------------------------------------------------------------------------
 # Optional static mount for site/static (improves performance for common assets)
+# If your build places assets at site/static/ then this mount will serve them.
+# We still keep the dynamic fallback route below so repo-root HTMLs and other
+# special aliases are resolved correctly.
 # -------------------------------------------------------------------------
 if STATIC_DIR.exists():
     static_assets_dir = STATIC_DIR / "static"
     if static_assets_dir.exists():
         app.mount("/static", StaticFiles(directory=str(static_assets_dir)), name="static_assets")
+
 
 def _fallback_ui() -> Optional[FileResponse]:
     """Return a usable UI when the requested path is missing."""
@@ -826,13 +883,14 @@ def _fallback_ui() -> Optional[FileResponse]:
             return response
     return None
 
+
 @app.get("/{full_path:path}", response_class=HTMLResponse)
 async def serve_frontend(full_path: str, request: Request):
     url_path = request.url.path
     if request.method not in {"GET", "HEAD"}:
         raise HTTPException(status_code=404, detail="Not found")
 
-    # Prefer start.html as landing page
+    # Prefer a modern landing page
     if url_path in {"/", "/index.html"}:
         if serve_file("start.html"):
             return RedirectResponse(url="/start.html", status_code=302)
@@ -842,6 +900,7 @@ async def serve_frontend(full_path: str, request: Request):
         if response:
             return response
 
+    # Short-hand, friendly routes
     if url_path in HOME_PATHS:
         response = serve_file("home.html")
         if response:
@@ -872,24 +931,29 @@ async def serve_frontend(full_path: str, request: Request):
         if response:
             return response
 
+    # Alias handling for friendly extensionless routes (e.g. /ar-dashboard)
     alias_resp = alias_response(url_path)
     if alias_resp:
         return alias_resp
 
+    # Serve repo-root and site files directly when possible.
     if full_path:
         direct_response = serve_file(full_path)
         if direct_response:
             return direct_response
+        # Allow extensionless routes to resolve to .html files
         if not Path(full_path).suffix:
             html_response = serve_file(f"{full_path}.html")
             if html_response:
                 return html_response
 
+    # If nothing matched, fall back to a usable UI if available (spa/index/rednode)
     fallback = _fallback_ui()
     if fallback:
         return fallback
 
     raise HTTPException(status_code=404, detail="Not found")
+
 
 @app.exception_handler(404)
 async def spa_fallback_handler(request: Request, exc: HTTPException):
@@ -900,46 +964,3 @@ async def spa_fallback_handler(request: Request, exc: HTTPException):
     if fallback:
         return fallback
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
-
-# -------------------------------------------------------------------------
-# Lifecycle: startup/shutdown
-# -------------------------------------------------------------------------
-@app.on_event("startup")
-def _startup():
-    # start camera manager if available
-    if camera_manager:
-        camera_manager.start()
-        logger.info("Camera manager started.")
-    # start pending commit thread
-    global _pending_thread, _pending_stop
-    if _pending_thread is None or not _pending_thread.is_alive():
-        _pending_stop = threading.Event()
-        _pending_thread = threading.Thread(target=process_pending_commits_loop, args=(_pending_stop,), daemon=True)
-        _pending_thread.start()
-        logger.info("Pending commits background thread started.")
-
-@app.on_event("shutdown")
-def _shutdown():
-    if camera_manager:
-        try:
-            camera_manager.stop()
-            logger.info("Camera manager stopped.")
-        except Exception as exc:
-            logger.exception("Error stopping camera manager: %s", exc)
-    global _pending_thread, _pending_stop
-    if _pending_stop:
-        _pending_stop.set()
-    if _pending_thread:
-        _pending_thread.join(timeout=3.0)
-
-# -------------------------------------------------------------------------
-# Helper: build_image_path
-# -------------------------------------------------------------------------
-def build_image_path(face_id: str, content_type: str) -> Path:
-    ext = "jpg"
-    if content_type == "image/png":
-        ext = "png"
-    elif content_type == "image/webp":
-        ext = "webp"
-    IMAGES_DIR.mkdir(parents=True, exist_ok=True)
-    return IMAGES_DIR / f"{face_id}.{ext}"
