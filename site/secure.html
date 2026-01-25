@@ -2256,6 +2256,14 @@
         stopAllCameras();
       });
 
+      window.addEventListener("pagehide", ()=>{
+        shutdownCamerasOnClose("page closed");
+      });
+
+      window.addEventListener("beforeunload", ()=>{
+        shutdownCamerasOnClose("page closed");
+      });
+
       el("btnExport").addEventListener("click", ()=>{
         const payload = {
           exportedAt: new Date().toISOString(),
@@ -2807,7 +2815,7 @@
         refreshBtn.className = "ghost";
         refreshBtn.textContent = "Refresh Devices";
         refreshBtn.addEventListener("click", async ()=>{
-          await enumerateVideoDevices(true);
+          await enumerateVideoDevices({ force: true, selectAll: true });
         });
         camSelect.appendChild(refreshBtn);
       }
@@ -2857,8 +2865,15 @@
         syncCameraCheckboxes();
       }
 
+      function selectAllSlotsFromDevices(){
+        const fillCount = Math.min(Math.max(devices.length, 1), MAX_CAM_UI);
+        settings.selectedSlots = Array.from({ length: fillCount }, (_, idx) => idx);
+        saveSettings();
+        syncCameraCheckboxes();
+      }
+
       async function ensureDevicesDiscoveredOnLoad(){
-        await enumerateVideoDevices(false);
+        await enumerateVideoDevices({ force: false });
 
         if(!devices.length && navigator.mediaDevices?.getUserMedia){
           try{
@@ -2866,7 +2881,7 @@
             tmp.getTracks().forEach(t => t.stop());
             setGlobalPerm(true, "Camera: Permission granted (idle)");
             addCvLog("Camera permission granted. Device list unlocked.");
-            await enumerateVideoDevices(true);
+            await enumerateVideoDevices({ force: true, selectAll: true });
           }catch(err){
             addCvLog("Camera permission request failed: " + (err?.message || err), "bad");
             setGlobalPerm(false, "Camera: Permission blocked");
@@ -2899,7 +2914,7 @@
         }
       }
 
-      async function enumerateVideoDevices(force=false){
+      async function enumerateVideoDevices({ force=false, selectAll=false } = {}){
         try{
           const list = await navigator.mediaDevices.enumerateDevices();
           devices = list.filter(d=>d.kind === "videoinput");
@@ -2909,6 +2924,9 @@
             if(sel) renderDeviceSelectOptions(sel, i);
           }
           ensureSelectedSlotsWithinLimits();
+          if(selectAll){
+            selectAllSlotsFromDevices();
+          }
           if(force) toast("Device list refreshed.");
         }catch(e){
           console.warn("enumerateDevices failed:", e);
@@ -3125,7 +3143,7 @@
           }
 
           // refresh devices to get labels after permission
-          await enumerateVideoDevices(false);
+          await enumerateVideoDevices({ force: false });
 
           const ov = el("ov_"+slotIdx);
           resizeOverlayToVideo(v, ov);
@@ -3184,6 +3202,12 @@
         camStates = new Map();
         camStreams = new Map();
         updateStreamStatus();
+      }
+
+      function shutdownCamerasOnClose(reason){
+        if(camStreams.size === 0) return;
+        hardResetCameras(reason);
+        setGlobalPerm(false, "Camera: Not started");
       }
 
       function resetCameraRecovery(success=false){
