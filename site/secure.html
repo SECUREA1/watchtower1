@@ -1598,6 +1598,14 @@
       let camStreams = new Map();  // slotIdx -> MediaStream
       let camStates  = new Map();  // slotIdx -> state
       let devices = [];            // videoinput list
+      const cameraRecovery = {
+        inProgress: false,
+        retries: 0,
+        maxRetries: 3,
+        baseDelayMs: 1500,
+        timer: null,
+        lastReason: "",
+      };
 
       let cameraDisplayOn = !!settings.cameraDisplayOn;
       let recognitionMode = !!settings.recognitionMode;
@@ -1776,6 +1784,9 @@
 
       // Try device list (labels may be blank until permission)
       ensureDevicesDiscoveredOnLoad();
+      watchCameraPermission();
+      window.addEventListener("pagehide", ()=>hardResetCameras("page hidden"));
+      window.addEventListener("beforeunload", ()=>hardResetCameras("page unload"));
 
       /***********************
        * Mobile tabs
@@ -2740,6 +2751,7 @@
       }
 
       function buildCameraSelectors(){
+        if(!camSelect) return;
         camSelect.innerHTML = "";
 
         for(let i=0;i<MAX_CAM_UI;i++){
@@ -2835,8 +2847,8 @@
         const cleaned = Array.from(new Set(settings.selectedSlots || []))
           .filter(n => Number.isInteger(n) && n >= 0 && n < MAX_CAM_UI);
 
-        if(cleaned.length === 0 && devices.length){
-          const fillCount = Math.min(devices.length, MAX_CAM_UI);
+        if(cleaned.length === 0){
+          const fillCount = Math.min(Math.max(devices.length, 1), MAX_CAM_UI);
           settings.selectedSlots = Array.from({ length: fillCount }, (_, idx) => idx);
         }else{
           settings.selectedSlots = cleaned.slice(0, MAX_CAM_UI);
@@ -2866,6 +2878,27 @@
         ensureSelectedSlotsWithinLimits();
       }
 
+      async function watchCameraPermission(){
+        if(!navigator.permissions?.query) return;
+        try{
+          const status = await navigator.permissions.query({ name: "camera" });
+          const handleChange = ()=>{
+            if(status.state === "granted"){
+              addCvLog("Camera permission granted. Auto-starting selected cameras.");
+              setGlobalPerm(true, "Camera: Permission granted");
+              resetCameraRecovery(true);
+              startSelectedCameras(true);
+            }else if(status.state === "denied"){
+              setGlobalPerm(false, "Camera: Permission blocked");
+            }
+          };
+          status.onchange = handleChange;
+          handleChange();
+        }catch(e){
+          console.warn("Camera permission watch failed:", e);
+        }
+      }
+
       async function enumerateVideoDevices(force=false){
         try{
           const list = await navigator.mediaDevices.enumerateDevices();
@@ -2879,6 +2912,7 @@
           if(force) toast("Device list refreshed.");
         }catch(e){
           console.warn("enumerateDevices failed:", e);
+          if(force) toast("Unable to refresh camera devices.");
         }
       }
 
@@ -3041,6 +3075,7 @@
 
         if(camStreams.size > 0){
           setGlobalPerm(true, "Camera: Streaming");
+          resetCameraRecovery(true);
         }else{
           setGlobalPerm(false, "Camera: Not streaming");
         }
@@ -3083,7 +3118,11 @@
           v.setAttribute("autoplay", "");
           v.setAttribute("playsinline", "");
           // iOS: play must be triggered from the user gesture (Start Cameras button).
-          await v.play();
+          try{
+            await v.play();
+          }catch(playErr){
+            addCvLog("Camera stream ready; press Start Cameras if playback is blocked.", "warn");
+          }
 
           // refresh devices to get labels after permission
           await enumerateVideoDevices(false);
@@ -3102,6 +3141,7 @@
           setGlobalPerm(false, "Camera: Permission blocked");
           toast("Camera permission blocked/unavailable (or device already in use).");
           addCvLog(`Camera ${slotIdx} failed: ${(err && err.message) || err}`, "bad");
+          scheduleCameraRecovery(err, slotIdx);
           updateStreamStatus();
           return false;
         }
@@ -3133,6 +3173,49 @@
       function stopAllCameras(){
         for(const [idx] of camStreams.entries()) stopCamera(idx);
         setGlobalPerm(false, "Camera: Not started");
+      }
+
+      function hardResetCameras(reason=""){
+        addCvLog(`Camera reset requested${reason ? `: ${reason}` : ""}`, "warn");
+        stopAllCameras();
+        for(let i=0;i<MAX_CAM_UI;i++){
+          resetCameraLog(i);
+        }
+        camStates = new Map();
+        camStreams = new Map();
+        updateStreamStatus();
+      }
+
+      function resetCameraRecovery(success=false){
+        if(success){
+          cameraRecovery.retries = 0;
+          cameraRecovery.inProgress = false;
+          cameraRecovery.lastReason = "";
+          if(cameraRecovery.timer){
+            clearTimeout(cameraRecovery.timer);
+            cameraRecovery.timer = null;
+          }
+        }
+      }
+
+      function scheduleCameraRecovery(err, slotIdx){
+        if(cameraRecovery.inProgress) return;
+        if(cameraRecovery.retries >= cameraRecovery.maxRetries){
+          addCvLog("Camera recovery exhausted. Please tap Start Cameras.", "warn");
+          return;
+        }
+        cameraRecovery.inProgress = true;
+        cameraRecovery.retries += 1;
+        cameraRecovery.lastReason = err?.message || String(err || "unknown error");
+        const delay = cameraRecovery.baseDelayMs * cameraRecovery.retries;
+        const slotLabel = (slotIdx != null && !Number.isNaN(slotIdx)) ? ` on Camera ${slotIdx}` : "";
+        addCvLog(`Auto-resetting camera session${slotLabel} in ${(delay/1000).toFixed(1)}s.`, "warn");
+        cameraRecovery.timer = setTimeout(async ()=>{
+          hardResetCameras(cameraRecovery.lastReason);
+          await sleep(300);
+          await startSelectedCameras(true);
+          cameraRecovery.inProgress = false;
+        }, delay);
       }
 
       function resizeOverlayToVideo(video, canvas){
