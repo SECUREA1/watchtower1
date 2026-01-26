@@ -308,6 +308,8 @@ HTML_ALIASES = {
     "/omconsole.html": "site/omconsole_render_single.html",
     "/omconsole-routing": "site/omconsole_render_single_games_ROUTING.html",
     "/omconsole-routing.html": "site/omconsole_render_single_games_ROUTING.html",
+    "/games": "site/games.html",
+    "/games.html": "site/games.html",
 }
 
 HOME_PATHS = {"/home", "/home.html"}
