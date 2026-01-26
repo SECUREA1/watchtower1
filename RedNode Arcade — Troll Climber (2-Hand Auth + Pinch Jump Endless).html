@@ -1,0 +1,3070 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no" />
+  <title>RedNode Arcade — Troll Climber (2-Hand Auth + Pinch Jump Endless)</title>
+  <style>
+    :root{
+      --ui-bg: rgba(0,0,0,0.45);
+      --ui-stroke: rgba(255,255,255,0.18);
+      --ui-glow: rgba(255, 60, 0, 0.45);
+      --ui-text: rgba(255,255,255,0.92);
+      --good: rgba(24,255,105,0.95);
+      --warn: rgba(255,208,0,0.95);
+      --bad: rgba(255,42,0,0.95);
+      --aim: rgba(0,190,255,0.95);
+      --shield: rgba(0,190,255,0.95);
+      --ammo: rgba(255,255,255,0.9);
+      --boost: rgba(255,208,0,0.95);
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: #0b0505;
+      touch-action: none;
+    }
+    canvas#gameCanvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      background: radial-gradient(1200px 900px at 50% 25%, #6b0000 0%, #220000 35%, #070000 100%);
+    }
+
+    .hud {
+      position: absolute;
+      top: 14px;
+      left: 14px;
+      right: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      pointer-events: none;
+      user-select: none;
+      z-index: 2;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .hud .panel {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: var(--ui-bg);
+      border: 1px solid var(--ui-stroke);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35), 0 0 24px var(--ui-glow);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      color: var(--ui-text);
+      pointer-events: none;
+      min-width: 240px;
+      flex-wrap: wrap;
+    }
+    .hud .label {
+      font-size: 12px;
+      opacity: 0.85;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .hud .value {
+      font-weight: 700;
+      font-size: 14px;
+      letter-spacing: 0.02em;
+    }
+    .hud .barWrap {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 220px;
+    }
+    .hud .hpbar, .hud .shbar {
+      width: 220px;
+      height: 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.18);
+      background: rgba(0,0,0,0.35);
+      overflow: hidden;
+      position: relative;
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.35);
+    }
+    .hud .hpfill, .hud .shfill {
+      height: 100%;
+      width: 100%;
+      border-radius: 999px;
+      transform-origin: left center;
+    }
+    .hud .hpfill {
+      background: linear-gradient(90deg, #18ff69 0%, #ffd000 55%, #ff2a00 100%);
+      filter: saturate(1.2);
+    }
+    .hud .shfill {
+      background: linear-gradient(90deg, rgba(0,190,255,0.95), rgba(0,190,255,0.55));
+      filter: saturate(1.1);
+    }
+    .hud .hpgloss, .hud .shgloss {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, rgba(255,255,255,0.20), rgba(255,255,255,0) 55%);
+      pointer-events: none;
+    }
+    .hud .pillInline {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(0,0,0,0.35);
+      white-space: nowrap;
+    }
+    .hud .miniDot {
+      width: 9px; height: 9px; border-radius: 50%;
+      background: rgba(255,255,255,0.22);
+      box-shadow: 0 0 14px rgba(255,60,0,0.18);
+    }
+    .hud .miniDot.shield { background: var(--shield); box-shadow: 0 0 14px rgba(0,190,255,0.30); }
+    .hud .miniDot.boost { background: var(--boost); box-shadow: 0 0 14px rgba(255,208,0,0.30); }
+    .hud .miniDot.ammo { background: rgba(255,255,255,0.85); box-shadow: 0 0 14px rgba(255,255,255,0.18); }
+
+    .debugHUD {
+      position: absolute;
+      left: 14px;
+      bottom: 14px;
+      z-index: 4;
+      pointer-events: none;
+      user-select: none;
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: rgba(0,0,0,0.48);
+      border: 1px solid rgba(255,255,255,0.14);
+      color: rgba(255,255,255,0.88);
+      box-shadow: 0 10px 28px rgba(0,0,0,0.45), 0 0 18px rgba(255,60,0,0.18);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      font-size: 12px;
+      line-height: 1.35;
+      min-width: 260px;
+      display: none;
+    }
+    .debugHUD .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin: 2px 0;
+    }
+    .debugHUD .pill2 {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(0,0,0,0.35);
+      white-space: nowrap;
+    }
+    .debugHUD .dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: rgba(255,255,255,0.22);
+      box-shadow: 0 0 14px rgba(255,60,0,0.18);
+    }
+    .debugHUD .dot.good { background: var(--good); box-shadow: 0 0 14px rgba(24,255,105,0.38); }
+    .debugHUD .dot.warn { background: var(--warn); box-shadow: 0 0 14px rgba(255,208,0,0.38); }
+    .debugHUD .dot.bad  { background: var(--bad);  box-shadow: 0 0 14px rgba(255,42,0,0.38); }
+    .debugHUD .dot.aim  { background: var(--aim);  box-shadow: 0 0 14px rgba(0,190,255,0.38); }
+
+    .mobile-controls {
+      position: absolute;
+      bottom: 14px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 10px;
+      z-index: 3;
+    }
+    .btn {
+      pointer-events: auto;
+      width: 62px;
+      height: 62px;
+      border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 16px;
+      background:
+        radial-gradient(14px 14px at 30% 28%, rgba(255,255,255,0.22), rgba(255,255,255,0) 60%),
+        linear-gradient(180deg, rgba(255,255,255,0.10), rgba(0,0,0,0.18));
+      box-shadow: 0 10px 28px rgba(0,0,0,0.40), 0 0 18px rgba(255,60,0,0.24);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      display: grid;
+      place-items: center;
+      color: rgba(255,255,255,0.92);
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+      position: relative;
+      overflow: hidden;
+    }
+    .btn:active {
+      transform: translateY(1px) scale(0.99);
+      box-shadow: 0 7px 18px rgba(0,0,0,0.35), 0 0 22px rgba(255,60,0,0.28);
+    }
+    .btn svg { width: 30px; height: 30px; filter: drop-shadow(0 0 10px rgba(255,60,0,0.25)); }
+    .btn .ripple {
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      border-radius: 999px;
+      background: rgba(255,60,0,0.25);
+      transform: translate(-50%, -50%) scale(0);
+      pointer-events: none;
+      opacity: 0;
+    }
+    .btn:active .ripple { animation: ripple 380ms ease-out; }
+    @keyframes ripple {
+      0% { opacity: 1; transform: translate(-50%, -50%) scale(0); }
+      100% { opacity: 0; transform: translate(-50%, -50%) scale(10); }
+    }
+
+    .hint {
+      position: absolute;
+      bottom: 92px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 8px 12px;
+      border-radius: 12px;
+      background: rgba(0,0,0,0.35);
+      border: 1px solid rgba(255,255,255,0.14);
+      color: rgba(255,255,255,0.85);
+      font-size: 12px;
+      letter-spacing: 0.02em;
+      box-shadow: 0 12px 28px rgba(0,0,0,0.35);
+      user-select: none;
+      pointer-events: none;
+      z-index: 2;
+      text-align: center;
+      line-height: 1.25;
+    }
+
+    @media (max-width: 520px) {
+      .hud .hpbar, .hud .shbar { width: 160px; }
+      .hud .barWrap { min-width: 160px; }
+      .hint { display: none; }
+      .hud .panel { min-width: 0; width: 100%; }
+    }
+
+    /* ---------------- AUTH OVERLAY ---------------- */
+    .authOverlay {
+      position: absolute;
+      inset: 0;
+      z-index: 50;
+      background: radial-gradient(1100px 900px at 50% 25%, rgba(107,0,0,0.85) 0%, rgba(20,0,0,0.92) 35%, rgba(0,0,0,0.96) 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+      transition: opacity 220ms ease, transform 220ms ease;
+      opacity: 1;
+      transform: scale(1);
+    }
+    .authOverlay.hidden {
+      opacity: 0;
+      pointer-events: none;
+      transform: scale(0.985);
+    }
+
+    .authPanel {
+      width: min(980px, calc(100vw - 26px));
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,0.16);
+      background: rgba(0,0,0,0.55);
+      box-shadow: 0 18px 70px rgba(0,0,0,0.55), 0 0 32px rgba(255,60,0,0.22);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      display: grid;
+      grid-template-columns: 1.25fr 1fr;
+      gap: 14px;
+      padding: 14px;
+      color: rgba(255,255,255,0.92);
+    }
+    @media (max-width: 860px) {
+      .authPanel { grid-template-columns: 1fr; }
+    }
+    .authTitle {
+      font-weight: 800;
+      letter-spacing: 0.02em;
+      font-size: 18px;
+      margin: 4px 0 2px 0;
+    }
+    .authSub {
+      opacity: 0.82;
+      font-size: 13px;
+      line-height: 1.4;
+      margin: 0 0 10px 0;
+    }
+    .authBox {
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(0,0,0,0.35);
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25);
+      overflow: hidden;
+    }
+    .camWrap {
+      position: relative;
+      aspect-ratio: 16/10;
+      background: rgba(0,0,0,0.6);
+    }
+    .camWrap video, .camWrap canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+    }
+    .camHUD {
+      position: absolute;
+      left: 10px;
+      right: 10px;
+      bottom: 10px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+      pointer-events: none;
+    }
+    .pill {
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.16);
+      background: rgba(0,0,0,0.45);
+      font-size: 12px;
+      letter-spacing: 0.02em;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 8px 18px rgba(0,0,0,0.35);
+      white-space: nowrap;
+    }
+    .dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: rgba(255,255,255,0.22);
+      box-shadow: 0 0 14px rgba(255,60,0,0.18);
+    }
+    .dot.good { background: var(--good); box-shadow: 0 0 14px rgba(24,255,105,0.38); }
+    .dot.warn { background: var(--warn); box-shadow: 0 0 14px rgba(255,208,0,0.38); }
+    .dot.bad  { background: var(--bad);  box-shadow: 0 0 14px rgba(255,42,0,0.38); }
+
+    .controls {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .cta {
+      pointer-events: auto;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.18);
+      background:
+        radial-gradient(18px 18px at 30% 28%, rgba(255,255,255,0.16), rgba(255,255,255,0) 60%),
+        linear-gradient(180deg, rgba(255,255,255,0.10), rgba(0,0,0,0.18));
+      box-shadow: 0 10px 26px rgba(0,0,0,0.45), 0 0 20px rgba(255,60,0,0.20);
+      padding: 11px 12px;
+      color: rgba(255,255,255,0.92);
+      font-weight: 750;
+      letter-spacing: 0.02em;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      cursor: pointer;
+    }
+    .cta:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+      filter: grayscale(0.35);
+    }
+    .mini {
+      font-size: 12px;
+      font-weight: 650;
+      padding: 9px 10px;
+      border-radius: 12px;
+    }
+    .statusBox {
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(0,0,0,0.35);
+      font-size: 12px;
+      line-height: 1.45;
+      white-space: pre-line;
+    }
+    .bar {
+      height: 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(0,0,0,0.35);
+      overflow: hidden;
+    }
+    .bar > div {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, rgba(24,255,105,0.95), rgba(255,208,0,0.95), rgba(255,42,0,0.95));
+      transform-origin: left center;
+      transition: width 80ms linear;
+    }
+    .toggle {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(0,0,0,0.30);
+    }
+    .toggle input { transform: scale(1.15); }
+    .finePrint {
+      opacity: 0.82;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    /* ---------------- SENSITIVITY TUNER (bottom-right) ---------------- */
+    .sensTuner {
+      position: absolute;
+      right: 14px;
+      bottom: 14px;
+      z-index: 6;
+      pointer-events: auto;
+      user-select: none;
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: rgba(0,0,0,0.48);
+      border: 1px solid rgba(255,255,255,0.16);
+      box-shadow: 0 10px 28px rgba(0,0,0,0.45), 0 0 18px rgba(255,60,0,0.18);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      width: 240px;
+    }
+    .sensTuner .top {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+      color: rgba(255,255,255,0.92);
+    }
+    .sensTuner .title {
+      font-size: 12px;
+      opacity: 0.88;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-weight: 760;
+    }
+    .sensTuner .val {
+      font-size: 13px;
+      font-weight: 820;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+    .sensTuner input[type="range"] {
+      width: 100%;
+      accent-color: #ff2a00;
+    }
+    .sensTuner .sub {
+      margin-top: 6px;
+      font-size: 11px;
+      opacity: 0.82;
+      color: rgba(255,255,255,0.84);
+      line-height: 1.25;
+    }
+    .sensTuner .row2 {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .sensBtn {
+      flex: 1;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.16);
+      background: rgba(0,0,0,0.35);
+      color: rgba(255,255,255,0.9);
+      padding: 8px 10px;
+      font-size: 12px;
+      font-weight: 760;
+      cursor: pointer;
+      box-shadow: 0 8px 18px rgba(0,0,0,0.35);
+    }
+    .sensBtn:active { transform: translateY(1px); }
+
+    @media (max-width: 520px) {
+      .sensTuner { width: 210px; right: 10px; bottom: 86px; } /* avoid covering mobile buttons */
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <div class="hud">
+    <div class="panel">
+      <div>
+        <div class="label">Height</div>
+        <div class="value" id="heightReadout">0 m</div>
+      </div>
+      <div>
+        <div class="label">Level</div>
+        <div class="value" id="levelReadout">1</div>
+      </div>
+
+      <div class="barWrap">
+        <div class="label">HP</div>
+        <div class="hpbar">
+          <div class="hpfill" id="hpFill"></div>
+          <div class="hpgloss"></div>
+        </div>
+      </div>
+
+      <div class="barWrap">
+        <div class="label">Shield</div>
+        <div class="shbar">
+          <div class="shfill" id="shFill"></div>
+          <div class="shgloss"></div>
+        </div>
+      </div>
+
+      <div class="pillInline">
+        <span class="miniDot ammo"></span>
+        <span class="label" style="margin:0;">Ammo</span>
+        <span class="value" id="ammoReadout">0</span>
+      </div>
+
+      <div class="pillInline">
+        <span class="miniDot boost"></span>
+        <span class="label" style="margin:0;">Boost</span>
+        <span class="value" id="boostReadout">0.0s</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div>
+        <div class="label">Controls</div>
+        <div class="value">Left hand steers • Left pinch = BIG jump (repeatable) • Right index aims (reticle) • Right pinch shoots (ammo)</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="hint">Hand detection runs at 30fps (lower CPU), game renders at full speed. Use the sensitivity tuner (bottom-right) to amplify hand motion.</div>
+
+  <div class="debugHUD" id="debugHUD">
+    <div class="row">
+      <span class="pill2"><span class="dot" id="dbgDotCam"></span><span id="dbgCam">Camera: off</span></span>
+      <span class="pill2"><span class="dot" id="dbgDotHands"></span><span id="dbgHands">Hands: 0/2</span></span>
+    </div>
+    <div class="row">
+      <span class="pill2"><span class="dot aim" id="dbgDotAim"></span><span id="dbgAim">Aim: —</span></span>
+      <span class="pill2"><span class="dot" id="dbgDotJump"></span><span id="dbgJump">Jump pinch: —</span></span>
+    </div>
+    <div class="row">
+      <span class="pill2"><span class="dot" id="dbgDotMove"></span><span id="dbgMove">Steer: —</span></span>
+      <span class="pill2"><span class="dot" id="dbgDotShoot"></span><span id="dbgShoot">Shoot pinch: —</span></span>
+    </div>
+  </div>
+
+  <!-- Sensitivity tuner -->
+  <div class="sensTuner" id="sensTuner">
+    <div class="top">
+      <div class="title">Control Sensitivity</div>
+      <div class="val"><span id="sensValue">2.0</span>x</div>
+    </div>
+    <input id="sensSlider" type="range" min="0.6" max="4.0" step="0.1" value="2.0" />
+    <div class="sub">
+      Higher = smaller hand movement creates larger on-screen steering + reticle movement.
+    </div>
+    <div class="row2">
+      <button class="sensBtn" id="sensReset">Reset</button>
+      <button class="sensBtn" id="sensMax">Max</button>
+    </div>
+  </div>
+
+  <div class="mobile-controls" aria-label="mobile controls">
+    <button class="btn" id="btnLeft" aria-label="move left">
+      <span class="ripple"></span>
+      <svg viewBox="0 0 24 24" fill="none">
+        <path d="M14.5 5L7 12l7.5 7" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
+    <button class="btn" id="btnJump" aria-label="jump">
+      <span class="ripple"></span>
+      <svg viewBox="0 0 24 24" fill="none">
+        <path d="M12 4l6 7H6l6-7Z" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round"/>
+        <path d="M12 11v9" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>
+      </svg>
+    </button>
+    <button class="btn" id="btnRight" aria-label="move right">
+      <span class="ripple"></span>
+      <svg viewBox="0 0 24 24" fill="none">
+        <path d="M9.5 5L17 12l-7.5 7" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
+    <button class="btn" id="btnWater" aria-label="shoot water">
+      <span class="ripple"></span>
+      <svg viewBox="0 0 24 24" fill="none">
+        <path d="M12 3c3.5 4 6.5 7.6 6.5 11.1A6.5 6.5 0 1 1 5.5 14.1C5.5 10.6 8.5 7 12 3Z"
+              stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>
+        <path d="M8.3 14.2c.4 2.2 2 3.6 4.1 3.9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- AUTH OVERLAY -->
+  <div class="authOverlay" id="authOverlay">
+    <div class="authPanel">
+      <div class="authBox">
+        <div style="padding: 12px 12px 0 12px;">
+          <div class="authTitle">Two-Hand Login (Local Pose)</div>
+          <div class="authSub">
+            Enroll a <b>custom two-hand pose</b>. Login validates against the same pose signature stored in <b>localStorage</b>.
+            Stability is measured only for enroll/login; during gameplay, hands can move normally.
+          </div>
+        </div>
+        <div class="camWrap">
+          <video id="authVideo" autoplay playsinline muted></video>
+          <canvas id="authCanvas"></canvas>
+          <div class="camHUD">
+            <div class="pill"><span class="dot" id="dotModel"></span><span id="lblModel">Model: loading…</span></div>
+            <div class="pill"><span class="dot" id="dotHands"></span><span id="lblHands">Hands: 0/2</span></div>
+            <div class="pill"><span class="dot" id="dotStable"></span><span id="lblStable">Stable: 0%</span></div>
+          </div>
+        </div>
+        <div style="padding: 12px;">
+          <div class="bar"><div id="stableBar"></div></div>
+          <div class="finePrint" style="margin-top: 10px;">
+            Tip: keep both hands visible (wrists + fingertips), avoid motion blur, and stay ~40–70cm from camera.
+          </div>
+        </div>
+      </div>
+
+      <div class="controls">
+        <div class="authBox" style="padding: 12px;">
+          <div class="row">
+            <button class="cta" id="btnStartCam">Enable Camera</button>
+            <button class="cta mini" id="btnEnroll" disabled>Enroll Pose</button>
+            <button class="cta mini" id="btnLogin" disabled>Login</button>
+            <button class="cta mini" id="btnReset" disabled>Reset Enrollment</button>
+          </div>
+
+          <div class="toggle" style="margin-top: 10px;">
+            <input type="checkbox" id="chkHandControl" checked />
+            <div>
+              <div style="font-weight: 760; letter-spacing: 0.02em;">Enable hand gesture controls after login</div>
+              <div class="finePrint">Left hand steers • Left pinch repeats BIG jump • Right index aims • Right pinch repeats shoot (ammo)</div>
+            </div>
+          </div>
+
+          <div class="statusBox" id="authStatus" style="margin-top: 10px;">Status: initializing…</div>
+          <div class="finePrint" style="margin-top: 10px;">
+            Storage key: <code>rn_trollclimber_enroll_v1</code>. This is device/browser specific.
+          </div>
+        </div>
+
+        <div class="authBox" style="padding: 12px;">
+          <div style="font-weight: 780; margin-bottom: 6px;">What gets stored?</div>
+          <div class="finePrint">
+            A <b>custom pose signature</b> (scale-normalized landmark distance embedding) for <b>Left + Right hands</b>.
+            Login recomputes the same signature and compares similarity.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
+
+    // ---------------- DOM ----------------
+    const authOverlay = document.getElementById("authOverlay");
+    const authVideo   = document.getElementById("authVideo");
+    const authCanvas  = document.getElementById("authCanvas");
+    const aCtx        = authCanvas.getContext("2d");
+
+    const btnStartCam = document.getElementById("btnStartCam");
+    const btnEnroll   = document.getElementById("btnEnroll");
+    const btnLogin    = document.getElementById("btnLogin");
+    const btnReset    = document.getElementById("btnReset");
+    const chkHandControl = document.getElementById("chkHandControl");
+
+    const authStatus  = document.getElementById("authStatus");
+    const dotModel    = document.getElementById("dotModel");
+    const dotHands    = document.getElementById("dotHands");
+    const dotStable   = document.getElementById("dotStable");
+    const lblModel    = document.getElementById("lblModel");
+    const lblHands    = document.getElementById("lblHands");
+    const lblStable   = document.getElementById("lblStable");
+    const stableBar   = document.getElementById("stableBar");
+
+    const debugHUD    = document.getElementById("debugHUD");
+    const dbgDotCam   = document.getElementById("dbgDotCam");
+    const dbgDotHands = document.getElementById("dbgDotHands");
+    const dbgDotAim   = document.getElementById("dbgDotAim");
+    const dbgDotJump  = document.getElementById("dbgDotJump");
+    const dbgDotMove  = document.getElementById("dbgDotMove");
+    const dbgDotShoot = document.getElementById("dbgDotShoot");
+    const dbgCam      = document.getElementById("dbgCam");
+    const dbgHands    = document.getElementById("dbgHands");
+    const dbgAim      = document.getElementById("dbgAim");
+    const dbgJump     = document.getElementById("dbgJump");
+    const dbgMove     = document.getElementById("dbgMove");
+    const dbgShoot    = document.getElementById("dbgShoot");
+
+    // HUD readouts
+    const hpFill = document.getElementById("hpFill");
+    const shFill = document.getElementById("shFill");
+    const heightReadout = document.getElementById("heightReadout");
+    const levelReadout  = document.getElementById("levelReadout");
+    const ammoReadout   = document.getElementById("ammoReadout");
+    const boostReadout  = document.getElementById("boostReadout");
+
+    // Sensitivity tuner DOM
+    const SENS_STORE_KEY = "rn_trollclimber_sens_v1";
+    const sensSlider = document.getElementById("sensSlider");
+    const sensValue  = document.getElementById("sensValue");
+    const sensReset  = document.getElementById("sensReset");
+    const sensMax    = document.getElementById("sensMax");
+
+    // ---------------- Config ----------------
+    const STORE_KEY = "rn_trollclimber_enroll_v1";
+
+    const STABLE_FRAMES_TARGET = 22;
+    const MOVE_EPS = 0.0068;
+    const MIN_HAND_SCORE = 0.55;
+
+    const COS_THRESHOLD = 0.985;
+    const L2_THRESHOLD  = 0.22;
+
+    // ratio = dist(thumbTip, indexTip) / dist(indexMCP, pinkyMCP)
+    const PINCH_RATIO_T = 0.32;
+
+    // Repeat behavior on HOLD
+    const PINCH_COOLDOWN_MS_JUMP  = 140;
+    const PINCH_COOLDOWN_MS_SHOOT = 140;
+
+    // Left-hand steering
+    const STEER_DEADZONE = 0.035;
+    const STEER_GAIN_BASE = 2.05;     // base steering gain
+    const STEER_SMOOTH_A = 0.82;
+
+    // Aim smoothing (reticle stability)
+    const AIM_SMOOTH_A = 0.78;
+
+    // Hand detection throttle (reduces lag)
+    const HAND_FPS = 30;
+    const HAND_INTERVAL_MS = 1000 / HAND_FPS;
+
+    // Debug UI throttle (reduces layout/DOM churn)
+    const DEBUG_HZ = 10;
+    const DEBUG_INTERVAL_MS = 1000 / DEBUG_HZ;
+
+    // ---------------- Sensitivity (user tunable) ----------------
+    let controlSensitivity = 2.0; // default
+
+    function loadSensitivity() {
+      try {
+        const raw = localStorage.getItem(SENS_STORE_KEY);
+        if (!raw) return null;
+        const v = parseFloat(raw);
+        if (!isFinite(v)) return null;
+        return v;
+      } catch {
+        return null;
+      }
+    }
+    function saveSensitivity(v) {
+      try { localStorage.setItem(SENS_STORE_KEY, String(v)); } catch {}
+    }
+    function setSensitivity(v) {
+      controlSensitivity = Math.max(0.6, Math.min(4.0, v));
+      sensSlider.value = String(controlSensitivity);
+      sensValue.textContent = controlSensitivity.toFixed(1);
+      saveSensitivity(controlSensitivity);
+    }
+
+    // init sensitivity from storage
+    const savedSens = loadSensitivity();
+    if (savedSens != null) setSensitivity(savedSens);
+    else setSensitivity(controlSensitivity);
+
+    sensSlider.addEventListener("input", () => setSensitivity(parseFloat(sensSlider.value)));
+    sensReset.addEventListener("click", () => setSensitivity(2.0));
+    sensMax.addEventListener("click", () => setSensitivity(4.0));
+
+    // ---------------- State ----------------
+    let landmarker = null;
+    let webcamOn = false;
+
+    let lastTs = 0;
+
+    // hand loop throttling
+    let lastDetectPerf = 0;
+    let cachedHandMap = { Left: null, Right: null, scoreL: 0, scoreR: 0 };
+
+    let lastHandsForStability = null;
+    let stableFrames = 0;
+    let lastMoveMetric = 999;
+
+    let mode = "idle"; // idle | enroll | login
+    let accum = null;
+
+    let enrolled = null;
+    let loggedIn = false;
+    let handControlEnabled = true;
+
+    let lastDebugPerf = 0;
+
+    // Gesture runtime state (consumed by the game)
+    const gestureState = {
+      active: false,
+      hasTwo: false,
+      scoreL: 0,
+      scoreR: 0,
+
+      // left "palm center" X (smoothed)
+      leftWristX: 0.5,
+      leftWristX_raw: 0.5,
+
+      // aim internal smoothing
+      aimX: 0.5, aimY: 0.5,
+      aimX_raw: 0.5, aimY_raw: 0.5,
+
+      // aim output after sensitivity mapping
+      aimX_out: 0.5, aimY_out: 0.5,
+
+      pinchJump: false,
+      pinchShoot: false,
+      lastJumpAt: 0,
+      lastShootAt: 0,
+      updatedAt: 0,
+    };
+
+    // ---------------- Helpers ----------------
+    function setStatus(msg) { authStatus.textContent = msg; }
+    function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+    function ema(prev, next, a) { return prev + (next - prev) * a; }
+
+    function cosSim(a, b) {
+      let dot = 0, na = 0, nb = 0;
+      for (let i = 0; i < a.length; i++) {
+        const x = a[i], y = b[i];
+        dot += x * y; na += x * x; nb += y * y;
+      }
+      const den = Math.sqrt(na) * Math.sqrt(nb);
+      return den ? (dot / den) : 0;
+    }
+
+    function l2(a, b) {
+      let s = 0;
+      for (let i = 0; i < a.length; i++) {
+        const d = a[i] - b[i];
+        s += d * d;
+      }
+      return Math.sqrt(s);
+    }
+
+    function resizeAuthCanvas() {
+      const r = authCanvas.getBoundingClientRect();
+      const dpr = Math.max(1, Math.min(2.0, window.devicePixelRatio || 1));
+      authCanvas.width = Math.floor(r.width * dpr);
+      authCanvas.height = Math.floor(r.height * dpr);
+      aCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    window.addEventListener("resize", resizeAuthCanvas, { passive: true });
+    resizeAuthCanvas();
+
+    function loadEnrollment() {
+      try {
+        const raw = localStorage.getItem(STORE_KEY);
+        if (!raw) return null;
+        const obj = JSON.parse(raw);
+        if (!obj?.vec || !Array.isArray(obj.vec)) return null;
+        return obj;
+      } catch {
+        return null;
+      }
+    }
+
+    function saveEnrollment(vec, extra = {}) {
+      const payload = {
+        vec: Array.from(vec),
+        meta: {
+          at: new Date().toISOString(),
+          version: 1,
+          stableFrames: STABLE_FRAMES_TARGET,
+          ...extra
+        }
+      };
+      localStorage.setItem(STORE_KEY, JSON.stringify(payload));
+      return payload;
+    }
+
+    function clearEnrollment() {
+      localStorage.removeItem(STORE_KEY);
+      enrolled = null;
+    }
+
+    function mapHands(results) {
+      const out = { Left: null, Right: null, scoreL: 0, scoreR: 0 };
+      if (!results?.landmarks || !results?.handednesses) return out;
+
+      for (let i = 0; i < results.landmarks.length; i++) {
+        const lm = results.landmarks[i];
+        const handed = results.handednesses[i]?.[0];
+        const label = handed?.categoryName;
+        const score = handed?.score ?? 0;
+        if (label === "Left")  { out.Left = lm; out.scoreL = score; }
+        if (label === "Right") { out.Right = lm; out.scoreR = score; }
+      }
+      return out;
+    }
+
+    function movementMetric(prev, cur) {
+      let sum = 0;
+      let n = 0;
+      for (const side of ["Left", "Right"]) {
+        const a = prev?.[side];
+        const b = cur?.[side];
+        if (!a || !b) continue;
+        for (let i = 0; i < 21; i++) {
+          const dx = (a[i].x - b[i].x);
+          const dy = (a[i].y - b[i].y);
+          const dz = (a[i].z - b[i].z);
+          sum += Math.sqrt(dx*dx + dy*dy + dz*dz);
+          n++;
+        }
+      }
+      return n ? (sum / n) : 999;
+    }
+
+    function handEmbedding(landmarks) {
+      const P = landmarks;
+
+      const dist = (i, j) => {
+        const a = P[i], b = P[j];
+        const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
+        return Math.sqrt(dx*dx + dy*dy + dz*dz);
+      };
+
+      const palmW = dist(5, 17);
+      const palmH = dist(0, 9);
+      const scale = Math.max(1e-6, (palmW + palmH) * 0.5);
+
+      const pairs = [
+        [0, 4],[0, 8],[0,12],[0,16],[0,20],
+        [4, 8],[8,12],[12,16],[16,20],
+        [5, 9],[9,13],[13,17],
+        [5,17],[0,5],[0,17],
+        [6, 8],[10,12],[14,16],[18,20],
+        [2, 4],[3, 4]
+      ];
+
+      const feat = new Float32Array(pairs.length);
+      for (let k = 0; k < pairs.length; k++) {
+        feat[k] = dist(pairs[k][0], pairs[k][1]) / scale;
+      }
+      return feat;
+    }
+
+    function twoHandEmbedding(handMap) {
+      if (!handMap.Left || !handMap.Right) return null;
+      const L = handEmbedding(handMap.Left);
+      const R = handEmbedding(handMap.Right);
+      const out = new Float32Array(L.length + R.length);
+      out.set(L, 0);
+      out.set(R, L.length);
+      return out;
+    }
+
+    function accumReset(dim) {
+      accum = { sum: new Float64Array(dim), n: 0 };
+    }
+    function accumAdd(vec) {
+      for (let i = 0; i < vec.length; i++) accum.sum[i] += vec[i];
+      accum.n++;
+    }
+    function accumMean() {
+      const out = new Float32Array(accum.sum.length);
+      const inv = 1 / Math.max(1, accum.n);
+      for (let i = 0; i < out.length; i++) out[i] = accum.sum[i] * inv;
+      return out;
+    }
+
+    function drawHandsOverlay(handMap) {
+      const w = authCanvas.clientWidth;
+      const h = authCanvas.clientHeight;
+      aCtx.clearRect(0, 0, w, h);
+
+      const drawOne = (lm, color) => {
+        aCtx.fillStyle = color;
+        for (let i = 0; i < lm.length; i++) {
+          const x = lm[i].x * w;
+          const y = lm[i].y * h;
+          aCtx.beginPath();
+          aCtx.arc(x, y, 3.0, 0, Math.PI * 2);
+          aCtx.fill();
+        }
+      };
+      if (handMap.Left)  drawOne(handMap.Left,  "rgba(24,255,105,0.9)");
+      if (handMap.Right) drawOne(handMap.Right, "rgba(0,190,255,0.9)");
+    }
+
+    function updateHUD(handMap, stablePct) {
+      const count = (handMap.Left ? 1 : 0) + (handMap.Right ? 1 : 0);
+      lblHands.textContent = `Hands: ${count}/2`;
+
+      if (count === 2 && handMap.scoreL >= MIN_HAND_SCORE && handMap.scoreR >= MIN_HAND_SCORE) {
+        dotHands.className = "dot good";
+      } else if (count === 1) {
+        dotHands.className = "dot warn";
+      } else {
+        dotHands.className = "dot bad";
+      }
+
+      lblStable.textContent = `Stable: ${Math.round(stablePct)}%`;
+      if (stablePct >= 100) dotStable.className = "dot good";
+      else if (stablePct >= 40) dotStable.className = "dot warn";
+      else dotStable.className = "dot bad";
+
+      stableBar.style.width = `${clamp(stablePct, 0, 100)}%`;
+    }
+
+    function authResetProgress() {
+      stableFrames = 0;
+      lastHandsForStability = null;
+      lastMoveMetric = 999;
+      if (accum) { accum.n = 0; accum.sum.fill(0); }
+    }
+
+    // ---------------- Pinch detection (ratio-normalized) ----------------
+    function dist3(a, b) {
+      const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
+      return Math.sqrt(dx*dx + dy*dy + dz*dz);
+    }
+    function pinchRatio(hand) {
+      const tip = dist3(hand[4], hand[8]);
+      const palm = Math.max(1e-6, dist3(hand[5], hand[17]));
+      return tip / palm;
+    }
+
+    // Palm center for smoother steering than just wrist
+    function palmCenterX(hand) {
+      return (hand[0].x + hand[5].x + hand[9].x + hand[17].x) * 0.25;
+    }
+
+    // Apply sensitivity around a center (0.5) so smaller motion produces larger output.
+    function applySensitivity01(v01, sens) {
+      const d = (v01 - 0.5) * sens;
+      return clamp(0.5 + d, 0, 1);
+    }
+
+    // ---------------- Gameplay hooks (defined later) ----------------
+    let worldReady = false;
+    function pinchJump() {}
+    function shootWaterAtScreen(nx, ny) {}
+
+    function updateGameplayGestures(handMap, ts) {
+      if (!loggedIn || !handControlEnabled) {
+        gestureState.active = false;
+        gestureState.hasTwo = false;
+        return;
+      }
+
+      const L = handMap.Left;
+      const R = handMap.Right;
+
+      const hasTwo = !!L && !!R && handMap.scoreL >= MIN_HAND_SCORE && handMap.scoreR >= MIN_HAND_SCORE;
+
+      gestureState.updatedAt = ts;
+      gestureState.hasTwo = hasTwo;
+      gestureState.active = hasTwo;
+      gestureState.scoreL = handMap.scoreL;
+      gestureState.scoreR = handMap.scoreR;
+
+      if (!hasTwo) return;
+
+      // Mirror X for natural movement on screen
+      const rawLeft = 1 - palmCenterX(L);
+      gestureState.leftWristX_raw = rawLeft;
+      gestureState.leftWristX = ema(gestureState.leftWristX, rawLeft, STEER_SMOOTH_A);
+
+      // Aim: right index fingertip (8)
+      const rawAimX = 1 - R[8].x;
+      const rawAimY = R[8].y;
+
+      gestureState.aimX_raw = rawAimX;
+      gestureState.aimY_raw = rawAimY;
+
+      // smooth base aim
+      gestureState.aimX = ema(gestureState.aimX, rawAimX, AIM_SMOOTH_A);
+      gestureState.aimY = ema(gestureState.aimY, rawAimY, AIM_SMOOTH_A);
+
+      // sensitivity-mapped aim (output)
+      const s = controlSensitivity;
+      gestureState.aimX_out = applySensitivity01(gestureState.aimX, s);
+      gestureState.aimY_out = applySensitivity01(gestureState.aimY, s);
+
+      const pL = pinchRatio(L);
+      const pR = pinchRatio(R);
+      const pinchL = pL < PINCH_RATIO_T;
+      const pinchR = pR < PINCH_RATIO_T;
+
+      gestureState.pinchJump = pinchL;
+      gestureState.pinchShoot = pinchR;
+
+      const now = performance.now();
+
+      // allow HOLD to trigger repeated jumps
+      if (pinchL && (now - gestureState.lastJumpAt) > PINCH_COOLDOWN_MS_JUMP) {
+        gestureState.lastJumpAt = now;
+        if (worldReady) pinchJump();
+      }
+
+      // allow HOLD to trigger repeated shots
+      if (pinchR && (now - gestureState.lastShootAt) > PINCH_COOLDOWN_MS_SHOOT) {
+        gestureState.lastShootAt = now;
+        if (worldReady) shootWaterAtScreen(gestureState.aimX_out, gestureState.aimY_out);
+      }
+    }
+
+    function updateDebugHUD(nowPerf) {
+      if (!debugHUD) return;
+
+      if (nowPerf - lastDebugPerf < DEBUG_INTERVAL_MS) return;
+      lastDebugPerf = nowPerf;
+
+      debugHUD.style.display = loggedIn ? "block" : "none";
+
+      dbgCam.textContent = webcamOn ? "Camera: on" : "Camera: off";
+      dbgDotCam.className = "dot " + (webcamOn ? "good" : "bad");
+
+      const count = (gestureState.hasTwo ? 2 : 0);
+      dbgHands.textContent = `Hands: ${count}/2`;
+      dbgDotHands.className = "dot " + (gestureState.hasTwo ? "good" : "warn");
+
+      if (gestureState.active) {
+        dbgAim.textContent = `Aim: ${(gestureState.aimX_out*100).toFixed(0)}%, ${(gestureState.aimY_out*100).toFixed(0)}%`;
+        dbgDotAim.className = "dot aim";
+
+        dbgJump.textContent = `Jump pinch: ${gestureState.pinchJump ? "ON" : "off"}`;
+        dbgDotJump.className = "dot " + (gestureState.pinchJump ? "good" : "warn");
+
+        dbgShoot.textContent = `Shoot pinch: ${gestureState.pinchShoot ? "ON" : "off"}`;
+        dbgDotShoot.className = "dot " + (gestureState.pinchShoot ? "good" : "warn");
+
+        const steerRaw = (gestureState.leftWristX - 0.5);
+        const steerScaled = steerRaw * controlSensitivity;
+        dbgMove.textContent = `Steer: ${steerScaled.toFixed(2)} (sens ${controlSensitivity.toFixed(1)}x)`;
+        dbgDotMove.className = "dot " + (Math.abs(steerScaled) > (STEER_DEADZONE / Math.max(1, controlSensitivity)) ? "good" : "warn");
+      } else {
+        dbgAim.textContent = "Aim: —";
+        dbgJump.textContent = "Jump pinch: —";
+        dbgShoot.textContent = "Shoot pinch: —";
+        dbgMove.textContent = "Steer: —";
+        dbgDotAim.className = "dot aim";
+        dbgDotJump.className = "dot warn";
+        dbgDotShoot.className = "dot warn";
+        dbgDotMove.className = "dot warn";
+      }
+    }
+
+    // ---------------- MediaPipe init ----------------
+    async function initLandmarker() {
+      dotModel.className = "dot warn";
+      lblModel.textContent = "Model: loading…";
+      setStatus("Status: loading hand model…");
+
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
+      );
+
+      landmarker = await HandLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+          delegate: "GPU"
+        },
+        runningMode: "VIDEO",
+        numHands: 2
+      });
+
+      dotModel.className = "dot good";
+      lblModel.textContent = "Model: ready";
+      setStatus("Status: model ready. Click “Enable Camera”.");
+    }
+
+    async function startCamera() {
+      if (!landmarker) return;
+
+      setStatus("Status: requesting camera permission…");
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false
+      });
+
+      authVideo.srcObject = stream;
+
+      await new Promise((res) => {
+        authVideo.onloadedmetadata = () => res();
+      });
+
+      webcamOn = true;
+
+      btnEnroll.disabled = false;
+      btnLogin.disabled = false;
+      btnReset.disabled = false;
+
+      enrolled = loadEnrollment();
+      setStatus(enrolled
+        ? "Status: camera on. Enrollment found. You can login now (or re-enroll)."
+        : "Status: camera on. No enrollment found. Enroll a two-hand pose.");
+
+      requestAnimationFrame(loopHands);
+    }
+
+    // ---------------- Main hands loop (auth + gameplay) ----------------
+    function loopHands(ts) {
+      if (!webcamOn) return;
+
+      if (ts - lastTs < 8) { requestAnimationFrame(loopHands); return; }
+      lastTs = ts;
+
+      const nowPerf = performance.now();
+      let handMap = cachedHandMap;
+
+      if (nowPerf - lastDetectPerf >= HAND_INTERVAL_MS) {
+        lastDetectPerf = nowPerf;
+        const results = landmarker.detectForVideo(authVideo, ts);
+        cachedHandMap = mapHands(results);
+        handMap = cachedHandMap;
+      }
+
+      updateGameplayGestures(handMap, ts);
+      updateDebugHUD(nowPerf);
+
+      const overlayVisible = !authOverlay.classList.contains("hidden");
+      const needsAuthWork = overlayVisible || !loggedIn || (mode === "enroll" || mode === "login");
+
+      if (needsAuthWork) {
+        drawHandsOverlay(handMap);
+
+        const hasTwoStableCandidate =
+          !!handMap.Left && !!handMap.Right &&
+          handMap.scoreL >= MIN_HAND_SCORE && handMap.scoreR >= MIN_HAND_SCORE;
+
+        let stableNow = false;
+        if (hasTwoStableCandidate && lastHandsForStability?.Left && lastHandsForStability?.Right) {
+          lastMoveMetric = movementMetric(lastHandsForStability, handMap);
+          stableNow = lastMoveMetric <= MOVE_EPS;
+        } else {
+          lastMoveMetric = 999;
+        }
+
+        if (hasTwoStableCandidate && stableNow) stableFrames++;
+        else stableFrames = Math.max(0, stableFrames - 1);
+
+        lastHandsForStability = { Left: handMap.Left, Right: handMap.Right };
+
+        const stablePct = (stableFrames / STABLE_FRAMES_TARGET) * 100;
+        updateHUD(handMap, stablePct);
+
+        if ((mode === "enroll" || mode === "login") && hasTwoStableCandidate && stableNow) {
+          const vec = twoHandEmbedding(handMap);
+          if (vec) {
+            if (!accum) accumReset(vec.length);
+            accumAdd(vec);
+          }
+
+          if (stableFrames >= STABLE_FRAMES_TARGET) {
+            const meanVec = accumMean();
+
+            if (mode === "enroll") {
+              enrolled = saveEnrollment(meanVec, { moveEps: MOVE_EPS, minScore: MIN_HAND_SCORE, pinchRatioT: PINCH_RATIO_T });
+              mode = "idle";
+              authResetProgress();
+              setStatus("Status: ENROLLED. Now click “Login” and hold the same two-hand pose.");
+            } else {
+              const stored = enrolled?.vec ? new Float32Array(enrolled.vec) : null;
+              if (!stored) {
+                mode = "idle";
+                authResetProgress();
+                setStatus("Status: no enrollment found. Enroll first.");
+              } else {
+                const cs = cosSim(meanVec, stored);
+                const d  = l2(meanVec, stored);
+                const ok = (cs >= COS_THRESHOLD) || (d <= L2_THRESHOLD);
+
+                if (ok) {
+                  loggedIn = true;
+                  mode = "idle";
+                  authResetProgress();
+
+                  setStatus(`Status: LOGIN SUCCESS.
+Similarity: ${cs.toFixed(4)} | L2: ${d.toFixed(3)}
+Starting game…`);
+
+                  handControlEnabled = !!chkHandControl.checked;
+
+                  setTimeout(() => {
+                    authOverlay.classList.add("hidden");
+                    startGameBoot();
+                  }, 260);
+                } else {
+                  mode = "idle";
+                  authResetProgress();
+                  setStatus(
+                    `Status: LOGIN FAILED (pose mismatch).
+Similarity: ${cs.toFixed(4)} (need ≥ ${COS_THRESHOLD})
+L2: ${d.toFixed(3)} (need ≤ ${L2_THRESHOLD})
+Tip: re-enroll with clearer lighting and keep hands centered.`
+                  );
+                }
+              }
+            }
+          } else {
+            if (mode === "enroll") {
+              setStatus(
+                `Status: enrolling… hold still with BOTH hands visible.
+Stable frames: ${stableFrames}/${STABLE_FRAMES_TARGET}
+Move metric: ${isFinite(lastMoveMetric) ? lastMoveMetric.toFixed(4) : "—"}`
+              );
+            }
+            if (mode === "login") {
+              setStatus(
+                `Status: logging in… match your enrolled pose and hold still.
+Stable frames: ${stableFrames}/${STABLE_FRAMES_TARGET}
+Move metric: ${isFinite(lastMoveMetric) ? lastMoveMetric.toFixed(4) : "—"}`
+              );
+            }
+          }
+        } else {
+          if (mode === "idle") {
+            if (!enrolled) setStatus("Status: ready. Click “Enroll Pose” then hold a TWO-hand pose until the bar completes.");
+            else if (!loggedIn) setStatus("Status: enrollment found. Click “Login” and hold the same TWO-hand pose until complete.");
+          }
+        }
+      }
+
+      requestAnimationFrame(loopHands);
+    }
+
+    // ---------------- UI events ----------------
+    btnStartCam.addEventListener("click", async () => {
+      try {
+        btnStartCam.disabled = true;
+        await startCamera();
+      } catch (e) {
+        btnStartCam.disabled = false;
+        setStatus(`Status: camera start failed.\n${String(e?.message || e)}`);
+      }
+    });
+
+    btnEnroll.addEventListener("click", () => {
+      if (!webcamOn) return;
+      mode = "enroll";
+      authResetProgress();
+      accum = null;
+      setStatus("Status: ENROLL started. Hold a TWO-hand pose steady until the bar fills.");
+    });
+
+    btnLogin.addEventListener("click", () => {
+      if (!webcamOn) return;
+      enrolled = loadEnrollment();
+      if (!enrolled) {
+        setStatus("Status: no enrollment found. Enroll first.");
+        return;
+      }
+      mode = "login";
+      authResetProgress();
+      accum = null;
+      setStatus("Status: LOGIN started. Match your enrolled TWO-hand pose and hold steady.");
+    });
+
+    btnReset.addEventListener("click", () => {
+      clearEnrollment();
+      loggedIn = false;
+      mode = "idle";
+      authResetProgress();
+      setStatus("Status: enrollment cleared. Click “Enroll Pose” to create a new two-hand pose.");
+    });
+
+    chkHandControl.addEventListener("change", () => {
+      handControlEnabled = !!chkHandControl.checked;
+    });
+
+    // ---------------- INIT AUTH ----------------
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setStatus("Status: this browser does not support camera access (getUserMedia).");
+      dotModel.className = "dot bad";
+      lblModel.textContent = "Model: unavailable";
+      btnStartCam.disabled = true;
+      btnEnroll.disabled = true;
+      btnLogin.disabled = true;
+      btnReset.disabled = true;
+    } else {
+      enrolled = loadEnrollment();
+      btnReset.disabled = !enrolled;
+      initLandmarker().catch((e) => {
+        dotModel.className = "dot bad";
+        lblModel.textContent = "Model: failed";
+        setStatus(`Status: model init failed.\n${String(e?.message || e)}`);
+      });
+    }
+
+    /******************************************************************
+     * GAME: Upgrades added:
+     * - Player Shield (absorbs damage first + regen)
+     * - Ammo system (shots consume ammo; ammo pickups replenish)
+     * - Booster pickups (temporary speed + jump + slight aim assist glow)
+     * - Enemy health + shield; water shots damage them; they can be “killed”
+     * - Animated pickups + particles (pickups + hits + kills)
+     ******************************************************************/
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d", { alpha: true, desynchronized: true });
+
+    // Cached render resources
+    let bgGrad = null;
+    let vignetteGrad = null;
+    let scanCanvas = null;
+    let scanPattern = null;
+
+    function rebuildCaches() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+
+      bgGrad = ctx.createLinearGradient(0, 0, 0, h);
+      bgGrad.addColorStop(0, "#3a0000");
+      bgGrad.addColorStop(0.45, "#180000");
+      bgGrad.addColorStop(1, "#050000");
+
+      vignetteGrad = ctx.createRadialGradient(w/2, h/2, Math.min(w,h)*0.2, w/2, h/2, Math.max(w,h)*0.75);
+      vignetteGrad.addColorStop(0, "rgba(0,0,0,0)");
+      vignetteGrad.addColorStop(1, "rgba(0,0,0,0.55)");
+
+      scanCanvas = document.createElement("canvas");
+      scanCanvas.width = 2;
+      scanCanvas.height = 6;
+      const sctx = scanCanvas.getContext("2d");
+      sctx.clearRect(0, 0, 2, 6);
+      sctx.globalAlpha = 0.12;
+      sctx.fillStyle = "black";
+      sctx.fillRect(0, 0, 2, 1);
+      sctx.fillRect(0, 3, 2, 1);
+      scanPattern = ctx.createPattern(scanCanvas, "repeat");
+    }
+
+    function resizeCanvas() {
+      const dpr = Math.max(1, Math.min(1.6, window.devicePixelRatio || 1));
+      const w = Math.floor(window.innerWidth);
+      const h = Math.floor(window.innerHeight);
+      canvas.style.width = w + "px";
+      canvas.style.height = h + "px";
+      canvas.width = Math.floor(w * dpr);
+      canvas.height = Math.floor(h * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      rebuildCaches();
+    }
+    window.addEventListener("resize", resizeCanvas, { passive: true });
+    resizeCanvas();
+
+    function svgToImg(svg) {
+      const s = svg.replaceAll("\n", "").replaceAll("\t", "").trim();
+      const uri = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(s);
+      const img = new Image();
+      img.decoding = "async";
+      img.src = uri;
+      return img;
+    }
+
+    const SPRITES = {
+      player: svgToImg(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
+          <defs>
+            <radialGradient id="gGlow" cx="50%" cy="40%" r="60%">
+              <stop offset="0%" stop-color="#ff6a2a" stop-opacity="1"/>
+              <stop offset="55%" stop-color="#ff2a00" stop-opacity="0.9"/>
+              <stop offset="100%" stop-color="#5a0000" stop-opacity="0.9"/>
+            </radialGradient>
+            <linearGradient id="gMetal" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#ffffff" stop-opacity="0.25"/>
+              <stop offset="0.35" stop-color="#8a8a8a" stop-opacity="0.22"/>
+              <stop offset="1" stop-color="#000000" stop-opacity="0.25"/>
+            </linearGradient>
+            <filter id="fNeon">
+              <feGaussianBlur stdDeviation="3" result="b"/>
+              <feColorMatrix in="b" type="matrix"
+                values="1 0 0 0 0
+                        0 0.2 0 0 0
+                        0 0 0 0 0
+                        0 0 0.6 0 0" result="c"/>
+              <feMerge>
+                <feMergeNode in="c"/>
+                <feMergeNode in="SourceGraphic"/>
+              </feMerge>
+            </filter>
+          </defs>
+
+          <circle cx="48" cy="54" r="30" fill="url(#gGlow)" opacity="0.35" filter="url(#fNeon)"/>
+          <path d="M30 72c0-10 8-18 18-18s18 8 18 18v6H30v-6Z"
+                fill="#1a0b0b" stroke="rgba(255,255,255,0.18)" stroke-width="2"/>
+          <path d="M35 72c2-9 7-14 13-14s11 5 13 14"
+                fill="rgba(255,60,0,0.18)" stroke="rgba(255,60,0,0.65)" stroke-width="2" filter="url(#fNeon)"/>
+          <path d="M41 66v10 M41 66h6c3 0 5 2 5 5s-2 5-5 5h-6 M55 66v10l7-10v10"
+                stroke="rgba(255,255,255,0.85)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.85"/>
+          <path d="M28 44c0-11 9-20 20-20h0c11 0 20 9 20 20v8c0 7-6 13-13 13H41c-7 0-13-6-13-13v-8Z"
+                fill="#0f0707" stroke="rgba(255,255,255,0.18)" stroke-width="2"/>
+          <path d="M35 40c3-4 8-6 13-6 M61 40c-3-4-8-6-13-6"
+                stroke="rgba(255,60,0,0.95)" stroke-width="3" stroke-linecap="round" filter="url(#fNeon)"/>
+          <circle cx="40" cy="47" r="5.5" fill="#e8f4ff"/>
+          <circle cx="56" cy="47" r="5.5" fill="#e8f4ff"/>
+          <circle cx="40" cy="48" r="2.6" fill="#1b75ff"/>
+          <circle cx="56" cy="48" r="2.6" fill="#1b75ff"/>
+          <path d="M38 56c4 4 16 4 20 0" stroke="rgba(255,255,255,0.75)" stroke-width="2.5" stroke-linecap="round"/>
+          <path d="M38 58l2 2 M56 58l-2 2" stroke="rgba(255,60,0,0.9)" stroke-width="2" stroke-linecap="round"/>
+          <path d="M26 44c2-14 13-24 27-24s25 10 27 24"
+                fill="url(#gMetal)" stroke="rgba(255,255,255,0.22)" stroke-width="2"/>
+          <path d="M24 44h48" stroke="rgba(255,60,0,0.7)" stroke-width="3" filter="url(#fNeon)"/>
+          <path d="M30 28c-5 2-8 6-8 10 4-1 8-3 10-7-1-1-1-2-2-3Z"
+                fill="rgba(255,60,0,0.55)" filter="url(#fNeon)"/>
+          <path d="M66 28c5 2 8 6 8 10-4-1-8-3-10-7 1-1 1-2 2-3Z"
+                fill="rgba(255,60,0,0.55)" filter="url(#fNeon)"/>
+        </svg>
+      `),
+      platform: svgToImg(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="256" height="64" viewBox="0 0 256 64">
+          <defs>
+            <linearGradient id="rock" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#2c1a13"/>
+              <stop offset="0.55" stop-color="#3a241b"/>
+              <stop offset="1" stop-color="#1a0f0b"/>
+            </linearGradient>
+            <linearGradient id="neon" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stop-color="#ff2a00" stop-opacity="0.15"/>
+              <stop offset="0.35" stop-color="#ff2a00" stop-opacity="0.8"/>
+              <stop offset="0.7" stop-color="#ff6a2a" stop-opacity="0.6"/>
+              <stop offset="1" stop-color="#ff2a00" stop-opacity="0.2"/>
+            </linearGradient>
+            <filter id="glow">
+              <feGaussianBlur stdDeviation="3" result="b"/>
+              <feMerge>
+                <feMergeNode in="b"/>
+                <feMergeNode in="SourceGraphic"/>
+              </feMerge>
+            </filter>
+          </defs>
+          <path d="M10 10h236l-10 44H20L10 10Z" fill="url(#rock)" stroke="rgba(255,255,255,0.14)" stroke-width="2"/>
+          <path d="M16 16h224l-7 32H23l-7-32Z" fill="none" stroke="rgba(255,60,0,0.75)" stroke-width="2" filter="url(#glow)"/>
+          <path d="M40 30h30m10 0h26m12 0h22m12 0h40"
+                stroke="url(#neon)" stroke-width="3" stroke-linecap="round" opacity="0.85"/>
+          <path d="M70 20v18m60-18v18m70-18v18"
+                stroke="rgba(255,60,0,0.35)" stroke-width="2" stroke-linecap="round"/>
+          <circle cx="38" cy="42" r="4" fill="rgba(255,255,255,0.18)"/>
+          <circle cx="218" cy="42" r="4" fill="rgba(255,255,255,0.18)"/>
+        </svg>
+      `),
+      enemy: svgToImg(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
+          <defs>
+            <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#0b2cff"/>
+              <stop offset="0.5" stop-color="#1b75ff"/>
+              <stop offset="1" stop-color="#00113a"/>
+            </linearGradient>
+            <filter id="fx">
+              <feGaussianBlur stdDeviation="4" result="b"/>
+              <feColorMatrix in="b" type="matrix"
+                values="0 0 0 0 0
+                        0 0.3 0 0 0
+                        0 0 1 0 0
+                        0 0 0.65 0 0" result="c"/>
+              <feMerge>
+                <feMergeNode in="c"/>
+                <feMergeNode in="SourceGraphic"/>
+              </feMerge>
+            </filter>
+          </defs>
+          <rect x="14" y="18" width="68" height="60" rx="16" fill="url(#g)" stroke="rgba(255,255,255,0.16)" stroke-width="2"/>
+          <path d="M22 46h52" stroke="rgba(255,255,255,0.18)" stroke-width="2"/>
+          <circle cx="36" cy="48" r="7.5" fill="#e8f4ff"/>
+          <circle cx="60" cy="48" r="7.5" fill="#e8f4ff"/>
+          <circle cx="36" cy="50" r="3.2" fill="#0b0505"/>
+          <circle cx="60" cy="50" r="3.2" fill="#0b0505"/>
+          <path d="M34 62c6 6 22 6 28 0" stroke="rgba(255,255,255,0.8)" stroke-width="2.8" stroke-linecap="round"/>
+          <path d="M42 63l2 3 M54 63l-2 3" stroke="rgba(255,60,0,0.9)" stroke-width="2.2" stroke-linecap="round" filter="url(#fx)"/>
+          <path d="M22 26c-6 2-10 8-10 14 6-2 11-6 13-12-1-1-2-1-3-2Z" fill="rgba(255,60,0,0.5)" filter="url(#fx)"/>
+          <path d="M74 26c6 2 10 8 10 14-6-2-11-6-13-12 1-1 2-1 3-2Z" fill="rgba(255,60,0,0.5)" filter="url(#fx)"/>
+        </svg>
+      `),
+      lava: svgToImg(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
+          <defs>
+            <radialGradient id="molten" cx="50%" cy="35%" r="65%">
+              <stop offset="0" stop-color="#fff2a3" stop-opacity="1"/>
+              <stop offset="0.35" stop-color="#ff6a2a" stop-opacity="1"/>
+              <stop offset="0.75" stop-color="#ff2a00" stop-opacity="1"/>
+              <stop offset="1" stop-color="#450000" stop-opacity="1"/>
+            </radialGradient>
+            <filter id="heat">
+              <feGaussianBlur stdDeviation="3" result="b"/>
+              <feMerge>
+                <feMergeNode in="b"/>
+                <feMergeNode in="SourceGraphic"/>
+              </feMerge>
+            </filter>
+          </defs>
+          <path d="M22 18h52l8 22-14 38H28L14 40l8-22Z"
+                fill="url(#molten)" stroke="rgba(255,255,255,0.10)" stroke-width="2" filter="url(#heat)"/>
+          <path d="M30 40c6-8 16-10 22-4 6 6 14 3 18-3"
+                fill="none" stroke="rgba(255,255,255,0.30)" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+          <path d="M28 62h40" stroke="rgba(0,0,0,0.30)" stroke-width="4" stroke-linecap="round" opacity="0.5"/>
+        </svg>
+      `),
+      water: svgToImg(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="64" viewBox="0 0 48 64">
+          <defs>
+            <linearGradient id="w" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#c9f3ff" stop-opacity="1"/>
+              <stop offset="0.35" stop-color="#2fe0ff" stop-opacity="1"/>
+              <stop offset="1" stop-color="#005a7a" stop-opacity="1"/>
+            </linearGradient>
+            <filter id="wg">
+              <feGaussianBlur stdDeviation="2" result="b"/>
+              <feMerge>
+                <feMergeNode in="b"/>
+                <feMergeNode in="SourceGraphic"/>
+              </feMerge>
+            </filter>
+          </defs>
+          <path d="M24 2c9 12 16 22 16 32a16 16 0 1 1-32 0c0-10 7-20 16-32Z"
+                fill="url(#w)" stroke="rgba(255,255,255,0.24)" stroke-width="2" filter="url(#wg)"/>
+          <path d="M16 38c1 7 6 11 12 12" stroke="rgba(255,255,255,0.55)" stroke-width="3" stroke-linecap="round"/>
+        </svg>
+      `),
+
+      // Pickups (animated)
+      pickupAmmo: svgToImg(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+          <defs>
+            <linearGradient id="am" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#ffffff" stop-opacity="0.9"/>
+              <stop offset="0.35" stop-color="#ffd000" stop-opacity="0.95"/>
+              <stop offset="1" stop-color="#ff2a00" stop-opacity="0.85"/>
+            </linearGradient>
+            <filter id="ag">
+              <feGaussianBlur stdDeviation="2.5" result="b"/>
+              <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+          </defs>
+          <path d="M18 20h20c8 0 14 6 14 14v2c0 8-6 14-14 14H18c-3 0-6-3-6-6V26c0-3 3-6 6-6Z"
+                fill="url(#am)" stroke="rgba(255,255,255,0.18)" stroke-width="2" filter="url(#ag)"/>
+          <path d="M18 26h28" stroke="rgba(0,0,0,0.25)" stroke-width="3" stroke-linecap="round"/>
+          <path d="M20 34h24" stroke="rgba(0,0,0,0.18)" stroke-width="3" stroke-linecap="round"/>
+          <circle cx="44" cy="42" r="4" fill="rgba(255,255,255,0.30)"/>
+        </svg>
+      `),
+      pickupShield: svgToImg(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+          <defs>
+            <linearGradient id="sh" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#c9f3ff"/>
+              <stop offset="0.4" stop-color="#2fe0ff"/>
+              <stop offset="1" stop-color="#005a7a"/>
+            </linearGradient>
+            <filter id="sg">
+              <feGaussianBlur stdDeviation="2.5" result="b"/>
+              <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+          </defs>
+          <path d="M32 10l18 8v16c0 12-8 20-18 24C22 54 14 46 14 34V18l18-8Z"
+                fill="url(#sh)" stroke="rgba(255,255,255,0.22)" stroke-width="2" filter="url(#sg)"/>
+          <path d="M32 16v34" stroke="rgba(255,255,255,0.35)" stroke-width="3" stroke-linecap="round"/>
+          <path d="M20 26h24" stroke="rgba(255,255,255,0.28)" stroke-width="3" stroke-linecap="round"/>
+        </svg>
+      `),
+      pickupBoost: svgToImg(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+          <defs>
+            <linearGradient id="bo" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#fff2a3"/>
+              <stop offset="0.4" stop-color="#ffd000"/>
+              <stop offset="1" stop-color="#ff2a00"/>
+            </linearGradient>
+            <filter id="bg">
+              <feGaussianBlur stdDeviation="2.5" result="b"/>
+              <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+          </defs>
+          <path d="M34 6L14 38h16l-2 20 22-32H34l2-20Z"
+                fill="url(#bo)" stroke="rgba(255,255,255,0.20)" stroke-width="2" filter="url(#bg)"/>
+          <path d="M18 44h28" stroke="rgba(255,255,255,0.18)" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+        </svg>
+      `),
+      pickupHealth: svgToImg(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+          <defs>
+            <linearGradient id="he" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#18ff69"/>
+              <stop offset="0.6" stop-color="#ffd000"/>
+              <stop offset="1" stop-color="#ff2a00"/>
+            </linearGradient>
+            <filter id="hg">
+              <feGaussianBlur stdDeviation="2.5" result="b"/>
+              <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+          </defs>
+          <path d="M26 10h12v12h12v12H38v12H26V34H14V22h12V10Z"
+                fill="url(#he)" stroke="rgba(255,255,255,0.20)" stroke-width="2" filter="url(#hg)"/>
+        </svg>
+      `),
+    };
+
+    function waitForSprites() {
+      const imgs = Object.values(SPRITES);
+      return Promise.all(imgs.map(img => new Promise(res => {
+        if (img.complete) return res();
+        img.onload = () => res();
+        img.onerror = () => res();
+      })));
+    }
+
+    // Physics: falling is 1/3 speed (gravity reduced)
+    const GRAVITY_BASE = 0.5;
+    const gravity = GRAVITY_BASE / 3;
+
+    const moveSpeedBase = 5.2;
+    const jumpVelocityBase = -12.5;
+    const pinchJumpVelocityBase = -17.0;       // BIG jump
+    const maxFallBase = 14.0;
+    const maxFall = maxFallBase / 3;           // ~1/3 fall speed
+
+    // velocity-based movement
+    const HAND_ACCEL = 0.45;
+    const KEY_ACCEL  = 0.55;
+    const FRICTION   = 0.82;
+
+    // Combat / RPG-ish tuning
+    const PLAYER_SHIELD_MAX = 120;
+    const PLAYER_SHIELD_REGEN_DELAY_FRAMES = 90; // after last damage
+    const PLAYER_SHIELD_REGEN_PER_FRAME = 0.85;
+
+    const PLAYER_AMMO_MAX = 40;
+    const PLAYER_AMMO_START = 18;
+
+    const BOOST_DURATION_FRAMES = 60 * 7; // ~7s at 60fps
+    const BOOST_SPEED_MULT = 1.35;
+    const BOOST_JUMP_MULT  = 1.25;
+    const BOOST_AIM_GLOW   = 0.35;
+
+    const ENEMY_HP_BASE = 18;
+    const ENEMY_SH_BASE = 12;
+
+    const SHOT_DAMAGE = 8;
+    const SHOT_PUSH = 0.8;
+
+    // Pickup types
+    const PICKUP = {
+      AMMO: "ammo",
+      SHIELD: "shield",
+      BOOST: "boost",
+      HEALTH: "health",
+    };
+
+    const keys = { left: false, right: false };
+
+    const world = { scrollY: 0, maxHeight: 0, tick: 0, shake: 0, shakeX: 0, shakeY: 0, level: 1 };
+
+    const player = {
+      x: 0, y: 0, w: 44, h: 44,
+      vx: 0, vy: 0,
+      onGround: false,
+
+      health: 200, maxHealth: 200,
+      shield: PLAYER_SHIELD_MAX, maxShield: PLAYER_SHIELD_MAX,
+      shieldHitFlash: 0,
+      lastDamageAtFrame: 0,
+
+      ammo: PLAYER_AMMO_START, maxAmmo: PLAYER_AMMO_MAX,
+      ammoFlash: 0,
+
+      boostT: 0,
+      boostFlash: 0,
+
+      invuln: 0,
+      face: 1
+    };
+
+    const waterShots = [];
+    const platforms = [];
+    const lavaChunks = [];
+    const enemies = [];
+    const embers = [];
+
+    // New: particles & floating pop text
+    const particles = [];
+    const floaters = [];
+
+    function rand(a, b) { return a + Math.random() * (b - a); }
+    function clamp2(v, a, b) { return Math.max(a, Math.min(b, v)); }
+    function lerp(a, b, t) { return a + (b - a) * t; }
+
+    function metersClimbed() {
+      return Math.floor(world.maxHeight / 12);
+    }
+
+    function computeLevel() {
+      const m = metersClimbed();
+      return 1 + Math.floor(m / 80);
+    }
+
+    function difficulty() {
+      const lvl = world.level;
+      return Math.max(0, lvl - 1);
+    }
+
+    function platformGap() {
+      const d = difficulty();
+      return clamp2(95 + d * 5 + rand(-10, 22), 90, 190);
+    }
+
+    function platformWidth() {
+      const d = difficulty();
+      const base = clamp2(170 - d * 6, 95, 190);
+      return clamp2(base + rand(-25, 35), 80, 210);
+    }
+
+    function pickPickupType() {
+      // Weighted: ammo + shield + boost + health
+      const r = Math.random();
+      if (r < 0.40) return PICKUP.AMMO;
+      if (r < 0.68) return PICKUP.SHIELD;
+      if (r < 0.88) return PICKUP.BOOST;
+      return PICKUP.HEALTH;
+    }
+
+    function spawnPickupsForPlatform(p) {
+      p.crystals = [];
+      const d = difficulty();
+      const n = Math.floor(rand(1, 4)); // fewer, higher value
+      for (let i = 0; i < n; i++) {
+        const type = pickPickupType();
+        const phase = Math.random() * Math.PI * 2;
+        const x = p.x + 12 + Math.random() * (p.w - 24);
+        const y = p.y - 18 + Math.random() * 8;
+
+        // value scaling
+        let value = 0;
+        if (type === PICKUP.AMMO)   value = 10 + Math.floor(rand(0, 6)) + Math.floor(d * 0.6);
+        if (type === PICKUP.SHIELD) value = 18 + Math.floor(rand(0, 10)) + Math.floor(d * 0.7);
+        if (type === PICKUP.HEALTH) value = 10 + Math.floor(rand(0, 10)) + Math.floor(d * 0.4);
+        if (type === PICKUP.BOOST)  value = BOOST_DURATION_FRAMES;
+
+        p.crystals.push({
+          type,
+          x, y,
+          s: 16 + Math.random() * 10,
+          r: Math.random() * Math.PI * 2,
+          phase,
+          value,
+          taken: false,
+          takeT: 0,
+        });
+      }
+    }
+
+    function initWorld() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+
+      waterShots.length = 0;
+      platforms.length = 0;
+      lavaChunks.length = 0;
+      enemies.length = 0;
+      embers.length = 0;
+      particles.length = 0;
+      floaters.length = 0;
+
+      world.scrollY = 0;
+      world.maxHeight = 0;
+      world.tick = 0;
+      world.shake = 0;
+      world.level = 1;
+
+      const baseW = clamp2(w * 0.55, 220, 420);
+      const baseX = (w - baseW) / 2;
+      const baseY = h - 110;
+      const baseP = { x: baseX, y: baseY, w: baseW, h: 22, crystals: [] };
+      spawnPickupsForPlatform(baseP);
+      platforms.push(baseP);
+
+      let topY = baseY;
+      const count = 70;
+      for (let i = 0; i < count; i++) {
+        const pw = platformWidth();
+        const px = rand(8, Math.max(9, w - pw - 8));
+        const py = topY - platformGap();
+        const p = { x: px, y: py, w: pw, h: 22, crystals: [] };
+        spawnPickupsForPlatform(p);
+        platforms.push(p);
+        topY = py;
+      }
+
+      player.x = w / 2 - player.w / 2;
+      player.y = baseP.y - player.h;
+      player.vx = 0;
+      player.vy = 0;
+      player.onGround = true;
+
+      player.health = player.maxHealth;
+      player.shield = player.maxShield;
+      player.shieldHitFlash = 0;
+      player.lastDamageAtFrame = 0;
+
+      player.ammo = PLAYER_AMMO_START;
+      player.ammoFlash = 0;
+
+      player.boostT = 0;
+      player.boostFlash = 0;
+
+      player.invuln = 0;
+
+      const lavaCount = 12;
+      for (let i = 0; i < lavaCount; i++) lavaChunks.push(spawnLava(true));
+
+      const enemyCount = 7;
+      for (let i = 0; i < enemyCount; i++) enemies.push(spawnEnemy(true));
+
+      for (let i = 0; i < 90; i++) embers.push(spawnEmber(true));
+
+      worldReady = true;
+    }
+
+    function spawnEmber(initial = false) {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      return {
+        x: Math.random() * w,
+        y: initial ? Math.random() * h : h + Math.random() * 120,
+        vy: 0.3 + Math.random() * 0.9,
+        vx: -0.25 + Math.random() * 0.5,
+        s: 0.6 + Math.random() * 1.8,
+        a: 0.25 + Math.random() * 0.55,
+        life: 240 + Math.random() * 240
+      };
+    }
+
+    function spawnLava(initial = false) {
+      const w = window.innerWidth;
+      const d = difficulty();
+      return {
+        x: Math.random() * w,
+        y: initial ? (-Math.random() * 1400) : (-80 - Math.random() * 900),
+        w: 36, h: 36,
+        vy: (1.0 + Math.random() * 2.2) + d * 0.15,
+        spin: (Math.random() * 0.02 + 0.01) * (Math.random() > 0.5 ? 1 : -1),
+        a: Math.random() * Math.PI * 2
+      };
+    }
+
+    function spawnEnemy(initial = false) {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const d = difficulty();
+
+      const hp = ENEMY_HP_BASE + Math.floor(d * 1.8);
+      const sh = ENEMY_SH_BASE + Math.floor(d * 1.2);
+
+      return {
+        x: Math.random() * w,
+        y: initial ? (h - 350 - Math.random() * 1100) : (-200 - Math.random() * 900),
+        w: 34, h: 34,
+        dir: Math.random() > 0.5 ? 1 : -1,
+        bob: Math.random() * Math.PI * 2,
+        spd: (2.0 + Math.random() * 1.2) + d * 0.15,
+
+        hp, maxHp: hp,
+        sh, maxSh: sh,
+        inv: 0,
+        hurtFlash: 0,
+        deadT: 0
+      };
+    }
+
+    function ensureHazardsForLevel() {
+      const d = difficulty();
+      const targetLava = clamp2(12 + Math.floor(d * 0.9), 12, 26);
+      const targetEnemies = clamp2(7 + Math.floor(d * 0.55), 7, 18);
+
+      while (lavaChunks.length < targetLava) lavaChunks.push(spawnLava(false));
+      while (enemies.length < targetEnemies) enemies.push(spawnEnemy(false));
+
+      for (const l of lavaChunks) l.vy = Math.min(l.vy + d * 0.0008, 6.5);
+      for (const e of enemies) e.spd = Math.min(e.spd + d * 0.0006, 6.0);
+    }
+
+    function spawnParticles(x, y, count, baseSpd, colA, colB) {
+      for (let i = 0; i < count; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const sp = baseSpd * (0.4 + Math.random() * 0.9);
+        particles.push({
+          x, y,
+          vx: Math.cos(a) * sp,
+          vy: Math.sin(a) * sp - (Math.random() * 0.8),
+          r: 1.2 + Math.random() * 2.8,
+          life: 28 + Math.random() * 22,
+          a: 0.95,
+          colA, colB,
+          tw: Math.random() * 1.0
+        });
+      }
+    }
+
+    function spawnFloater(x, y, text, tint="rgba(255,255,255,0.95)") {
+      floaters.push({
+        x, y,
+        vy: -0.65 - Math.random() * 0.35,
+        life: 48,
+        text,
+        tint
+      });
+    }
+
+    function applyDamageToShieldAndHP(target, amount) {
+      // target: {sh, hp}
+      let rem = amount;
+      if (target.sh > 0) {
+        const used = Math.min(target.sh, rem);
+        target.sh -= used;
+        rem -= used;
+      }
+      if (rem > 0) target.hp = Math.max(0, target.hp - rem);
+    }
+
+    // ---- Gameplay hook: pinch jump (BIG and repeatable) ----
+    pinchJump = function pinchJumpImpl() {
+      if (!worldReady) return;
+      const d = difficulty();
+      const boostMult = (player.boostT > 0 ? BOOST_JUMP_MULT : 1.0);
+      const boost = (pinchJumpVelocityBase - d * 0.12) * boostMult;
+      player.vy = Math.min(player.vy, boost);
+      player.onGround = false;
+      world.shake = Math.min(12, world.shake + 2.2);
+
+      if (player.boostT > 0) {
+        spawnParticles(player.x + player.w/2, player.y + player.h, 6, 2.2, "rgba(255,208,0,0.95)", "rgba(255,42,0,0.85)");
+      }
+    };
+
+    function jump() {
+      const d = difficulty();
+      const boostMult = (player.boostT > 0 ? BOOST_JUMP_MULT : 1.0);
+      const v = (jumpVelocityBase - d * 0.08) * boostMult;
+      if (player.onGround) {
+        player.vy = v;
+        player.onGround = false;
+        world.shake = Math.min(10, world.shake + 2.0);
+      }
+    }
+
+    function shootWater() {
+      if (!worldReady) return;
+      const ax = (gestureState.active ? gestureState.aimX_out : 0.5);
+      const ay = (gestureState.active ? gestureState.aimY_out : 0.25);
+      shootWaterAtScreen(ax, ay);
+    }
+
+    function flashAmmoEmpty() {
+      player.ammoFlash = 14;
+      spawnFloater(player.x + player.w/2, player.y - 10, "NO AMMO", "rgba(255,208,0,0.95)");
+      world.shake = Math.min(10, world.shake + 1.2);
+    }
+
+    // ---- Gameplay hook: shoot toward reticle (ammo) ----
+    shootWaterAtScreen = function shootWaterAtScreenImpl(nx, ny) {
+      if (!worldReady) return;
+
+      // Ammo gate
+      if (player.ammo <= 0) {
+        flashAmmoEmpty();
+        return;
+      }
+
+      const now = performance.now();
+      if (shootWaterAtScreenImpl._t && now - shootWaterAtScreenImpl._t < 95) return;
+      shootWaterAtScreenImpl._t = now;
+
+      player.ammo = Math.max(0, player.ammo - 1);
+
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+
+      const tx = clamp2(nx, 0, 1) * w;
+      const ty = clamp2(ny, 0, 1) * h;
+
+      const ox = player.x + player.w * 0.5;
+      const oy = player.y + player.h * 0.35;
+
+      let dx = tx - ox;
+      let dy = ty - oy;
+
+      const len = Math.max(1e-6, Math.hypot(dx, dy));
+      dx /= len;
+      dy /= len;
+
+      if (dy > 0.35) dy = 0.35;
+
+      const spd = 9.2 + difficulty() * 0.18 + (player.boostT > 0 ? 0.85 : 0);
+
+      waterShots.push({
+        x: ox - 6,
+        y: oy - 10,
+        w: 12, h: 18,
+        vx: dx * spd,
+        vy: dy * spd,
+        a: Math.atan2(dy * spd, dx * spd),
+        dmg: SHOT_DAMAGE + (player.boostT > 0 ? 2 : 0)
+      });
+
+      spawnParticles(ox, oy, 3, 1.6, "rgba(0,210,255,0.85)", "rgba(255,255,255,0.55)");
+    };
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowLeft") keys.left = true;
+      if (e.key === "ArrowRight") keys.right = true;
+      if (e.key === "ArrowUp") jump();
+      if (e.key === " ") shootWater();
+    });
+    document.addEventListener("keyup", (e) => {
+      if (e.key === "ArrowLeft") keys.left = false;
+      if (e.key === "ArrowRight") keys.right = false;
+    });
+
+    function wireButton(btn, onDown, onUp) {
+      const ripple = btn.querySelector(".ripple");
+      const setRipple = (ev) => {
+        const r = btn.getBoundingClientRect();
+        const x = (ev.touches ? ev.touches[0].clientX : ev.clientX) - r.left;
+        const y = (ev.touches ? ev.touches[0].clientY : ev.clientY) - r.top;
+        ripple.style.left = x + "px";
+        ripple.style.top = y + "px";
+      };
+      const down = (ev) => { ev.preventDefault(); setRipple(ev); onDown(); };
+      const up = (ev) => { ev.preventDefault(); onUp && onUp(); };
+
+      btn.addEventListener("pointerdown", down);
+      btn.addEventListener("pointerup", up);
+      btn.addEventListener("pointercancel", up);
+      btn.addEventListener("pointerleave", up);
+    }
+
+    wireButton(document.getElementById("btnLeft"),
+      () => keys.left = true,
+      () => keys.left = false
+    );
+    wireButton(document.getElementById("btnRight"),
+      () => keys.right = true,
+      () => keys.right = false
+    );
+    wireButton(document.getElementById("btnJump"),
+      () => pinchJump()
+    );
+    wireButton(document.getElementById("btnWater"),
+      () => shootWater()
+    );
+
+    function damagePlayer(amount, knockX = 0) {
+      if (player.invuln > 0) return;
+
+      player.lastDamageAtFrame = world.tick;
+      player.invuln = 22;
+      player.x += knockX;
+
+      let rem = amount;
+
+      // shield first
+      if (player.shield > 0) {
+        const used = Math.min(player.shield, rem);
+        player.shield -= used;
+        rem -= used;
+
+        player.shieldHitFlash = 14;
+        spawnParticles(player.x + player.w/2, player.y + player.h/2, 9, 2.2, "rgba(0,190,255,0.90)", "rgba(255,255,255,0.45)");
+      }
+
+      if (rem > 0) {
+        player.health = Math.max(0, player.health - rem);
+        spawnParticles(player.x + player.w/2, player.y + player.h/2, 10, 2.4, "rgba(255,42,0,0.90)", "rgba(255,208,0,0.55)");
+      }
+
+      world.shake = Math.min(18, world.shake + 6);
+    }
+
+    function topPlatformY() {
+      let minY = Infinity;
+      for (const p of platforms) minY = Math.min(minY, p.y);
+      return minY;
+    }
+
+    function recyclePlatforms() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+
+      let topY = topPlatformY();
+      const recycleLine = h + 140;
+
+      for (const p of platforms) {
+        if (p.y > recycleLine) {
+          const pw = platformWidth();
+          p.w = pw;
+          p.x = rand(8, Math.max(9, w - pw - 8));
+          p.y = topY - platformGap();
+          topY = p.y;
+          spawnPickupsForPlatform(p);
+        }
+      }
+    }
+
+    function rectHit(ax, ay, aw, ah, bx, by, bw, bh) {
+      return (ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by);
+    }
+
+    function applyPickup(pick) {
+      if (pick.taken) return;
+
+      const d = difficulty();
+
+      if (pick.type === PICKUP.AMMO) {
+        const before = player.ammo;
+        player.ammo = Math.min(player.maxAmmo, player.ammo + pick.value);
+        const gained = player.ammo - before;
+        spawnFloater(pick.x, pick.y, `+${gained} AMMO`, "rgba(255,255,255,0.92)");
+        spawnParticles(pick.x, pick.y, 14, 2.4, "rgba(255,255,255,0.85)", "rgba(255,208,0,0.65)");
+      }
+      if (pick.type === PICKUP.SHIELD) {
+        const before = player.shield;
+        player.shield = Math.min(player.maxShield, player.shield + pick.value);
+        const gained = player.shield - before;
+        spawnFloater(pick.x, pick.y, `+${gained} SH`, "rgba(0,190,255,0.95)");
+        spawnParticles(pick.x, pick.y, 16, 2.6, "rgba(0,190,255,0.88)", "rgba(255,255,255,0.45)");
+        player.shieldHitFlash = 12;
+      }
+      if (pick.type === PICKUP.HEALTH) {
+        const before = player.health;
+        player.health = Math.min(player.maxHealth, player.health + pick.value);
+        const gained = player.health - before;
+        spawnFloater(pick.x, pick.y, `+${gained} HP`, "rgba(24,255,105,0.95)");
+        spawnParticles(pick.x, pick.y, 16, 2.5, "rgba(24,255,105,0.88)", "rgba(255,208,0,0.55)");
+      }
+      if (pick.type === PICKUP.BOOST) {
+        player.boostT = Math.min(BOOST_DURATION_FRAMES, player.boostT + pick.value);
+        player.boostFlash = 18;
+        spawnFloater(pick.x, pick.y, `BOOST!`, "rgba(255,208,0,0.95)");
+        spawnParticles(pick.x, pick.y, 18, 2.8, "rgba(255,208,0,0.95)", "rgba(255,42,0,0.80)");
+      }
+
+      // mark taken and animate out
+      pick.taken = true;
+      pick.takeT = 1;
+    }
+
+    function updatePickups() {
+      // pickup collision checks
+      for (const plat of platforms) {
+        for (const c of plat.crystals) {
+          if (c.taken) {
+            c.takeT += 1;
+            continue;
+          }
+          const cx = c.x - c.s * 0.5;
+          const cy = c.y - c.s * 0.5;
+          const cs = c.s;
+          if (rectHit(player.x, player.y, player.w, player.h, cx, cy, cs, cs)) {
+            applyPickup(c);
+          }
+        }
+
+        // prune fully-animated-out pickups to keep lists short
+        plat.crystals = plat.crystals.filter(p => !p.taken || p.takeT < 22);
+      }
+    }
+
+    // Improved movement: sensitivity amplifies steering so smaller hand movement => bigger speed
+    function computeSteerVx() {
+      const d = difficulty();
+      const boostMult = (player.boostT > 0 ? BOOST_SPEED_MULT : 1.0);
+      const moveSpeed = (moveSpeedBase + d * 0.10) * (STEER_GAIN_BASE * controlSensitivity) * boostMult;
+
+      let steer = 0;
+
+      // effective deadzone shrinks as sensitivity increases
+      const dz = STEER_DEADZONE / Math.max(1, controlSensitivity);
+
+      if (handControlEnabled && gestureState.active) {
+        // sensitivity applied around center
+        const s = (gestureState.leftWristX - 0.5) * controlSensitivity;
+        if (Math.abs(s) >= dz) {
+          const n = clamp2(s / 0.5, -1, 1);
+          steer += n;
+        }
+      }
+
+      if (keys.left)  steer -= 1;
+      if (keys.right) steer += 1;
+
+      steer = clamp2(steer, -1, 1);
+
+      if (steer < 0) player.face = -1;
+      if (steer > 0) player.face =  1;
+
+      return steer * moveSpeed;
+    }
+
+    function updatePlayer() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+
+      // Shield regen
+      const sinceDmg = world.tick - player.lastDamageAtFrame;
+      if (sinceDmg >= PLAYER_SHIELD_REGEN_DELAY_FRAMES && player.shield < player.maxShield) {
+        player.shield = Math.min(player.maxShield, player.shield + PLAYER_SHIELD_REGEN_PER_FRAME);
+      }
+
+      // Boost countdown
+      if (player.boostT > 0) player.boostT--;
+      if (player.boostFlash > 0) player.boostFlash--;
+      if (player.shieldHitFlash > 0) player.shieldHitFlash--;
+      if (player.ammoFlash > 0) player.ammoFlash--;
+
+      const targetVx = computeSteerVx();
+
+      const accel = (keys.left || keys.right) ? KEY_ACCEL : HAND_ACCEL;
+
+      if (Math.abs(targetVx) > 0.001) {
+        player.vx = lerp(player.vx, targetVx, accel);
+      } else {
+        player.vx *= FRICTION;
+        if (Math.abs(player.vx) < 0.02) player.vx = 0;
+      }
+
+      player.x += player.vx;
+      player.x = clamp2(player.x, 0, w - player.w);
+
+      const prevY = player.y;
+
+      player.vy += gravity;
+      player.vy = Math.min(player.vy, maxFall);
+      player.y += player.vy;
+
+      player.onGround = false;
+
+      for (const p of platforms) {
+        const isOverlappingX = player.x + player.w > p.x && player.x < p.x + p.w;
+        const wasAbove = prevY + player.h <= p.y + 2;
+        const nowOnTop = player.y + player.h >= p.y && player.y + player.h <= p.y + p.h + 8;
+        if (isOverlappingX && wasAbove && nowOnTop && player.vy >= 0) {
+          player.y = p.y - player.h;
+          player.vy = 0;
+          player.onGround = true;
+        }
+      }
+
+      const mid = h * 0.52;
+      if (player.y < mid) {
+        const offset = mid - player.y;
+        player.y = mid;
+        world.scrollY += offset;
+        world.maxHeight = Math.max(world.maxHeight, world.scrollY);
+
+        for (const p of platforms) {
+          p.y += offset;
+          for (const c of p.crystals) c.y += offset;
+        }
+        for (const lava of lavaChunks) lava.y += offset;
+        for (const e of enemies) e.y += offset;
+
+        for (const s of waterShots) s.y += offset;
+
+        // particles + floaters scroll with world
+        for (const pt of particles) pt.y += offset;
+        for (const fl of floaters) fl.y += offset;
+      }
+
+      if (player.invuln > 0) player.invuln--;
+
+      recyclePlatforms();
+      ensureHazardsForLevel();
+      updatePickups();
+
+      if (player.y > h + 160 || player.health <= 0) {
+        alert("Game Over — The trolls got you. Refresh to climb again.");
+        document.location.reload();
+      }
+    }
+
+    function updateLava() {
+      const h = window.innerHeight;
+      const w = window.innerWidth;
+
+      for (const lava of lavaChunks) {
+        lava.a += lava.spin;
+        lava.y += lava.vy;
+
+        if (lava.y > h + 120) {
+          lava.y = topPlatformY() - rand(120, 900);
+          lava.x = rand(0, w);
+          lava.vy = (1.0 + Math.random() * 2.2) + difficulty() * 0.15;
+        }
+
+        if (rectHit(player.x, player.y, player.w, player.h, lava.x, lava.y, lava.w, lava.h)) {
+          damagePlayer(2, (player.x + player.w/2 < lava.x + lava.w/2) ? -6 : 6);
+        }
+      }
+    }
+
+    function updateEnemies() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+
+      for (const e of enemies) {
+        if (e.inv > 0) e.inv--;
+        if (e.hurtFlash > 0) e.hurtFlash--;
+
+        // if “dead”, respawn after short delay
+        if (e.deadT > 0) {
+          e.deadT--;
+          if (e.deadT === 0) {
+            const ne = spawnEnemy(false);
+            Object.assign(e, ne);
+          }
+          continue;
+        }
+
+        e.bob += 0.05;
+        e.x += e.spd * e.dir;
+
+        if (e.x < 0 || e.x + e.w > w) e.dir *= -1;
+
+        if (e.y > h + 160) {
+          const ne = spawnEnemy(false);
+          Object.assign(e, ne);
+        }
+
+        const ey = e.y + Math.sin(e.bob) * 2.2;
+
+        // collision damage to player
+        if (rectHit(player.x, player.y, player.w, player.h, e.x, ey, e.w, e.h)) {
+          damagePlayer(1, (player.x + player.w/2 < e.x + e.w/2) ? -4 : 4);
+        }
+
+        // enemy shield regen slowly (keeps fights dynamic)
+        if (world.tick % 18 === 0 && e.sh < e.maxSh) {
+          e.sh = Math.min(e.maxSh, e.sh + 1);
+        }
+      }
+    }
+
+    function damageEnemy(e, amount, hitX, hitY, dirX) {
+      if (e.deadT > 0) return;
+      if (e.inv > 0) return;
+
+      e.inv = 6;
+      e.hurtFlash = 10;
+
+      const beforeHp = e.hp;
+      const beforeSh = e.sh;
+      applyDamageToShieldAndHP(e, amount);
+
+      const didSh = (beforeSh !== e.sh);
+      const didHp = (beforeHp !== e.hp);
+
+      if (didSh && !didHp) {
+        spawnParticles(hitX, hitY, 12, 2.6, "rgba(0,190,255,0.88)", "rgba(255,255,255,0.40)");
+      } else {
+        spawnParticles(hitX, hitY, 14, 2.8, "rgba(255,42,0,0.90)", "rgba(0,190,255,0.55)");
+      }
+
+      e.x += dirX * SHOT_PUSH;
+
+      if (e.hp <= 0) {
+        e.deadT = 32;
+        world.shake = Math.min(18, world.shake + 4);
+        spawnParticles(e.x + e.w/2, e.y + e.h/2, 26, 3.4, "rgba(255,208,0,0.95)", "rgba(255,42,0,0.85)");
+        spawnFloater(e.x + e.w/2, e.y - 10, "TROLL DOWN", "rgba(255,208,0,0.95)");
+
+        // chance: drop a pickup “burst” near death spot (increases reward loop)
+        const r = Math.random();
+        if (r < 0.20) {
+          // inject into nearest platform or create a floating pickup by attaching to a platform-like structure
+          // simplest: add to a random platform's pickup list at this y
+          let best = platforms[0];
+          let bestDy = Infinity;
+          for (const p of platforms) {
+            const dy = Math.abs(p.y - e.y);
+            if (dy < bestDy) { bestDy = dy; best = p; }
+          }
+          const type = (Math.random() < 0.55) ? PICKUP.AMMO : (Math.random() < 0.5 ? PICKUP.SHIELD : PICKUP.BOOST);
+          best.crystals.push({
+            type,
+            x: clamp2(e.x + e.w/2, best.x + 16, best.x + best.w - 16),
+            y: best.y - 18,
+            s: 18,
+            r: Math.random() * Math.PI * 2,
+            phase: Math.random() * Math.PI * 2,
+            value: type === PICKUP.AMMO ? 12 : (type === PICKUP.SHIELD ? 22 : BOOST_DURATION_FRAMES),
+            taken: false,
+            takeT: 0,
+          });
+        }
+      }
+    }
+
+    function updateWater() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+
+      for (let i = waterShots.length - 1; i >= 0; i--) {
+        const s = waterShots[i];
+
+        s.x += s.vx;
+        s.y += s.vy;
+        s.vy += 0.10;
+        s.a = Math.atan2(s.vy, s.vx);
+
+        if (s.y > h + 200 || s.y + s.h < -240 || s.x < -240 || s.x > w + 240) {
+          waterShots.splice(i, 1);
+          continue;
+        }
+
+        // lava interaction
+        for (const lava of lavaChunks) {
+          if (rectHit(s.x, s.y, s.w, s.h, lava.x, lava.y, lava.w, lava.h)) {
+            lava.y = topPlatformY() - rand(120, 900);
+            lava.x = rand(0, w);
+            lava.vy = (1.0 + Math.random() * 2.2) + difficulty() * 0.15;
+
+            // small sustain reward
+            player.health = Math.min(player.maxHealth, player.health + 1);
+            player.shield = Math.min(player.maxShield, player.shield + 0.5);
+            world.shake = Math.min(18, world.shake + 2);
+            spawnParticles(lava.x + lava.w/2, lava.y + lava.h/2, 10, 2.4, "rgba(0,210,255,0.85)", "rgba(255,255,255,0.45)");
+            waterShots.splice(i, 1);
+            break;
+          }
+        }
+
+        // enemy interaction (new: damage + shield)
+        for (const e of enemies) {
+          if (e.deadT > 0) continue;
+          const ey = e.y + Math.sin(e.bob) * 2.2;
+          if (rectHit(s.x, s.y, s.w, s.h, e.x, ey, e.w, e.h)) {
+            const hitX = s.x + s.w/2;
+            const hitY = s.y + s.h/2;
+            const dirX = (s.vx >= 0) ? 1 : -1;
+            damageEnemy(e, s.dmg ?? SHOT_DAMAGE, hitX, hitY, dirX);
+
+            waterShots.splice(i, 1);
+            break;
+          }
+        }
+      }
+    }
+
+    function updateEmbers() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      for (let i = embers.length - 1; i >= 0; i--) {
+        const p = embers[i];
+        p.x += p.vx;
+        p.y -= p.vy;
+        p.life -= 1;
+        if (p.y < -120 || p.life <= 0) {
+          embers[i] = spawnEmber(false);
+        } else {
+          if (p.x < -50) p.x = w + 50;
+          if (p.x > w + 50) p.x = -50;
+        }
+      }
+    }
+
+    function updateParticles() {
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.03;
+        p.life -= 1;
+        p.a *= 0.97;
+        if (p.life <= 0 || p.a < 0.03) particles.splice(i, 1);
+      }
+      for (let i = floaters.length - 1; i >= 0; i--) {
+        const f = floaters[i];
+        f.y += f.vy;
+        f.life -= 1;
+        if (f.life <= 0) floaters.splice(i, 1);
+      }
+    }
+
+    function drawBackground() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+
+      ctx.fillStyle = bgGrad;
+      ctx.fillRect(0, 0, w, h);
+
+      const t = world.tick;
+      const par1 = (world.scrollY * 0.07) % h;
+      const par2 = (world.scrollY * 0.12) % h;
+
+      ctx.save();
+      ctx.globalAlpha = 0.55;
+      ctx.fillStyle = "rgba(0,0,0,0.35)";
+      for (let i = 0; i < 10; i++) {
+        const x = (i * 240 + (t * 0.15)) % (w + 300) - 150;
+        const y = (h * 0.25) + Math.sin((t * 0.01) + i) * 10 + par1;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + 140, y - 80);
+        ctx.lineTo(x + 280, y);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
+
+      ctx.save();
+      ctx.globalAlpha = 0.72;
+      ctx.fillStyle = "rgba(0,0,0,0.48)";
+      for (let i = 0; i < 9; i++) {
+        const x = (i * 280 - (t * 0.11)) % (w + 360) - 180;
+        const y = (h * 0.55) + Math.cos((t * 0.008) + i * 0.7) * 14 + par2;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + 180, y - 120);
+        ctx.lineTo(x + 360, y);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
+
+      ctx.save();
+      for (const p of embers) {
+        ctx.globalAlpha = p.a;
+        ctx.beginPath();
+        ctx.fillStyle = "rgba(255, 80, 0, 1)";
+        ctx.arc(p.x, p.y, p.s, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+
+      ctx.save();
+      ctx.fillStyle = vignetteGrad;
+      ctx.fillRect(0, 0, w, h);
+      ctx.restore();
+    }
+
+    function drawPlatforms() {
+      for (const p of platforms) {
+        if (SPRITES.platform.complete) {
+          ctx.save();
+          ctx.shadowColor = "rgba(255,60,0,0.18)";
+          ctx.shadowBlur = 14;
+          ctx.drawImage(SPRITES.platform, p.x, p.y - 12, p.w, p.h + 18);
+          ctx.restore();
+        } else {
+          ctx.fillStyle = "#654321";
+          ctx.fillRect(p.x, p.y, p.w, p.h);
+        }
+      }
+    }
+
+    function spriteForPickup(type) {
+      if (type === PICKUP.AMMO) return SPRITES.pickupAmmo;
+      if (type === PICKUP.SHIELD) return SPRITES.pickupShield;
+      if (type === PICKUP.BOOST) return SPRITES.pickupBoost;
+      return SPRITES.pickupHealth;
+    }
+
+    function drawPickups() {
+      for (const p of platforms) {
+        for (const t of p.crystals) {
+          const img = spriteForPickup(t.type);
+          const pulse = 1 + Math.sin(world.tick * 0.08 + t.phase) * 0.08;
+          const bob = Math.sin(world.tick * 0.06 + t.phase) * 5;
+
+          // take animation: shrink + fade upward
+          let alpha = 0.95;
+          let scale = pulse;
+          let rise = 0;
+          if (t.taken) {
+            alpha = Math.max(0, 1 - (t.takeT / 22));
+            scale = (1 - t.takeT / 22) * 0.9 + 0.05;
+            rise = -t.takeT * 1.2;
+          }
+
+          if (img.complete) {
+            ctx.save();
+            ctx.translate(t.x, t.y + bob + rise);
+            ctx.rotate(t.r + world.tick * 0.01);
+            ctx.globalAlpha = alpha;
+
+            // glow by type
+            if (t.type === PICKUP.SHIELD) ctx.shadowColor = "rgba(0,190,255,0.30)";
+            else if (t.type === PICKUP.BOOST) ctx.shadowColor = "rgba(255,208,0,0.30)";
+            else if (t.type === PICKUP.AMMO) ctx.shadowColor = "rgba(255,255,255,0.20)";
+            else ctx.shadowColor = "rgba(24,255,105,0.25)";
+            ctx.shadowBlur = 20;
+
+            const s = t.s * scale;
+            ctx.drawImage(img, -s/2, -s/2, s, s);
+
+            // halo ring
+            ctx.globalAlpha = alpha * 0.28;
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = "rgba(255,255,255,0.55)";
+            ctx.beginPath();
+            ctx.arc(0, 0, (t.s * 0.8) * scale, 0, Math.PI * 2);
+            ctx.stroke();
+
+            ctx.restore();
+          } else {
+            ctx.fillStyle = "#a0522d";
+            ctx.beginPath();
+            ctx.arc(t.x, t.y, 6, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      }
+    }
+
+    function drawLava() {
+      for (const lava of lavaChunks) {
+        if (SPRITES.lava.complete) {
+          ctx.save();
+          ctx.translate(lava.x + lava.w/2, lava.y + lava.h/2);
+          ctx.rotate(lava.a);
+          const s = 1.0 + Math.sin(world.tick * 0.03 + lava.x * 0.01) * 0.06;
+          ctx.scale(s, s);
+          ctx.shadowColor = "rgba(255, 50, 0, 0.55)";
+          ctx.shadowBlur = 22;
+          ctx.drawImage(SPRITES.lava, -lava.w/2, -lava.h/2, lava.w, lava.h);
+          ctx.restore();
+
+          ctx.save();
+          ctx.globalAlpha = 0.12;
+          ctx.strokeStyle = "rgba(255,120,60,0.9)";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          const r = 18 + (Math.sin(world.tick * 0.06 + lava.x) * 2.5);
+          ctx.ellipse(lava.x + lava.w/2, lava.y + lava.h + 8, r, r*0.35, 0, 0, Math.PI*2);
+          ctx.stroke();
+          ctx.restore();
+        } else {
+          ctx.fillStyle = "#e60000";
+          ctx.fillRect(lava.x, lava.y, lava.w, lava.h);
+        }
+      }
+    }
+
+    function drawEnemies() {
+      for (const e of enemies) {
+        if (e.deadT > 0) continue;
+
+        const ey = e.y + Math.sin(e.bob) * 2.2;
+
+        if (SPRITES.enemy.complete) {
+          ctx.save();
+          ctx.globalAlpha = e.hurtFlash > 0 ? 0.75 : 1.0;
+          ctx.shadowColor = "rgba(0,120,255,0.35)";
+          ctx.shadowBlur = 18;
+          ctx.drawImage(SPRITES.enemy, e.x - 18, ey - 22, e.w + 36, e.h + 44);
+          ctx.restore();
+        } else {
+          ctx.fillStyle = "#0000ff";
+          ctx.fillRect(e.x, ey, e.w, e.h);
+        }
+
+        // Enemy HP + Shield mini-bars (animated)
+        const barW = 46;
+        const barH = 5;
+        const bx = e.x + e.w/2 - barW/2;
+        const by = ey - 18;
+
+        const hpPct = clamp2(e.hp / e.maxHp, 0, 1);
+        const shPct = clamp2(e.sh / e.maxSh, 0, 1);
+
+        ctx.save();
+        ctx.globalAlpha = 0.85;
+        ctx.fillStyle = "rgba(0,0,0,0.35)";
+        ctx.fillRect(bx, by, barW, barH);
+        ctx.fillRect(bx, by + 7, barW, barH);
+
+        ctx.fillStyle = "rgba(255,42,0,0.85)";
+        ctx.fillRect(bx, by, barW * hpPct, barH);
+
+        ctx.fillStyle = "rgba(0,190,255,0.85)";
+        ctx.fillRect(bx, by + 7, barW * shPct, barH);
+
+        ctx.globalAlpha = 0.28;
+        ctx.strokeStyle = "rgba(255,255,255,0.55)";
+        ctx.strokeRect(bx, by, barW, barH);
+        ctx.strokeRect(bx, by + 7, barW, barH);
+
+        ctx.restore();
+      }
+    }
+
+    function drawWater() {
+      for (const s of waterShots) {
+        if (SPRITES.water.complete) {
+          ctx.save();
+          ctx.translate(s.x + s.w/2, s.y + s.h/2);
+          ctx.rotate(s.a + Math.PI / 2);
+          ctx.shadowColor = "rgba(0, 210, 255, 0.35)";
+          ctx.shadowBlur = 16;
+          ctx.drawImage(SPRITES.water, -s.w, -s.h, s.w*2, s.h*2.2);
+          ctx.restore();
+        } else {
+          ctx.fillStyle = "#00ccff";
+          ctx.fillRect(s.x, s.y, s.w, s.h);
+        }
+      }
+    }
+
+    function drawPlayer() {
+      const bob = player.onGround ? Math.sin(world.tick * 0.12) * 1.2 : 0;
+      const blink = (player.invuln > 0) && (world.tick % 4 < 2);
+
+      // shield bubble effect
+      const shieldPct = clamp2(player.shield / player.maxShield, 0, 1);
+      if (player.shield > 0) {
+        ctx.save();
+        const cx = player.x + player.w/2;
+        const cy = player.y + player.h/2 + bob;
+        const rr = 28 + shieldPct * 10 + Math.sin(world.tick * 0.08) * 1.2;
+
+        const flash = player.shieldHitFlash > 0 ? 0.20 : 0.08;
+        ctx.globalAlpha = Math.min(0.35, 0.10 + shieldPct * 0.18 + flash);
+
+        ctx.strokeStyle = "rgba(0,190,255,0.85)";
+        ctx.lineWidth = 2;
+        ctx.shadowColor = "rgba(0,190,255,0.25)";
+        ctx.shadowBlur = 18;
+        ctx.beginPath();
+        ctx.arc(cx, cy, rr, 0, Math.PI*2);
+        ctx.stroke();
+
+        ctx.globalAlpha = 0.06 + shieldPct * 0.10 + (player.shieldHitFlash > 0 ? 0.06 : 0);
+        ctx.fillStyle = "rgba(0,190,255,0.65)";
+        ctx.beginPath();
+        ctx.arc(cx, cy, rr, 0, Math.PI*2);
+        ctx.fill();
+
+        ctx.restore();
+      }
+
+      if (SPRITES.player.complete) {
+        ctx.save();
+        ctx.translate(player.x + player.w/2, player.y + player.h/2 + bob);
+        ctx.scale(player.face, 1);
+        ctx.shadowColor = "rgba(255,60,0,0.30)";
+        ctx.shadowBlur = 22;
+        ctx.globalAlpha = blink ? 0.35 : 1;
+
+        ctx.drawImage(SPRITES.player, -42, -50, 84, 92);
+
+        // boost glow overlay
+        if (player.boostT > 0) {
+          ctx.globalAlpha = 0.10 + Math.sin(world.tick*0.12) * 0.06;
+          ctx.shadowColor = "rgba(255,208,0,0.35)";
+          ctx.shadowBlur = 24;
+          ctx.beginPath();
+          ctx.arc(0, 8, 26, 0, Math.PI*2);
+          ctx.fillStyle = "rgba(255,208,0,0.35)";
+          ctx.fill();
+        }
+
+        ctx.restore();
+      } else {
+        ctx.fillStyle = "#ff5733";
+        ctx.fillRect(player.x, player.y, player.w, player.h);
+      }
+    }
+
+    function drawAimAndHandUI() {
+      if (!handControlEnabled || !gestureState.active) return;
+
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+
+      const ax = clamp2(gestureState.aimX_out, 0, 1) * w;
+      const ay = clamp2(gestureState.aimY_out, 0, 1) * h;
+
+      // reticle (boost adds glow)
+      ctx.save();
+      const glow = (player.boostT > 0 ? BOOST_AIM_GLOW : 0);
+      ctx.globalAlpha = 0.92;
+      ctx.strokeStyle = "rgba(0, 210, 255, 0.85)";
+      ctx.lineWidth = 2;
+      ctx.shadowColor = `rgba(0, 210, 255, ${0.25 + glow})`;
+      ctx.shadowBlur = 18 + (player.boostT > 0 ? 14 : 0);
+
+      ctx.beginPath();
+      ctx.arc(ax, ay, 14, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(ax - 24, ay); ctx.lineTo(ax - 10, ay);
+      ctx.moveTo(ax + 10, ay); ctx.lineTo(ax + 24, ay);
+      ctx.moveTo(ax, ay - 24); ctx.lineTo(ax, ay - 10);
+      ctx.moveTo(ax, ay + 10); ctx.lineTo(ax, ay + 24);
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.save();
+      ctx.globalAlpha = 0.18;
+      ctx.strokeStyle = "rgba(0, 210, 255, 0.9)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(player.x + player.w * 0.5, player.y + player.h * 0.35);
+      ctx.lineTo(ax, ay);
+      ctx.stroke();
+      ctx.restore();
+
+      // left-hand steering indicator
+      const lx = clamp2( applySensitivity01(gestureState.leftWristX, controlSensitivity), 0, 1) * w;
+      ctx.save();
+      ctx.globalAlpha = 0.65;
+      ctx.strokeStyle = "rgba(24,255,105,0.75)";
+      ctx.lineWidth = 3;
+      ctx.shadowColor = "rgba(24,255,105,0.22)";
+      ctx.shadowBlur = 14;
+
+      const y = h - 90;
+      ctx.beginPath();
+      ctx.moveTo(w * 0.20, y);
+      ctx.lineTo(w * 0.80, y);
+      ctx.stroke();
+
+      ctx.fillStyle = "rgba(24,255,105,0.85)";
+      ctx.beginPath();
+      ctx.arc(lx, y, 7.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function drawParticles() {
+      // particles
+      for (const p of particles) {
+        const t = Math.max(0, Math.min(1, p.life / 40));
+        ctx.save();
+        ctx.globalAlpha = p.a;
+        ctx.beginPath();
+        const col = (t > 0.55) ? p.colA : p.colB;
+        ctx.fillStyle = col;
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // floating text
+      for (const f of floaters) {
+        const a = Math.max(0, Math.min(1, f.life / 48));
+        ctx.save();
+        ctx.globalAlpha = 0.2 + a * 0.8;
+        ctx.font = "700 12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial";
+        ctx.fillStyle = f.tint;
+        ctx.shadowColor = "rgba(0,0,0,0.45)";
+        ctx.shadowBlur = 8;
+        ctx.textAlign = "center";
+        ctx.fillText(f.text, f.x, f.y);
+        ctx.restore();
+      }
+    }
+
+    function drawScanlines() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      if (!scanPattern) return;
+      ctx.save();
+      ctx.globalAlpha = 0.08;
+      ctx.fillStyle = scanPattern;
+      ctx.fillRect(0, 0, w, h);
+      ctx.restore();
+    }
+
+    function updateHud() {
+      const hpPct = clamp2(player.health / player.maxHealth, 0, 1);
+      hpFill.style.transform = `scaleX(${hpPct})`;
+
+      const shPct = clamp2(player.shield / player.maxShield, 0, 1);
+      shFill.style.transform = `scaleX(${shPct})`;
+
+      const meters = metersClimbed();
+      heightReadout.textContent = `${meters} m`;
+
+      world.level = computeLevel();
+      levelReadout.textContent = String(world.level);
+
+      ammoReadout.textContent = String(player.ammo);
+      boostReadout.textContent = (player.boostT > 0) ? `${(player.boostT / 60).toFixed(1)}s` : "0.0s";
+    }
+
+    function gameLoop() {
+      world.tick++;
+
+      if (world.shake > 0.01) {
+        world.shake *= 0.88;
+        world.shakeX = (Math.random() - 0.5) * world.shake;
+        world.shakeY = (Math.random() - 0.5) * world.shake;
+      } else {
+        world.shake = 0; world.shakeX = 0; world.shakeY = 0;
+      }
+
+      updateHud();
+      updatePlayer();
+      updateLava();
+      updateEnemies();
+      updateWater();
+      updateEmbers();
+      updateParticles();
+
+      ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+
+      ctx.save();
+      ctx.translate(world.shakeX, world.shakeY);
+      drawBackground();
+      drawPlatforms();
+      drawPickups();
+      drawLava();
+      drawEnemies();
+      drawWater();
+      drawPlayer();
+      drawParticles();
+      ctx.restore();
+
+      drawAimAndHandUI();
+      drawScanlines();
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    // Boot deferred until login success
+    let gameStarted = false;
+    async function startGameBoot() {
+      if (gameStarted) return;
+      gameStarted = true;
+      await waitForSprites();
+      initWorld();
+      gameLoop();
+    }
+  </script>
+</body>
+</html>

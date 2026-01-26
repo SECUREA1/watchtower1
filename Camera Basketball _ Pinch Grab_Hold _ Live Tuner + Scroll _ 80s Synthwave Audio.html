@@ -1,0 +1,2497 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Camera Basketball | Pinch Grab/Hold | Live Tuner + Scroll | 80s Synthwave Audio</title>
+
+  <!-- MediaPipe Hands -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
+  <style>
+    :root{
+      --bg:#050611;
+      --panel:#0f1426ee;
+      --panel2:#0b1022ee;
+      --text:#eef2ff;
+      --muted:#b6bed8;
+      --cyan:#00ffff;
+      --magenta:#ff00ff;
+      --accent:#ffb000;
+      --rim:#ff4a4a;
+      --line:#7a86b3;
+    }
+    html,body{height:100%;background:var(--bg);margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:var(--text);}
+    .wrap{display:flex;justify-content:center;align-items:flex-start;padding:18px;}
+    .gameShell{
+      position:relative;
+      width:min(960px, 96vw);
+      aspect-ratio: 16 / 9;
+      border-radius:14px;
+      overflow:hidden;
+      box-shadow:0 18px 70px rgba(0,0,0,.60);
+      border:1px solid rgba(255,255,255,.10);
+      background:#000;
+      user-select:none;
+      touch-action:none;
+    }
+
+    /* Stage wrapper (zoom/offset) */
+    #stage{
+      position:absolute; inset:0;
+      transform-origin: center center;
+      will-change: transform;
+    }
+
+    #courtSVG{position:absolute;inset:0;width:100%;height:100%;display:block;}
+    #handsCanvas{position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none;}
+
+    .hud{
+      position:absolute; left:0; top:0; right:0;
+      padding:10px 14px;
+      background:linear-gradient(to bottom, rgba(0,0,0,.70), rgba(0,0,0,.00));
+      display:flex; align-items:center; gap:12px;
+      font-size:14px;
+      pointer-events:none;
+      z-index:5;
+    }
+    .hud .pill{
+      background:rgba(10,12,18,.72);
+      border:1px solid rgba(255,255,255,.10);
+      padding:6px 10px;
+      border-radius:999px;
+      backdrop-filter: blur(8px);
+      display:flex; align-items:center; gap:10px;
+      box-shadow:0 6px 22px rgba(0,0,0,.38);
+      white-space:nowrap;
+    }
+    .hud .p1{color:var(--cyan); font-weight:900;}
+    .hud .p2{color:var(--magenta); font-weight:900;}
+    .hud .clock{color:var(--text); font-weight:900; letter-spacing:.5px;}
+    .hud .hint{color:var(--muted); font-size:12px;}
+    .hud .targets{display:flex; gap:14px; font-size:12px; color:var(--muted);}
+
+    .toast{
+      position:absolute; left:0; right:0; top:54px;
+      display:flex; justify-content:center;
+      pointer-events:none;
+      z-index:6;
+    }
+    .toast .box{
+      background:rgba(0,0,0,.62);
+      border:1px solid rgba(255,255,255,.10);
+      padding:6px 12px;
+      border-radius:10px;
+      font-size:12px;
+      color:var(--text);
+      backdrop-filter: blur(8px);
+      opacity:0;
+      transform: translateY(-6px);
+      transition: opacity .16s ease, transform .16s ease;
+      max-width:min(92%, 860px);
+      text-align:center;
+    }
+    .toast .box.show{opacity:1; transform: translateY(0px);}
+
+    .tuner{
+      position:absolute;
+      left:14px; top:84px;
+      width:min(500px, calc(100% - 28px));
+      max-height: calc(100% - 98px);
+      background:var(--panel);
+      border:1px solid rgba(255,255,255,.12);
+      border-radius:14px;
+      box-shadow:0 16px 60px rgba(0,0,0,.60);
+      overflow:hidden;
+      display:none;
+      backdrop-filter: blur(12px);
+      touch-action:auto;
+      z-index:8;
+    }
+    .tuner.show{display:block;}
+    .tunerHeader{
+      padding:12px 14px 10px;
+      border-bottom:1px solid rgba(255,255,255,.08);
+      display:flex; align-items:center; justify-content:space-between; gap:10px;
+      background:linear-gradient(to bottom, rgba(255,255,255,.05), rgba(255,255,255,.00));
+    }
+    .tunerHeader .title{font-weight:900;letter-spacing:.7px;color:#ffd27a;font-size:14px;}
+    .tunerHeader .sub{color:var(--muted);font-size:12px;margin-left:10px;font-weight:800;}
+
+    /* TUNER SELECTOR (tabs) now scrolls too */
+    .tabs{
+      padding:10px 12px;
+      display:flex;
+      gap:8px;
+      background:var(--panel2);
+      border-bottom:1px solid rgba(255,255,255,.08);
+
+      overflow-x:auto;
+      overflow-y:hidden;
+      white-space:nowrap;
+      flex-wrap:nowrap;
+
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,176,0,.55) rgba(255,255,255,.08);
+    }
+    .tabs::-webkit-scrollbar{ height:10px; }
+    .tabs::-webkit-scrollbar-track{
+      background: rgba(255,255,255,.07);
+      border-top:1px solid rgba(255,255,255,.06);
+    }
+    .tabs::-webkit-scrollbar-thumb{
+      background: linear-gradient(to right, rgba(255,176,0,.75), rgba(255,120,0,.60));
+      border-radius:10px;
+      border:2px solid rgba(0,0,0,.20);
+    }
+
+    .tabBtn{
+      cursor:pointer;
+      padding:6px 10px;
+      border-radius:10px;
+      background:rgba(255,255,255,.05);
+      border:1px solid rgba(255,255,255,.10);
+      color:var(--muted);
+      font-size:12px;
+      font-weight:900;
+      letter-spacing:.2px;
+      flex:0 0 auto;
+    }
+    .tabBtn.active{
+      color:var(--text);
+      background:rgba(255,255,255,.09);
+      border-color: rgba(255,255,255,.18);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.06);
+    }
+
+    /* SCROLLBAR: tuner body */
+    .tunerBody{
+      padding:10px 14px 12px;
+      overflow-y:auto;
+      overflow-x:hidden;
+      max-height: calc(100% - 168px);
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,176,0,.55) rgba(255,255,255,.08);
+    }
+    .tunerBody::-webkit-scrollbar{ width:10px; }
+    .tunerBody::-webkit-scrollbar-track{
+      background: rgba(255,255,255,.07);
+      border-left:1px solid rgba(255,255,255,.06);
+    }
+    .tunerBody::-webkit-scrollbar-thumb{
+      background: linear-gradient(to bottom, rgba(255,176,0,.75), rgba(255,120,0,.60));
+      border-radius:10px;
+      border:2px solid rgba(0,0,0,.20);
+    }
+
+    .sliderRow{margin:10px 0 14px;}
+    .sliderTop{display:flex; justify-content:space-between; align-items:baseline; gap:10px; font-size:12px; color:var(--muted);}
+    .sliderTop .k{color:var(--text); font-weight:900;}
+    input[type="range"]{width:100%;margin-top:8px;accent-color: var(--accent);}
+
+    .actions{
+      padding:10px 12px 12px;
+      border-top:1px solid rgba(255,255,255,.08);
+      background:linear-gradient(to top, rgba(255,255,255,.04), rgba(255,255,255,.00));
+      display:flex; flex-wrap:wrap; gap:8px;
+    }
+    .btn{
+      cursor:pointer;
+      padding:8px 10px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.12);
+      background:rgba(255,255,255,.06);
+      color:var(--text);
+      font-size:12px;
+      font-weight:900;
+      letter-spacing:.2px;
+    }
+    .btn:hover{background:rgba(255,255,255,.10);}
+    .btn.good{border-color: rgba(55,214,122,.35);}
+    .btn.warn{border-color: rgba(255,176,0,.35);}
+
+    .debugVideo{
+      position:absolute; right:12px; bottom:12px;
+      width:min(260px, 48%);
+      border-radius:12px;
+      overflow:hidden;
+      border:1px solid rgba(255,255,255,.12);
+      box-shadow:0 14px 50px rgba(0,0,0,.45);
+      display:none;
+      background:#000;
+      touch-action:auto;
+      z-index:7;
+    }
+    .debugVideo.show{display:block;}
+    .debugVideo video{
+      display:block;width:100%;height:auto;
+      transform: scaleX(-1);
+    }
+
+    .footerNote{
+      max-width: 960px;
+      color: #b6bed8;
+      font-size: 12px;
+      line-height: 1.4;
+      margin: 10px auto 0;
+      padding: 0 18px;
+    }
+    code.k{color:#d4dcff;background:rgba(255,255,255,.06);padding:2px 6px;border-radius:8px;border:1px solid rgba(255,255,255,.10);}
+
+    /* ===== LOGIN / HAND SCAN OVERLAY ===== */
+    .loginOverlay{
+      position:absolute; inset:0;
+      z-index:20;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      background: radial-gradient(circle at 50% 30%, rgba(255,0,255,.10), rgba(0,255,255,.08), rgba(0,0,0,.82) 65%, rgba(0,0,0,.92));
+      backdrop-filter: blur(10px);
+      touch-action:auto;
+    }
+    .loginOverlay.show{display:flex;}
+    .loginBox{
+      width:min(720px, calc(100% - 32px));
+      border-radius:16px;
+      border:1px solid rgba(255,255,255,.12);
+      background: rgba(8,10,18,.72);
+      box-shadow:0 18px 70px rgba(0,0,0,.65);
+      overflow:hidden;
+    }
+    .loginTop{
+      padding:14px 16px 10px;
+      display:flex;
+      align-items:baseline;
+      justify-content:space-between;
+      gap:12px;
+      border-bottom:1px solid rgba(255,255,255,.08);
+      background: linear-gradient(to bottom, rgba(255,255,255,.06), rgba(255,255,255,.00));
+    }
+    .loginTitle{
+      font-weight:1000;
+      letter-spacing:1.1px;
+      color:#ffd27a;
+      font-size:14px;
+    }
+    .loginSub{
+      color:rgba(214,224,255,.85);
+      font-weight:800;
+      font-size:12px;
+    }
+    .scanWrap{
+      padding:14px 16px 16px;
+      display:grid;
+      grid-template-columns: 1fr 240px;
+      gap:14px;
+      align-items:stretch;
+    }
+    @media (max-width: 720px){
+      .scanWrap{grid-template-columns:1fr; }
+    }
+    .scanPanel{
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.10);
+      background: rgba(0,0,0,.35);
+      padding:12px;
+      position:relative;
+      overflow:hidden;
+    }
+    .scanPanel::before{
+      content:"";
+      position:absolute; inset:-2px;
+      background: linear-gradient(90deg, rgba(0,255,255,.00), rgba(0,255,255,.16), rgba(255,0,255,.16), rgba(255,0,255,.00));
+      opacity:.55;
+      filter: blur(10px);
+      pointer-events:none;
+    }
+    .scanArea{
+      position:relative;
+      height: 300px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.12);
+      background: radial-gradient(circle at 50% 35%, rgba(0,255,255,.08), rgba(255,0,255,.06), rgba(0,0,0,.65));
+      overflow:hidden;
+    }
+    .scanBoxRect{
+      position:absolute;
+      left:35%;
+      top:18%;
+      width:30%;
+      height:58%;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.18);
+      box-shadow: inset 0 0 0 1px rgba(0,255,255,.10);
+    }
+    .scanBoxRect::before{
+      content:"";
+      position:absolute; inset:-2px;
+      border-radius:14px;
+      border:1px solid rgba(0,255,255,.18);
+      opacity:.75;
+      filter: blur(0.2px);
+    }
+    .scanLine{
+      position:absolute;
+      left:10%;
+      width:80%;
+      height:2px;
+      background: linear-gradient(90deg, rgba(0,255,255,0), rgba(0,255,255,.85), rgba(255,0,255,.85), rgba(255,0,255,0));
+      opacity:.9;
+      filter: blur(.2px);
+      animation: scanline 1.05s linear infinite;
+    }
+    @keyframes scanline{
+      0%{ top:18%; }
+      100%{ top:76%; }
+    }
+    .scanHint{
+      position:absolute;
+      left:12px; right:12px; bottom:10px;
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      font-size:12px;
+      color:rgba(214,224,255,.82);
+      font-weight:800;
+      pointer-events:none;
+    }
+    .progressOuter{
+      margin-top:10px;
+      height:10px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.06);
+      overflow:hidden;
+    }
+    .progressInner{
+      height:100%;
+      width:0%;
+      background: linear-gradient(90deg, rgba(0,255,255,.85), rgba(255,0,255,.85), rgba(255,176,0,.85));
+      border-radius:999px;
+    }
+    .countBig{
+      font-size:54px;
+      font-weight:1000;
+      letter-spacing:1px;
+      color:rgba(255,255,255,.92);
+      text-align:center;
+      text-shadow: 0 0 22px rgba(0,255,255,.14), 0 0 22px rgba(255,0,255,.12);
+      margin-top:12px;
+    }
+    .scanMeta{
+      padding:12px;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.10);
+      background: rgba(0,0,0,.35);
+      display:flex;
+      flex-direction:column;
+      justify-content:space-between;
+      gap:12px;
+    }
+    .metaRow{
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      font-size:12px;
+      color:rgba(214,224,255,.85);
+      font-weight:850;
+    }
+    .metaRow span:last-child{ color:#ffd27a; }
+    .metaSmall{
+      color:rgba(182,190,216,.92);
+      font-size:12px;
+      line-height:1.35;
+      font-weight:750;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="gameShell" id="shell">
+      <div id="stage">
+        <svg id="courtSVG" viewBox="0 0 960 540" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <!-- Synthwave backdrop -->
+            <linearGradient id="skyGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#1a0b3a"/>
+              <stop offset=".45" stop-color="#070a1c"/>
+              <stop offset="1" stop-color="#03040a"/>
+            </linearGradient>
+
+            <radialGradient id="sunGrad" cx="50%" cy="40%" r="60%">
+              <stop offset="0" stop-color="rgba(255,210,120,.92)"/>
+              <stop offset=".35" stop-color="rgba(255,110,220,.78)"/>
+              <stop offset="1" stop-color="rgba(30,10,60,0)"/>
+            </radialGradient>
+
+            <linearGradient id="horizonGlow" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stop-color="rgba(0,255,255,.00)"/>
+              <stop offset=".5" stop-color="rgba(0,255,255,.22)"/>
+              <stop offset="1" stop-color="rgba(255,0,255,.00)"/>
+            </linearGradient>
+
+            <pattern id="starDots" width="180" height="180" patternUnits="userSpaceOnUse">
+              <circle cx="20" cy="30" r="1.2" fill="rgba(255,255,255,.35)"/>
+              <circle cx="60" cy="80" r="1.0" fill="rgba(255,255,255,.22)"/>
+              <circle cx="110" cy="40" r="1.1" fill="rgba(255,255,255,.28)"/>
+              <circle cx="150" cy="120" r="1.0" fill="rgba(255,255,255,.20)"/>
+              <circle cx="35" cy="150" r="1.0" fill="rgba(255,255,255,.18)"/>
+              <circle cx="95" cy="140" r="1.2" fill="rgba(255,255,255,.26)"/>
+              <circle cx="140" cy="70" r="1.0" fill="rgba(255,255,255,.18)"/>
+            </pattern>
+
+            <linearGradient id="floorGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#1a233a"/>
+              <stop offset=".6" stop-color="#12182a"/>
+              <stop offset="1" stop-color="#0a0d18"/>
+            </linearGradient>
+
+            <pattern id="floorLines" width="26" height="26" patternUnits="userSpaceOnUse">
+              <path d="M0 0 H26" stroke="rgba(255,255,255,.05)" stroke-width="1"/>
+              <path d="M0 13 H26" stroke="rgba(255,255,255,.03)" stroke-width="1"/>
+            </pattern>
+
+            <radialGradient id="vignette" cx="50%" cy="40%" r="70%">
+              <stop offset="55%" stop-color="rgba(0,0,0,0)"/>
+              <stop offset="100%" stop-color="rgba(0,0,0,.55)"/>
+            </radialGradient>
+
+            <filter id="softShadow" x="-30%" y="-30%" width="160%" height="160%">
+              <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="rgba(0,0,0,.55)"/>
+            </filter>
+
+            <filter id="ballShadow" x="-40%" y="-40%" width="180%" height="180%">
+              <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="rgba(0,0,0,.55)"/>
+            </filter>
+
+            <radialGradient id="ballGrad" cx="35%" cy="30%" r="70%">
+              <stop offset="0" stop-color="#ffe0c8"/>
+              <stop offset=".35" stop-color="#ff9d3a"/>
+              <stop offset="1" stop-color="#d25a00"/>
+            </radialGradient>
+
+            <style>
+              .courtLine{stroke:#7a86b3;stroke-width:3;opacity:.90}
+              .courtLine2{stroke:#7a86b3;stroke-width:3;opacity:.70}
+              .keyFill{fill:rgba(85,92,128,.40)}
+              .keyStroke{stroke:rgba(140,150,205,.70);stroke-width:3}
+              .rimStroke{stroke:#ff4a4a;stroke-width:8;stroke-linecap:round;fill:none}
+              .rimLip{stroke:rgba(255,255,255,.10);stroke-width:2;opacity:.9}
+              .boardOuter{fill:rgba(240,245,255,.18);stroke:rgba(240,245,255,.55);stroke-width:2}
+              .boardInner{fill:none;stroke:rgba(240,245,255,.65);stroke-width:2}
+              .netMain{stroke:rgba(233,236,246,.95);stroke-width:2;stroke-linecap:round}
+              .netFine{stroke:rgba(233,236,246,.65);stroke-width:1;stroke-linecap:round}
+              .neon{filter:url(#softShadow)}
+            </style>
+          </defs>
+
+          <!-- Backdrop -->
+          <rect x="0" y="0" width="960" height="540" fill="url(#skyGrad)"/>
+          <rect x="0" y="0" width="960" height="300" fill="url(#starDots)" opacity="0.85"/>
+
+          <!-- Sun glow -->
+          <circle cx="480" cy="150" r="170" fill="url(#sunGrad)" opacity="0.95"/>
+
+          <!-- Horizon glow -->
+          <rect x="0" y="255" width="960" height="4" fill="url(#horizonGlow)" opacity="0.95"/>
+
+          <!-- Synth grid -->
+          <g opacity="0.22">
+            <g stroke="rgba(255,0,255,.60)" stroke-width="1">
+              <line x1="480" y1="260" x2="60"  y2="540"/>
+              <line x1="480" y1="260" x2="140" y2="540"/>
+              <line x1="480" y1="260" x2="220" y2="540"/>
+              <line x1="480" y1="260" x2="300" y2="540"/>
+              <line x1="480" y1="260" x2="380" y2="540"/>
+              <line x1="480" y1="260" x2="580" y2="540"/>
+              <line x1="480" y1="260" x2="660" y2="540"/>
+              <line x1="480" y1="260" x2="740" y2="540"/>
+              <line x1="480" y1="260" x2="820" y2="540"/>
+              <line x1="480" y1="260" x2="900" y2="540"/>
+            </g>
+            <g stroke="rgba(0,255,255,.55)" stroke-width="1">
+              <line x1="0" y1="540" x2="960" y2="540"/>
+              <line x1="0" y1="520" x2="960" y2="520"/>
+              <line x1="0" y1="502" x2="960" y2="502"/>
+              <line x1="0" y1="486" x2="960" y2="486"/>
+              <line x1="0" y1="472" x2="960" y2="472"/>
+              <line x1="0" y1="460" x2="960" y2="460"/>
+              <line x1="0" y1="448" x2="960" y2="448"/>
+              <line x1="0" y1="438" x2="960" y2="438"/>
+              <line x1="0" y1="428" x2="960" y2="428"/>
+              <line x1="0" y1="420" x2="960" y2="420"/>
+              <line x1="0" y1="412" x2="960" y2="412"/>
+              <line x1="0" y1="405" x2="960" y2="405"/>
+              <line x1="0" y1="398" x2="960" y2="398"/>
+              <line x1="0" y1="392" x2="960" y2="392"/>
+            </g>
+          </g>
+
+          <!-- Court base -->
+          <rect x="0" y="280" width="960" height="260" fill="url(#floorGrad)"/>
+          <rect x="0" y="280" width="960" height="260" fill="url(#floorLines)" opacity=".55"/>
+
+          <!-- Court lines -->
+          <line x1="480" y1="280" x2="480" y2="540" class="courtLine"/>
+          <circle cx="480" cy="410" r="60" fill="none" class="courtLine2"/>
+          <circle cx="480" cy="410" r="62" fill="none" stroke="rgba(0,255,255,.22)" stroke-width="3"/>
+          <circle cx="480" cy="410" r="58" fill="none" stroke="rgba(255,0,255,.18)" stroke-width="3"/>
+
+          <rect x="0" y="390" width="170" height="150" class="keyFill"/>
+          <rect x="790" y="390" width="170" height="150" class="keyFill"/>
+          <rect x="0" y="390" width="170" height="150" fill="none" class="keyStroke"/>
+          <rect x="790" y="390" width="170" height="150" fill="none" class="keyStroke"/>
+
+          <!-- Hoops -->
+          <g id="hoopLeft" filter="url(#softShadow)"></g>
+          <g id="hoopRight" filter="url(#softShadow)"></g>
+
+          <!-- Ball -->
+          <g id="ballGroup" filter="url(#ballShadow)">
+            <circle id="ballOuter" cx="480" cy="351" r="20" fill="none" stroke="rgba(255,255,255,.14)" stroke-width="6" opacity="0" />
+            <circle id="ball" cx="480" cy="351" r="16" fill="url(#ballGrad)" stroke="rgba(0,0,0,.25)" stroke-width="1"/>
+            <g id="ballSpin" transform="translate(480 351) rotate(0) translate(-480 -351)">
+              <path id="ballSeams" d="" fill="none" stroke="rgba(80,40,10,.35)" stroke-width="2" stroke-linecap="round" />
+            </g>
+          </g>
+
+          <rect x="0" y="0" width="960" height="540" fill="url(#vignette)" opacity="0.62"/>
+        </svg>
+
+        <canvas id="handsCanvas" width="960" height="540"></canvas>
+      </div>
+
+      <div class="hud">
+        <div class="pill">
+          <span class="p1" id="p1Score">P1 0</span>
+          <span class="p2" id="p2Score">P2 0</span>
+          <span class="clock" id="clock">03:00</span>
+        </div>
+        <div class="pill targets">
+          <span>P1 Target: RIGHT hoop</span>
+          <span>P2 Target: LEFT hoop</span>
+        </div>
+        <div class="pill hint">
+          <span><code class="k">T</code> Tuner</span>
+          <span><code class="k">R</code> Reset</span>
+          <span><code class="k">1</code>/<code class="k">2</code>/<code class="k">3</code> Presets</span>
+          <span><code class="k">S</code> Save</span>
+          <span><code class="k">L</code> Load</span>
+          <span><code class="k">V</code> Video</span>
+        </div>
+      </div>
+
+      <div class="toast"><div class="box" id="toastBox">Status</div></div>
+
+      <div class="tuner" id="tuner">
+        <div class="tunerHeader">
+          <div>
+            <span class="title">LIVE TUNER</span>
+            <span class="sub">Tabs scroll | Sliders scroll | Esc closes</span>
+          </div>
+          <div class="sub" style="margin-left:0;">Pinch-touch grabs; release throws</div>
+        </div>
+        <div class="tabs" id="tabs"></div>
+        <div class="tunerBody" id="tunerBody"></div>
+        <div class="actions">
+          <button class="btn warn" id="preset1">Preset1 (Classic)</button>
+          <button class="btn warn" id="preset2">Preset2 (EasyScore)</button>
+          <button class="btn warn" id="preset3">Preset3 (Arcade)</button>
+          <button class="btn good" id="saveBtn">Save</button>
+          <button class="btn" id="loadBtn">Load</button>
+        </div>
+      </div>
+
+      <div class="debugVideo" id="debugVideo">
+        <video id="inputVideo" autoplay playsinline muted></video>
+      </div>
+
+      <!-- LOGIN / HAND SCAN -->
+      <div class="loginOverlay show" id="loginOverlay">
+        <div class="loginBox">
+          <div class="loginTop">
+            <div class="loginTitle">HAND LOGIN</div>
+            <div class="loginSub" id="loginSub">Place your hand inside the scan box</div>
+          </div>
+          <div class="scanWrap">
+            <div class="scanPanel">
+              <div class="scanArea">
+                <div class="scanBoxRect" id="scanBoxRect"></div>
+                <div class="scanLine"></div>
+                <div class="scanHint">
+                  <span id="scanHintLeft">Camera: initializing…</span>
+                  <span id="scanHintRight">Audio: starting…</span>
+                </div>
+              </div>
+              <div class="progressOuter" aria-hidden="true">
+                <div class="progressInner" id="scanProgress"></div>
+              </div>
+            </div>
+            <div class="scanMeta">
+              <div>
+                <div class="metaRow"><span>STEP</span><span id="loginStep">WAIT</span></div>
+                <div class="metaRow"><span>HAND</span><span id="handOk">NO</span></div>
+                <div class="metaRow"><span>STABLE</span><span id="stableOk">NO</span></div>
+                <div class="countBig" id="countBig">—</div>
+              </div>
+              <div class="metaSmall" id="metaSmall">
+                Audio is forced to auto-start on load. If your browser blocks it, click once anywhere to unlock audio instantly.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="footerNote">
+    Camera requires <b>HTTPS</b> or <b>localhost</b>. Audio is forced to auto-start on load; some browsers still require a user gesture.
+    If you hear no audio, click once anywhere in the game to unlock.
+  </div>
+
+  <script>
+    // ================= CORE =================
+    const W = 960, H = 540;
+    const FPS = 60;
+    const MIRROR_HANDS_X = true;
+
+    // ================= SETTINGS =================
+    const DEFAULT_SETTINGS = {
+      // Display
+      screen_scale: 1.00,
+      screen_offset_x: 0.0,
+      screen_offset_y: 0.0,
+      hands_opacity: 0.95,
+
+      // Audio
+      master_vol: 0.90,
+      sfx_vol: 0.85,
+      beat_vol: 0.22,
+      beat_on: 1.0,
+      beat_bpm: 156,
+
+      // Physics
+      gravity: 0.85,
+      restitution: 0.72,
+      floor_friction: 0.88,
+      air_drag: 0.995,
+      wall_bounce: 0.60,
+
+      // Hand slap
+      impulse_mult: 2.3,
+      max_impulse: 30.0,
+
+      // Throw
+      throw_mult: 1.75,
+      throw_cap: 45.0,
+
+      // Grab / hold
+      grab_radius: 56.0,
+      hold_follow: 0.55,
+      hold_max_follow_px_per_frame: 70.0,
+      catch_dampen: 0.35,
+
+      // Pinch detection
+      pinch_close_ratio: 0.38,
+      pinch_open_ratio: 0.52,
+      pinch_smooth_alpha: 0.35,
+      pinch_release_grace_frames: 3,
+
+      // Ball
+      ball_radius: 16.0,
+
+      // Hoops
+      left_hoop_x: 160.0,
+      right_hoop_x: (W - 160),
+      hoop_y: 180.0,
+      rim_radius: 18.0,
+      net_height: 40.0,
+      rim_push: 8.0,
+
+      backboard_bounce: 0.80,
+      backboard_offset: 34.0,
+      backboard_height: 160.0,
+      backboard_halfspan: 90.0,
+
+      // Net assist
+      score_x_halfwidth: 10.0,
+      score_y_margin: 0.0,
+      funnel_radius: 70.0,
+      funnel_strength: 0.0,
+      net_drag: 0.999,
+      rim_forgiveness: 0.0,
+
+      // Game
+      score_value: 2.0,
+      match_seconds: 180.0,
+    };
+
+    const PRESETS = {
+      Classic: {...DEFAULT_SETTINGS},
+      EasyScore: {
+        ...DEFAULT_SETTINGS,
+        score_x_halfwidth: 20.0,
+        score_y_margin: 12.0,
+        funnel_strength: 0.030,
+        net_drag: 0.960,
+        rim_forgiveness: 0.65,
+        rim_radius: 20.0,
+        net_height: 55.0,
+      },
+      Arcade: {
+        ...DEFAULT_SETTINGS,
+        gravity: 0.65,
+        restitution: 0.90,
+        floor_friction: 0.94,
+        air_drag: 0.998,
+        impulse_mult: 3.2,
+        max_impulse: 55.0,
+        throw_mult: 2.2,
+        throw_cap: 65.0,
+        score_x_halfwidth: 22.0,
+        score_y_margin: 14.0,
+        funnel_strength: 0.040,
+        net_drag: 0.950,
+        rim_forgiveness: 0.75,
+        rim_radius: 22.0,
+        net_height: 65.0,
+      },
+    };
+
+    let settings = {...DEFAULT_SETTINGS};
+
+    // ================= DOM =================
+    const shell = document.getElementById('shell');
+    const stage = document.getElementById('stage');
+
+    const hoopLeftG = document.getElementById('hoopLeft');
+    const hoopRightG = document.getElementById('hoopRight');
+
+    const handsCanvas = document.getElementById('handsCanvas');
+    const hctx = handsCanvas.getContext('2d');
+
+    const ballEl = document.getElementById('ball');
+    const ballOuterEl = document.getElementById('ballOuter');
+    const ballSeamsEl = document.getElementById('ballSeams');
+    const ballSpinG = document.getElementById('ballSpin');
+
+    const p1ScoreEl = document.getElementById('p1Score');
+    const p2ScoreEl = document.getElementById('p2Score');
+    const clockEl = document.getElementById('clock');
+
+    const toastBox = document.getElementById('toastBox');
+
+    const tuner = document.getElementById('tuner');
+    const tabsEl = document.getElementById('tabs');
+    const tunerBody = document.getElementById('tunerBody');
+
+    const preset1Btn = document.getElementById('preset1');
+    const preset2Btn = document.getElementById('preset2');
+    const preset3Btn = document.getElementById('preset3');
+    const saveBtn = document.getElementById('saveBtn');
+    const loadBtn = document.getElementById('loadBtn');
+
+    const debugVideoWrap = document.getElementById('debugVideo');
+    const video = document.getElementById('inputVideo');
+
+    // Login overlay DOM
+    const loginOverlay = document.getElementById('loginOverlay');
+    const loginSub = document.getElementById('loginSub');
+    const loginStepEl = document.getElementById('loginStep');
+    const handOkEl = document.getElementById('handOk');
+    const stableOkEl = document.getElementById('stableOk');
+    const countBigEl = document.getElementById('countBig');
+    const scanProgressEl = document.getElementById('scanProgress');
+    const scanHintLeft = document.getElementById('scanHintLeft');
+    const scanHintRight = document.getElementById('scanHintRight');
+
+    // ================= UTIL =================
+    const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+    const nowMs = ()=>performance.now();
+
+    function clampSettings(s){
+      s.screen_scale = clamp(s.screen_scale, 0.80, 1.35);
+      s.screen_offset_x = clamp(s.screen_offset_x, -160.0, 160.0);
+      s.screen_offset_y = clamp(s.screen_offset_y, -120.0, 120.0);
+      s.hands_opacity = clamp(s.hands_opacity, 0.0, 1.0);
+
+      s.master_vol = clamp(s.master_vol, 0.0, 1.0);
+      s.sfx_vol = clamp(s.sfx_vol, 0.0, 1.0);
+      s.beat_vol = clamp(s.beat_vol, 0.0, 0.60);
+      s.beat_on = clamp(s.beat_on, 0.0, 1.0);
+      s.beat_bpm = clamp(s.beat_bpm, 110, 190);
+
+      s.gravity = clamp(s.gravity, 0.0, 3.0);
+      s.restitution = clamp(s.restitution, 0.0, 0.99);
+      s.floor_friction = clamp(s.floor_friction, 0.0, 0.999);
+      s.air_drag = clamp(s.air_drag, 0.90, 0.9999);
+      s.wall_bounce = clamp(s.wall_bounce, 0.0, 1.0);
+
+      s.impulse_mult = clamp(s.impulse_mult, 0.0, 10.0);
+      s.max_impulse = clamp(s.max_impulse, 0.0, 200.0);
+
+      s.throw_mult = clamp(s.throw_mult, 0.0, 10.0);
+      s.throw_cap = clamp(s.throw_cap, 5.0, 120.0);
+
+      s.grab_radius = clamp(s.grab_radius, 10.0, 200.0);
+      s.hold_follow = clamp(s.hold_follow, 0.10, 1.0);
+      s.hold_max_follow_px_per_frame = clamp(s.hold_max_follow_px_per_frame, 10.0, 240.0);
+      s.catch_dampen = clamp(s.catch_dampen, 0.0, 0.95);
+
+      s.pinch_close_ratio = clamp(s.pinch_close_ratio, 0.15, 0.75);
+      s.pinch_open_ratio  = clamp(s.pinch_open_ratio,  0.20, 0.95);
+      s.pinch_smooth_alpha = clamp(s.pinch_smooth_alpha, 0.05, 0.95);
+      s.pinch_release_grace_frames = clamp(s.pinch_release_grace_frames, 0, 12);
+      if (s.pinch_open_ratio <= s.pinch_close_ratio + 0.02){
+        s.pinch_open_ratio = s.pinch_close_ratio + 0.02;
+      }
+
+      s.ball_radius = clamp(s.ball_radius, 6.0, 60.0);
+
+      s.left_hoop_x = clamp(s.left_hoop_x, 80.0, W*0.45);
+      s.right_hoop_x = clamp(s.right_hoop_x, W*0.55, W-80.0);
+      s.hoop_y = clamp(s.hoop_y, 60.0, H-140.0);
+      s.rim_radius = clamp(s.rim_radius, 10.0, 70.0);
+      s.net_height = clamp(s.net_height, 10.0, 200.0);
+
+      s.rim_push = clamp(s.rim_push, 0.0, 30.0);
+      s.backboard_bounce = clamp(s.backboard_bounce, 0.0, 1.0);
+      s.backboard_offset = clamp(s.backboard_offset, 0.0, 160.0);
+      s.backboard_height = clamp(s.backboard_height, 60.0, 420.0);
+      s.backboard_halfspan = clamp(s.backboard_halfspan, 30.0, 260.0);
+
+      s.score_x_halfwidth = clamp(s.score_x_halfwidth, 8.0, 60.0);
+      s.score_y_margin = clamp(s.score_y_margin, 0.0, 80.0);
+      s.funnel_radius = clamp(s.funnel_radius, 20.0, 180.0);
+      s.funnel_strength = clamp(s.funnel_strength, 0.0, 0.08);
+      s.net_drag = clamp(s.net_drag, 0.90, 0.999);
+      s.rim_forgiveness = clamp(s.rim_forgiveness, 0.0, 1.0);
+
+      s.score_value = clamp(s.score_value, 1.0, 3.0);
+      s.match_seconds = clamp(s.match_seconds, 30.0, 900.0);
+      return s;
+    }
+
+    function mx(normX){ return MIRROR_HANDS_X ? (1 - normX) : normX; }
+
+    function applyDisplayTransform(){
+      stage.style.transform = `translate(${settings.screen_offset_x}px, ${settings.screen_offset_y}px) scale(${settings.screen_scale})`;
+    }
+
+    // ================= STATUS =================
+    let statusUntilMs = 0;
+    function setStatus(msg){
+      toastBox.textContent = msg;
+      statusUntilMs = nowMs() + 2600;
+      toastBox.classList.add('show');
+    }
+
+    // ================= AUDIO (FORCED AUTO-START ON LOAD) =================
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    const audio = new AudioCtx();
+    let audioUnlocked = false;
+
+    function primeAudio(){
+      // Very short silent "ping" to initialize graphs once resume succeeds (no audible output)
+      try{
+        const o = audio.createOscillator();
+        const g = audio.createGain();
+        g.gain.value = 0.00001;
+        o.type = "sine";
+        o.frequency.value = 440;
+        o.connect(g).connect(audio.destination);
+        const t0 = audio.currentTime;
+        o.start(t0);
+        o.stop(t0 + 0.02);
+      } catch {}
+    }
+
+    function unlockAudio(){
+      if (audioUnlocked) return;
+      // Attempt to resume; some browsers still require a gesture. We retry via hardAutostartAudio().
+      audio.resume().then(()=>{
+        audioUnlocked = true;
+        primeAudio();
+        sound.updateVolumes();
+        scanHintRight.textContent = "Audio: running";
+      }).catch(()=>{
+        scanHintRight.textContent = "Audio: click to enable";
+      });
+    }
+
+    function hardAutostartAudio(){
+      // Best-effort auto-start: try immediately + short retry burst on load/focus/visibility.
+      unlockAudio();
+      let tries = 0;
+      const maxTries = 18; // ~1.8s burst
+      const tick = ()=>{
+        if (audioUnlocked) return;
+        tries++;
+        unlockAudio();
+        if (tries < maxTries) setTimeout(tick, 100);
+      };
+      tick();
+    }
+
+    // Force audio start as early as possible
+    hardAutostartAudio();
+    document.addEventListener('DOMContentLoaded', hardAutostartAudio, {passive:true});
+    window.addEventListener('load', hardAutostartAudio, {passive:true});
+    window.addEventListener('focus', hardAutostartAudio, {passive:true});
+    document.addEventListener('visibilitychange', ()=>{ if (!document.hidden) hardAutostartAudio(); }, {passive:true});
+
+    // Also unlock on any user activation (guaranteed path)
+    const activationEvents = ['pointerdown','touchstart','mousedown','keydown'];
+    activationEvents.forEach(ev=>{
+      window.addEventListener(ev, hardAutostartAudio, {passive:true});
+    });
+
+    const midiToHz = (m)=>440 * Math.pow(2,(m-69)/12);
+
+    class SynthwaveSound {
+      constructor(ctx){
+        this.ctx = ctx;
+
+        this.master = ctx.createGain();
+        this.sfx = ctx.createGain();
+        this.beat = ctx.createGain();
+
+        this.sfx.connect(this.master);
+        this.beat.connect(this.master);
+        this.master.connect(ctx.destination);
+
+        this._timer = null;
+        this._step = 0;
+        this._bpm = settings.beat_bpm;
+
+        this._masterLP = ctx.createBiquadFilter();
+        this._masterLP.type = "lowpass";
+        this._masterLP.frequency.value = 14000;
+        this.master.disconnect();
+        this.master.connect(this._masterLP);
+        this._masterLP.connect(ctx.destination);
+
+        this.updateVolumes();
+        this._ensureBeat(); // scheduler starts immediately; audio will sound once unlocked
+      }
+
+      updateVolumes(){
+        this.master.gain.value = settings.master_vol;
+        this.sfx.gain.value = settings.sfx_vol;
+        this.beat.gain.value = (settings.beat_on > 0.5) ? settings.beat_vol : 0.0;
+
+        this._bpm = settings.beat_bpm;
+        if (settings.beat_on > 0.5) this._ensureBeat();
+        else this._stopBeat();
+      }
+
+      _kick(t0){
+        const o = this.ctx.createOscillator();
+        const g = this.ctx.createGain();
+        o.type = "sine";
+        o.frequency.setValueAtTime(150, t0);
+        o.frequency.exponentialRampToValueAtTime(52, t0 + 0.09);
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(0.95, t0 + 0.002);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
+        o.connect(g).connect(this.beat);
+        o.start(t0);
+        o.stop(t0 + 0.18);
+      }
+
+      _snare(t0){
+        const bp = this.ctx.createBiquadFilter();
+        bp.type = "bandpass";
+        bp.frequency.setValueAtTime(1800, t0);
+        bp.Q.value = 1.1;
+
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(0.55, t0 + 0.003);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.12);
+
+        const o1 = this.ctx.createOscillator();
+        const o2 = this.ctx.createOscillator();
+        o1.type = "triangle";
+        o2.type = "triangle";
+        o1.frequency.setValueAtTime(260, t0);
+        o2.frequency.setValueAtTime(380, t0);
+
+        o1.frequency.exponentialRampToValueAtTime(210, t0 + 0.08);
+        o2.frequency.exponentialRampToValueAtTime(310, t0 + 0.08);
+
+        o1.connect(bp);
+        o2.connect(bp);
+        bp.connect(g).connect(this.beat);
+
+        o1.start(t0); o2.start(t0);
+        o1.stop(t0 + 0.14); o2.stop(t0 + 0.14);
+      }
+
+      _hat(t0){
+        const hp = this.ctx.createBiquadFilter();
+        hp.type = "highpass";
+        hp.frequency.setValueAtTime(6500, t0);
+
+        const o = this.ctx.createOscillator();
+        o.type = "square";
+        o.frequency.setValueAtTime(8200, t0);
+
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(0.22, t0 + 0.001);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.03);
+
+        o.connect(hp).connect(g).connect(this.beat);
+        o.start(t0);
+        o.stop(t0 + 0.04);
+      }
+
+      _bass(t0, midi, dur=0.11){
+        const o = this.ctx.createOscillator();
+        o.type = "sawtooth";
+        o.frequency.setValueAtTime(midiToHz(midi), t0);
+
+        const lp = this.ctx.createBiquadFilter();
+        lp.type = "lowpass";
+        lp.frequency.setValueAtTime(420, t0);
+        lp.frequency.exponentialRampToValueAtTime(220, t0 + dur);
+
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(0.42, t0 + 0.005);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+
+        o.connect(lp).connect(g).connect(this.beat);
+        o.start(t0);
+        o.stop(t0 + dur + 0.02);
+      }
+
+      _chord(t0, midis, dur=0.20){
+        const lp = this.ctx.createBiquadFilter();
+        lp.type = "lowpass";
+        lp.frequency.setValueAtTime(4200, t0);
+        lp.frequency.exponentialRampToValueAtTime(1800, t0 + dur);
+
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(0.24, t0 + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+
+        lp.connect(g).connect(this.beat);
+
+        for (const m of midis){
+          const o = this.ctx.createOscillator();
+          o.type = "sawtooth";
+          o.frequency.setValueAtTime(midiToHz(m), t0);
+
+          const lfo = this.ctx.createOscillator();
+          const lfoG = this.ctx.createGain();
+          lfo.type = "sine";
+          lfo.frequency.setValueAtTime(5.5, t0);
+          lfoG.gain.value = 6.0;
+          lfo.connect(lfoG).connect(o.detune);
+
+          o.connect(lp);
+          lfo.start(t0);
+          o.start(t0);
+          lfo.stop(t0 + dur);
+          o.stop(t0 + dur + 0.02);
+        }
+      }
+
+      bounce(intensity=1.0){
+        if (!audioUnlocked) return;
+        const t0 = this.ctx.currentTime;
+
+        const o = this.ctx.createOscillator();
+        o.type = "sine";
+        o.frequency.setValueAtTime(140, t0);
+        o.frequency.exponentialRampToValueAtTime(80, t0 + 0.10);
+
+        const g = this.ctx.createGain();
+        const amp = 0.18 * clamp(intensity,0.2,1.6);
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(amp, t0 + 0.002);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.14);
+
+        o.connect(g).connect(this.sfx);
+        o.start(t0);
+        o.stop(t0 + 0.16);
+      }
+
+      rim(intensity=1.0){
+        if (!audioUnlocked) return;
+        const t0 = this.ctx.currentTime;
+
+        const car = this.ctx.createOscillator();
+        const mod = this.ctx.createOscillator();
+        const modG = this.ctx.createGain();
+        car.type = "sine";
+        mod.type = "sine";
+
+        car.frequency.setValueAtTime(820, t0);
+        mod.frequency.setValueAtTime(360, t0);
+
+        modG.gain.setValueAtTime(280, t0);
+        modG.gain.exponentialRampToValueAtTime(25, t0 + 0.18);
+        mod.connect(modG).connect(car.frequency);
+
+        const g = this.ctx.createGain();
+        const amp = 0.11 * clamp(intensity,0.2,1.8);
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(amp, t0 + 0.002);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
+
+        const hp = this.ctx.createBiquadFilter();
+        hp.type = "highpass";
+        hp.frequency.value = 420;
+
+        car.connect(hp).connect(g).connect(this.sfx);
+        mod.start(t0); car.start(t0);
+        mod.stop(t0 + 0.24); car.stop(t0 + 0.24);
+      }
+
+      swish(){
+        if (!audioUnlocked) return;
+        const t0 = this.ctx.currentTime;
+
+        const o = this.ctx.createOscillator();
+        o.type = "triangle";
+        o.frequency.setValueAtTime(1400, t0);
+        o.frequency.exponentialRampToValueAtTime(520, t0 + 0.18);
+
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(0.08, t0 + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.20);
+
+        const hp = this.ctx.createBiquadFilter();
+        hp.type = "highpass";
+        hp.frequency.value = 520;
+
+        o.connect(hp).connect(g).connect(this.sfx);
+        o.start(t0);
+        o.stop(t0 + 0.21);
+      }
+
+      score(){
+        if (!audioUnlocked) return;
+        this.swish();
+        const t0 = this.ctx.currentTime + 0.02;
+        this._chord(t0, [72, 76, 79], 0.18);
+      }
+
+      grab(){
+        if (!audioUnlocked) return;
+        const t0 = this.ctx.currentTime;
+        const o = this.ctx.createOscillator();
+        o.type = "triangle";
+        o.frequency.setValueAtTime(360, t0);
+        o.frequency.exponentialRampToValueAtTime(220, t0 + 0.05);
+
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(0.07, t0 + 0.003);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.08);
+
+        o.connect(g).connect(this.sfx);
+        o.start(t0);
+        o.stop(t0 + 0.09);
+      }
+
+      throw(){
+        if (!audioUnlocked) return;
+        const t0 = this.ctx.currentTime;
+        const o = this.ctx.createOscillator();
+        o.type = "sine";
+        o.frequency.setValueAtTime(520, t0);
+        o.frequency.exponentialRampToValueAtTime(980, t0 + 0.06);
+
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(0.06, t0 + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.09);
+
+        o.connect(g).connect(this.sfx);
+        o.start(t0);
+        o.stop(t0 + 0.10);
+      }
+
+      scanBeep(progress01=0.0){
+        if (!audioUnlocked) return;
+        const t0 = this.ctx.currentTime;
+        const f = 520 + 980 * clamp(progress01,0,1);
+
+        const o = this.ctx.createOscillator();
+        o.type = "sine";
+        o.frequency.setValueAtTime(f, t0);
+        o.frequency.exponentialRampToValueAtTime(f * 1.12, t0 + 0.05);
+
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(0.06, t0 + 0.002);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.06);
+
+        const hp = this.ctx.createBiquadFilter();
+        hp.type = "highpass";
+        hp.frequency.value = 260;
+
+        o.connect(hp).connect(g).connect(this.sfx);
+        o.start(t0);
+        o.stop(t0 + 0.07);
+      }
+
+      scanPulse(){
+        if (!audioUnlocked) return;
+        const t0 = this.ctx.currentTime;
+
+        const o = this.ctx.createOscillator();
+        o.type = "triangle";
+        o.frequency.setValueAtTime(320, t0);
+        o.frequency.exponentialRampToValueAtTime(520, t0 + 0.08);
+
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(0.07, t0 + 0.003);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.10);
+
+        o.connect(g).connect(this.sfx);
+        o.start(t0);
+        o.stop(t0 + 0.11);
+      }
+
+      scanComplete(){
+        if (!audioUnlocked) return;
+        const t0 = this.ctx.currentTime;
+        this._chord(t0 + 0.02, [67, 71, 74], 0.22);
+        this._chord(t0 + 0.26, [72, 76, 79], 0.18);
+      }
+
+      _ensureBeat(){
+        if (this._timer) return;
+        this._step = 0;
+        this._timer = setInterval(()=>this._tick(), 20);
+      }
+
+      _stopBeat(){
+        if (!this._timer) return;
+        clearInterval(this._timer);
+        this._timer = null;
+      }
+
+      _tick(){
+        if (!audioUnlocked) return;
+        if (settings.beat_on <= 0.5) return;
+
+        const bpm = this._bpm;
+        const stepDur = (60 / bpm) / 2;
+        const lookahead = 0.08;
+        const tNow = this.ctx.currentTime;
+
+        if (!this._nextTime) this._nextTime = tNow + 0.02;
+        while (this._nextTime < tNow + lookahead){
+          const s = this._step % 16;
+          const t0 = this._nextTime;
+
+          if ([0,6,8,14].includes(s)) this._kick(t0);
+          if ([4,12].includes(s)) this._snare(t0);
+          this._hat(t0);
+
+          const bassPattern = [36,36,38,36, 41,41,43,41, 36,36,38,36, 43,43,45,43];
+          this._bass(t0 + 0.005, bassPattern[s], 0.10);
+
+          if (s === 0)  this._chord(t0 + 0.01, [60, 67, 72], 0.20);
+          if (s === 8)  this._chord(t0 + 0.01, [62, 69, 74], 0.20);
+          if (s === 12) this._chord(t0 + 0.01, [65, 72, 77], 0.18);
+
+          this._step++;
+          this._nextTime += stepDur;
+        }
+      }
+    }
+
+    const sound = new SynthwaveSound(audio);
+
+    // ================= GAME STATE =================
+    const scores = {0:0, 1:0};
+    let ballSpinDeg = 0;
+    let gameStarted = false;
+
+    const ball = {
+      pos: {x: W/2, y: -200},
+      vel: {x: 0, y: 0},
+      grabbedBy: null,
+      lastTouch: null,
+      scoredLeft: false,
+      scoredRight: false,
+      holdTarget: null,
+      holdPrevTarget: null,
+
+      radius(){ return settings.ball_radius; },
+
+      reset(){
+        this.pos.x = W/2; this.pos.y = H*0.65;
+        this.vel.x = 0; this.vel.y = 0;
+        this.grabbedBy = null;
+        this.lastTouch = null;
+        this.scoredLeft = false;
+        this.scoredRight = false;
+        this.holdTarget = null;
+        this.holdPrevTarget = null;
+        syncBallSVG();
+      },
+
+      parkHidden(){
+        this.pos.x = W/2; this.pos.y = -240;
+        this.vel.x = 0; this.vel.y = 0;
+        this.grabbedBy = null;
+        this.holdTarget = null;
+        this.holdPrevTarget = null;
+        syncBallSVG();
+      },
+
+      dropToStart(){
+        this.pos.x = W/2;
+        this.pos.y = -80;
+        this.vel.x = 0;
+        this.vel.y = 0;
+        this.grabbedBy = null;
+        this.holdTarget = null;
+        this.holdPrevTarget = null;
+        syncBallSVG();
+      },
+
+      updateStep(){
+        if (this.grabbedBy !== null && this.holdTarget){
+          const dx = this.holdTarget.x - this.pos.x;
+          const dy = this.holdTarget.y - this.pos.y;
+          const d = Math.hypot(dx,dy);
+          const maxStep = settings.hold_max_follow_px_per_frame;
+
+          let sx = dx, sy = dy;
+          if (d > maxStep){
+            const k = maxStep / (d + 1e-6);
+            sx *= k; sy *= k;
+          }
+          this.pos.x += sx * settings.hold_follow;
+          this.pos.y += sy * settings.hold_follow;
+
+          this.vel.x *= 0.2;
+          this.vel.y *= 0.2;
+          return;
+        }
+
+        this.vel.y += settings.gravity;
+        this.pos.x += this.vel.x;
+        this.pos.y += this.vel.y;
+
+        this.vel.x *= settings.air_drag;
+        this.vel.y *= settings.air_drag;
+
+        ballSpinDeg = (ballSpinDeg + this.vel.x * 2.3) % 360;
+
+        const r = this.radius();
+
+        if (this.pos.y + r >= H){
+          this.pos.y = H - r;
+          const impact = Math.min(1.25, Math.max(0.2, Math.abs(this.vel.y) / 22));
+          this.vel.y *= -settings.restitution;
+          this.vel.x *= settings.floor_friction;
+          sound.bounce(impact);
+        }
+
+        if (this.pos.x < r){
+          this.pos.x = r;
+          this.vel.x *= -settings.wall_bounce;
+        } else if (this.pos.x > W - r){
+          this.pos.x = W - r;
+          this.vel.x *= -settings.wall_bounce;
+        }
+
+        if (this.pos.y > H + 280){
+          this.reset();
+        }
+      }
+    };
+
+    let matchStartMs = nowMs();
+    let matchLeft = settings.match_seconds;
+
+    function resetMatch(){
+      scores[0] = 0; scores[1] = 0;
+      matchStartMs = nowMs();
+      matchLeft = settings.match_seconds;
+      ball.reset();
+      setStatus("Reset match");
+    }
+
+    function startGameFromLogin(){
+      scores[0] = 0; scores[1] = 0;
+      matchStartMs = nowMs();
+      matchLeft = settings.match_seconds;
+      gameStarted = true;
+      ball.dropToStart();
+      setStatus("Login verified. Game started — ball dropped.");
+    }
+
+    // ================= HOOPS (uniform net) =================
+    function buildHoopSVG(groupEl, side){
+      groupEl.innerHTML = "";
+      const hoopX = (side === "left") ? settings.left_hoop_x : settings.right_hoop_x;
+      const hoopY = settings.hoop_y;
+      const rimR  = settings.rim_radius;
+      const netH  = settings.net_height;
+
+      const boardW = 56;
+      const boardH = settings.backboard_height;
+      const boardTop = hoopY - boardH/2;
+      const boardX = (side === "left")
+        ? (hoopX - settings.backboard_offset - boardW)
+        : (hoopX + settings.backboard_offset);
+
+      const ns = "http://www.w3.org/2000/svg";
+      const rect = (x,y,w,h,cls,rx=6)=>{
+        const r = document.createElementNS(ns,"rect");
+        r.setAttribute("x",x); r.setAttribute("y",y);
+        r.setAttribute("width",w); r.setAttribute("height",h);
+        r.setAttribute("rx",rx);
+        r.setAttribute("class",cls);
+        return r;
+      };
+      const line = (x1,y1,x2,y2,cls)=>{
+        const l = document.createElementNS(ns,"line");
+        l.setAttribute("x1",x1); l.setAttribute("y1",y1);
+        l.setAttribute("x2",x2); l.setAttribute("y2",y2);
+        l.setAttribute("class",cls);
+        return l;
+      };
+
+      groupEl.appendChild(rect(boardX, boardTop, boardW, boardH, "boardOuter", 8));
+      groupEl.appendChild(rect(boardX + 10, hoopY - 22, boardW - 20, 44, "boardInner", 8));
+
+      groupEl.appendChild(line(hoopX - rimR, hoopY, hoopX + rimR, hoopY, "rimStroke"));
+      groupEl.appendChild(line(hoopX - rimR, hoopY - 3, hoopX + rimR, hoopY - 3, "rimLip"));
+
+      const netG = document.createElementNS(ns,"g");
+      const topL = {x: hoopX - rimR*0.92, y: hoopY + 4};
+      const topR = {x: hoopX + rimR*0.92, y: hoopY + 4};
+      const botL = {x: hoopX - rimR*0.58, y: hoopY + netH};
+      const botR = {x: hoopX + rimR*0.58, y: hoopY + netH};
+
+      netG.appendChild(line(topL.x, topL.y, botL.x, botL.y, "netMain"));
+      netG.appendChild(line(topR.x, topR.y, botR.x, botR.y, "netMain"));
+      netG.appendChild(line(topL.x, topL.y, topR.x, topR.y, "netMain"));
+
+      const strands = 8;
+      for (let i=1;i<strands;i++){
+        const t = i/strands;
+        const xTop = topL.x*(1-t) + topR.x*t;
+        const xBot = botL.x*(1-t) + botR.x*t;
+        netG.appendChild(line(xTop, topL.y, xBot, botL.y, "netFine"));
+      }
+
+      const rows = 6;
+      for (let r=1;r<=rows;r++){
+        const t = r/(rows+1);
+        const xl = topL.x*(1-t) + botL.x*t;
+        const xr = topR.x*(1-t) + botR.x*t;
+        const yy = topL.y*(1-t) + botL.y*t;
+        netG.appendChild(line(xl, yy, xr, yy, "netFine"));
+      }
+
+      groupEl.appendChild(netG);
+    }
+
+    function syncHoopsSVG(){
+      buildHoopSVG(hoopLeftG, "left");
+      buildHoopSVG(hoopRightG, "right");
+    }
+
+    function syncBallSVG(){
+      const r = ball.radius();
+      ballEl.setAttribute("cx", ball.pos.x);
+      ballEl.setAttribute("cy", ball.pos.y);
+      ballEl.setAttribute("r", r);
+
+      ballOuterEl.setAttribute("cx", ball.pos.x);
+      ballOuterEl.setAttribute("cy", ball.pos.y);
+      ballOuterEl.setAttribute("r", r + 4);
+      ballOuterEl.style.opacity = (ball.grabbedBy !== null) ? "1" : "0";
+
+      const x = ball.pos.x, y = ball.pos.y;
+      const s = r * 0.9;
+      ballSeamsEl.setAttribute("d",
+        `M ${x - s} ${y} Q ${x} ${y - s*0.6} ${x + s} ${y}
+         M ${x - s*0.6} ${y - s*0.4} Q ${x} ${y} ${x + s*0.6} ${y + s*0.4}
+         M ${x - s*0.6} ${y + s*0.4} Q ${x} ${y} ${x + s*0.6} ${y - s*0.4}`
+      );
+
+      ballSpinG.setAttribute(
+        "transform",
+        `translate(${x} ${y}) rotate(${ballSpinDeg.toFixed(2)}) translate(${-x} ${-y})`
+      );
+    }
+
+    // ================= HOOP PHYSICS + SCORING =================
+    function enhancedNetAssist(hoopX, hoopY){
+      if (ball.vel.y <= 0) return;
+      if (settings.funnel_strength <= 0) return;
+
+      const cx = hoopX, cy = hoopY + 8;
+      const dx = cx - ball.pos.x;
+      const dy = cy - ball.pos.y;
+      const d = Math.hypot(dx,dy);
+
+      if (d < settings.funnel_radius && (hoopY - 18) < ball.pos.y && ball.pos.y < (hoopY + settings.net_height + 30)){
+        ball.vel.x += dx * settings.funnel_strength;
+        ball.vel.y += dy * settings.funnel_strength;
+        ball.vel.x *= settings.net_drag;
+        ball.vel.y *= settings.net_drag;
+      }
+    }
+
+    function rimCollision(hoopX, hoopY){
+      const rimR = settings.rim_radius;
+      const ballR = ball.radius();
+
+      let forgiveness = 0;
+      if (settings.rim_forgiveness > 0){
+        const nearCenter = Math.abs(ball.pos.x - hoopX) < (settings.score_x_halfwidth * 1.2);
+        const descendingInBand = (ball.vel.y > 0 && (hoopY - 10) < ball.pos.y && ball.pos.y < (hoopY + settings.net_height + 10));
+        forgiveness = (nearCenter && descendingInBand) ? settings.rim_forgiveness : 0;
+      }
+      const strengthScale = (1.0 - 0.75 * forgiveness);
+
+      const rims = [{x: hoopX - rimR, y: hoopY}, {x: hoopX + rimR, y: hoopY}];
+      for (const rim of rims){
+        const dx = ball.pos.x - rim.x;
+        const dy = ball.pos.y - rim.y;
+        const d = Math.hypot(dx,dy);
+        if (d < (ballR + rimR)){
+          const nx = dx / (d + 1e-6);
+          const ny = dy / (d + 1e-6);
+          ball.vel.x += nx * (settings.rim_push * strengthScale);
+          ball.vel.y += ny * (settings.rim_push * strengthScale);
+          sound.rim(Math.min(1.6, Math.max(0.2, Math.hypot(ball.vel.x, ball.vel.y) / 28)));
+        }
+      }
+    }
+
+    function backboardCollision(hoopX, hoopY, side){
+      const boardW = 56;
+      const planeX = (side === "left")
+        ? (hoopX - settings.backboard_offset - boardW) + boardW
+        : (hoopX + settings.backboard_offset);
+
+      if (side === "right"){
+        if (ball.pos.x > planeX && Math.abs(ball.pos.y - hoopY) < settings.backboard_halfspan){
+          ball.vel.x *= -settings.backboard_bounce;
+          ball.pos.x = planeX;
+          sound.rim(0.7);
+        }
+      } else {
+        if (ball.pos.x < planeX && Math.abs(ball.pos.y - hoopY) < settings.backboard_halfspan){
+          ball.vel.x *= -settings.backboard_bounce;
+          ball.pos.x = planeX;
+          sound.rim(0.7);
+        }
+      }
+    }
+
+    function scoreCheck(hoopX, hoopY, side){
+      const netH = settings.net_height;
+      const xw = settings.score_x_halfwidth;
+      const ym = settings.score_y_margin;
+
+      if (ball.pos.y < hoopY - 55){
+        ball.scoredLeft = false;
+        ball.scoredRight = false;
+      }
+
+      const inX = (hoopX - xw < ball.pos.x && ball.pos.x < hoopX + xw);
+      const inY = (hoopY - ym < ball.pos.y && ball.pos.y < hoopY + netH + ym);
+      const movingDown = (ball.vel.y > 0);
+      if (!(inX && inY && movingDown)) return;
+
+      if (side === "left" && ball.scoredLeft) return;
+      if (side === "right" && ball.scoredRight) return;
+
+      const last = ball.lastTouch;
+      if (last === null || last === undefined) return;
+
+      const targetSide = (last === 0) ? "right" : "left";
+      const points = Math.round(settings.score_value);
+
+      let scorer, msg;
+      if (side === targetSide){
+        scorer = last;
+        msg = `P${scorer+1} scored (+${points})`;
+      } else {
+        scorer = 1 - last;
+        msg = `Self-goal! P${scorer+1} (+${points})`;
+      }
+
+      scores[scorer] += points;
+      sound.score();
+      setStatus(msg);
+
+      if (side === "left") ball.scoredLeft = true;
+      else ball.scoredRight = true;
+    }
+
+    function hoopPhysicsAndScore(){
+      const hoopY = settings.hoop_y;
+      const leftX = settings.left_hoop_x;
+      const rightX = settings.right_hoop_x;
+
+      enhancedNetAssist(leftX, hoopY);
+      enhancedNetAssist(rightX, hoopY);
+
+      rimCollision(leftX, hoopY);
+      rimCollision(rightX, hoopY);
+
+      backboardCollision(leftX, hoopY, "left");
+      backboardCollision(rightX, hoopY, "right");
+
+      scoreCheck(leftX, hoopY, "left");
+      scoreCheck(rightX, hoopY, "right");
+    }
+
+    // ================= HAND TRACKING =================
+    const HAND_CONNECTIONS = [
+      [0,1],[1,2],[2,3],[3,4],
+      [0,5],[5,6],[6,7],[7,8],
+      [5,9],[9,10],[10,11],[11,12],
+      [9,13],[13,14],[14,15],[15,16],
+      [13,17],[17,18],[18,19],[19,20],
+      [0,17],
+    ];
+
+    let latestHands = [];
+    const pinchState = new Map();
+    const pinchEma = new Map();
+    const pinchGrace = new Map();
+    const holding = new Map();
+    const lastFinger = new Map();
+
+    let mpHands = null;
+    let camStream = null;
+    let cameraRunning = false;
+    let processingFrame = false;
+
+    function distNorm(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+
+    function computePinchNormalized(pid, lm){
+      const t = lm[4], i = lm[8];
+      const palmW = Math.max(1e-6, distNorm(lm[5], lm[17]));
+      const rawRatio = distNorm(t, i) / palmW;
+
+      const a = settings.pinch_smooth_alpha;
+      const prev = pinchEma.get(pid);
+      const smoothed = (prev === undefined) ? rawRatio : (prev*(1-a) + rawRatio*a);
+      pinchEma.set(pid, smoothed);
+
+      const was = pinchState.get(pid) || false;
+      let isPinching = was;
+
+      if (!was){
+        if (smoothed < settings.pinch_close_ratio) isPinching = true;
+      } else {
+        if (smoothed > settings.pinch_open_ratio){
+          let g = pinchGrace.get(pid) ?? 0;
+          if (g <= 0) g = settings.pinch_release_grace_frames;
+          g -= 1;
+          pinchGrace.set(pid, Math.max(0, g));
+          if ((pinchGrace.get(pid) ?? 0) === 0) isPinching = false;
+        } else {
+          pinchGrace.set(pid, 0);
+        }
+      }
+
+      pinchState.set(pid, isPinching);
+      return isPinching;
+    }
+
+    function getPinchPointPx(lm){
+      const t = lm[4], i = lm[8];
+      return { x: ((t.x+i.x)*0.5)*W, y: ((t.y+i.y)*0.5)*H };
+    }
+
+    function pinchTouchesBall(p){
+      return Math.hypot(p.x - ball.pos.x, p.y - ball.pos.y) <= settings.grab_radius;
+    }
+
+    function onCatch(){
+      ball.vel.x *= (1 - settings.catch_dampen);
+      ball.vel.y *= (1 - settings.catch_dampen);
+    }
+
+    function throwFromHoldTarget(dtSec){
+      const prev = ball.holdPrevTarget;
+      const cur  = ball.holdTarget;
+      if (!prev || !cur) return {x:0,y:0};
+
+      const vxSec = (cur.x - prev.x) / Math.max(1e-4, dtSec);
+      const vySec = (cur.y - prev.y) / Math.max(1e-4, dtSec);
+
+      let vx = (vxSec / FPS) * settings.throw_mult;
+      let vy = (vySec / FPS) * settings.throw_mult;
+
+      const sp = Math.hypot(vx,vy);
+      if (sp > settings.throw_cap){
+        const k = settings.throw_cap / (sp + 1e-6);
+        vx *= k; vy *= k;
+      }
+      return {x:vx, y:vy};
+    }
+
+    function applyHandsToGame(dtSec){
+      if (!gameStarted) return;
+
+      for (const hand of latestHands){
+        const pid = hand.pid;
+        const lm = hand.landmarks;
+
+        const isPinching = computePinchNormalized(pid, lm);
+        const pinchPx = getPinchPointPx(lm);
+        const isHolding = holding.get(pid) || false;
+
+        if (!isHolding){
+          if (isPinching && pinchTouchesBall(pinchPx) && ball.grabbedBy === null){
+            holding.set(pid, true);
+            ball.grabbedBy = pid;
+            ball.lastTouch = pid;
+            ball.holdTarget = {...pinchPx};
+            ball.holdPrevTarget = {...pinchPx};
+            onCatch();
+            sound.grab();
+          }
+        } else {
+          if (ball.grabbedBy !== pid){
+            holding.set(pid, false);
+          } else if (isPinching){
+            ball.holdPrevTarget = ball.holdTarget ? {...ball.holdTarget} : {...pinchPx};
+            ball.holdTarget = {...pinchPx};
+          } else {
+            holding.set(pid, false);
+            ball.grabbedBy = null;
+            const v = throwFromHoldTarget(dtSec);
+            ball.vel.x = v.x;
+            ball.vel.y = v.y;
+            ball.holdTarget = null;
+            ball.holdPrevTarget = null;
+            sound.throw();
+          }
+        }
+
+        if (ball.grabbedBy === null){
+          for (const fid of [8,12,16]){
+            const p = lm[fid];
+            const fpos = {x: p.x*W, y: p.y*H};
+            const key = `${pid}-${fid}`;
+            const prevF = lastFinger.get(key) || {...fpos};
+
+            const dxSec = (fpos.x - prevF.x) / Math.max(1e-4, dtSec);
+            const dySec = (fpos.y - prevF.y) / Math.max(1e-4, dtSec);
+            lastFinger.set(key, {...fpos});
+
+            const hitR = ball.radius() + 20.0;
+            if (Math.hypot(fpos.x - ball.pos.x, fpos.y - ball.pos.y) < hitR){
+              const speedSec = Math.hypot(dxSec, dySec);
+              const impulse = Math.min((speedSec / FPS) * settings.impulse_mult, settings.max_impulse);
+              if (impulse > 2.0){
+                const dl = Math.hypot(dxSec, dySec) + 1e-6;
+                ball.vel.x += (dxSec / dl) * impulse;
+                ball.vel.y += (dySec / dl) * impulse;
+                ball.lastTouch = pid;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    function drawHands(){
+      hctx.clearRect(0,0,W,H);
+      if (!latestHands.length || settings.hands_opacity <= 0) return;
+
+      for (const hand of latestHands){
+        const pid = hand.pid;
+        const lm = hand.landmarks;
+
+        const a = settings.hands_opacity;
+        const color = (pid === 0) ? `rgba(0,255,255,${0.95*a})` : `rgba(255,0,255,${0.95*a})`;
+        const glow  = (pid === 0) ? `rgba(0,255,255,${0.20*a})` : `rgba(255,0,255,${0.20*a})`;
+
+        hctx.lineWidth = 6;
+        hctx.strokeStyle = glow;
+        hctx.lineCap = "round";
+        hctx.beginPath();
+        for (const [a1,b1] of HAND_CONNECTIONS){
+          const pa = lm[a1], pb = lm[b1];
+          hctx.moveTo(pa.x*W, pa.y*H);
+          hctx.lineTo(pb.x*W, pb.y*H);
+        }
+        hctx.stroke();
+
+        hctx.lineWidth = 2;
+        hctx.strokeStyle = color;
+        hctx.beginPath();
+        for (const [a1,b1] of HAND_CONNECTIONS){
+          const pa = lm[a1], pb = lm[b1];
+          hctx.moveTo(pa.x*W, pa.y*H);
+          hctx.lineTo(pb.x*W, pb.y*H);
+        }
+        hctx.stroke();
+
+        const pp = getPinchPointPx(lm);
+        hctx.fillStyle = `rgba(255,255,255,${0.22*a})`;
+        hctx.beginPath();
+        hctx.arc(pp.x, pp.y, 6, 0, Math.PI*2);
+        hctx.fill();
+      }
+    }
+
+    async function startHandTracking(){
+      if (cameraRunning) return true;
+
+      try{
+        if (!mpHands){
+          mpHands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+          });
+          mpHands.setOptions({
+            maxNumHands: 2,
+            modelComplexity: 0,
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.7
+          });
+          mpHands.onResults((results)=>{
+            if (!results || !results.multiHandLandmarks || results.multiHandLandmarks.length === 0){
+              latestHands = [];
+              return;
+            }
+
+            const processed = results.multiHandLandmarks.slice(0,2).map((lm)=> {
+              const out = lm.map((p)=>({x: mx(p.x), y: p.y, z: p.z}));
+              return { lm: out, wx: out[0].x };
+            });
+
+            processed.sort((a,b)=>a.wx - b.wx);
+            latestHands = processed.map((h, idx)=>({pid: idx, landmarks: h.lm}));
+          });
+        }
+
+        camStream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            facingMode: "user",
+            width: { ideal: 640 },
+            height: { ideal: 360 }
+          }
+        });
+
+        video.srcObject = camStream;
+        await video.play();
+
+        cameraRunning = true;
+        scanHintLeft.textContent = "Camera: active";
+        setStatus("Camera active. Pinch-touch the ball to grab & hold. Release pinch to throw.");
+
+        const loop = async ()=>{
+          if (!cameraRunning) return;
+          if (video.readyState >= 2 && mpHands && !processingFrame){
+            processingFrame = true;
+            try{ await mpHands.send({image: video}); } catch {}
+            processingFrame = false;
+          }
+          requestAnimationFrame(loop);
+        };
+        requestAnimationFrame(loop);
+
+        return true;
+      } catch (err){
+        cameraRunning = false;
+        latestHands = [];
+        scanHintLeft.textContent = "Camera: blocked";
+        setStatus("Camera blocked/unavailable. Click once to retry. (HTTPS/localhost required)");
+        console.warn(err);
+        return false;
+      }
+    }
+
+    startHandTracking();
+    shell.addEventListener('pointerdown', ()=>{ if (!cameraRunning) startHandTracking(); }, {passive:true});
+
+    // ================= LOGIN / HAND SCAN LOGIC =================
+    const login = {
+      state: "WAIT_HAND",
+      countdown: 3,
+      countdownAccum: 0,
+      scanProgress: 0,
+      scanBeepAccum: 0,
+      palmHistory: [],
+    };
+
+    function showLoginOverlay(show){
+      loginOverlay.classList.toggle('show', show);
+    }
+
+    function getPalmCenterAndSize(hand){
+      const lm = hand.landmarks;
+      const wrist = lm[0];
+      const midMcp = lm[9];
+      const palm = { x: (wrist.x + midMcp.x) * 0.5, y: (wrist.y + midMcp.y) * 0.5 };
+      const palmW = Math.max(1e-6, distNorm(lm[5], lm[17]));
+      return { palm, palmW };
+    }
+
+    function handMeetsScanCriteria(){
+      if (!latestHands.length) return { ok:false };
+
+      let best = null;
+      for (const h of latestHands){
+        const {palm, palmW} = getPalmCenterAndSize(h);
+        const px = palm.x * W;
+        const py = palm.y * H;
+
+        const inBox =
+          px > W*0.35 && px < W*0.65 &&
+          py > H*0.18 && py < H*0.76;
+
+        const palmPx = palmW * W;
+        const sizeOk = palmPx > 55 && palmPx < 260;
+
+        const score = (inBox ? 2 : 0) + (sizeOk ? 1 : 0) - Math.abs(px - W*0.5)/W;
+        if (!best || score > best.score){
+          best = { hand:h, palm, palmW, inBox, sizeOk, score, px, py, palmPx };
+        }
+      }
+      if (!best) return { ok:false };
+      return { ok: best.inBox && best.sizeOk, ...best };
+    }
+
+    function updateStability(px, py){
+      login.palmHistory.push({x:px, y:py});
+      if (login.palmHistory.length > 14) login.palmHistory.shift();
+      if (login.palmHistory.length < 8) return false;
+
+      const xs = login.palmHistory.map(p=>p.x);
+      const ys = login.palmHistory.map(p=>p.y);
+      const mxv = xs.reduce((a,b)=>a+b,0)/xs.length;
+      const myv = ys.reduce((a,b)=>a+b,0)/ys.length;
+
+      let maxD = 0;
+      for (const p of login.palmHistory){
+        maxD = Math.max(maxD, Math.hypot(p.x - mxv, p.y - myv));
+      }
+      return maxD < 14;
+    }
+
+    function setLoginUI(stepText, subText){
+      loginStepEl.textContent = stepText;
+      loginSub.textContent = subText;
+    }
+
+    function updateLogin(dtSec){
+      if (gameStarted) return;
+
+      // Keep forcing audio start while the overlay is visible
+      hardAutostartAudio();
+
+      if (!cameraRunning){
+        login.state = "NO_CAMERA";
+        setLoginUI("NO_CAMERA", "Camera blocked/unavailable. Click once to retry camera, or press Enter to start without scan.");
+        handOkEl.textContent = "NO";
+        stableOkEl.textContent = "NO";
+        countBigEl.textContent = "—";
+        scanProgressEl.style.width = "0%";
+        showLoginOverlay(true);
+        return;
+      }
+
+      const info = handMeetsScanCriteria();
+      handOkEl.textContent = info.ok ? "YES" : "NO";
+
+      if (!info.ok){
+        login.palmHistory.length = 0;
+        stableOkEl.textContent = "NO";
+        login.countdown = 3;
+        login.countdownAccum = 0;
+        login.scanProgress = 0;
+        login.scanBeepAccum = 0;
+        scanProgressEl.style.width = "0%";
+
+        login.state = "WAIT_HAND";
+        countBigEl.textContent = "—";
+        setLoginUI("WAIT", "Place your hand inside the scan box and hold it steady.");
+        showLoginOverlay(true);
+        return;
+      }
+
+      const stable = updateStability(info.px, info.py);
+      stableOkEl.textContent = stable ? "YES" : "NO";
+
+      if (!stable){
+        login.countdown = 3;
+        login.countdownAccum = 0;
+        login.scanProgress = 0;
+        login.scanBeepAccum = 0;
+        scanProgressEl.style.width = "0%";
+        login.state = "WAIT_HAND";
+        countBigEl.textContent = "—";
+        setLoginUI("STABILIZE", "Hold steady — keep your hand centered inside the scan box.");
+        showLoginOverlay(true);
+        return;
+      }
+
+      if (login.state === "WAIT_HAND" || login.state === "STABILIZE"){
+        login.state = "COUNTDOWN";
+        login.countdown = 3;
+        login.countdownAccum = 0;
+        sound.scanPulse();
+      }
+
+      if (login.state === "COUNTDOWN"){
+        setLoginUI("COUNTDOWN", "Keep steady. Countdown will start the scan.");
+        login.countdownAccum += dtSec;
+        countBigEl.textContent = String(login.countdown);
+
+        if (login.countdownAccum >= 1.0){
+          login.countdownAccum = 0;
+          login.countdown -= 1;
+          sound.scanPulse();
+        }
+
+        if (login.countdown <= 0){
+          login.state = "SCANNING";
+          login.scanProgress = 0;
+          login.scanBeepAccum = 0;
+          countBigEl.textContent = "SCAN";
+          sound.scanPulse();
+        }
+        showLoginOverlay(true);
+        return;
+      }
+
+      if (login.state === "SCANNING"){
+        setLoginUI("SCANNING", "Scanning hand placement… hold steady until complete.");
+        countBigEl.textContent = "SCAN";
+
+        const scanDuration = 1.65;
+        login.scanProgress += dtSec / scanDuration;
+        login.scanProgress = clamp(login.scanProgress, 0, 1);
+
+        login.scanBeepAccum += dtSec;
+        if (login.scanBeepAccum >= 0.12){
+          login.scanBeepAccum = 0;
+          sound.scanBeep(login.scanProgress);
+        }
+
+        scanProgressEl.style.width = `${Math.round(login.scanProgress * 100)}%`;
+
+        if (login.scanProgress >= 1.0){
+          login.state = "DONE";
+          sound.scanComplete();
+          showLoginOverlay(false);
+          startGameFromLogin();
+        } else {
+          showLoginOverlay(true);
+        }
+        return;
+      }
+    }
+
+    // Enter key fallback if camera blocked
+    window.addEventListener('keydown', (e)=>{
+      if (e.key === "Enter" && !gameStarted && !cameraRunning){
+        showLoginOverlay(false);
+        sound.scanComplete();
+        startGameFromLogin();
+      }
+    });
+
+    // ================= MOUSE GRAB (fallback) =================
+    const mouse = { activePointerId: null, grabbing: false };
+
+    function clientToGameXY(clientX, clientY){
+      const r = stage.getBoundingClientRect();
+      return {
+        x: (clientX - r.left) / r.width * W,
+        y: (clientY - r.top)  / r.height * H
+      };
+    }
+    function pointerIsOnUI(target){
+      return tuner.contains(target) || debugVideoWrap.contains(target);
+    }
+
+    shell.addEventListener('pointerdown', (e)=>{
+      hardAutostartAudio();
+      if (pointerIsOnUI(e.target)) return;
+
+      const p = clientToGameXY(e.clientX, e.clientY);
+      const d = Math.hypot(p.x - ball.pos.x, p.y - ball.pos.y);
+      if (gameStarted && d <= settings.grab_radius && ball.grabbedBy === null){
+        mouse.grabbing = true;
+        mouse.activePointerId = e.pointerId;
+        ball.grabbedBy = -1;
+        ball.lastTouch = 0;
+        ball.holdTarget = {...p};
+        ball.holdPrevTarget = {...p};
+        ball.vel.x *= (1 - settings.catch_dampen);
+        ball.vel.y *= (1 - settings.catch_dampen);
+        sound.grab();
+        shell.setPointerCapture(e.pointerId);
+      }
+    });
+
+    shell.addEventListener('pointermove', (e)=>{
+      if (!mouse.grabbing || ball.grabbedBy !== -1) return;
+      const p = clientToGameXY(e.clientX, e.clientY);
+      ball.holdPrevTarget = ball.holdTarget ? {...ball.holdTarget} : {...p};
+      ball.holdTarget = {...p};
+    });
+
+    function endMouseGrab(dtSec){
+      if (ball.grabbedBy !== -1) return;
+      const prev = ball.holdPrevTarget;
+      const cur  = ball.holdTarget;
+      if (!prev || !cur){
+        ball.grabbedBy = null;
+        ball.holdTarget = null;
+        ball.holdPrevTarget = null;
+        return;
+      }
+      const vxSec = (cur.x - prev.x) / Math.max(1e-4, dtSec);
+      const vySec = (cur.y - prev.y) / Math.max(1e-4, dtSec);
+
+      let vx = (vxSec / FPS) * settings.throw_mult;
+      let vy = (vySec / FPS) * settings.throw_mult;
+
+      const sp = Math.hypot(vx,vy);
+      if (sp > settings.throw_cap){
+        const k = settings.throw_cap / (sp + 1e-6);
+        vx *= k; vy *= k;
+      }
+
+      ball.grabbedBy = null;
+      ball.vel.x = vx;
+      ball.vel.y = vy;
+      ball.holdTarget = null;
+      ball.holdPrevTarget = null;
+      sound.throw();
+    }
+
+    shell.addEventListener('pointerup', (e)=>{
+      if (mouse.grabbing && mouse.activePointerId === e.pointerId){
+        mouse.grabbing = false;
+        mouse.activePointerId = null;
+        endMouseGrab(1 / FPS);
+        try{ shell.releasePointerCapture(e.pointerId); } catch {}
+      }
+    });
+    shell.addEventListener('pointercancel', (e)=>{
+      if (mouse.grabbing && mouse.activePointerId === e.pointerId){
+        mouse.grabbing = false;
+        mouse.activePointerId = null;
+        endMouseGrab(1 / FPS);
+      }
+    });
+
+    // ================= TUNER =================
+    const PAGES = [
+      { name:"Display", sliders:[
+        ["Screen Zoom","screen_scale",0.80,1.35,0.01,(v)=>Number(v).toFixed(2)],
+        ["Screen Offset X","screen_offset_x",-160,160,1,(v)=>Math.round(v).toString()],
+        ["Screen Offset Y","screen_offset_y",-120,120,1,(v)=>Math.round(v).toString()],
+        ["Hands Opacity","hands_opacity",0.0,1.0,0.01,(v)=>Number(v).toFixed(2)],
+      ]},
+      { name:"Audio", sliders:[
+        ["Master Volume","master_vol",0.0,1.0,0.01,(v)=>Number(v).toFixed(2)],
+        ["SFX Volume","sfx_vol",0.0,1.0,0.01,(v)=>Number(v).toFixed(2)],
+        ["Beat Volume","beat_vol",0.0,0.60,0.01,(v)=>Number(v).toFixed(2)],
+        ["Beat On (0/1)","beat_on",0.0,1.0,1,(v)=>Math.round(v).toString()],
+        ["Beat BPM","beat_bpm",110,190,1,(v)=>Math.round(v).toString()],
+      ]},
+      { name:"Physics", sliders:[
+        ["Gravity","gravity",0.0,3.0,0.01,(v)=>v.toFixed(2)],
+        ["Bounce","restitution",0.0,0.99,0.01,(v)=>v.toFixed(2)],
+        ["Floor Friction","floor_friction",0.0,0.999,0.001,(v)=>v.toFixed(3)],
+        ["Air Drag","air_drag",0.90,0.9999,0.0001,(v)=>v.toFixed(4)],
+        ["Wall Bounce","wall_bounce",0.0,1.0,0.01,(v)=>v.toFixed(2)],
+      ]},
+      { name:"Throw+Grab", sliders:[
+        ["Finger Force","impulse_mult",0.0,10.0,0.01,(v)=>v.toFixed(2)],
+        ["Max Impulse","max_impulse",0.0,200.0,1,(v)=>Math.round(v).toString()],
+        ["Throw Mult","throw_mult",0.0,10.0,0.01,(v)=>v.toFixed(2)],
+        ["Throw Cap","throw_cap",5.0,120.0,1,(v)=>Math.round(v).toString()],
+        ["Grab Radius","grab_radius",10.0,200.0,1,(v)=>Math.round(v).toString()],
+        ["Hold Follow","hold_follow",0.10,1.0,0.01,(v)=>Number(v).toFixed(2)],
+        ["Hold Max Step","hold_max_follow_px_per_frame",10.0,240.0,1,(v)=>Math.round(v).toString()],
+        ["Catch Dampen","catch_dampen",0.0,0.95,0.01,(v)=>Number(v).toFixed(2)],
+      ]},
+      { name:"Pinch", sliders:[
+        ["Pinch Close Ratio","pinch_close_ratio",0.15,0.75,0.01,(v)=>Number(v).toFixed(2)],
+        ["Pinch Open Ratio","pinch_open_ratio",0.20,0.95,0.01,(v)=>Number(v).toFixed(2)],
+        ["Pinch Smooth Alpha","pinch_smooth_alpha",0.05,0.95,0.01,(v)=>Number(v).toFixed(2)],
+        ["Release Grace (frames)","pinch_release_grace_frames",0,12,1,(v)=>Math.round(v).toString()],
+      ]},
+      { name:"Ball+Hoops", sliders:[
+        ["Ball Radius","ball_radius",6.0,60.0,1,(v)=>Math.round(v).toString()],
+        ["Left Hoop X","left_hoop_x",80.0,W*0.45,1,(v)=>Math.round(v).toString()],
+        ["Right Hoop X","right_hoop_x",W*0.55,W-80.0,1,(v)=>Math.round(v).toString()],
+        ["Hoop Y","hoop_y",60.0,H-140.0,1,(v)=>Math.round(v).toString()],
+        ["Rim Radius","rim_radius",10.0,70.0,1,(v)=>Math.round(v).toString()],
+        ["Net Height","net_height",10.0,200.0,1,(v)=>Math.round(v).toString()],
+        ["Rim Push","rim_push",0.0,30.0,0.1,(v)=>Number(v).toFixed(1)],
+        ["Backboard Bounce","backboard_bounce",0.0,1.0,0.01,(v)=>Number(v).toFixed(2)],
+        ["Backboard Offset","backboard_offset",0.0,160.0,1,(v)=>Math.round(v).toString()],
+        ["Backboard Height","backboard_height",60.0,420.0,1,(v)=>Math.round(v).toString()],
+        ["Backboard Halfspan","backboard_halfspan",30.0,260.0,1,(v)=>Math.round(v).toString()],
+      ]},
+      { name:"Net Assist", sliders:[
+        ["Score Halfwidth","score_x_halfwidth",8.0,60.0,1,(v)=>Math.round(v).toString()],
+        ["Score Y Margin","score_y_margin",0.0,80.0,1,(v)=>Math.round(v).toString()],
+        ["Funnel Radius","funnel_radius",20.0,180.0,1,(v)=>Math.round(v).toString()],
+        ["Funnel Strength","funnel_strength",0.0,0.08,0.001,(v)=>Number(v).toFixed(3)],
+        ["Net Drag","net_drag",0.90,0.999,0.001,(v)=>Number(v).toFixed(3)],
+        ["Rim Forgiveness","rim_forgiveness",0.0,1.0,0.01,(v)=>Number(v).toFixed(2)],
+      ]},
+      { name:"Game", sliders:[
+        ["Score Value","score_value",1.0,3.0,1,(v)=>Math.round(v).toString()],
+        ["Match Seconds","match_seconds",30.0,900.0,1,(v)=>Math.round(v).toString()],
+      ]},
+    ];
+
+    let activePage = 0;
+
+    function rebuildTabs(){
+      tabsEl.innerHTML = "";
+      PAGES.forEach((p,i)=>{
+        const b = document.createElement('button');
+        b.className = 'tabBtn' + (i===activePage ? ' active' : '');
+        b.textContent = p.name;
+        b.addEventListener('click', ()=>{
+          activePage = i;
+          rebuildTabs();
+          rebuildSliders();
+          tunerBody.scrollTop = 0;
+          b.scrollIntoView({behavior:"smooth", block:"nearest", inline:"nearest"});
+        });
+        tabsEl.appendChild(b);
+      });
+    }
+
+    function sliderRow(label,key,min,max,step,fmtFn){
+      const row = document.createElement('div');
+      row.className = 'sliderRow';
+
+      const top = document.createElement('div');
+      top.className = 'sliderTop';
+
+      const left = document.createElement('div');
+      left.innerHTML = `<span class="k">${label}</span>`;
+
+      const right = document.createElement('div');
+      right.id = `val-${key}`;
+      right.textContent = fmtFn(settings[key]);
+
+      top.appendChild(left);
+      top.appendChild(right);
+
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.min = min;
+      input.max = max;
+      input.step = step;
+      input.value = settings[key];
+
+      input.addEventListener('input', ()=>{
+        settings[key] = Number(input.value);
+        clampSettings(settings);
+        input.value = settings[key];
+        document.getElementById(`val-${key}`).textContent = fmtFn(settings[key]);
+
+        if (key === "screen_scale" || key === "screen_offset_x" || key === "screen_offset_y"){
+          applyDisplayTransform();
+        }
+        if (key.startsWith("master_") || key.endsWith("_vol") || key === "beat_on" || key === "beat_bpm" || key === "sfx_vol"){
+          sound.updateVolumes();
+        }
+        if (key.includes("hoop") || key.includes("rim") || key.includes("net") || key.includes("board")){
+          syncHoopsSVG();
+        }
+      });
+
+      row.appendChild(top);
+      row.appendChild(input);
+      return row;
+    }
+
+    function rebuildSliders(){
+      tunerBody.innerHTML = "";
+      const page = PAGES[activePage];
+      for (const spec of page.sliders){
+        tunerBody.appendChild(sliderRow(...spec));
+      }
+    }
+
+    function toggleTuner(force){
+      const want = (force !== undefined) ? force : !tuner.classList.contains('show');
+      tuner.classList.toggle('show', want);
+    }
+
+    function applyPreset(name){
+      settings = {...PRESETS[name]};
+      clampSettings(settings);
+      applyDisplayTransform();
+      sound.updateVolumes();
+
+      pinchState.clear(); pinchEma.clear(); pinchGrace.clear();
+      holding.clear(); lastFinger.clear();
+
+      syncHoopsSVG();
+      rebuildTabs();
+      rebuildSliders();
+      setStatus(`Preset loaded: ${name}`);
+    }
+
+    function saveSettings(){
+      try{
+        localStorage.setItem("bball_tuner_settings", JSON.stringify(settings));
+        setStatus("Saved to localStorage");
+      } catch {
+        setStatus("Save failed");
+      }
+    }
+
+    function loadSettings(){
+      try{
+        const raw = localStorage.getItem("bball_tuner_settings");
+        if (!raw){ setStatus("Load failed (no saved settings)"); return; }
+        settings = {...DEFAULT_SETTINGS, ...JSON.parse(raw)};
+        clampSettings(settings);
+        applyDisplayTransform();
+        sound.updateVolumes();
+
+        pinchState.clear(); pinchEma.clear(); pinchGrace.clear();
+        holding.clear(); lastFinger.clear();
+
+        syncHoopsSVG();
+        rebuildTabs();
+        rebuildSliders();
+        setStatus("Loaded from localStorage");
+      } catch {
+        setStatus("Load failed (invalid data)");
+      }
+    }
+
+    preset1Btn.addEventListener('click', ()=>applyPreset("Classic"));
+    preset2Btn.addEventListener('click', ()=>applyPreset("EasyScore"));
+    preset3Btn.addEventListener('click', ()=>applyPreset("Arcade"));
+    saveBtn.addEventListener('click', saveSettings);
+    loadBtn.addEventListener('click', loadSettings);
+
+    // ================= KEYBOARD =================
+    let showVideo = false;
+    window.addEventListener('keydown', (e)=>{
+      const k = e.key.toLowerCase();
+      if (k === 'escape' && tuner.classList.contains('show')) toggleTuner(false);
+      if (k === 't') toggleTuner();
+      if (k === 'r') { if (gameStarted) resetMatch(); }
+      if (k === '1') applyPreset("Classic");
+      if (k === '2') applyPreset("EasyScore");
+      if (k === '3') applyPreset("Arcade");
+      if (k === 's') saveSettings();
+      if (k === 'l') loadSettings();
+      if (k === 'v'){
+        showVideo = !showVideo;
+        debugVideoWrap.classList.toggle('show', showVideo);
+      }
+    });
+
+    // ================= HUD + LOOP =================
+    function updateHUD(){
+      p1ScoreEl.textContent = `P1 ${scores[0]}`;
+      p2ScoreEl.textContent = `P2 ${scores[1]}`;
+
+      const m = Math.floor(matchLeft / 60);
+      const s = Math.floor(matchLeft % 60);
+      clockEl.textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+
+      if (nowMs() > statusUntilMs){
+        toastBox.classList.remove('show');
+      }
+    }
+
+    let lastMs = nowMs();
+    let accum = 0;
+    const stepSec = 1 / FPS;
+
+    function frame(){
+      const t = nowMs();
+      const dt = Math.min(0.06, (t - lastMs) / 1000);
+      lastMs = t;
+
+      updateLogin(dt);
+
+      if (gameStarted){
+        const elapsed = (t - matchStartMs) / 1000;
+        matchLeft = Math.max(0, settings.match_seconds - elapsed);
+      } else {
+        matchLeft = settings.match_seconds;
+      }
+
+      applyHandsToGame(dt);
+
+      accum += dt;
+      while (accum >= stepSec){
+        if (gameStarted && matchLeft > 0){
+          ball.updateStep();
+          hoopPhysicsAndScore();
+        } else if (gameStarted) {
+          ball.vel.x *= 0.96;
+          ball.vel.y *= 0.96;
+        }
+        accum -= stepSec;
+      }
+
+      drawHands();
+      syncBallSVG();
+      updateHUD();
+
+      requestAnimationFrame(frame);
+    }
+
+    // ================= INIT =================
+    function init(){
+      try{
+        const raw = localStorage.getItem("bball_tuner_settings");
+        if (raw) settings = {...DEFAULT_SETTINGS, ...JSON.parse(raw)};
+      } catch {}
+      clampSettings(settings);
+
+      applyDisplayTransform();
+      syncHoopsSVG();
+      rebuildTabs();
+      rebuildSliders();
+
+      // Force audio engine to start immediately on startup
+      hardAutostartAudio();
+
+      gameStarted = false;
+      scores[0] = 0; scores[1] = 0;
+      ball.parkHidden();
+      showLoginOverlay(true);
+
+      setStatus("Booting… audio auto-start engaged. If you hear nothing, click once to unlock audio.");
+      requestAnimationFrame(frame);
+    }
+
+    init();
+  </script>
+</body>
+</html>

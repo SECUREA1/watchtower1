@@ -1,0 +1,3206 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Laser Eyes HUD — Gaze Cursor + Wizard + Training + Asteroid/Drone Shooter</title>
+  <style>
+    :root{
+      --bg0:#050610;
+      --bg1:#0b1020;
+      --panel: rgba(10, 12, 24, 0.72);
+      --line: rgba(255,255,255,0.14);
+      --txt: #e8ecff;
+
+      --dockTop: 64px;
+      --dockBottom: 164px;
+      --dockSide: 320px;
+      --dockPad: 12px;
+    }
+
+    html, body { height: 100%; margin: 0; overflow: hidden; font-family: ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace; background: var(--bg1); color: var(--txt); }
+
+    body::before{
+      content:"";
+      position:fixed; inset:0;
+      pointer-events:none;
+      background:
+        repeating-linear-gradient(
+          to bottom,
+          rgba(255,255,255,0.03) 0px,
+          rgba(255,255,255,0.03) 1px,
+          rgba(0,0,0,0.00) 2px,
+          rgba(0,0,0,0.00) 4px
+        );
+      mix-blend-mode: soft-light;
+      opacity: 0.45;
+      z-index: 10050;
+    }
+    body::after{
+      content:"";
+      position:fixed; inset:-20px;
+      pointer-events:none;
+      background: radial-gradient(1200px 800px at 50% 40%, rgba(255,255,255,0.06), transparent 60%);
+      filter: blur(0.5px);
+      opacity: 0.65;
+      z-index: 10049;
+    }
+
+    .stage {
+      position: fixed; inset: 0;
+      z-index: 1;
+      background:
+        radial-gradient(1000px 650px at 20% 15%, rgba(255, 70, 235, 0.18), transparent 60%),
+        radial-gradient(900px 600px at 80% 75%, rgba(70, 255, 220, 0.10), transparent 62%),
+        linear-gradient(180deg, rgba(7,10,22,0.72), rgba(11,16,32,0.66) 55%, rgba(11,16,32,0.70));
+      padding:
+        calc(var(--dockTop) + var(--dockPad))
+        calc(var(--dockSide) + var(--dockPad))
+        calc(var(--dockBottom) + var(--dockPad))
+        calc(var(--dockSide) + var(--dockPad));
+      box-sizing: border-box;
+      overflow: hidden;
+    }
+
+    #hud.collapsed ~ .stage{
+      padding:
+        calc(var(--dockTop) + 10px)
+        calc(74px + 10px)
+        calc(66px + 10px)
+        calc(74px + 10px);
+    }
+
+    .demoGrid {
+      width: min(1080px, 92vw);
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(220px, 1fr));
+      gap: 14px;
+    }
+    .card {
+      background: rgba(12, 14, 28, 0.52);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 18px;
+      padding: 16px;
+      box-shadow:
+        0 18px 50px rgba(0,0,0,0.40),
+        0 0 0 1px rgba(255,255,255,0.06) inset;
+      backdrop-filter: blur(10px);
+      position: relative;
+      overflow: hidden;
+    }
+    .card::before{
+      content:"";
+      position:absolute; inset:-2px;
+      background: radial-gradient(700px 200px at 20% 10%, rgba(255, 70, 235, 0.14), transparent 55%),
+                  radial-gradient(600px 220px at 80% 80%, rgba(70, 255, 220, 0.10), transparent 60%);
+      filter: blur(0.2px);
+      pointer-events:none;
+      opacity:0.9;
+    }
+    .card h2 { margin: 0 0 8px; font-size: 15px; letter-spacing: 0.4px; position: relative; }
+    .card p { margin: 0; font-size: 13px; opacity: 0.9; line-height: 1.45; position: relative; }
+    .card button {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.16);
+      background: rgba(255,255,255,0.06);
+      color: #eef3ff;
+      cursor: pointer;
+      font-weight: 820;
+      letter-spacing: 0.3px;
+      position: relative;
+      box-shadow: 0 10px 26px rgba(0,0,0,0.35);
+      transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+    }
+    .card button:hover { background: rgba(255,255,255,0.10); box-shadow: 0 12px 34px rgba(0,0,0,0.45), 0 0 22px rgba(120,140,255,0.18); transform: translateY(-1px); }
+    .card button:active { transform: translateY(0px) scale(0.99); }
+
+    #cursor {
+      position: fixed; z-index: 10020;
+      left: 50vw; top: 50vh;
+      width: 18px; height: 18px;
+      border-radius: 999px;
+      border: 2px solid rgba(255,255,255,0.92);
+      background: rgba(50,200,255,0.25);
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      box-shadow: 0 14px 30px rgba(0,0,0,0.45), 0 0 18px rgba(70,255,220,0.18);
+    }
+    #cursor.clicking {
+      transform: translate(-50%, -50%) scale(1.55);
+      background: rgba(255,70,235,0.20);
+      box-shadow: 0 18px 40px rgba(0,0,0,0.55), 0 0 26px rgba(255,70,235,0.22);
+    }
+
+    #previewWrap {
+      position: fixed; right: 14px; bottom: 14px; z-index: 9998;
+      width: 360px; height: 270px;
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.14);
+      box-shadow: 0 18px 50px rgba(0,0,0,0.45);
+      background: #000;
+    }
+    #previewWrap.full {
+      right: 0; bottom: 0;
+      inset: 0;
+      width: 100vw; height: 100vh;
+      border-radius: 0;
+      border: none;
+      box-shadow: none;
+      z-index: 0;
+    }
+    #video, #overlay { position: absolute; inset: 0; width: 100%; height: 100%; transform: scaleX(-1); }
+    #overlay { pointer-events: none; }
+
+    /* HUD */
+    #hud { position: fixed; inset: 0; z-index: 10030; pointer-events: none; }
+    .hudDock{
+      pointer-events: auto;
+      background: rgba(8, 10, 20, 0.72);
+      border: 1px solid rgba(255,255,255,0.14);
+      box-shadow:
+        0 22px 70px rgba(0,0,0,0.55),
+        0 0 0 1px rgba(255,255,255,0.06) inset,
+        0 0 24px rgba(120,140,255,0.12);
+      backdrop-filter: blur(12px);
+      overflow: hidden;
+      position: fixed;
+    }
+    .hudDock::before{
+      content:"";
+      position:absolute; inset:-2px;
+      background: linear-gradient(90deg, rgba(255,70,235,0.18), rgba(70,255,220,0.12), rgba(120,140,255,0.18));
+      filter: blur(10px);
+      opacity: 0.55;
+      pointer-events:none;
+    }
+
+    #hudTop{
+      left: 12px; right: 12px; top: 12px;
+      height: var(--dockTop);
+      border-radius: 18px;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 10px 10px 12px;
+      box-sizing: border-box;
+      background:
+        linear-gradient(90deg, rgba(255,70,235,0.10), rgba(70,255,220,0.07), rgba(120,140,255,0.10)),
+        rgba(255,255,255,0.03);
+    }
+    #hudTop .title { display: flex; flex-direction: column; gap: 2px; position: relative; }
+    #hudTop .title .h1 { font-size: 13px; font-weight: 950; letter-spacing: 0.6px; }
+    #hudTop .title .sub { font-size: 11px; opacity: 0.88; }
+    #hudTop .actions { display: flex; gap: 8px; align-items: center; position: relative; flex-wrap: wrap; justify-content: flex-end; }
+    #hudTop button,
+    .row2 button{
+      padding: 8px 10px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.16);
+      background: rgba(255,255,255,0.06);
+      color: #eef3ff;
+      cursor: pointer;
+      font-weight: 900;
+      font-size: 12px;
+      letter-spacing: 0.4px;
+      box-shadow: 0 10px 26px rgba(0,0,0,0.35);
+      transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+      position: relative;
+      white-space: nowrap;
+    }
+    #hudTop button:hover,
+    .row2 button:hover{ background: rgba(255,255,255,0.10); box-shadow: 0 12px 34px rgba(0,0,0,0.45), 0 0 22px rgba(70,255,220,0.14); transform: translateY(-1px); }
+    #hudTop button:active,
+    .row2 button:active{ transform: translateY(0px) scale(0.99); }
+    #hudTop button:disabled,
+    .row2 button:disabled{ opacity: 0.55; cursor: not-allowed; box-shadow: none; transform: none; }
+
+    .pill {
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.05);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+      opacity: 0.98;
+      box-shadow: 0 0 18px rgba(120,140,255,0.10);
+      white-space: nowrap;
+    }
+
+    .hudSide{
+      top: calc(12px + var(--dockTop) + 10px);
+      bottom: calc(12px + var(--dockBottom) + 10px);
+      width: var(--dockSide);
+      border-radius: 18px;
+      padding: 10px 12px 12px;
+      box-sizing: border-box;
+    }
+    #hudLeft{ left: 12px; }
+    #hudRight{ right: 12px; }
+
+    .hudScroll{ position: relative; height: 100%; overflow: auto; padding-right: 2px; }
+
+    #hudBottom{
+      left: 12px; right: 12px; bottom: 12px;
+      height: var(--dockBottom);
+      border-radius: 18px;
+      padding: 10px 12px 12px;
+      box-sizing: border-box;
+    }
+
+    .sectionTitle {
+      margin-top: 10px;
+      font-size: 12px;
+      font-weight: 950;
+      letter-spacing: 0.7px;
+      opacity: 0.98;
+      position: relative;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 170px 1fr 64px;
+      gap: 10px;
+      align-items: center;
+      margin: 7px 0;
+      position: relative;
+    }
+    label { font-size: 12px; opacity: 0.92; letter-spacing: 0.2px; }
+    input[type="range"] { width: 100%; }
+    .val { font-size: 12px; text-align: right; opacity: 0.95; font-variant-numeric: tabular-nums; }
+
+    .row2 { display: flex; gap: 10px; align-items: center; margin: 8px 0; flex-wrap: wrap; position: relative; }
+    .switchRow { display: flex; gap: 12px; align-items: center; margin: 8px 0; flex-wrap: wrap; position: relative; }
+    .switchRow label { display: flex; gap: 8px; align-items: center; }
+
+    #status {
+      margin-top: 8px;
+      font-size: 12px;
+      line-height: 1.35;
+      opacity: 0.96;
+      padding: 10px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 12px;
+      font-variant-numeric: tabular-nums;
+      white-space: pre-line;
+    }
+
+    .bar {
+      width: 100%;
+      height: 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.05);
+      overflow: hidden;
+      position: relative;
+    }
+    .bar > div {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, rgba(70,255,220,0.85), rgba(255,70,235,0.65), rgba(120,140,255,0.85));
+      border-radius: 999px;
+      transition: width 90ms linear;
+    }
+
+    .hint { font-size: 12px; opacity: 0.85; line-height: 1.35; margin-top: 6px; position: relative; }
+    .tiny { font-size: 11px; opacity: 0.8; position: relative; }
+
+    #hud.collapsed { pointer-events: none; }
+    #hud.collapsed .hudDock { pointer-events: auto; }
+    #hud.collapsed .hudSide{ width: 74px; padding: 10px 10px; }
+    #hud.collapsed #hudBottom{ height: 66px; padding: 10px 12px; }
+    #hud.collapsed .hudScroll{ overflow: hidden; }
+    #hud.collapsed .collapseHide{ display: none !important; }
+    #hud.collapsed .collapseMini{
+      display: flex !important;
+      gap: 8px;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+    }
+    .collapseMini{ display: none; }
+
+    /* Wizard */
+    #wizard {
+      position: fixed; inset: 0; z-index: 10040;
+      display: none;
+      background: rgba(0,0,0,0.60);
+      backdrop-filter: blur(6px);
+    }
+    #wizardPanel {
+      position: absolute; left: 50%; top: 50%;
+      transform: translate(-50%, -50%);
+      width: min(860px, 94vw);
+      background: rgba(10,12,24,0.90);
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 18px;
+      box-shadow: 0 22px 70px rgba(0,0,0,0.60);
+      padding: 14px 14px 12px;
+      position: relative;
+      overflow: hidden;
+    }
+    #wizardPanel::before{
+      content:"";
+      position:absolute; inset:-2px;
+      background: linear-gradient(90deg, rgba(255,70,235,0.12), rgba(70,255,220,0.08), rgba(120,140,255,0.12));
+      filter: blur(12px);
+      opacity: 0.55;
+      pointer-events:none;
+    }
+    #wizardPanel h3 { margin: 0 0 6px; font-size: 15px; font-weight: 950; letter-spacing: 0.6px; position: relative; }
+    #wizardPanel p { margin: 0; font-size: 13px; line-height: 1.45; opacity: 0.9; position: relative; }
+    #wizardPanel .meta {
+      margin-top: 10px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      align-items: center;
+      position: relative;
+    }
+    #wizardPanel .meta .box {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.10);
+      border-radius: 14px;
+      padding: 10px;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    #wizardPanel .meta b { font-weight: 950; }
+    #wizardPanel .buttons {
+      margin-top: 12px;
+      display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;
+      position: relative;
+    }
+    #wizardPanel button {
+      padding: 9px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.16);
+      background: rgba(255,255,255,0.06);
+      color: #eef3ff;
+      cursor: pointer;
+      font-weight: 900;
+      letter-spacing: 0.4px;
+      box-shadow: 0 10px 26px rgba(0,0,0,0.35);
+      transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+    }
+    #wizardPanel button:hover { background: rgba(255,255,255,0.10); box-shadow: 0 12px 34px rgba(0,0,0,0.45); transform: translateY(-1px); }
+    #wizardPanel button:active { transform: translateY(0px) scale(0.99); }
+    #wizardPanel button:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; transform: none; }
+
+    #calibDot {
+      position: fixed; z-index: 10041;
+      width: 18px; height: 18px;
+      border-radius: 999px;
+      background: #fff;
+      border: 2px solid rgba(0,0,0,0.8);
+      box-shadow: 0 14px 32px rgba(0,0,0,0.55), 0 0 22px rgba(70,255,220,0.22);
+      transform: translate(-50%, -50%);
+      display: none;
+    }
+
+    #gameCanvas { position: fixed; inset: 0; z-index: 9997; pointer-events: none; }
+
+    #toast {
+      position: fixed; left: 50%; bottom: 16px; z-index: 10041;
+      transform: translateX(-50%);
+      background: rgba(10,12,24,0.88);
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 14px;
+      padding: 10px 12px;
+      font-size: 13px;
+      opacity: 0.96;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.55);
+      display: none;
+      max-width: min(920px, 92vw);
+      line-height: 1.45;
+      letter-spacing: 0.2px;
+      white-space: pre-line;
+    }
+
+    #fileImport { display: none; }
+
+    @media (max-width: 1100px){
+      :root{ --dockSide: 280px; }
+      .row{ grid-template-columns: 150px 1fr 58px; }
+    }
+    @media (max-width: 920px){
+      :root{ --dockSide: 240px; --dockBottom: 176px; }
+      .demoGrid{ grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="stage">
+    <div class="demoGrid">
+      <div class="card">
+        <h2>Laser Eyes Game</h2>
+        <p>Toggle Game ON. Aim with your eyes. Single blinks fire 1 damage shots (enemy HP shown). Hold a blink to cut with a continuous laser beam that overheats and smokes.</p>
+        <button onclick="alert('Demo UI button (outside game).')">Demo Button</button>
+      </div>
+      <div class="card">
+        <h2>Shield + Ammo + Time</h2>
+        <p>Dwell-click activates a shield burst. Ammo is consumed by shots/beam; pickups appear during play. Timer ends the run.</p>
+        <button onclick="alert('Clicked.')">Another Button</button>
+      </div>
+      <div class="card">
+        <h2>Calibration</h2>
+        <p>Run Wizard for stable gaze + blink. Use invert and push-out to tune direction and reach.</p>
+        <button onclick="alert('Clicked target.')">Click Target</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="cursor" aria-hidden="true"></div>
+
+  <div id="hud">
+    <div id="hudTop" class="hudDock">
+      <div class="title">
+        <div class="h1">Laser Eyes HUD</div>
+        <div class="sub">Gaze cursor + docked tuner + wizard + training + shooter demo</div>
+      </div>
+      <div class="actions">
+        <button id="collapseBtn">Collapse</button>
+        <button id="startBtn">Start</button>
+        <button id="stopBtn" disabled>Stop</button>
+        <button id="gameBtn" disabled>Game OFF</button>
+        <span class="pill" id="gamePill">GAME: OFF</span>
+        <span class="pill" id="fpsPill">FPS: —</span>
+        <span class="pill" id="blinkPill">BLINK: —</span>
+        <span class="pill" id="speedPill">SPEED: —</span>
+      </div>
+    </div>
+
+    <div id="hudLeft" class="hudDock hudSide">
+      <div class="collapseMini">
+        <button id="centerBtnMini" disabled>C</button>
+        <button id="wizardBtnMini" disabled>W</button>
+        <button id="trainingBtnMini" disabled>T</button>
+      </div>
+
+      <div class="hudScroll collapseHide">
+        <div class="sectionTitle">Movement</div>
+        <div class="row"><label for="maxSpeed">Max speed (px/s)</label><input id="maxSpeed" type="range" min="300" max="3200" step="25"><div class="val" id="maxSpeedVal"></div></div>
+        <div class="row"><label for="sensitivity">Sensitivity gain</label><input id="sensitivity" type="range" min="0.60" max="2.60" step="0.05"><div class="val" id="sensitivityVal"></div></div>
+        <div class="row"><label for="pushOut">Push-out stretch</label><input id="pushOut" type="range" min="0" max="1.25" step="0.02"><div class="val" id="pushOutVal"></div></div>
+        <div class="row"><label for="assist">Precision assist</label><input id="assist" type="range" min="0" max="0.55" step="0.01"><div class="val" id="assistVal"></div></div>
+        <div class="row"><label for="deadzone">Soft deadzone</label><input id="deadzone" type="range" min="0" max="0.18" step="0.005"><div class="val" id="deadzoneVal"></div></div>
+        <div class="row"><label for="minCutoff">Filter (min cutoff)</label><input id="minCutoff" type="range" min="0.2" max="3.0" step="0.05"><div class="val" id="minCutoffVal"></div></div>
+        <div class="row"><label for="beta">Filter (beta)</label><input id="beta" type="range" min="0" max="0.09" step="0.002"><div class="val" id="betaVal"></div></div>
+
+        <div class="sectionTitle">Direction</div>
+        <div class="switchRow">
+          <label><input id="invertX" type="checkbox"> Invert left/right</label>
+          <label><input id="invertY" type="checkbox"> Invert up/down</label>
+        </div>
+
+        <div class="sectionTitle">Game</div>
+        <div class="switchRow">
+          <label><input id="gameHaptics" type="checkbox" checked> Vibration (if supported)</label>
+          <label><input id="gameFX" type="checkbox" checked> FX (heat/smoke)</label>
+        </div>
+        <div class="row"><label for="gameTimeSec">Round time (s)</label><input id="gameTimeSec" type="range" min="30" max="180" step="5"><div class="val" id="gameTimeSecVal"></div></div>
+        <div class="row"><label for="gameDifficulty">Difficulty</label><input id="gameDifficulty" type="range" min="1" max="5" step="1"><div class="val" id="gameDifficultyVal"></div></div>
+
+        <div class="sectionTitle">Debug / Preview</div>
+        <div class="switchRow">
+          <label><input id="showPreview" type="checkbox" checked> Preview</label>
+          <label><input id="fullPreview" type="checkbox" checked> Full preview</label>
+          <label><input id="debugDraw" type="checkbox" checked> Debug overlay</label>
+        </div>
+      </div>
+    </div>
+
+    <div id="hudRight" class="hudDock hudSide">
+      <div class="hudScroll">
+        <div class="sectionTitle">Click</div>
+        <div class="switchRow">
+          <label><input id="dwellClick" type="checkbox" checked> Dwell click</label>
+          <label><input id="blinkClick" type="checkbox" checked> Blink click</label>
+        </div>
+
+        <div class="row"><label for="dwellMs">Dwell time (ms)</label><input id="dwellMs" type="range" min="300" max="1600" step="10"><div class="val" id="dwellMsVal"></div></div>
+        <div class="row"><label for="dwellRadius">Dwell radius (px)</label><input id="dwellRadius" type="range" min="10" max="48" step="1"><div class="val" id="dwellRadiusVal"></div></div>
+
+        <div class="switchRow">
+          <label><input type="radio" name="blinkMode" value="long" checked> Long blink</label>
+          <label><input type="radio" name="blinkMode" value="double"> Double blink</label>
+        </div>
+
+        <div class="row"><label for="longBlinkMs">Long blink (ms)</label><input id="longBlinkMs" type="range" min="160" max="560" step="10"><div class="val" id="longBlinkMsVal"></div></div>
+        <div class="row"><label for="dblWindowMs">Double window (ms)</label><input id="dblWindowMs" type="range" min="300" max="950" step="10"><div class="val" id="dblWindowMsVal"></div></div>
+        <div class="row"><label for="clickCooldownMs">Click cooldown (ms)</label><input id="clickCooldownMs" type="range" min="350" max="1400" step="10"><div class="val" id="clickCooldownMsVal"></div></div>
+
+        <div class="sectionTitle">Blink Safety</div>
+        <div class="row"><label for="blinkQualityGate">Blink quality gate (%)</label><input id="blinkQualityGate" type="range" min="0" max="100" step="1"><div class="val" id="blinkQualityGateVal"></div></div>
+        <div class="tiny">In game: blink shots require quality ≥ gate. Hold-blink beam obeys overheat (heat bar).</div>
+      </div>
+    </div>
+
+    <div id="hudBottom" class="hudDock">
+      <div class="row2 collapseHide">
+        <button id="centerBtn" disabled>Center</button>
+        <button id="wizardBtn" disabled>Calibration Wizard</button>
+        <button id="trainingBtn" disabled>Training Mode</button>
+        <button id="exportBtn">Export JSON</button>
+        <button id="importBtn">Import JSON</button>
+        <input id="fileImport" type="file" accept="application/json" />
+      </div>
+
+      <div class="collapseMini">
+        <span class="pill" id="qualityMini">Q: —</span>
+        <span class="pill" id="modeMini">HUD</span>
+      </div>
+
+      <div class="collapseHide">
+        <div class="sectionTitle" style="margin-top:0;">Scan Quality</div>
+        <div class="bar"><div id="qualityBar"></div></div>
+        <div class="tiny" id="qualityText">Quality: —</div>
+
+        <div id="status">Idle. Press Start. (Use https:// or localhost for camera.)</div>
+        <div class="hint">
+          Shortcuts: <b>W</b>=Wizard, <b>T</b>=Training, <b>C</b>=Center. In validation: press <b>SPACE</b> on the dot.
+          Game: single blink = 1 damage; hold blink = continuous cutting beam; dwell-click = shield burst.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="previewWrap">
+    <video id="video" autoplay playsinline></video>
+    <canvas id="overlay"></canvas>
+  </div>
+
+  <canvas id="gameCanvas"></canvas>
+
+  <div id="wizard">
+    <div id="wizardPanel">
+      <h3 id="wizTitle">Wizard</h3>
+      <p id="wizText">…</p>
+      <div class="meta">
+        <div class="box" id="wizBoxLeft">…</div>
+        <div class="box" id="wizBoxRight">…</div>
+      </div>
+      <div class="buttons">
+        <button id="wizBackBtn" disabled>Back</button>
+        <button id="wizCancelBtn">Cancel</button>
+        <button id="wizNextBtn" disabled>Next</button>
+      </div>
+      <div class="tiny" style="margin-top:8px; opacity:0.82;">
+        Tip: Capture pauses if stability drops. Keep head still; move eyes only.
+      </div>
+    </div>
+  </div>
+
+  <div id="calibDot"></div>
+  <div id="toast"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+
+  <script>
+    /**********************
+     * Utilities
+     **********************/
+    function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+    function lerp(a, b, t) { return a + (b - a) * t; }
+    function mean(arr){ return arr.reduce((a,b)=>a+b,0) / Math.max(1, arr.length); }
+    function stddev(arr){
+      if (arr.length < 2) return 0;
+      const m = mean(arr);
+      const v = arr.reduce((a,x)=>a+(x-m)*(x-m),0) / (arr.length-1);
+      return Math.sqrt(v);
+    }
+    function median(arr){
+      if (!arr.length) return null;
+      const s = [...arr].sort((a,b)=>a-b);
+      const mid = Math.floor(s.length / 2);
+      return s.length % 2 ? s[mid] : (s[mid-1] + s[mid]) / 2;
+    }
+    function nowMs(){ return performance.now(); }
+
+    function toast(msg, ms=2200){
+      const el = document.getElementById("toast");
+      el.textContent = msg;
+      el.style.display = "block";
+      clearTimeout(toast._t);
+      toast._t = setTimeout(()=>{ el.style.display = "none"; }, ms);
+    }
+
+    function svgDataUri(svg){
+      return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg.trim());
+    }
+    function loadSvgImage(svg){
+      return new Promise((resolve, reject)=>{
+        const img = new Image();
+        img.onload = ()=>resolve(img);
+        img.onerror = reject;
+        img.src = svgDataUri(svg);
+      });
+    }
+
+    /**********************
+     * One Euro Filter
+     **********************/
+    class LowPass {
+      constructor(alpha, initVal=0) { this.alpha = alpha; this.s = initVal; this.init = false; }
+      setAlpha(a){ this.alpha = a; }
+      filter(x){
+        if (!this.init){ this.s = x; this.init = true; return x; }
+        this.s = this.alpha * x + (1 - this.alpha) * this.s;
+        return this.s;
+      }
+      reset(){ this.init = false; }
+    }
+    function alphaFromCutoff(cutoff, dt){
+      const tau = 1 / (2 * Math.PI * cutoff);
+      return 1 / (1 + tau / Math.max(1e-6, dt));
+    }
+    class OneEuro {
+      constructor(minCutoff=1.2, beta=0.015, dCutoff=1.0){
+        this.minCutoff = minCutoff; this.beta = beta; this.dCutoff = dCutoff;
+        this.xFilt = new LowPass(1.0); this.dxFilt = new LowPass(1.0);
+        this.lastX = null; this.lastT = null;
+      }
+      setParams(minCutoff, beta){ this.minCutoff = minCutoff; this.beta = beta; }
+      filter(x, tSec){
+        if (this.lastT == null){
+          this.lastT = tSec; this.lastX = x;
+          this.xFilt.reset(); this.dxFilt.reset();
+          return this.xFilt.filter(x);
+        }
+        const dt = Math.max(1e-4, tSec - this.lastT);
+        const dx = (x - this.lastX) / dt;
+        this.lastX = x; this.lastT = tSec;
+
+        const aD = alphaFromCutoff(this.dCutoff, dt);
+        this.dxFilt.setAlpha(aD);
+        const dxHat = this.dxFilt.filter(dx);
+
+        const cutoff = this.minCutoff + this.beta * Math.abs(dxHat);
+        const a = alphaFromCutoff(cutoff, dt);
+        this.xFilt.setAlpha(a);
+        return this.xFilt.filter(x);
+      }
+      reset(){ this.lastT = null; this.lastX = null; this.xFilt.reset(); this.dxFilt.reset(); }
+    }
+
+    /**********************
+     * Settings
+     **********************/
+    const LS_KEY = "laser_eyes_hud_v1";
+    const DEFAULTS = {
+      maxSpeed: 1750,
+      sensitivity: 1.00,
+      pushOut: 0.35,
+      assist: 0.18,
+      deadzone: 0.030,
+      minCutoff: 1.25,
+      beta: 0.018,
+
+      invertX: false,
+      invertY: false,
+
+      dwellClick: true,
+      dwellMs: 760,
+      dwellRadius: 18,
+
+      blinkClick: true,
+      blinkMode: "long",
+      longBlinkMs: 260,
+      dblWindowMs: 560,
+      clickCooldownMs: 780,
+
+      blinkQualityGate: 70,
+
+      showPreview: true,
+      fullPreview: true,
+      debugDraw: true,
+      hudCollapsed: false,
+
+      /* Game */
+      gameEnabled: false,
+      gameHaptics: true,
+      gameFX: true,
+      gameTimeSec: 75,
+      gameDifficulty: 2,
+
+      gazeCal: null,
+      blinkCal: null,
+      calibrationMaxRmsePx: 90
+    };
+
+    function loadSettings(){
+      try {
+        const raw = localStorage.getItem(LS_KEY);
+        if (!raw) return structuredClone(DEFAULTS);
+        const parsed = JSON.parse(raw);
+        const merged = { ...structuredClone(DEFAULTS), ...parsed };
+        merged.sensitivity = clamp(Number(merged.sensitivity ?? DEFAULTS.sensitivity), 0.60, 2.60);
+        merged.pushOut = clamp(Number(merged.pushOut ?? DEFAULTS.pushOut), 0, 1.25);
+        merged.blinkQualityGate = clamp(Number(merged.blinkQualityGate ?? DEFAULTS.blinkQualityGate), 0, 100);
+        merged.gameTimeSec = clamp(Number(merged.gameTimeSec ?? DEFAULTS.gameTimeSec), 30, 180);
+        merged.gameDifficulty = clamp(Number(merged.gameDifficulty ?? DEFAULTS.gameDifficulty), 1, 5);
+        return merged;
+      } catch {
+        return structuredClone(DEFAULTS);
+      }
+    }
+    let settings = loadSettings();
+    function saveSettings(){ localStorage.setItem(LS_KEY, JSON.stringify(settings)); }
+
+    /**********************
+     * DOM
+     **********************/
+    const cursorEl = document.getElementById("cursor");
+    const statusEl = document.getElementById("status");
+    const fpsPill = document.getElementById("fpsPill");
+    const blinkPill = document.getElementById("blinkPill");
+    const speedPill = document.getElementById("speedPill");
+    const gamePill = document.getElementById("gamePill");
+
+    const qualityBar = document.getElementById("qualityBar");
+    const qualityText = document.getElementById("qualityText");
+    const qualityMini = document.getElementById("qualityMini");
+
+    const previewWrap = document.getElementById("previewWrap");
+    const video = document.getElementById("video");
+    const overlay = document.getElementById("overlay");
+    const octx = overlay.getContext("2d");
+
+    const gameCanvas = document.getElementById("gameCanvas");
+    const gctx = gameCanvas.getContext("2d");
+
+    const hud = document.getElementById("hud");
+    const collapseBtn = document.getElementById("collapseBtn");
+
+    const startBtn = document.getElementById("startBtn");
+    const stopBtn = document.getElementById("stopBtn");
+    const gameBtn = document.getElementById("gameBtn");
+
+    const centerBtn = document.getElementById("centerBtn");
+    const wizardBtn = document.getElementById("wizardBtn");
+    const trainingBtn = document.getElementById("trainingBtn");
+
+    const centerBtnMini = document.getElementById("centerBtnMini");
+    const wizardBtnMini = document.getElementById("wizardBtnMini");
+    const trainingBtnMini = document.getElementById("trainingBtnMini");
+
+    const exportBtn = document.getElementById("exportBtn");
+    const importBtn = document.getElementById("importBtn");
+    const fileImport = document.getElementById("fileImport");
+
+    const inputs = {
+      maxSpeed: document.getElementById("maxSpeed"),
+      sensitivity: document.getElementById("sensitivity"),
+      pushOut: document.getElementById("pushOut"),
+      assist: document.getElementById("assist"),
+      deadzone: document.getElementById("deadzone"),
+      minCutoff: document.getElementById("minCutoff"),
+      beta: document.getElementById("beta"),
+
+      invertX: document.getElementById("invertX"),
+      invertY: document.getElementById("invertY"),
+
+      dwellClick: document.getElementById("dwellClick"),
+      blinkClick: document.getElementById("blinkClick"),
+      dwellMs: document.getElementById("dwellMs"),
+      dwellRadius: document.getElementById("dwellRadius"),
+
+      longBlinkMs: document.getElementById("longBlinkMs"),
+      dblWindowMs: document.getElementById("dblWindowMs"),
+      clickCooldownMs: document.getElementById("clickCooldownMs"),
+
+      blinkQualityGate: document.getElementById("blinkQualityGate"),
+
+      showPreview: document.getElementById("showPreview"),
+      fullPreview: document.getElementById("fullPreview"),
+      debugDraw: document.getElementById("debugDraw"),
+
+      gameHaptics: document.getElementById("gameHaptics"),
+      gameFX: document.getElementById("gameFX"),
+      gameTimeSec: document.getElementById("gameTimeSec"),
+      gameDifficulty: document.getElementById("gameDifficulty"),
+    };
+
+    const vals = {
+      maxSpeed: document.getElementById("maxSpeedVal"),
+      sensitivity: document.getElementById("sensitivityVal"),
+      pushOut: document.getElementById("pushOutVal"),
+      assist: document.getElementById("assistVal"),
+      deadzone: document.getElementById("deadzoneVal"),
+      minCutoff: document.getElementById("minCutoffVal"),
+      beta: document.getElementById("betaVal"),
+      dwellMs: document.getElementById("dwellMsVal"),
+      dwellRadius: document.getElementById("dwellRadiusVal"),
+      longBlinkMs: document.getElementById("longBlinkMsVal"),
+      dblWindowMs: document.getElementById("dblWindowMsVal"),
+      clickCooldownMs: document.getElementById("clickCooldownMsVal"),
+      blinkQualityGate: document.getElementById("blinkQualityGateVal"),
+      gameTimeSec: document.getElementById("gameTimeSecVal"),
+      gameDifficulty: document.getElementById("gameDifficultyVal"),
+    };
+
+    function updatePreviewLayout(){ previewWrap.classList.toggle("full", !!settings.fullPreview); }
+    function updateValueLabels(){
+      vals.maxSpeed.textContent = Math.round(settings.maxSpeed);
+      vals.sensitivity.textContent = Number(settings.sensitivity).toFixed(2);
+      vals.pushOut.textContent = Number(settings.pushOut).toFixed(2);
+      vals.assist.textContent = Number(settings.assist).toFixed(2);
+      vals.deadzone.textContent = Number(settings.deadzone).toFixed(3);
+      vals.minCutoff.textContent = Number(settings.minCutoff).toFixed(2);
+      vals.beta.textContent = Number(settings.beta).toFixed(3);
+      vals.dwellMs.textContent = Math.round(settings.dwellMs);
+      vals.dwellRadius.textContent = Math.round(settings.dwellRadius);
+      vals.longBlinkMs.textContent = Math.round(settings.longBlinkMs);
+      vals.dblWindowMs.textContent = Math.round(settings.dblWindowMs);
+      vals.clickCooldownMs.textContent = Math.round(settings.clickCooldownMs);
+      vals.blinkQualityGate.textContent = `${Math.round(settings.blinkQualityGate)}%`;
+      vals.gameTimeSec.textContent = `${Math.round(settings.gameTimeSec)}s`;
+      vals.gameDifficulty.textContent = `${Math.round(settings.gameDifficulty)}`;
+    }
+
+    function setUIFromSettings(){
+      inputs.maxSpeed.value = settings.maxSpeed;
+      inputs.sensitivity.value = settings.sensitivity;
+      inputs.pushOut.value = settings.pushOut;
+      inputs.assist.value = settings.assist;
+      inputs.deadzone.value = settings.deadzone;
+      inputs.minCutoff.value = settings.minCutoff;
+      inputs.beta.value = settings.beta;
+
+      inputs.invertX.checked = !!settings.invertX;
+      inputs.invertY.checked = !!settings.invertY;
+
+      inputs.dwellClick.checked = settings.dwellClick;
+      inputs.blinkClick.checked = settings.blinkClick;
+      inputs.dwellMs.value = settings.dwellMs;
+      inputs.dwellRadius.value = settings.dwellRadius;
+
+      inputs.longBlinkMs.value = settings.longBlinkMs;
+      inputs.dblWindowMs.value = settings.dblWindowMs;
+      inputs.clickCooldownMs.value = settings.clickCooldownMs;
+
+      inputs.blinkQualityGate.value = settings.blinkQualityGate;
+      document.querySelectorAll('input[name="blinkMode"]').forEach(r => r.checked = (r.value === settings.blinkMode));
+
+      inputs.showPreview.checked = settings.showPreview;
+      inputs.fullPreview.checked = !!settings.fullPreview;
+      inputs.debugDraw.checked = settings.debugDraw;
+      previewWrap.style.display = settings.showPreview ? "block" : "none";
+      updatePreviewLayout();
+
+      inputs.gameHaptics.checked = !!settings.gameHaptics;
+      inputs.gameFX.checked = !!settings.gameFX;
+      inputs.gameTimeSec.value = settings.gameTimeSec;
+      inputs.gameDifficulty.value = settings.gameDifficulty;
+
+      hud.classList.toggle("collapsed", !!settings.hudCollapsed);
+      collapseBtn.textContent = settings.hudCollapsed ? "Expand" : "Collapse";
+
+      gameBtn.textContent = settings.gameEnabled ? "Game ON" : "Game OFF";
+      gamePill.textContent = `GAME: ${settings.gameEnabled ? "ON" : "OFF"}`;
+
+      updateValueLabels();
+    }
+
+    function bindRange(key, parser=Number){
+      inputs[key].addEventListener("input", () => {
+        settings[key] = parser(inputs[key].value);
+        updateValueLabels();
+        saveSettings();
+      });
+    }
+
+    [
+      "maxSpeed","sensitivity","pushOut","assist","deadzone","minCutoff","beta",
+      "dwellMs","dwellRadius","longBlinkMs","dblWindowMs","clickCooldownMs",
+      "blinkQualityGate","gameTimeSec","gameDifficulty"
+    ].forEach(k => bindRange(k));
+
+    inputs.invertX.addEventListener("change", () => { settings.invertX = inputs.invertX.checked; saveSettings(); });
+    inputs.invertY.addEventListener("change", () => { settings.invertY = inputs.invertY.checked; saveSettings(); });
+
+    inputs.dwellClick.addEventListener("change", () => { settings.dwellClick = inputs.dwellClick.checked; saveSettings(); });
+    inputs.blinkClick.addEventListener("change", () => { settings.blinkClick = inputs.blinkClick.checked; saveSettings(); });
+
+    document.querySelectorAll('input[name="blinkMode"]').forEach(r => {
+      r.addEventListener("change", () => {
+        settings.blinkMode = document.querySelector('input[name="blinkMode"]:checked').value;
+        saveSettings();
+      });
+    });
+
+    inputs.showPreview.addEventListener("change", () => {
+      settings.showPreview = inputs.showPreview.checked;
+      previewWrap.style.display = settings.showPreview ? "block" : "none";
+      saveSettings();
+    });
+
+    inputs.fullPreview.addEventListener("change", () => {
+      settings.fullPreview = inputs.fullPreview.checked;
+      updatePreviewLayout();
+      saveSettings();
+    });
+
+    inputs.debugDraw.addEventListener("change", () => { settings.debugDraw = inputs.debugDraw.checked; saveSettings(); });
+
+    inputs.gameHaptics.addEventListener("change", () => { settings.gameHaptics = inputs.gameHaptics.checked; saveSettings(); });
+    inputs.gameFX.addEventListener("change", () => { settings.gameFX = inputs.gameFX.checked; saveSettings(); });
+
+    collapseBtn.addEventListener("click", () => {
+      settings.hudCollapsed = !settings.hudCollapsed;
+      hud.classList.toggle("collapsed", !!settings.hudCollapsed);
+      collapseBtn.textContent = settings.hudCollapsed ? "Expand" : "Collapse";
+      saveSettings();
+    });
+
+    exportBtn.addEventListener("click", () => {
+      const blob = new Blob([JSON.stringify(settings, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "laser_eyes_settings.json";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    });
+    importBtn.addEventListener("click", () => fileImport.click());
+    fileImport.addEventListener("change", async () => {
+      const file = fileImport.files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const parsed = JSON.parse(text);
+        settings = { ...structuredClone(DEFAULTS), ...parsed };
+        settings.sensitivity = clamp(Number(settings.sensitivity ?? DEFAULTS.sensitivity), 0.60, 2.60);
+        settings.pushOut = clamp(Number(settings.pushOut ?? DEFAULTS.pushOut), 0, 1.25);
+        settings.blinkQualityGate = clamp(Number(settings.blinkQualityGate ?? DEFAULTS.blinkQualityGate), 0, 100);
+        settings.gameTimeSec = clamp(Number(settings.gameTimeSec ?? DEFAULTS.gameTimeSec), 30, 180);
+        settings.gameDifficulty = clamp(Number(settings.gameDifficulty ?? DEFAULTS.gameDifficulty), 1, 5);
+        saveSettings();
+        setUIFromSettings();
+        toast("Imported settings.");
+      } catch (e) {
+        toast(`Import failed: ${e?.message || e}`, 3200);
+      } finally {
+        fileImport.value = "";
+      }
+    });
+
+    setUIFromSettings();
+
+    /**********************
+     * Cursor + click dispatch (game-aware)
+     **********************/
+    let cursorX = window.innerWidth / 2;
+    let cursorY = window.innerHeight / 2;
+    let vX = 0, vY = 0;
+
+    function renderCursor(){
+      cursorEl.style.left = `${cursorX}px`;
+      cursorEl.style.top  = `${cursorY}px`;
+    }
+
+    function resetCursor(){
+      cursorX = window.innerWidth / 2;
+      cursorY = window.innerHeight / 2;
+      vX = 0; vY = 0;
+      stableAnchor = { x: cursorX, y: cursorY };
+      stableSince = null;
+      euroX.reset(); euroY.reset();
+      renderCursor();
+    }
+
+    function dispatchVirtualClick(x, y){
+      cursorEl.classList.add("clicking");
+      setTimeout(() => cursorEl.classList.remove("clicking"), 120);
+
+      if (game.active) {
+        // In-game: dwell click becomes shield burst (no DOM click).
+        game.activateShieldBurst();
+        return;
+      }
+
+      // Outside game: normal UI click + training hit
+      trainer.onClick(x, y);
+      const el = document.elementFromPoint(x, y);
+      if (!el) return;
+      const opts = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y };
+      el.dispatchEvent(new MouseEvent("mousedown", opts));
+      el.dispatchEvent(new MouseEvent("mouseup", opts));
+      el.dispatchEvent(new MouseEvent("click", opts));
+    }
+
+    /**********************
+     * Dwell click logic
+     **********************/
+    let stableAnchor = { x: cursorX, y: cursorY };
+    let stableSince = null;
+    let lastDwellClickAt = 0;
+
+    function updateDwellClick(now){
+      if (!settings.dwellClick || trainer.blockDwell) return;
+      if (game.active && game.isOverheated) return;
+
+      const dx = cursorX - stableAnchor.x;
+      const dy = cursorY - stableAnchor.y;
+      const dist = Math.hypot(dx, dy);
+
+      if (dist <= settings.dwellRadius) {
+        if (stableSince === null) stableSince = now;
+
+        const cooldownMs = 700;
+        if ((now - stableSince) >= settings.dwellMs && (now - lastDwellClickAt) >= cooldownMs) {
+          lastDwellClickAt = now;
+          stableSince = null;
+          stableAnchor = { x: cursorX, y: cursorY };
+          dispatchVirtualClick(cursorX, cursorY);
+        }
+      } else {
+        stableAnchor = { x: cursorX, y: cursorY };
+        stableSince = null;
+      }
+    }
+
+    /**********************
+     * FaceMesh helpers
+     **********************/
+    const RIGHT_EYE = [33, 160, 158, 133, 153, 144];
+    const LEFT_EYE  = [362, 385, 387, 263, 373, 380];
+
+    function dist2D(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+    function earForEye(lm, idx){
+      const p1 = lm[idx[0]], p2 = lm[idx[1]], p3 = lm[idx[2]];
+      const p4 = lm[idx[3]], p5 = lm[idx[4]], p6 = lm[idx[5]];
+      const num = dist2D(p2,p6) + dist2D(p3,p5);
+      const den = 2*dist2D(p1,p4) + 1e-6;
+      return num / den;
+    }
+    function ratioInEye(iris, cornerA, cornerB, lidTop, lidBot){
+      const xMin = Math.min(cornerA.x, cornerB.x);
+      const xMax = Math.max(cornerA.x, cornerB.x);
+      const yMin = Math.min(lidTop.y, lidBot.y);
+      const yMax = Math.max(lidTop.y, lidBot.y);
+      const rx = (iris.x - xMin) / (xMax - xMin + 1e-6);
+      const ry = (iris.y - yMin) / (yMax - yMin + 1e-6);
+      return { rx: clamp(rx, 0, 1), ry: clamp(ry, 0, 1) };
+    }
+
+    /**********************
+     * Scan quality gating
+     **********************/
+    const rxBuf = [];
+    const ryBuf = [];
+    const earBuf = [];
+    const BUF_MAX = 30;
+
+    function pushBuf(buf, v){
+      buf.push(v);
+      if (buf.length > BUF_MAX) buf.shift();
+    }
+
+    function computeScanQuality(hasFace, rx, ry, ear){
+      if (!hasFace) return { q: 0, reason: "No face" };
+      if (!Number.isFinite(rx) || !Number.isFinite(ry)) return { q: 0, reason: "No iris" };
+      pushBuf(rxBuf, rx);
+      pushBuf(ryBuf, ry);
+      if (Number.isFinite(ear)) pushBuf(earBuf, ear);
+
+      const srx = stddev(rxBuf);
+      const sry = stddev(ryBuf);
+      const qx = clamp(1 - (srx / 0.020), 0, 1);
+      const qy = clamp(1 - (sry / 0.025), 0, 1);
+      const q = Math.round(100 * (0.55*qx + 0.45*qy));
+
+      let reason = "Stable";
+      if (q < 35) reason = "Unstable (head/lighting)";
+      else if (q < 70) reason = "Improving (hold steady)";
+      return { q, reason };
+    }
+
+    function updateQualityUI(qInfo){
+      qualityBar.style.width = `${qInfo.q}%`;
+      qualityText.textContent = `Quality: ${qInfo.q}% — ${qInfo.reason}`;
+      if (qualityMini) qualityMini.textContent = `Q: ${qInfo.q}%`;
+    }
+
+    function isStableForCapture(qInfo){ return qInfo.q >= 78; }
+
+    /**********************
+     * Calibration model (poly2)
+     **********************/
+    function features(rx, ry){ return [1, rx, ry, rx*ry, rx*rx, ry*ry]; }
+
+    function solveLeastSquares(A, b){
+      const N = A.length;
+      const M = A[0].length;
+      const AtA = Array.from({length:M}, ()=>Array(M).fill(0));
+      const Atb = Array(M).fill(0);
+
+      for (let i=0;i<N;i++){
+        const row = A[i];
+        for (let r=0;r<M;r++){
+          Atb[r] += row[r] * b[i];
+          for (let c=0;c<M;c++){
+            AtA[r][c] += row[r] * row[c];
+          }
+        }
+      }
+
+      const aug = AtA.map((row, i) => [...row, Atb[i]]);
+      for (let col=0; col<M; col++){
+        let pivot = col;
+        for (let r=col+1; r<M; r++){
+          if (Math.abs(aug[r][col]) > Math.abs(aug[pivot][col])) pivot = r;
+        }
+        if (Math.abs(aug[pivot][col]) < 1e-10) return null;
+        [aug[col], aug[pivot]] = [aug[pivot], aug[col]];
+
+        const div = aug[col][col];
+        for (let c=col; c<=M; c++) aug[col][c] /= div;
+
+        for (let r=0; r<M; r++){
+          if (r === col) continue;
+          const factor = aug[r][col];
+          for (let c=col; c<=M; c++){
+            aug[r][c] -= factor * aug[col][c];
+          }
+        }
+      }
+      return aug.map(r => r[M]);
+    }
+
+    function fitCalibration(samples){
+      const A = samples.map(s => features(s.rx, s.ry));
+      const bx = samples.map(s => s.nx);
+      const by = samples.map(s => s.ny);
+      const cx = solveLeastSquares(A, bx);
+      const cy = solveLeastSquares(A, by);
+      if (!cx || !cy) return null;
+
+      const errs = samples.map(s => {
+        const f = features(s.rx, s.ry);
+        const nx = f.reduce((acc,v,i)=>acc + v*cx[i], 0);
+        const ny = f.reduce((acc,v,i)=>acc + v*cy[i], 0);
+        const px = nx * window.innerWidth;
+        const py = ny * window.innerHeight;
+        return Math.hypot(px - s.txPx, py - s.tyPx);
+      });
+      const rmse = Math.sqrt(errs.reduce((a,e)=>a+e*e,0) / Math.max(1, errs.length));
+      return { type: "poly2", cx, cy, rmsePx: rmse, createdAt: new Date().toISOString() };
+    }
+
+    function applyCalibration(rx, ry){
+      if (!settings.gazeCal || settings.gazeCal.type !== "poly2") {
+        return { nx: clamp(rx, 0, 1), ny: clamp(ry, 0, 1), source: "raw" };
+      }
+      const cal = settings.gazeCal;
+      const f = features(rx, ry);
+      const nx = f.reduce((acc,v,i)=>acc + v*cal.cx[i], 0);
+      const ny = f.reduce((acc,v,i)=>acc + v*cal.cy[i], 0);
+      return { nx: clamp(nx, 0, 1), ny: clamp(ny, 0, 1), source: "cal" };
+    }
+
+    /**********************
+     * Movement (invert + push-out)
+     **********************/
+    const euroX = new OneEuro(settings.minCutoff, settings.beta);
+    const euroY = new OneEuro(settings.minCutoff, settings.beta);
+
+    function softDeadzone(v, dz){
+      const av = Math.abs(v);
+      if (av <= dz){
+        const t = av / Math.max(1e-6, dz);
+        const atten = t*t*t * 0.12;
+        return Math.sign(v) * atten;
+      }
+      const scaled = (av - dz) / (1 - dz);
+      const s = scaled*scaled*(3 - 2*scaled);
+      return Math.sign(v) * clamp(s, 0, 1);
+    }
+
+    function applyMovement(nx, ny, dt, tNowMs){
+      euroX.setParams(settings.minCutoff, settings.beta);
+      euroY.setParams(settings.minCutoff, settings.beta);
+      const tSec = tNowMs / 1000;
+
+      let fx = euroX.filter(nx, tSec);
+      let fy = euroY.filter(ny, tSec);
+
+      if (settings.invertX) fx = 1 - fx;
+      if (settings.invertY) fy = 1 - fy;
+
+      const stretch = 1 + (settings.pushOut ?? 0);
+      const fxPush = clamp(0.5 + (fx - 0.5) * stretch, 0, 1);
+      const fyPush = clamp(0.5 + (fy - 0.5) * stretch, 0, 1);
+
+      let ix = (fxPush - 0.5) * 2;
+      let iy = (fyPush - 0.5) * 2;
+
+      const gain = clamp(Number(settings.sensitivity ?? 1.0), 0.60, 2.60);
+      ix = clamp(ix * gain, -1, 1);
+      iy = clamp(iy * gain, -1, 1);
+
+      ix = softDeadzone(ix, settings.deadzone);
+      iy = softDeadzone(iy, settings.deadzone);
+
+      const exp = 1.55;
+      const sx = Math.pow(Math.abs(ix), exp);
+      const sy = Math.pow(Math.abs(iy), exp);
+
+      const maxSp = settings.maxSpeed;
+      const vTargetX = Math.sign(ix) * sx * maxSp;
+      const vTargetY = Math.sign(iy) * sy * maxSp;
+
+      const inertia = 0.62;
+      const blend = 1 - inertia;
+      vX = lerp(vX, vTargetX, blend);
+      vY = lerp(vY, vTargetY, blend);
+
+      const inputMag = Math.hypot(ix, iy);
+      const stopness = clamp(1 - inputMag, 0, 1);
+      const friction = 2.1 + stopness * 9.0;
+      vX *= Math.exp(-friction * dt);
+      vY *= Math.exp(-friction * dt);
+
+      cursorX = clamp(cursorX + vX * dt, 0, window.innerWidth);
+      cursorY = clamp(cursorY + vY * dt, 0, window.innerHeight);
+
+      const speed = Math.hypot(vX, vY);
+      const speedNorm = clamp(speed / (maxSp + 1e-6), 0, 1);
+
+      const assistNow = settings.assist * (1 - speedNorm);
+      if (assistNow > 0.0001){
+        const px = fxPush * window.innerWidth;
+        const py = fyPush * window.innerHeight;
+        cursorX = lerp(cursorX, px, assistNow);
+        cursorY = lerp(cursorY, py, assistNow);
+      }
+
+      return { fx: fxPush, fy: fyPush, speedNorm, inputMag };
+    }
+
+    /**********************
+     * Game: Laser Eyes Shooter (SVG entities + heat/smoke + overheat)
+     **********************/
+    const SVGS = {
+      player: `
+        <svg xmlns="http://www.w3.org/2000/svg" width="140" height="140" viewBox="0 0 140 140">
+          <defs>
+            <radialGradient id="g" cx="50%" cy="40%" r="70%">
+              <stop offset="0%" stop-color="#ffffff" stop-opacity="0.22"/>
+              <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+          <circle cx="70" cy="70" r="55" fill="rgba(255,255,255,0.10)" stroke="rgba(255,255,255,0.45)" stroke-width="3"/>
+          <circle cx="70" cy="70" r="56" fill="url(#g)"/>
+          <ellipse cx="52" cy="62" rx="16" ry="12" fill="rgba(255,255,255,0.10)" stroke="rgba(255,255,255,0.35)" stroke-width="2"/>
+          <ellipse cx="88" cy="62" rx="16" ry="12" fill="rgba(255,255,255,0.10)" stroke="rgba(255,255,255,0.35)" stroke-width="2"/>
+          <circle cx="52" cy="62" r="4" fill="rgba(70,255,220,0.90)"/>
+          <circle cx="88" cy="62" r="4" fill="rgba(70,255,220,0.90)"/>
+          <path d="M50 95 Q70 110 90 95" fill="none" stroke="rgba(255,70,235,0.55)" stroke-width="4" stroke-linecap="round"/>
+        </svg>
+      `,
+      drone: `
+        <svg xmlns="http://www.w3.org/2000/svg" width="120" height="90" viewBox="0 0 120 90">
+          <rect x="20" y="22" width="80" height="46" rx="14" fill="rgba(255,255,255,0.10)" stroke="rgba(255,255,255,0.40)" stroke-width="3"/>
+          <circle cx="40" cy="45" r="9" fill="rgba(255,70,235,0.25)" stroke="rgba(255,70,235,0.75)" stroke-width="2"/>
+          <circle cx="80" cy="45" r="9" fill="rgba(70,255,220,0.25)" stroke="rgba(70,255,220,0.75)" stroke-width="2"/>
+          <path d="M12 28 L26 18 L30 24 L18 34 Z" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.25)" stroke-width="2"/>
+          <path d="M108 28 L94 18 L90 24 L102 34 Z" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.25)" stroke-width="2"/>
+        </svg>
+      `,
+      asteroid: `
+        <svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120">
+          <path d="M60 10
+                   C80 14 104 24 110 48
+                   C116 72 104 96 80 108
+                   C56 120 32 114 16 94
+                   C0 74 6 48 20 30
+                   C34 12 44 8 60 10 Z"
+                fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.40)" stroke-width="3"/>
+          <circle cx="45" cy="52" r="8" fill="rgba(0,0,0,0.20)" />
+          <circle cx="72" cy="70" r="10" fill="rgba(0,0,0,0.18)" />
+          <circle cx="78" cy="40" r="6" fill="rgba(0,0,0,0.15)" />
+        </svg>
+      `,
+      ammo: `
+        <svg xmlns="http://www.w3.org/2000/svg" width="90" height="90" viewBox="0 0 90 90">
+          <circle cx="45" cy="45" r="34" fill="rgba(70,255,220,0.10)" stroke="rgba(70,255,220,0.70)" stroke-width="3"/>
+          <path d="M30 50 L60 50" stroke="rgba(70,255,220,0.85)" stroke-width="6" stroke-linecap="round"/>
+          <path d="M45 35 L45 65" stroke="rgba(255,70,235,0.75)" stroke-width="6" stroke-linecap="round"/>
+        </svg>
+      `,
+      shield: `
+        <svg xmlns="http://www.w3.org/2000/svg" width="90" height="90" viewBox="0 0 90 90">
+          <path d="M45 10 L70 20 V42 C70 62 58 75 45 82 C32 75 20 62 20 42 V20 Z"
+                fill="rgba(120,140,255,0.10)" stroke="rgba(120,140,255,0.75)" stroke-width="3"/>
+          <path d="M45 18 V75" stroke="rgba(255,255,255,0.25)" stroke-width="2"/>
+        </svg>
+      `
+    };
+
+    const game = {
+      active: false,
+      assetsReady: false,
+      imgs: {},
+      timeLeft: 0,
+      score: 0,
+      health: 100,
+      shield: 100,          // meter
+      shieldActive: false,
+      shieldBurstTime: 0,
+      ammo: 120,
+      heat: 0,              // 0..1
+      overheatedUntil: 0,
+      beamActive: false,
+      beamEngagedAt: 0,
+      targetLock: null,     // {id, hp}
+      enemies: [],
+      pickups: [],
+      particles: [],
+      shake: 0,
+      lastSpawnAt: 0,
+      lastPickupAt: 0,
+      idSeq: 1,
+      lastHudLine: "",
+
+      get isOverheated(){ return nowMs() < this.overheatedUntil; },
+
+      async ensureAssets(){
+        if (this.assetsReady) return;
+        const entries = Object.entries(SVGS);
+        for (const [k, svg] of entries){
+          this.imgs[k] = await loadSvgImage(svg);
+        }
+        this.assetsReady = true;
+      },
+
+      start(){
+        this.active = true;
+        this.timeLeft = Number(settings.gameTimeSec) || 75;
+        this.score = 0;
+        this.health = 100;
+        this.shield = 100;
+        this.shieldActive = false;
+        this.shieldBurstTime = 0;
+        this.ammo = 120;
+        this.heat = 0;
+        this.overheatedUntil = 0;
+        this.beamActive = false;
+        this.beamEngagedAt = 0;
+        this.targetLock = null;
+        this.enemies = [];
+        this.pickups = [];
+        this.particles = [];
+        this.shake = 0;
+        this.lastSpawnAt = nowMs();
+        this.lastPickupAt = nowMs();
+        this.idSeq = 1;
+
+        trainer.reset();
+        toast("GAME ON: Aim with eyes. Single blink = 1 damage shot. Hold blink = cutting beam. Dwell-click = shield burst.", 4200);
+      },
+
+      stop(){
+        this.active = false;
+        this.beamActive = false;
+        this.targetLock = null;
+        this.enemies = [];
+        this.pickups = [];
+        this.particles = [];
+        this.shake = 0;
+        toast("GAME OFF.", 1800);
+      },
+
+      // single blink pulse shot (1 damage)
+      pulseShot(){
+        if (!this.active) return;
+        const t = nowMs();
+
+        if (this.isOverheated){
+          this.fxOverheatDeny();
+          return;
+        }
+        if (this.ammo <= 0){
+          this.fxDryFire();
+          return;
+        }
+
+        this.ammo -= 1;
+        this.addHeat(0.06);
+        this.fxPulse(t);
+
+        // damage enemy under cursor (small radius)
+        const hit = this.pickEnemyAt(cursorX, cursorY, 38);
+        if (hit){
+          this.damageEnemy(hit, 1, "pulse");
+          this.targetLock = { id: hit.id, hp: hit.hp };
+        } else {
+          this.targetLock = null;
+        }
+      },
+
+      setBeamOn(on){
+        if (!this.active) return;
+        if (on){
+          if (this.isOverheated) return;
+          if (this.ammo <= 0) return;
+          if (!this.beamActive){
+            this.beamActive = true;
+            this.beamEngagedAt = nowMs();
+            this.fxBeamStart();
+          }
+        } else {
+          if (this.beamActive){
+            this.beamActive = false;
+            this.fxBeamStop();
+          }
+        }
+      },
+
+      activateShieldBurst(){
+        if (!this.active) return;
+        if (this.shield <= 10) {
+          toast("Shield too low.", 900);
+          return;
+        }
+        this.shieldActive = true;
+        this.shieldBurstTime = 1.1; // seconds
+        this.shake = Math.max(this.shake, 0.35);
+        if (settings.gameHaptics && navigator.vibrate) navigator.vibrate([18, 24, 18]);
+        for (let i=0;i<26;i++){
+          this.particles.push(this.makeParticle(cursorX, cursorY, "spark"));
+        }
+      },
+
+      pickEnemyAt(x, y, r){
+        let best = null;
+        let bestD = Infinity;
+        for (const e of this.enemies){
+          const d = Math.hypot(x - e.x, y - e.y);
+          if (d <= r + e.radius && d < bestD){
+            best = e; bestD = d;
+          }
+        }
+        return best;
+      },
+
+      damageEnemy(e, dmg, src){
+        e.hp -= dmg;
+        e.hitFlash = 0.12;
+        this.score += Math.max(1, Math.floor(dmg));
+        for (let i=0;i<10;i++) this.particles.push(this.makeParticle(e.x, e.y, src === "beam" ? "smoke" : "spark"));
+
+        // "laser cuts": if asteroid big and beam/pulse reduces hp, split once
+        if (e.kind === "asteroid" && !e.split && e.hp <= Math.max(1, e.maxHp * 0.55)){
+          e.split = true;
+          const fragCount = 2;
+          for (let i=0;i<fragCount;i++){
+            this.enemies.push(this.makeEnemy("asteroid_frag", e.x + (i? 10 : -10), e.y, e.vx + (i? 80 : -80), e.vy, e.size * 0.72));
+          }
+        }
+
+        if (e.hp <= 0){
+          e.dead = true;
+          this.score += e.kind === "drone" ? 10 : 7;
+          this.shake = Math.max(this.shake, 0.22);
+          for (let i=0;i<26;i++) this.particles.push(this.makeParticle(e.x, e.y, "boom"));
+          // chance drop
+          const dropRoll = Math.random();
+          if (dropRoll < 0.12) this.pickups.push(this.makePickup("ammo", e.x, e.y));
+          else if (dropRoll < 0.18) this.pickups.push(this.makePickup("shield", e.x, e.y));
+        }
+      },
+
+      addHeat(amount){
+        this.heat = clamp(this.heat + amount, 0, 1);
+        if (this.heat >= 1){
+          this.triggerOverheat();
+        }
+      },
+
+      cool(dt){
+        const coolRate = this.beamActive ? 0.07 : 0.22;
+        this.heat = clamp(this.heat - coolRate * dt, 0, 1);
+      },
+
+      triggerOverheat(){
+        const t = nowMs();
+        this.overheatedUntil = t + 1800;
+        this.beamActive = false;
+        this.shake = Math.max(this.shake, 0.55);
+        if (settings.gameHaptics && navigator.vibrate) navigator.vibrate([35, 45, 35, 55, 35]);
+        toast("OVERHEAT. Cooling…", 1400);
+        // heavy smoke burst
+        for (let i=0;i<60;i++) this.particles.push(this.makeParticle(cursorX, cursorY, "smoke_heavy"));
+      },
+
+      fxPulse(t){
+        if (settings.gameHaptics && navigator.vibrate) navigator.vibrate(16);
+        this.shake = Math.max(this.shake, 0.10);
+      },
+      fxDryFire(){
+        if (settings.gameHaptics && navigator.vibrate) navigator.vibrate([12, 24, 12]);
+        toast("Out of ammo.", 900);
+      },
+      fxOverheatDeny(){
+        if (settings.gameHaptics && navigator.vibrate) navigator.vibrate([10, 50, 10]);
+      },
+      fxBeamStart(){
+        if (settings.gameHaptics && navigator.vibrate) navigator.vibrate([14, 14, 14]);
+      },
+      fxBeamStop(){ /* no-op */ },
+
+      makeEnemy(kind, x, y, vx, vy, size){
+        const diff = Number(settings.gameDifficulty) || 2;
+        const baseHp = kind === "drone" ? (3 + diff) : (4 + diff*2);
+        const hp = kind === "asteroid_frag" ? Math.max(2, Math.floor(baseHp * 0.55)) : baseHp;
+        const r = kind === "drone" ? 26 : (kind === "asteroid_frag" ? 20 : 32);
+        return {
+          id: this.idSeq++,
+          kind,
+          x, y,
+          vx, vy,
+          hp,
+          maxHp: hp,
+          radius: r,
+          size: size ?? 1,
+          hitFlash: 0,
+          split: false,
+          dead: false
+        };
+      },
+
+      makePickup(type, x, y){
+        return {
+          id: this.idSeq++,
+          type,
+          x, y,
+          vy: 140 + Math.random()*80,
+          radius: 22,
+          t: 0,
+          dead: false
+        };
+      },
+
+      spawnEnemy(){
+        const t = nowMs();
+        const diff = Number(settings.gameDifficulty) || 2;
+
+        const w = gameCanvas.width, h = gameCanvas.height;
+        const x = 80 + Math.random()*(w - 160);
+        const y = -50;
+
+        // mix drones + asteroids
+        const r = Math.random();
+        const kind = (r < (0.55 - diff*0.06)) ? "asteroid" : "drone";
+
+        const vy = 140 + diff*40 + Math.random()*80;
+        const vx = (Math.random()*2 - 1) * (40 + diff*20);
+
+        const size = kind === "asteroid" ? (0.9 + Math.random()*0.5) : (0.95 + Math.random()*0.3);
+        this.enemies.push(this.makeEnemy(kind, x, y, vx, vy, size));
+
+        this.lastSpawnAt = t;
+      },
+
+      spawnPickup(){
+        const w = gameCanvas.width;
+        const x = 90 + Math.random()*(w - 180);
+        const y = -40;
+        const type = Math.random() < 0.62 ? "ammo" : "shield";
+        this.pickups.push(this.makePickup(type, x, y));
+        this.lastPickupAt = nowMs();
+      },
+
+      makeParticle(x, y, kind){
+        const a = Math.random()*Math.PI*2;
+        const sp = (kind === "smoke_heavy" ? 160 : kind === "smoke" ? 120 : 220) * (0.35 + Math.random());
+        const vx = Math.cos(a)*sp;
+        const vy = Math.sin(a)*sp - (kind.startsWith("smoke") ? 110 : 0);
+        const life = kind === "boom" ? (0.45 + Math.random()*0.35) :
+                     kind.startsWith("smoke") ? (0.85 + Math.random()*0.75) :
+                     (0.35 + Math.random()*0.25);
+        return { x, y, vx, vy, life, t: 0, kind, size: 2 + Math.random()*6 };
+      },
+
+      update(dt){
+        if (!this.active) return;
+
+        // timer
+        this.timeLeft -= dt;
+        if (this.timeLeft <= 0){
+          this.timeLeft = 0;
+          this.endRun("TIME");
+          return;
+        }
+
+        // shield burst
+        if (this.shieldActive){
+          this.shieldBurstTime -= dt;
+          this.shield = clamp(this.shield - (42 * dt), 0, 100);
+          if (this.shieldBurstTime <= 0 || this.shield <= 0){
+            this.shieldActive = false;
+            this.shieldBurstTime = 0;
+          }
+        } else {
+          // recharge slowly
+          this.shield = clamp(this.shield + (10 * dt), 0, 100);
+        }
+
+        // overheat cooling
+        this.cool(dt);
+
+        // beam: continuous damage + heat + smoke + ammo drain
+        if (this.beamActive){
+          if (this.isOverheated || this.ammo <= 0){
+            this.setBeamOn(false);
+          } else {
+            // ammo drain (beam)
+            const drain = 22 * dt; // ammo per second
+            if (this.ammo <= 0.001) {
+              this.ammo = 0;
+              this.setBeamOn(false);
+            } else {
+              this.ammo = Math.max(0, this.ammo - drain);
+              this.addHeat(0.55 * dt);
+
+              // damage along beam segment (player -> cursor)
+              const p = this.playerPos();
+              const bx1 = p.x, by1 = p.y;
+              const bx2 = cursorX, by2 = cursorY;
+              const beamW = 18;
+              for (const e of this.enemies){
+                if (e.dead) continue;
+                const d = distPointToSegment(e.x, e.y, bx1, by1, bx2, by2);
+                if (d <= beamW + e.radius*0.15){
+                  this.damageEnemy(e, 6.5 * dt, "beam");
+                  this.targetLock = { id: e.id, hp: e.hp };
+                }
+              }
+
+              // smoke trail
+              if (settings.gameFX){
+                for (let i=0;i<2;i++){
+                  const t = Math.random();
+                  const sx = lerp(bx1, bx2, t);
+                  const sy = lerp(by1, by2, t);
+                  this.particles.push(this.makeParticle(sx, sy, "smoke"));
+                }
+              }
+
+              // subtle constant vibration while holding
+              if (settings.gameHaptics && navigator.vibrate){
+                // lightweight keepalive pulse; browsers cap it anyway
+                navigator.vibrate(8);
+              }
+            }
+          }
+        }
+
+        // spawn pacing
+        const t = nowMs();
+        const diff = Number(settings.gameDifficulty) || 2;
+        const baseSpawn = 850 - diff*110;           // ms
+        const accel = clamp((1 - this.timeLeft/(settings.gameTimeSec||75)) * 260, 0, 260);
+        const spawnEvery = Math.max(360, baseSpawn - accel);
+
+        if (t - this.lastSpawnAt >= spawnEvery){
+          this.spawnEnemy();
+        }
+
+        const pickupEvery = Math.max(2200, 3800 - diff*250);
+        if (t - this.lastPickupAt >= pickupEvery){
+          this.spawnPickup();
+        }
+
+        // update enemies
+        const w = gameCanvas.width, h = gameCanvas.height;
+        const ppos = this.playerPos();
+        for (const e of this.enemies){
+          if (e.dead) continue;
+          e.x += e.vx * dt;
+          e.y += e.vy * dt;
+
+          // drift bounds
+          if (e.x < 40){ e.x = 40; e.vx *= -0.8; }
+          if (e.x > w-40){ e.x = w-40; e.vx *= -0.8; }
+
+          // hit flash decay
+          e.hitFlash = Math.max(0, e.hitFlash - dt);
+
+          // reach bottom / collide with player => damage
+          const dToPlayer = Math.hypot(e.x - ppos.x, e.y - ppos.y);
+          if (dToPlayer <= (e.radius + 44)){
+            e.dead = true;
+            this.takeDamage(e.kind === "drone" ? 10 : 14);
+            for (let i=0;i<34;i++) this.particles.push(this.makeParticle(ppos.x, ppos.y, "boom"));
+            this.shake = Math.max(this.shake, 0.35);
+          } else if (e.y > h + 80){
+            e.dead = true;
+            this.takeDamage(e.kind === "drone" ? 6 : 9);
+          }
+        }
+
+        // pickups
+        for (const pk of this.pickups){
+          if (pk.dead) continue;
+          pk.t += dt;
+          pk.y += pk.vy * dt;
+          // floaty
+          pk.x += Math.sin((pk.t*2.6) + pk.id) * 22 * dt;
+
+          const d = Math.hypot(pk.x - cursorX, pk.y - cursorY);
+          if (d <= (pk.radius + 24)){
+            pk.dead = true;
+            if (pk.type === "ammo"){
+              this.ammo = Math.min(220, this.ammo + 45);
+              toast("+AMMO", 650);
+              if (settings.gameHaptics && navigator.vibrate) navigator.vibrate(12);
+            } else {
+              this.shield = Math.min(100, this.shield + 45);
+              toast("+SHIELD", 650);
+              if (settings.gameHaptics && navigator.vibrate) navigator.vibrate([10, 10, 10]);
+            }
+          } else if (pk.y > h + 80){
+            pk.dead = true;
+          }
+        }
+
+        // particles
+        for (const pt of this.particles){
+          pt.t += dt;
+          pt.x += pt.vx * dt;
+          pt.y += pt.vy * dt;
+
+          // smoke rises and spreads
+          if (pt.kind.startsWith("smoke")){
+            pt.vx *= Math.exp(-0.6*dt);
+            pt.vy *= Math.exp(-0.35*dt);
+            pt.vy -= 28*dt;
+          } else {
+            pt.vx *= Math.exp(-1.1*dt);
+            pt.vy *= Math.exp(-1.1*dt);
+          }
+        }
+
+        // cleanup
+        this.enemies = this.enemies.filter(e => !e.dead);
+        this.pickups = this.pickups.filter(p => !p.dead);
+        this.particles = this.particles.filter(p => p.t < p.life);
+
+        // shake decay
+        this.shake = Math.max(0, this.shake - 0.9*dt);
+
+        // update target lock HP display
+        if (this.targetLock){
+          const found = this.enemies.find(e => e.id === this.targetLock.id);
+          if (found) this.targetLock.hp = found.hp;
+          else this.targetLock = null;
+        }
+
+        if (this.health <= 0){
+          this.endRun("HP");
+          return;
+        }
+      },
+
+      takeDamage(amount){
+        if (this.shieldActive && this.shield > 0){
+          // shield absorbs a lot
+          const absorb = Math.min(amount * 0.75, this.shield * 0.35);
+          this.shield = clamp(this.shield - absorb, 0, 100);
+          amount = amount - absorb*0.9;
+        }
+        this.health = Math.max(0, this.health - amount);
+        if (settings.gameHaptics && navigator.vibrate) navigator.vibrate([18, 28, 18]);
+      },
+
+      endRun(reason){
+        this.active = false;
+        this.beamActive = false;
+        toast(`GAME OVER (${reason}). Score: ${Math.floor(this.score)}\nToggle Game to restart.`, 5200);
+      },
+
+      playerPos(){
+        // anchor player head at bottom center
+        return { x: gameCanvas.width * 0.5, y: gameCanvas.height * 0.86 };
+      },
+
+      draw(){
+        const w = gameCanvas.width, h = gameCanvas.height;
+        gctx.clearRect(0,0,w,h);
+
+        if (!this.active && !trainer.active) return;
+
+        // draw training OR game
+        if (trainer.active && !this.active){
+          trainer.draw();
+          return;
+        }
+
+        if (!this.active) return;
+
+        // shake transform
+        let sx = 0, sy = 0;
+        if (this.shake > 0){
+          sx = (Math.random()*2-1) * (8 * this.shake);
+          sy = (Math.random()*2-1) * (8 * this.shake);
+        }
+
+        gctx.save();
+        gctx.translate(sx, sy);
+
+        // background subtle haze
+        gctx.fillStyle = "rgba(0,0,0,0.12)";
+        gctx.fillRect(0,0,w,h);
+
+        // beam drawing (laser eyes)
+        const p = this.playerPos();
+        const beamOn = this.beamActive && !this.isOverheated && this.ammo > 0;
+        if (beamOn){
+          const grad = gctx.createLinearGradient(p.x, p.y, cursorX, cursorY);
+          grad.addColorStop(0, "rgba(255,70,235,0.30)");
+          grad.addColorStop(0.5, "rgba(255,255,255,0.20)");
+          grad.addColorStop(1, "rgba(70,255,220,0.24)");
+          gctx.strokeStyle = grad;
+          gctx.lineWidth = 14;
+          gctx.lineCap = "round";
+          gctx.beginPath();
+          gctx.moveTo(p.x-18, p.y-18);
+          gctx.lineTo(cursorX, cursorY);
+          gctx.stroke();
+
+          gctx.strokeStyle = "rgba(255,255,255,0.25)";
+          gctx.lineWidth = 3;
+          gctx.beginPath();
+          gctx.moveTo(p.x+18, p.y-18);
+          gctx.lineTo(cursorX, cursorY);
+          gctx.stroke();
+        }
+
+        // enemies
+        for (const e of this.enemies){
+          const img = e.kind === "drone" ? this.imgs.drone : this.imgs.asteroid;
+          const scale = (e.kind === "drone" ? 0.65 : 0.70) * (e.size ?? 1);
+          const iw = img.width * scale;
+          const ih = img.height * scale;
+
+          // hit flash outline
+          if (e.hitFlash > 0){
+            gctx.save();
+            gctx.globalAlpha = clamp(e.hitFlash/0.12, 0, 1);
+            gctx.strokeStyle = "rgba(255,255,255,0.35)";
+            gctx.lineWidth = 4;
+            gctx.beginPath();
+            gctx.arc(e.x, e.y, e.radius + 10, 0, Math.PI*2);
+            gctx.stroke();
+            gctx.restore();
+          }
+
+          gctx.drawImage(img, e.x - iw/2, e.y - ih/2, iw, ih);
+
+          // HP bar (this is the "menu HP" for enemies: single blink = 1 hp damage)
+          const hpFrac = clamp(e.hp / Math.max(1e-6, e.maxHp), 0, 1);
+          const barW = 56, barH = 6;
+          gctx.fillStyle = "rgba(255,255,255,0.12)";
+          gctx.fillRect(e.x - barW/2, e.y - e.radius - 18, barW, barH);
+          gctx.fillStyle = "rgba(255,70,235,0.45)";
+          gctx.fillRect(e.x - barW/2, e.y - e.radius - 18, barW * hpFrac, barH);
+          gctx.strokeStyle = "rgba(255,255,255,0.18)";
+          gctx.strokeRect(e.x - barW/2, e.y - e.radius - 18, barW, barH);
+        }
+
+        // pickups
+        for (const pk of this.pickups){
+          const img = pk.type === "ammo" ? this.imgs.ammo : this.imgs.shield;
+          const scale = 0.62;
+          const iw = img.width * scale;
+          const ih = img.height * scale;
+          gctx.drawImage(img, pk.x - iw/2, pk.y - ih/2, iw, ih);
+        }
+
+        // particles
+        for (const pt of this.particles){
+          const life = pt.life;
+          const a = clamp(1 - (pt.t / life), 0, 1);
+          if (pt.kind === "spark" || pt.kind === "boom"){
+            gctx.fillStyle = `rgba(255,255,255,${0.20*a})`;
+            gctx.beginPath();
+            gctx.arc(pt.x, pt.y, pt.size * (0.7 + (1-a)), 0, Math.PI*2);
+            gctx.fill();
+
+            gctx.fillStyle = `rgba(70,255,220,${0.10*a})`;
+            gctx.beginPath();
+            gctx.arc(pt.x, pt.y, pt.size * 1.6, 0, Math.PI*2);
+            gctx.fill();
+          } else { // smoke
+            const base = pt.kind === "smoke_heavy" ? 0.22 : 0.14;
+            gctx.fillStyle = `rgba(255,255,255,${base*a})`;
+            gctx.beginPath();
+            gctx.arc(pt.x, pt.y, pt.size * (1.4 + (1-a)*1.2), 0, Math.PI*2);
+            gctx.fill();
+          }
+        }
+
+        // player head SVG
+        const head = this.imgs.player;
+        const headScale = 0.82;
+        const hw = head.width * headScale;
+        const hh = head.height * headScale;
+        gctx.drawImage(head, p.x - hw/2, p.y - hh/2, hw, hh);
+
+        // shield visual
+        if (this.shieldActive){
+          gctx.save();
+          gctx.globalAlpha = 0.25 + 0.15*Math.sin(nowMs()*0.02);
+          gctx.strokeStyle = "rgba(120,140,255,0.55)";
+          gctx.lineWidth = 6;
+          gctx.beginPath();
+          gctx.arc(p.x, p.y, 86, 0, Math.PI*2);
+          gctx.stroke();
+          gctx.restore();
+        }
+
+        gctx.restore();
+
+        // HUD (in-canvas)
+        const heatPct = Math.round(this.heat * 100);
+        const timeS = Math.ceil(this.timeLeft);
+        const ammoI = Math.floor(this.ammo);
+        const hpI = Math.round(this.health);
+        const shI = Math.round(this.shield);
+
+        gctx.save();
+        gctx.font = "13px ui-monospace, Menlo, Monaco, 'Cascadia Mono', monospace";
+        gctx.fillStyle = "rgba(232,236,255,0.92)";
+        gctx.fillText(`SCORE ${Math.floor(this.score)}   TIME ${timeS}s   HP ${hpI}   SH ${shI}   AMMO ${ammoI}   HEAT ${heatPct}%${this.isOverheated?" (OVERHEAT)":""}`, 16, 22);
+
+        // target HP (menu info)
+        if (this.targetLock){
+          gctx.fillStyle = "rgba(255,255,255,0.90)";
+          gctx.fillText(`TARGET HP: ${Math.max(0, this.targetLock.hp).toFixed(1)}  (single blink = 1)`, 16, 42);
+        } else {
+          gctx.fillStyle = "rgba(255,255,255,0.72)";
+          gctx.fillText(`Aim at a drone/asteroid to display TARGET HP`, 16, 42);
+        }
+        gctx.restore();
+      }
+    };
+
+    function distPointToSegment(px, py, x1, y1, x2, y2){
+      const vx = x2 - x1, vy = y2 - y1;
+      const wx = px - x1, wy = py - y1;
+      const c1 = vx*wx + vy*wy;
+      if (c1 <= 0) return Math.hypot(px-x1, py-y1);
+      const c2 = vx*vx + vy*vy;
+      if (c2 <= c1) return Math.hypot(px-x2, py-y2);
+      const t = c1 / c2;
+      const projx = x1 + t*vx, projy = y1 + t*vy;
+      return Math.hypot(px-projx, py-projy);
+    }
+
+    /**********************
+     * Training (kept, but game overrides)
+     **********************/
+    const trainer = {
+      active: false,
+      step: 0,
+      score: 0,
+      streak: 0,
+      startTime: 0,
+      targets: [],
+      mode: "none",
+      blockBlink: false,
+      blockDwell: false,
+      paused: false,
+
+      pauseChallenges(flag){ this.paused = flag; },
+
+      reset(){
+        this.active = false;
+        this.step = 0;
+        this.score = 0;
+        this.streak = 0;
+        this.targets = [];
+        this.mode = "none";
+        this.blockBlink = false;
+        this.blockDwell = false;
+        this.startTime = 0;
+      },
+
+      start(){
+        if (game.active) { toast("Stop game to use training.", 1200); return; }
+        this.active = true;
+        this.mode = "tutorial";
+        this.step = 0;
+        this.score = 0;
+        this.streak = 0;
+        this.startTime = nowMs();
+        this.targets = [];
+        this.spawnTutorialStep();
+        toast("Training started.", 2400);
+      },
+
+      nextStep(){
+        this.step += 1;
+        this.spawnTutorialStep();
+      },
+
+      spawnTutorialStep(){
+        this.targets = [];
+        this.blockBlink = false;
+        this.blockDwell = false;
+
+        if (this.step === 0){
+          this.targets = [
+            {type:"hover", x:0.18, y:0.30, r:44, done:false, hold:0},
+            {type:"hover", x:0.82, y:0.30, r:44, done:false, hold:0},
+            {type:"hover", x:0.82, y:0.78, r:44, done:false, hold:0},
+            {type:"hover", x:0.18, y:0.78, r:44, done:false, hold:0},
+          ];
+          toast("Step 1/4: Move into each ring (no click).", 2600);
+          return;
+        }
+
+        if (this.step === 1){
+          this.targets = Array.from({length:5}, (_,i)=>({
+            type:"click", clickMode:"dwell",
+            x: 0.25 + 0.12*i,
+            y: 0.55 + (i%2? -0.12 : 0.12),
+            r: 30, done:false
+          }));
+          this.blockBlink = true;
+          toast("Step 2/4: Dwell-click targets (blink disabled).", 2800);
+          return;
+        }
+
+        if (this.step === 2){
+          this.targets = Array.from({length:5}, (_,i)=>({
+            type:"click", clickMode:"blink",
+            x: 0.25 + 0.12*i,
+            y: 0.35 + (i%2? -0.10 : 0.10),
+            r: 30, done:false
+          }));
+          this.blockDwell = true;
+          toast("Step 3/4: Blink-click targets (dwell disabled).", 2800);
+          return;
+        }
+
+        if (this.step === 3){
+          this.targets = Array.from({length:12}, ()=>({
+            type:"click",
+            clickMode:"either",
+            x: 0.15 + Math.random()*0.70,
+            y: 0.18 + Math.random()*0.70,
+            r: 26, done:false
+          }));
+          toast("Step 4/4: Mini-run. Hit targets fast.", 2800);
+          return;
+        }
+
+        const elapsed = ((nowMs() - this.startTime)/1000).toFixed(1);
+        toast(`Training complete. Score: ${this.score}. Time: ${elapsed}s.`, 4200);
+        this.reset();
+      },
+
+      update(dt){
+        if (!this.active || this.paused) return;
+
+        for (const t of this.targets){
+          if (t.done) continue;
+          const px = t.x * window.innerWidth;
+          const py = t.y * window.innerHeight;
+          const d = Math.hypot(cursorX - px, cursorY - py);
+
+          if (t.type === "hover"){
+            if (d <= t.r){
+              t.hold += dt;
+              if (t.hold >= 0.45){
+                t.done = true;
+                this.score += 10;
+              }
+            } else {
+              t.hold = 0;
+            }
+          }
+        }
+
+        if (this.targets.length && this.targets.every(t => t.done)){
+          this.nextStep();
+        }
+      },
+
+      onClick(x, y){
+        if (!this.active || this.paused) return;
+
+        for (const t of this.targets){
+          if (t.done) continue;
+          if (t.type !== "click") continue;
+
+          const px = t.x * window.innerWidth;
+          const py = t.y * window.innerHeight;
+          const d = Math.hypot(x - px, y - py);
+          if (d <= t.r){
+            t.done = true;
+            this.score += 15;
+            this.streak += 1;
+            if (this.streak % 3 === 0) this.score += 10;
+            break;
+          }
+        }
+
+        if (this.targets.length && this.targets.every(t => t.done)){
+          this.nextStep();
+        }
+      },
+
+      draw(){
+        // training overlay on gameCanvas
+        const w = gameCanvas.width, h = gameCanvas.height;
+        gctx.clearRect(0,0,w,h);
+        if (!this.active) return;
+
+        gctx.save();
+        gctx.lineWidth = 3;
+        gctx.font = "13px ui-monospace, Menlo, Monaco, 'Cascadia Mono', monospace";
+        gctx.fillStyle = "rgba(232,236,255,0.92)";
+        const elapsed = ((nowMs() - this.startTime)/1000).toFixed(1);
+        gctx.fillText(`Training: step ${Math.min(this.step+1,4)}/4  score ${this.score}  time ${elapsed}s`, 16, h - 18);
+
+        for (const t of this.targets){
+          const px = t.x * w;
+          const py = t.y * h;
+          const done = !!t.done;
+
+          gctx.strokeStyle = done ? "rgba(70,255,220,0.35)" : "rgba(255,255,255,0.70)";
+          gctx.beginPath();
+          gctx.arc(px, py, t.r, 0, Math.PI*2);
+          gctx.stroke();
+
+          gctx.fillStyle = done ? "rgba(70,255,220,0.10)" : "rgba(120,140,255,0.10)";
+          gctx.beginPath();
+          gctx.arc(px, py, Math.max(6, t.r*0.33), 0, Math.PI*2);
+          gctx.fill();
+
+          if (t.type === "hover" && !done){
+            const prog = clamp((t.hold ?? 0) / 0.45, 0, 1);
+            gctx.strokeStyle = "rgba(70,255,220,0.85)";
+            gctx.beginPath();
+            gctx.arc(px, py, t.r + 8, -Math.PI/2, -Math.PI/2 + prog * Math.PI*2);
+            gctx.stroke();
+          }
+        }
+
+        gctx.restore();
+      }
+    };
+
+    /**********************
+     * Blink detection (EAR-based) + Game mapping
+     *
+     * Requirements implemented:
+     * - Single blink -> 1 damage shot (game.pulseShot())
+     * - Hold blink -> continuous cutting beam with vibration + heat + smoke + overheat
+     **********************/
+    let eyeState = "OPEN";
+    let closeStart = null;
+    let closedConfirmed = false;
+    let lastClickAt = 0;
+    let lastBlinkEvent = 0;
+    let debounceUntil = 0;
+    let longBlinkFired = false;
+
+    function currentBlinkThresholds(openEarEstimate){
+      if (settings.blinkCal && Number.isFinite(settings.blinkCal.tClose) && Number.isFinite(settings.blinkCal.tOpen)) {
+        return { tClose: settings.blinkCal.tClose, tOpen: settings.blinkCal.tOpen, src: "cal" };
+      }
+      const base = openEarEstimate ?? 0.27;
+      const tClose = clamp(base * 0.72, 0.10, 0.34);
+      const tOpen  = clamp(base * 0.80, 0.12, 0.38);
+      return { tClose, tOpen, src: "auto" };
+    }
+
+    function tryBlinkClick(tNow, speedNorm, qNow){
+      if (!settings.blinkClick || trainer.blockBlink) return;
+
+      const gate = clamp(Number(settings.blinkQualityGate ?? 70), 0, 100);
+      if ((qNow ?? 0) < gate) return;
+
+      if ((tNow - lastClickAt) < settings.clickCooldownMs) return;
+      if (speedNorm > 0.60) return;
+
+      lastClickAt = tNow;
+
+      // If game is active: blink click becomes pulse shot or beam (handled separately)
+      if (game.active) return;
+
+      dispatchVirtualClick(cursorX, cursorY);
+    }
+
+    function updateBlink(tNow, ear, openEarEstimate, speedNorm, qNow){
+      if (!Number.isFinite(ear)) return { ear, state: eyeState, note: "ear n/a" };
+      if (tNow < debounceUntil) return { ear, state: eyeState, note: "debounce" };
+
+      const { tClose, tOpen, src } = currentBlinkThresholds(openEarEstimate);
+
+      if (eyeState === "OPEN") {
+        if (ear < tClose) {
+          eyeState = "CLOSED";
+          closeStart = tNow;
+          closedConfirmed = false;
+          longBlinkFired = false;
+          debounceUntil = tNow + 25;
+
+          // game: start beam gating (beam turns on only after longBlinkMs)
+          if (game.active) {
+            game.setBeamOn(false);
+          }
+        }
+      } else {
+        const dur = tNow - (closeStart ?? tNow);
+        if (!closedConfirmed && dur >= 55) closedConfirmed = true;
+
+        // HOLD BLINK -> continuous laser beam (cuts) + heat/smoke handled in game.update
+        if (game.active && closedConfirmed && dur >= settings.longBlinkMs && !longBlinkFired) {
+          // engage beam once we cross long threshold
+          longBlinkFired = true;
+          game.setBeamOn(true);
+        }
+
+        // Non-game long blink click (legacy behavior)
+        if (!game.active && settings.blinkMode === "long" && closedConfirmed && !longBlinkFired && dur >= settings.longBlinkMs) {
+          longBlinkFired = true;
+          tryBlinkClick(tNow, speedNorm, qNow);
+        }
+
+        if (ear > tOpen) {
+          eyeState = "OPEN";
+          debounceUntil = tNow + 55;
+
+          // On reopen:
+          // - In-game: if it was a short blink (below longBlinkMs) => pulse shot (1 damage).
+          // - If beam was active => stop beam.
+          if (game.active) {
+            // Stop beam
+            game.setBeamOn(false);
+
+            // Short blink => pulse shot (quality gate required)
+            const gate = clamp(Number(settings.blinkQualityGate ?? 70), 0, 100);
+            if ((qNow ?? 0) >= gate) {
+              const isShort = closedConfirmed && dur >= 70 && dur < settings.longBlinkMs;
+              if (isShort) {
+                game.pulseShot(); // single blink does 1 hp damage to target
+              }
+            }
+          } else {
+            // non-game: handle double blink click if enabled
+            if (closedConfirmed && dur <= 320) {
+              if (settings.blinkMode === "double") {
+                if ((tNow - lastBlinkEvent) <= settings.dblWindowMs) {
+                  lastBlinkEvent = 0;
+                  tryBlinkClick(tNow, speedNorm, qNow);
+                } else {
+                  lastBlinkEvent = tNow;
+                }
+              }
+            }
+          }
+
+          closeStart = null;
+          closedConfirmed = false;
+          longBlinkFired = false;
+        }
+      }
+
+      return { ear, tClose, tOpen, src, state: eyeState };
+    }
+
+    /**********************
+     * Debug draw
+     **********************/
+    function drawDebug(lm, irisL, irisR, rx, ry, blinkInfo){
+      if (!settings.debugDraw) {
+        octx.clearRect(0,0,overlay.width,overlay.height);
+        return;
+      }
+      octx.save();
+      octx.clearRect(0,0,overlay.width,overlay.height);
+
+      const dot = (p, r, color) => {
+        octx.fillStyle = color;
+        octx.beginPath();
+        octx.arc(p.x * overlay.width, p.y * overlay.height, r, 0, Math.PI*2);
+        octx.fill();
+      };
+
+      dot(irisL, 3, "rgba(70,255,220,0.95)");
+      dot(irisR, 3, "rgba(70,255,220,0.95)");
+
+      dot(lm[33], 2, "rgba(255,255,255,0.85)");
+      dot(lm[133],2, "rgba(255,255,255,0.85)");
+      dot(lm[159],2, "rgba(255,255,255,0.85)");
+      dot(lm[145],2, "rgba(255,255,255,0.85)");
+      dot(lm[362],2, "rgba(255,255,255,0.85)");
+      dot(lm[263],2, "rgba(255,255,255,0.85)");
+      dot(lm[386],2, "rgba(255,255,255,0.85)");
+      dot(lm[374],2, "rgba(255,255,255,0.85)");
+
+      octx.fillStyle = "rgba(255,255,255,0.95)";
+      octx.font = "12px ui-monospace, Menlo, Monaco, 'Cascadia Mono', monospace";
+      const cal = settings.gazeCal ? `cal:ON rmse~${Math.round(settings.gazeCal.rmsePx)}px` : "cal:OFF";
+      octx.fillText(
+        `rx=${rx.toFixed(3)} ry=${ry.toFixed(3)} ear=${(blinkInfo.ear ?? 0).toFixed(3)} ${cal} blink=${blinkInfo.src ?? ""} ${blinkInfo.state ?? ""}`,
+        10, 18
+      );
+      octx.restore();
+    }
+
+    /**********************
+     * Wizard (kept)
+     **********************/
+    const wizard = document.getElementById("wizard");
+    const wizTitle = document.getElementById("wizTitle");
+    const wizText = document.getElementById("wizText");
+    const wizBoxLeft = document.getElementById("wizBoxLeft");
+    const wizBoxRight = document.getElementById("wizBoxRight");
+    const wizBackBtn = document.getElementById("wizBackBtn");
+    const wizCancelBtn = document.getElementById("wizCancelBtn");
+    const wizNextBtn = document.getElementById("wizNextBtn");
+    const calibDot = document.getElementById("calibDot");
+
+    const CALIB_POINTS = (() => {
+      const xs = [0.14, 0.50, 0.86];
+      const ys = [0.18, 0.52, 0.86];
+      const pts = [];
+      for (let j=0;j<ys.length;j++){
+        for (let i=0;i<xs.length;i++){
+          pts.push({ name: `P${j*3+i+1}`, nx: xs[i], ny: ys[j] });
+        }
+      }
+      return pts;
+    })();
+
+    const wizardState = {
+      open: false,
+      step: 0,
+      capture: {
+        active: false,
+        pointIndex: 0,
+        pointSamples: [],
+        allSamples: [],
+        stableHoldMs: 240,
+        requiredSamples: 28,
+        lastStableStart: null,
+        timeoutAt: 0
+      },
+      blink: {
+        phase: 0,
+        openBuf: [],
+        blinkMins: [],
+        neededBlinks: 6,
+        lastBlinkMin: Infinity,
+        inClosure: false
+      },
+      validate: {
+        phase: 0,
+        points: [],
+        idx: 0,
+        samples: []
+      }
+    };
+
+    function openWizard(){
+      if (!running) return;
+      wizardState.open = true;
+      wizardState.step = 0;
+
+      wizardState.capture.active = false;
+      wizardState.capture.pointIndex = 0;
+      wizardState.capture.pointSamples = [];
+      wizardState.capture.allSamples = [];
+      wizardState.capture.lastStableStart = null;
+      wizardState.capture.timeoutAt = nowMs() + 9000;
+
+      wizardState.blink.phase = 0;
+      wizardState.blink.openBuf = [];
+      wizardState.blink.blinkMins = [];
+      wizardState.blink.lastBlinkMin = Infinity;
+      wizardState.blink.inClosure = false;
+
+      wizardState.validate.phase = 0;
+      wizardState.validate.points = [];
+      wizardState.validate.idx = 0;
+      wizardState.validate.samples = [];
+
+      calibDot.style.display = "none";
+      wizard.style.display = "block";
+      trainer.pauseChallenges(true);
+      updateWizardUI();
+    }
+
+    function closeWizard(msg){
+      wizard.style.display = "none";
+      calibDot.style.display = "none";
+      wizardState.open = false;
+      wizardState.capture.active = false;
+      trainer.pauseChallenges(false);
+      if (msg) toast(msg, 2500);
+    }
+
+    function formatGazeCalBox(){
+      if (!settings.gazeCal) return "Not calibrated.";
+      return `Type: ${settings.gazeCal.type}<br>RMSE (fit): ~${Math.round(settings.gazeCal.rmsePx)} px<br>Created: ${settings.gazeCal.createdAt}`;
+    }
+    function formatBlinkCalBox(){
+      if (!settings.blinkCal) return "Not calibrated.";
+      const b = settings.blinkCal;
+      return `Open EAR: ${b.openEar.toFixed(3)}<br>Closed EAR: ${b.closedEar.toFixed(3)}<br>tClose: ${b.tClose.toFixed(3)}<br>tOpen: ${b.tOpen.toFixed(3)}`;
+    }
+    function pickRandomValidationPoints(n){
+      const candidates = [
+        {nx:0.18, ny:0.20}, {nx:0.82, ny:0.20}, {nx:0.82, ny:0.86}, {nx:0.18, ny:0.86}, {nx:0.50, ny:0.52},
+        {nx:0.50, ny:0.20}, {nx:0.50, ny:0.86}, {nx:0.18, ny:0.52}, {nx:0.82, ny:0.52}
+      ];
+      const s = [...candidates].sort(()=>Math.random()-0.5);
+      return s.slice(0, n);
+    }
+    function summarizeValidation(){
+      const v = wizardState.validate;
+      if (!v.samples.length) return { ok: false, html: "No samples." };
+      const errs = v.samples.map(s => s.errPx);
+      const rmse = Math.sqrt(errs.reduce((a,e)=>a+e*e,0) / errs.length);
+      const p50 = median(errs);
+      const p90 = [...errs].sort((a,b)=>a-b)[Math.floor(0.90*(errs.length-1))];
+      const ok = rmse <= settings.calibrationMaxRmsePx;
+      let html = `RMSE: ${Math.round(rmse)} px<br>Median: ${Math.round(p50)} px<br>P90: ${Math.round(p90)} px<br>Threshold: ${settings.calibrationMaxRmsePx} px<br>`;
+      html += ok ? "<span style='color:rgba(70,255,220,0.95)'><b>Status: PASS</b></span>" : "<span style='color:rgba(255,140,140,0.95)'><b>Status: FAIL</b></span>";
+      return { ok, rmse, html };
+    }
+    function showCalibDotForPoint(i){
+      const p = CALIB_POINTS[i];
+      calibDot.style.display = "block";
+      calibDot.style.left = `${p.nx * window.innerWidth}px`;
+      calibDot.style.top  = `${p.ny * window.innerHeight}px`;
+    }
+    function showValidationDot(){
+      const v = wizardState.validate;
+      const p = v.points[v.idx];
+      calibDot.style.display = "block";
+      calibDot.style.left = `${p.nx * window.innerWidth}px`;
+      calibDot.style.top  = `${p.ny * window.innerHeight}px`;
+    }
+    function startValidation(){
+      wizardState.validate.phase = 1;
+      wizardState.validate.samples = [];
+      wizardState.validate.idx = 0;
+      wizardState.validate.points = pickRandomValidationPoints(5);
+      showValidationDot();
+    }
+    function captureValidationSample(){
+      const v = wizardState.validate;
+      if (v.phase !== 1) return;
+      if (!lastFrame.hasFace || !Number.isFinite(lastFrame.rx) || !Number.isFinite(lastFrame.ry)) return;
+
+      const { nx, ny } = applyCalibration(lastFrame.rx, lastFrame.ry);
+      const px = nx * window.innerWidth;
+      const py = ny * window.innerHeight;
+
+      const p = v.points[v.idx];
+      const tx = p.nx * window.innerWidth;
+      const ty = p.ny * window.innerHeight;
+      const errPx = Math.hypot(px - tx, py - ty);
+
+      v.samples.push({ nx, ny, px, py, tx, ty, errPx });
+
+      v.idx += 1;
+      if (v.idx >= v.points.length){
+        v.phase = 2;
+        calibDot.style.display = "none";
+      } else {
+        showValidationDot();
+      }
+      updateWizardUI();
+    }
+
+    function updateWizardUI(){
+      wizBackBtn.disabled = (wizardState.step === 0);
+      wizNextBtn.disabled = true;
+
+      const step = wizardState.step;
+
+      if (step === 0){
+        wizTitle.textContent = "Calibration Wizard — Clean Scan Gate";
+        wizText.textContent = "Stability-gated blink + gaze calibration + validation.";
+        wizBoxLeft.innerHTML = `<b>Requirements</b><br>• Face visible<br>• Keep head still<br>• Quality ≥ ~78%`;
+        wizBoxRight.innerHTML = `<b>Outputs</b><br>• Gaze fit<br>• Blink thresholds<br>• Validation score`;
+        wizNextBtn.textContent = "Start Blink Calibration";
+        wizNextBtn.disabled = false;
+      }
+
+      if (step === 1){
+        wizTitle.textContent = "Step 1 — Blink Calibration";
+        const b = wizardState.blink;
+        if (b.phase === 0) {
+          wizText.textContent = "Keep eyes open naturally for ~2 seconds to learn baseline EAR.";
+          wizBoxLeft.innerHTML = `<b>Progress</b><br>Open samples: ${b.openBuf.length}/60<br>Valid blinks: ${b.blinkMins.length}/${b.neededBlinks}`;
+          wizBoxRight.innerHTML = `<b>Tips</b><br>Relax eyelids. Baseline pauses if quality drops.`;
+          wizNextBtn.textContent = "Continue";
+          wizNextBtn.disabled = true;
+        } else if (b.phase === 1) {
+          wizText.textContent = "Blink normally. We capture blink minimum EAR and validate consistency.";
+          wizBoxLeft.innerHTML = `<b>Progress</b><br>Baseline: 60/60<br>Valid blinks: ${b.blinkMins.length}/${b.neededBlinks}`;
+          wizBoxRight.innerHTML = `<b>Rule</b><br>Normal blink only (avoid forced squint).`;
+          wizNextBtn.textContent = "Continue";
+          wizNextBtn.disabled = (b.blinkMins.length < b.neededBlinks);
+        } else {
+          wizText.textContent = "Blink calibration complete.";
+          wizBoxLeft.innerHTML = `<b>Saved</b><br>${formatBlinkCalBox()}`;
+          wizBoxRight.innerHTML = `<b>Next</b><br>Stability-gated 3×3 gaze grid capture.`;
+          wizNextBtn.textContent = "Start Gaze Calibration";
+          wizNextBtn.disabled = false;
+        }
+      }
+
+      if (step === 2){
+        wizTitle.textContent = "Step 2 — Gaze Calibration";
+        const c = wizardState.capture;
+        const p = CALIB_POINTS[c.pointIndex];
+        wizText.textContent = "Look at the dot. Capture begins only when scan quality is stable.";
+        wizBoxLeft.innerHTML = `<b>Point</b><br>${c.pointIndex+1}/${CALIB_POINTS.length}<br>Samples: ${c.pointSamples.length}/${c.requiredSamples}`;
+        wizBoxRight.innerHTML = `<b>Target</b><br>${p.name}<br>(${Math.round(p.nx*100)}%, ${Math.round(p.ny*100)}%)`;
+        wizNextBtn.textContent = "Next";
+        wizNextBtn.disabled = true;
+      }
+
+      if (step === 3){
+        wizTitle.textContent = "Step 3 — Validation";
+        const v = wizardState.validate;
+        if (v.phase === 0){
+          wizText.textContent = "Dot appears. Look at it and press SPACE to capture. Repeat 5 times.";
+          wizBoxLeft.innerHTML = `<b>How</b><br>Look at dot → SPACE`;
+          wizBoxRight.innerHTML = `<b>Meaning</b><br>Strict pixel RMSE.`;
+          wizNextBtn.textContent = "Start Validation";
+          wizNextBtn.disabled = false;
+        } else if (v.phase === 1){
+          const p = v.points[v.idx];
+          wizText.textContent = `Validation ${v.idx+1}/${v.points.length}. Look at the dot and press SPACE.`;
+          wizBoxLeft.innerHTML = `<b>Captured</b><br>${v.samples.length}/${v.points.length}`;
+          wizBoxRight.innerHTML = `<b>Current</b><br>(${Math.round(p.nx*100)}%, ${Math.round(p.ny*100)}%)`;
+          wizNextBtn.textContent = "Continue";
+          wizNextBtn.disabled = true;
+        } else {
+          const summary = summarizeValidation();
+          wizText.textContent = summary.ok ? "Validation passed." : "Validation failed.";
+          wizBoxLeft.innerHTML = `<b>Results</b><br>${summary.html}`;
+          wizBoxRight.innerHTML = summary.ok
+            ? `<b>Proceed</b><br>Start game or training.`
+            : `<b>Retry</b><br>Re-run gaze capture with steadier head/lighting.`;
+          wizNextBtn.textContent = summary.ok ? "Finish" : "Retry Gaze Calibration";
+          wizNextBtn.disabled = false;
+        }
+      }
+
+      if (step === 4){
+        wizTitle.textContent = "Done — Summary";
+        wizText.textContent = "Calibration saved.";
+        wizBoxLeft.innerHTML = `<b>Gaze</b><br>${formatGazeCalBox()}`;
+        wizBoxRight.innerHTML = `<b>Blink</b><br>${formatBlinkCalBox()}`;
+        wizNextBtn.textContent = "Close";
+        wizNextBtn.disabled = false;
+      }
+    }
+
+    wizCancelBtn.addEventListener("click", () => closeWizard("Wizard cancelled."));
+    wizBackBtn.addEventListener("click", () => {
+      if (wizardState.step > 0) {
+        wizardState.step -= 1;
+        calibDot.style.display = "none";
+        wizardState.capture.active = false;
+        wizardState.validate.phase = 0;
+        updateWizardUI();
+      }
+    });
+
+    wizNextBtn.addEventListener("click", () => {
+      const step = wizardState.step;
+
+      if (step === 0) {
+        wizardState.step = 1;
+        wizardState.blink.phase = 0;
+        updateWizardUI();
+        return;
+      }
+
+      if (step === 1) {
+        if (wizardState.blink.phase < 2) return;
+        wizardState.step = 2;
+        wizardState.capture.active = true;
+        wizardState.capture.pointIndex = 0;
+        wizardState.capture.pointSamples = [];
+        wizardState.capture.allSamples = [];
+        wizardState.capture.lastStableStart = null;
+        wizardState.capture.timeoutAt = nowMs() + 9000;
+        showCalibDotForPoint(0);
+        updateWizardUI();
+        return;
+      }
+
+      if (step === 3) {
+        const v = wizardState.validate;
+        if (v.phase === 0){
+          startValidation();
+          updateWizardUI();
+          return;
+        }
+        if (v.phase === 2){
+          const summary = summarizeValidation();
+          if (summary.ok){
+            wizardState.step = 4;
+            calibDot.style.display = "none";
+            updateWizardUI();
+          } else {
+            wizardState.step = 2;
+            wizardState.capture.active = true;
+            wizardState.capture.pointIndex = 0;
+            wizardState.capture.pointSamples = [];
+            wizardState.capture.allSamples = [];
+            wizardState.capture.lastStableStart = null;
+            wizardState.capture.timeoutAt = nowMs() + 9000;
+            showCalibDotForPoint(0);
+            updateWizardUI();
+          }
+          return;
+        }
+      }
+
+      if (step === 4) {
+        closeWizard("Calibration saved.");
+        return;
+      }
+    });
+
+    function wizardProcessFrame(qInfo, ear, rx, ry, tNow){
+      if (!wizardState.open) return;
+
+      if (wizardState.step === 1){
+        const b = wizardState.blink;
+
+        if (b.phase === 0){
+          if (isStableForCapture(qInfo) && Number.isFinite(ear)){
+            b.openBuf.push(ear);
+          }
+          if (b.openBuf.length >= 60){
+            b.openEar = median(b.openBuf);
+            b.phase = 1;
+            toast("Baseline captured. Now blink normally.", 1800);
+          }
+          updateWizardUI();
+          return;
+        }
+
+        if (b.phase === 1){
+          const openEar = b.openEar ?? median(b.openBuf) ?? 0.28;
+          const startClose = openEar * 0.78;
+          const endOpen = openEar * 0.88;
+
+          if (!isStableForCapture(qInfo)) { updateWizardUI(); return; }
+
+          if (!b.inClosure){
+            if (ear < startClose){
+              b.inClosure = true;
+              b.lastBlinkMin = ear;
+            }
+          } else {
+            b.lastBlinkMin = Math.min(b.lastBlinkMin, ear);
+            if (ear > endOpen){
+              b.inClosure = false;
+
+              const amp = openEar - b.lastBlinkMin;
+              if (amp >= 0.045 && b.lastBlinkMin > 0.06 && b.lastBlinkMin < openEar*0.92){
+                b.blinkMins.push(b.lastBlinkMin);
+              }
+              b.lastBlinkMin = Infinity;
+
+              if (b.blinkMins.length >= b.neededBlinks){
+                const closedEar = median(b.blinkMins);
+                const openEar2 = openEar;
+                const spread = stddev(b.blinkMins);
+
+                const ok = (openEar2 - closedEar) >= 0.05 && spread <= 0.020 && closedEar < openEar2*0.85;
+                if (!ok){
+                  toast("Blink samples inconsistent. Try again.", 2400);
+                  b.blinkMins = [];
+                  updateWizardUI();
+                  return;
+                }
+
+                const tClose = lerp(openEar2, closedEar, 0.65);
+                const tOpen  = lerp(openEar2, closedEar, 0.45);
+
+                settings.blinkCal = { openEar: openEar2, closedEar, tClose, tOpen, createdAt: new Date().toISOString() };
+                saveSettings();
+                b.phase = 2;
+                toast("Blink calibration saved.", 1800);
+              }
+            }
+          }
+          updateWizardUI();
+          return;
+        }
+
+        updateWizardUI();
+        return;
+      }
+
+      if (wizardState.step === 2 && wizardState.capture.active){
+        const c = wizardState.capture;
+
+        if (tNow > c.timeoutAt && c.pointSamples.length < 5){
+          toast("Hold steadier; capture is stability-gated.", 2400);
+          c.timeoutAt = tNow + 9000;
+        }
+
+        if (!Number.isFinite(rx) || !Number.isFinite(ry)){
+          c.lastStableStart = null;
+          return;
+        }
+
+        if (isStableForCapture(qInfo)){
+          if (c.lastStableStart == null) c.lastStableStart = tNow;
+          const held = tNow - c.lastStableStart;
+
+          if (held >= c.stableHoldMs){
+            c.pointSamples.push({ rx, ry });
+
+            if (c.pointSamples.length >= c.requiredSamples){
+              const p = CALIB_POINTS[c.pointIndex];
+              const rxs = c.pointSamples.map(s=>s.rx);
+              const rys = c.pointSamples.map(s=>s.ry);
+              const rxMed = median(rxs);
+              const ryMed = median(rys);
+
+              c.allSamples.push({
+                rx: rxMed, ry: ryMed,
+                nx: p.nx, ny: p.ny,
+                txPx: p.nx * window.innerWidth,
+                tyPx: p.ny * window.innerHeight
+              });
+
+              c.pointSamples = [];
+              c.lastStableStart = null;
+
+              c.pointIndex += 1;
+              if (c.pointIndex >= CALIB_POINTS.length){
+                const cal = fitCalibration(c.allSamples);
+                if (!cal){
+                  toast("Calibration fit failed. Retrying…", 2400);
+                  c.pointIndex = 0;
+                  c.allSamples = [];
+                  showCalibDotForPoint(0);
+                  updateWizardUI();
+                  return;
+                }
+
+                settings.gazeCal = cal;
+                saveSettings();
+
+                calibDot.style.display = "none";
+                c.active = false;
+
+                wizardState.step = 3;
+                wizardState.validate.phase = 0;
+                toast(`Gaze fit RMSE ~${Math.round(cal.rmsePx)} px. Validate next.`, 2800);
+                updateWizardUI();
+              } else {
+                showCalibDotForPoint(c.pointIndex);
+                c.timeoutAt = tNow + 9000;
+                updateWizardUI();
+              }
+            } else {
+              updateWizardUI();
+            }
+          } else {
+            updateWizardUI();
+          }
+        } else {
+          c.lastStableStart = null;
+          updateWizardUI();
+        }
+      }
+    }
+
+    /**********************
+     * Runtime: FaceMesh + game loop
+     **********************/
+    let faceMesh = null;
+    let camera = null;
+    let running = false;
+
+    const lastFrame = {
+      hasFace: false,
+      rx: NaN,
+      ry: NaN,
+      ear: NaN,
+      openEarEstimate: null,
+      qInfo: {q:0, reason:"—"},
+      speedNorm: 0,
+      inputMag: 0
+    };
+
+    const RIGHT_IRIS = [469, 470, 471, 472];
+    const LEFT_IRIS  = [474, 475, 476, 477];
+
+    function averageLandmarks(lm, idxs){
+      let x = 0, y = 0;
+      for (const i of idxs){ x += lm[i].x; y += lm[i].y; }
+      return { x: x / idxs.length, y: y / idxs.length };
+    }
+
+    function updateStatus(text){
+      statusEl.textContent = text;
+    }
+
+    function resizeAll(){
+      gameCanvas.width = window.innerWidth;
+      gameCanvas.height = window.innerHeight;
+
+      cursorX = clamp(cursorX, 0, window.innerWidth);
+      cursorY = clamp(cursorY, 0, window.innerHeight);
+      renderCursor();
+    }
+
+    window.addEventListener("resize", () => {
+      resizeAll();
+      if (wizardState.open && wizardState.step === 2 && wizardState.capture.active){
+        showCalibDotForPoint(wizardState.capture.pointIndex);
+      }
+      if (wizardState.open && wizardState.step === 3 && wizardState.validate.phase === 1){
+        showValidationDot();
+      }
+    });
+
+    resizeAll();
+    renderCursor();
+
+    let lastT = null;
+    let fpsBuf = [];
+    let lastFaceSeenAt = 0;
+
+    // independent RAF loop for game/training rendering and updates
+    let rafLast = null;
+    function rafLoop(ts){
+      if (!rafLast) rafLast = ts;
+      const dt = clamp((ts - rafLast)/1000, 0.001, 0.060);
+      rafLast = ts;
+
+      // update gameplay
+      if (game.active){
+        game.update(dt);
+      } else {
+        trainer.update(dt);
+      }
+
+      // draw
+      game.draw();
+
+      requestAnimationFrame(rafLoop);
+    }
+    requestAnimationFrame(rafLoop);
+
+    async function startSystem(){
+      if (running) return;
+      updateStatus("Starting camera…");
+
+      // load SVG game assets up front
+      try {
+        await game.ensureAssets();
+      } catch {
+        toast("SVG assets failed to load. Game will still run, but may not render correctly.", 3200);
+      }
+
+      faceMesh = new FaceMesh({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+      });
+      faceMesh.setOptions({
+        maxNumFaces: 1,
+        refineLandmarks: true,
+        minDetectionConfidence: 0.6,
+        minTrackingConfidence: 0.6
+      });
+
+      faceMesh.onResults(onResults);
+
+      video.addEventListener("loadedmetadata", () => {
+        overlay.width = video.videoWidth || 640;
+        overlay.height = video.videoHeight || 480;
+      }, { once: true });
+
+      camera = new Camera(video, {
+        onFrame: async () => {
+          if (!running) return;
+          await faceMesh.send({ image: video });
+        },
+        width: 640,
+        height: 480
+      });
+
+      try {
+        running = true;
+        await camera.start();
+
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        gameBtn.disabled = false;
+
+        centerBtn.disabled = false;
+        wizardBtn.disabled = false;
+        trainingBtn.disabled = false;
+
+        centerBtnMini.disabled = false;
+        wizardBtnMini.disabled = false;
+        trainingBtnMini.disabled = false;
+
+        updateStatus("Running. Use Wizard for calibration. Toggle Game for Laser Eyes shooter.");
+        toast("Camera running. Press W for wizard. Toggle Game to play.", 3200);
+      } catch (e){
+        running = false;
+        updateStatus(`Camera start failed: ${e?.message || e}`);
+        toast("Camera permission denied or not available.", 3200);
+      }
+    }
+
+    function stopSystem(){
+      running = false;
+      try { camera?.stop(); } catch {}
+      camera = null;
+      faceMesh = null;
+
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      gameBtn.disabled = true;
+
+      centerBtn.disabled = true;
+      wizardBtn.disabled = true;
+      trainingBtn.disabled = true;
+
+      centerBtnMini.disabled = true;
+      wizardBtnMini.disabled = true;
+      trainingBtnMini.disabled = true;
+
+      game.stop();
+      trainer.reset();
+
+      octx.clearRect(0,0,overlay.width,overlay.height);
+      gctx.clearRect(0,0,gameCanvas.width,gameCanvas.height);
+
+      updateStatus("Stopped.");
+      toast("Stopped.", 1200);
+    }
+
+    startBtn.addEventListener("click", startSystem);
+    stopBtn.addEventListener("click", stopSystem);
+
+    function setGameEnabled(flag){
+      settings.gameEnabled = !!flag;
+      saveSettings();
+      gameBtn.textContent = settings.gameEnabled ? "Game ON" : "Game OFF";
+      gamePill.textContent = `GAME: ${settings.gameEnabled ? "ON" : "OFF"}`;
+      if (settings.gameEnabled){
+        trainer.reset();
+        game.start();
+      } else {
+        game.stop();
+      }
+    }
+
+    gameBtn.addEventListener("click", () => {
+      if (!running) return;
+      setGameEnabled(!settings.gameEnabled);
+    });
+
+    centerBtn.addEventListener("click", () => { resetCursor(); toast("Centered.", 900); });
+    wizardBtn.addEventListener("click", openWizard);
+    trainingBtn.addEventListener("click", () => { if (!running) return; trainer.start(); });
+
+    centerBtnMini.addEventListener("click", () => { resetCursor(); toast("Centered.", 900); });
+    wizardBtnMini.addEventListener("click", openWizard);
+    trainingBtnMini.addEventListener("click", () => { if (!running) return; trainer.start(); });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.repeat) return;
+
+      if (e.code === "KeyC" && running) { resetCursor(); toast("Centered.", 900); }
+      if (e.code === "KeyW" && running) { openWizard(); }
+      if (e.code === "KeyT" && running) { trainer.start(); }
+
+      if (e.code === "KeyG" && running) { setGameEnabled(!settings.gameEnabled); }
+
+      if (e.code === "Space" && wizardState.open && wizardState.step === 3 && wizardState.validate.phase === 1){
+        e.preventDefault();
+        captureValidationSample();
+      }
+    });
+
+    /**********************
+     * onResults
+     **********************/
+    function onResults(results){
+      const tNow = nowMs();
+      if (lastT == null) lastT = tNow;
+      const dt = clamp((tNow - lastT)/1000, 0.001, 0.08);
+      lastT = tNow;
+
+      fpsBuf.push(1/dt);
+      if (fpsBuf.length > 20) fpsBuf.shift();
+      fpsPill.textContent = `FPS: ${Math.round(mean(fpsBuf))}`;
+
+      let hasFace = false;
+      let rx = NaN, ry = NaN;
+      let ear = NaN;
+      let irisL = null, irisR = null;
+
+      const faces = results.multiFaceLandmarks;
+      if (faces && faces.length){
+        hasFace = true;
+        lastFaceSeenAt = tNow;
+
+        const lm = faces[0];
+
+        try {
+          irisR = averageLandmarks(lm, RIGHT_IRIS);
+          irisL = averageLandmarks(lm, LEFT_IRIS);
+        } catch {
+          irisR = lm[468] ?? lm[33];
+          irisL = lm[473] ?? lm[362];
+        }
+
+        const earR = earForEye(lm, RIGHT_EYE);
+        const earL = earForEye(lm, LEFT_EYE);
+        ear = (earR + earL) / 2;
+
+        const rRat = ratioInEye(irisR, lm[33], lm[133], lm[159], lm[145]);
+        const lRat = ratioInEye(irisL, lm[362], lm[263], lm[386], lm[374]);
+
+        rx = (rRat.rx + lRat.rx) / 2;
+        ry = (rRat.ry + lRat.ry) / 2;
+
+        const openEarEstimate = settings.blinkCal?.openEar ?? (earBuf.length ? median(earBuf) : null);
+
+        const qInfo = computeScanQuality(true, rx, ry, ear);
+        updateQualityUI(qInfo);
+
+        wizardProcessFrame(qInfo, ear, rx, ry, tNow);
+
+        let speedNorm = lastFrame.speedNorm ?? 0;
+        let inputMag = lastFrame.inputMag ?? 0;
+
+        if (Number.isFinite(rx) && Number.isFinite(ry)){
+          const cal = applyCalibration(rx, ry);
+
+          const mv = applyMovement(cal.nx, cal.ny, dt, tNow);
+          speedNorm = mv.speedNorm;
+          inputMag = mv.inputMag ?? 0;
+
+          renderCursor();
+          updateDwellClick(tNow);
+
+          const blinkInfo = updateBlink(tNow, ear, openEarEstimate, speedNorm, qInfo.q);
+
+          drawDebug(lm, irisL, irisR, rx, ry, blinkInfo);
+
+          blinkPill.textContent = `BLINK: ${blinkInfo.state ?? "—"} (${(blinkInfo.ear ?? 0).toFixed(3)})`;
+          speedPill.textContent = `SPEED: ${(Math.round(speedNorm*100))}%  IN:${(inputMag ?? 0).toFixed(2)}`;
+        } else {
+          updateQualityUI({q:0, reason:"No iris"});
+        }
+
+        lastFrame.hasFace = true;
+        lastFrame.rx = rx;
+        lastFrame.ry = ry;
+        lastFrame.ear = ear;
+        lastFrame.openEarEstimate = openEarEstimate;
+        lastFrame.qInfo = qInfo;
+        lastFrame.speedNorm = speedNorm;
+        lastFrame.inputMag = inputMag;
+
+        const calState = settings.gazeCal ? `cal ON (~${Math.round(settings.gazeCal.rmsePx)}px fit)` : "cal OFF";
+        const blinkState = settings.blinkCal ? `blink ON (tClose ${settings.blinkCal.tClose.toFixed(3)})` : "blink auto";
+
+        const gameLine = game.active
+          ? `GAME: ON  HP ${Math.round(game.health)}  SH ${Math.round(game.shield)}  AMMO ${Math.floor(game.ammo)}  HEAT ${Math.round(game.heat*100)}%${game.isOverheated?" (OVERHEAT)":""}  TIME ${Math.ceil(game.timeLeft)}s  SCORE ${Math.floor(game.score)}`
+          : `GAME: OFF`;
+
+        updateStatus(
+          `Tracking. ${calState}. ${blinkState}.\n` +
+          `Quality ${qInfo.q}%. InvertX=${settings.invertX?"ON":"OFF"} InvertY=${settings.invertY?"ON":"OFF"} Sens=${Number(settings.sensitivity).toFixed(2)} Push=${Number(settings.pushOut).toFixed(2)} Gate=${Math.round(settings.blinkQualityGate)}%.\n` +
+          gameLine + `\n` +
+          `Controls: Single blink=shot (1 dmg). Hold blink=beam cut. Dwell-click=shield burst (game).`
+        );
+
+      } else {
+        const since = tNow - lastFaceSeenAt;
+        const slow = clamp(since / 700, 0, 1);
+        vX *= (1 - 0.15*slow);
+        vY *= (1 - 0.15*slow);
+        cursorX = clamp(cursorX + vX * dt, 0, window.innerWidth);
+        cursorY = clamp(cursorY + vY * dt, 0, window.innerHeight);
+        renderCursor();
+
+        updateQualityUI({q:0, reason:"No face"});
+        octx.clearRect(0,0,overlay.width,overlay.height);
+
+        blinkPill.textContent = `BLINK: —`;
+        speedPill.textContent = `SPEED: —`;
+
+        lastFrame.hasFace = false;
+
+        // If we lose face mid-beam, stop beam for safety.
+        if (game.active) game.setBeamOn(false);
+
+        updateStatus("No face detected. Ensure your face is centered and well lit.");
+      }
+    }
+
+    /**********************
+     * Preview + HUD init
+     **********************/
+    function updatePreviewVisibility(){
+      previewWrap.style.display = settings.showPreview ? "block" : "none";
+      updatePreviewLayout();
+    }
+    updatePreviewVisibility();
+    resetCursor();
+
+    /**********************
+     * Wizard UI: close on backdrop
+     **********************/
+    wizard.addEventListener("click", (e) => {
+      if (e.target === wizard) closeWizard("Closed.");
+    });
+
+    /**********************
+     * Game state buttons sync
+     **********************/
+    function refreshGameUI(){
+      gameBtn.textContent = settings.gameEnabled ? "Game ON" : "Game OFF";
+      gamePill.textContent = `GAME: ${settings.gameEnabled ? "ON" : "OFF"}`;
+    }
+    refreshGameUI();
+
+    // Apply persisted game setting ONLY after camera starts (so it doesn't run in stopped state)
+    // User can toggle immediately after Start.
+
+    /**********************
+     * Initial toast
+     **********************/
+    toast("Press Start to enable camera. Toggle Game for Laser Eyes shooter. Hold blink = beam cut.", 4200);
+  </script>
+</body>
+</html>

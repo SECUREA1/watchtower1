@@ -1,0 +1,2467 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Eye Cursor Trainer (HUD Docked Tuner + Full Preview)</title>
+  <style>
+    :root{
+      --bg0:#050610;
+      --bg1:#0b1020;
+      --neonA: rgba(255, 70, 235, 0.85);
+      --neonB: rgba(70, 255, 220, 0.85);
+      --neonC: rgba(120, 140, 255, 0.90);
+      --panel: rgba(10, 12, 24, 0.72);
+      --panel2: rgba(255,255,255,0.06);
+      --line: rgba(255,255,255,0.14);
+      --txt: #e8ecff;
+      --txt2: rgba(232,236,255,0.88);
+      --txt3: rgba(232,236,255,0.75);
+
+      /* Dock sizes */
+      --dockTop: 64px;
+      --dockBottom: 148px;
+      --dockSide: 320px;
+      --dockPad: 12px;
+    }
+
+    html, body { height: 100%; margin: 0; overflow: hidden; font-family: ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace; background: var(--bg1); color: var(--txt); }
+
+    /* Retro CRT vibe */
+    body::before{
+      content:"";
+      position:fixed; inset:0;
+      pointer-events:none;
+      background:
+        repeating-linear-gradient(
+          to bottom,
+          rgba(255,255,255,0.03) 0px,
+          rgba(255,255,255,0.03) 1px,
+          rgba(0,0,0,0.00) 2px,
+          rgba(0,0,0,0.00) 4px
+        );
+      mix-blend-mode: soft-light;
+      opacity: 0.45;
+      z-index: 10050;
+    }
+    body::after{
+      content:"";
+      position:fixed; inset:-20px;
+      pointer-events:none;
+      background: radial-gradient(1200px 800px at 50% 40%, rgba(255,255,255,0.06), transparent 60%);
+      filter: blur(0.5px);
+      opacity: 0.65;
+      z-index: 10049;
+    }
+
+    /* Main stage remains visible; pads around dock panels */
+    .stage {
+      position: fixed; inset: 0;
+      z-index: 1; /* above full-preview video when enabled */
+      background:
+        radial-gradient(1000px 650px at 20% 15%, rgba(255, 70, 235, 0.18), transparent 60%),
+        radial-gradient(900px 600px at 80% 75%, rgba(70, 255, 220, 0.10), transparent 62%),
+        linear-gradient(180deg, rgba(7,10,22,0.72), rgba(11,16,32,0.66) 55%, rgba(11,16,32,0.70));
+      padding:
+        calc(var(--dockTop) + var(--dockPad))
+        calc(var(--dockSide) + var(--dockPad))
+        calc(var(--dockBottom) + var(--dockPad))
+        calc(var(--dockSide) + var(--dockPad));
+      box-sizing: border-box;
+      overflow: hidden;
+    }
+
+    /* When collapsed: reduce side + bottom padding */
+    #hud.collapsed ~ .stage{
+      padding:
+        calc(var(--dockTop) + 10px)
+        calc(74px + 10px)
+        calc(66px + 10px)
+        calc(74px + 10px);
+    }
+
+    .demoGrid {
+      width: min(1080px, 92vw);
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(220px, 1fr));
+      gap: 14px;
+    }
+
+    .card {
+      background: rgba(12, 14, 28, 0.52);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 18px;
+      padding: 16px;
+      box-shadow:
+        0 18px 50px rgba(0,0,0,0.40),
+        0 0 0 1px rgba(255,255,255,0.06) inset;
+      backdrop-filter: blur(10px);
+      position: relative;
+      overflow: hidden;
+    }
+    .card::before{
+      content:"";
+      position:absolute; inset:-2px;
+      background: radial-gradient(700px 200px at 20% 10%, rgba(255, 70, 235, 0.14), transparent 55%),
+                  radial-gradient(600px 220px at 80% 80%, rgba(70, 255, 220, 0.10), transparent 60%);
+      filter: blur(0.2px);
+      pointer-events:none;
+      opacity:0.9;
+    }
+    .card h2 { margin: 0 0 8px; font-size: 15px; letter-spacing: 0.4px; text-shadow: 0 0 10px rgba(120,140,255,0.25); position: relative; }
+    .card p { margin: 0; font-size: 13px; color: var(--txt2); line-height: 1.45; position: relative; }
+    .card button {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.16);
+      background: rgba(255,255,255,0.06);
+      color: #eef3ff;
+      cursor: pointer;
+      font-weight: 820;
+      letter-spacing: 0.3px;
+      position: relative;
+      box-shadow: 0 10px 26px rgba(0,0,0,0.35);
+      transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+    }
+    .card button:hover {
+      background: rgba(255,255,255,0.10);
+      box-shadow: 0 12px 34px rgba(0,0,0,0.45), 0 0 22px rgba(120,140,255,0.18);
+      transform: translateY(-1px);
+    }
+    .card button:active { transform: translateY(0px) scale(0.99); }
+
+    #cursor {
+      position: fixed; z-index: 10020;
+      left: 50vw; top: 50vh;
+      width: 18px; height: 18px;
+      border-radius: 999px;
+      border: 2px solid rgba(255,255,255,0.92);
+      background: rgba(50,200,255,0.25);
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      box-shadow: 0 14px 30px rgba(0,0,0,0.45), 0 0 18px rgba(70,255,220,0.18);
+    }
+    #cursor.clicking {
+      transform: translate(-50%, -50%) scale(1.55);
+      background: rgba(255,70,235,0.20);
+      box-shadow: 0 18px 40px rgba(0,0,0,0.55), 0 0 26px rgba(255,70,235,0.22);
+    }
+
+    /* Preview: normal (floating) vs full */
+    #previewWrap {
+      position: fixed; right: 14px; bottom: 14px; z-index: 9998;
+      width: 360px; height: 270px;
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.14);
+      box-shadow: 0 18px 50px rgba(0,0,0,0.45);
+      background: #000;
+    }
+    #previewWrap.full {
+      right: 0; bottom: 0;
+      inset: 0;
+      width: 100vw; height: 100vh;
+      border-radius: 0;
+      border: none;
+      box-shadow: none;
+      z-index: 0; /* behind stage + HUD */
+    }
+
+    #video, #overlay {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      transform: scaleX(-1);
+    }
+    #overlay { pointer-events: none; }
+
+    /* --- HUD Docked Layout --- */
+    #hud { position: fixed; inset: 0; z-index: 10030; pointer-events: none; }
+
+    .hudDock{
+      pointer-events: auto;
+      background: rgba(8, 10, 20, 0.72);
+      border: 1px solid rgba(255,255,255,0.14);
+      box-shadow:
+        0 22px 70px rgba(0,0,0,0.55),
+        0 0 0 1px rgba(255,255,255,0.06) inset,
+        0 0 24px rgba(120,140,255,0.12);
+      backdrop-filter: blur(12px);
+      overflow: hidden;
+      position: fixed;
+    }
+    .hudDock::before{
+      content:"";
+      position:absolute; inset:-2px;
+      background: linear-gradient(90deg, rgba(255,70,235,0.18), rgba(70,255,220,0.12), rgba(120,140,255,0.18));
+      filter: blur(10px);
+      opacity: 0.55;
+      pointer-events:none;
+    }
+
+    /* Top bar */
+    #hudTop{
+      left: 12px; right: 12px; top: 12px;
+      height: var(--dockTop);
+      border-radius: 18px;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 10px 10px 12px;
+      box-sizing: border-box;
+      background:
+        linear-gradient(90deg, rgba(255,70,235,0.10), rgba(70,255,220,0.07), rgba(120,140,255,0.10)),
+        rgba(255,255,255,0.03);
+    }
+    #hudTop .title { display: flex; flex-direction: column; gap: 2px; position: relative; }
+    #hudTop .title .h1 { font-size: 13px; font-weight: 950; letter-spacing: 0.6px; text-shadow: 0 0 18px rgba(255,70,235,0.16); }
+    #hudTop .title .sub { font-size: 11px; opacity: 0.88; color: rgba(232,236,255,0.86); }
+    #hudTop .actions { display: flex; gap: 8px; align-items: center; position: relative; flex-wrap: wrap; justify-content: flex-end; }
+    #hudTop button {
+      padding: 8px 10px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.16);
+      background: rgba(255,255,255,0.06);
+      color: #eef3ff;
+      cursor: pointer;
+      font-weight: 900;
+      font-size: 12px;
+      letter-spacing: 0.4px;
+      box-shadow: 0 10px 26px rgba(0,0,0,0.35);
+      transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+      position: relative;
+      white-space: nowrap;
+    }
+    #hudTop button:hover {
+      background: rgba(255,255,255,0.10);
+      box-shadow: 0 12px 34px rgba(0,0,0,0.45), 0 0 22px rgba(70,255,220,0.14);
+      transform: translateY(-1px);
+    }
+    #hudTop button:active { transform: translateY(0px) scale(0.99); }
+    #hudTop button:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; transform: none; }
+
+    .pill {
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.05);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+      opacity: 0.98;
+      box-shadow: 0 0 18px rgba(120,140,255,0.10);
+      white-space: nowrap;
+    }
+
+    /* Side panels */
+    .hudSide{
+      top: calc(12px + var(--dockTop) + 10px);
+      bottom: calc(12px + var(--dockBottom) + 10px);
+      width: var(--dockSide);
+      border-radius: 18px;
+      padding: 10px 12px 12px;
+      box-sizing: border-box;
+    }
+    #hudLeft{ left: 12px; }
+    #hudRight{ right: 12px; }
+
+    .hudScroll{
+      position: relative;
+      height: 100%;
+      overflow: auto;
+      padding-right: 2px;
+    }
+
+    /* Bottom bar */
+    #hudBottom{
+      left: 12px; right: 12px; bottom: 12px;
+      height: var(--dockBottom);
+      border-radius: 18px;
+      padding: 10px 12px 12px;
+      box-sizing: border-box;
+    }
+
+    .sectionTitle {
+      margin-top: 10px;
+      font-size: 12px;
+      font-weight: 950;
+      letter-spacing: 0.7px;
+      color: rgba(232,236,255,0.95);
+      text-shadow: 0 0 14px rgba(120,140,255,0.14);
+      position: relative;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 170px 1fr 64px;
+      gap: 10px;
+      align-items: center;
+      margin: 7px 0;
+      position: relative;
+    }
+    label { font-size: 12px; color: rgba(232,236,255,0.92); letter-spacing: 0.2px; }
+    input[type="range"] { width: 100%; }
+    .val { font-size: 12px; text-align: right; opacity: 0.95; font-variant-numeric: tabular-nums; }
+
+    .row2 { display: flex; gap: 10px; align-items: center; margin: 8px 0; flex-wrap: wrap; position: relative; }
+    .row2 button {
+      padding: 8px 10px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.16);
+      background: rgba(255,255,255,0.06);
+      color: #eef3ff;
+      cursor: pointer;
+      font-weight: 900;
+      font-size: 12px;
+      letter-spacing: 0.4px;
+      box-shadow: 0 10px 26px rgba(0,0,0,0.35);
+      transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+      position: relative;
+      white-space: nowrap;
+    }
+    .row2 button:hover {
+      background: rgba(255,255,255,0.10);
+      box-shadow: 0 12px 34px rgba(0,0,0,0.45), 0 0 22px rgba(255,70,235,0.12);
+      transform: translateY(-1px);
+    }
+    .row2 button:active { transform: translateY(0px) scale(0.99); }
+    .row2 button:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; transform: none; }
+
+    .switchRow { display: flex; gap: 12px; align-items: center; margin: 8px 0; flex-wrap: wrap; position: relative; }
+    .switchRow label { display: flex; gap: 8px; align-items: center; }
+
+    #status {
+      margin-top: 8px;
+      font-size: 12px;
+      line-height: 1.35;
+      color: rgba(232,236,255,0.92);
+      padding: 10px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 12px;
+      font-variant-numeric: tabular-nums;
+      box-shadow: 0 0 18px rgba(255,70,235,0.08);
+    }
+
+    .bar {
+      width: 100%;
+      height: 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.05);
+      overflow: hidden;
+      box-shadow: 0 0 18px rgba(70,255,220,0.07);
+      position: relative;
+    }
+    .bar > div {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, rgba(70,255,220,0.85), rgba(255,70,235,0.65), rgba(120,140,255,0.85));
+      border-radius: 999px;
+      transition: width 90ms linear;
+    }
+
+    .hint { font-size: 12px; opacity: 0.85; line-height: 1.35; margin-top: 6px; position: relative; }
+    .tiny { font-size: 11px; opacity: 0.8; position: relative; }
+
+    /* Collapse mode: make side + bottom minimal to maximize gameplay */
+    #hud.collapsed { pointer-events: none; }
+    #hud.collapsed .hudDock { pointer-events: auto; }
+
+    #hud.collapsed .hudSide{
+      width: 74px;
+      padding: 10px 10px;
+    }
+    #hud.collapsed #hudBottom{
+      height: 66px;
+      padding: 10px 12px;
+    }
+    #hud.collapsed .hudScroll{ overflow: hidden; }
+    #hud.collapsed .collapseHide{ display: none !important; }
+    #hud.collapsed .collapseMini{
+      display: flex !important;
+      gap: 8px;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+    }
+
+    /* Mini controls visible only when collapsed */
+    .collapseMini{ display: none; }
+
+    /* Wizard */
+    #wizard {
+      position: fixed; inset: 0; z-index: 10040;
+      display: none;
+      background: rgba(0,0,0,0.60);
+      backdrop-filter: blur(6px);
+    }
+    #wizardPanel {
+      position: absolute; left: 50%; top: 50%;
+      transform: translate(-50%, -50%);
+      width: min(860px, 94vw);
+      background: rgba(10,12,24,0.90);
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 18px;
+      box-shadow: 0 22px 70px rgba(0,0,0,0.60), 0 0 30px rgba(120,140,255,0.10);
+      padding: 14px 14px 12px;
+      position: relative;
+      overflow: hidden;
+    }
+    #wizardPanel::before{
+      content:"";
+      position:absolute; inset:-2px;
+      background: linear-gradient(90deg, rgba(255,70,235,0.12), rgba(70,255,220,0.08), rgba(120,140,255,0.12));
+      filter: blur(12px);
+      opacity: 0.55;
+      pointer-events:none;
+    }
+    #wizardPanel h3 { margin: 0 0 6px; font-size: 15px; font-weight: 950; letter-spacing: 0.6px; position: relative; }
+    #wizardPanel p { margin: 0; font-size: 13px; line-height: 1.45; color: rgba(232,236,255,0.88); position: relative; }
+    #wizardPanel .meta {
+      margin-top: 10px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      align-items: center;
+      position: relative;
+    }
+    #wizardPanel .meta .box {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.10);
+      border-radius: 14px;
+      padding: 10px;
+      font-size: 12px;
+      line-height: 1.35;
+      box-shadow: 0 0 18px rgba(70,255,220,0.06);
+    }
+    #wizardPanel .meta b { font-weight: 950; }
+    #wizardPanel .buttons {
+      margin-top: 12px;
+      display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;
+      position: relative;
+    }
+    #wizardPanel button {
+      padding: 9px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.16);
+      background: rgba(255,255,255,0.06);
+      color: #eef3ff;
+      cursor: pointer;
+      font-weight: 900;
+      letter-spacing: 0.4px;
+      box-shadow: 0 10px 26px rgba(0,0,0,0.35);
+      transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+    }
+    #wizardPanel button:hover { background: rgba(255,255,255,0.10); box-shadow: 0 12px 34px rgba(0,0,0,0.45), 0 0 22px rgba(255,70,235,0.12); transform: translateY(-1px); }
+    #wizardPanel button:active { transform: translateY(0px) scale(0.99); }
+    #wizardPanel button:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; transform: none; }
+
+    #calibDot {
+      position: fixed; z-index: 10041;
+      width: 18px; height: 18px;
+      border-radius: 999px;
+      background: #fff;
+      border: 2px solid rgba(0,0,0,0.8);
+      box-shadow: 0 14px 32px rgba(0,0,0,0.55), 0 0 22px rgba(70,255,220,0.22);
+      transform: translate(-50%, -50%);
+      display: none;
+    }
+
+    #gameCanvas { position: fixed; inset: 0; z-index: 9997; pointer-events: none; }
+
+    #toast {
+      position: fixed; left: 50%; bottom: 16px; z-index: 10041;
+      transform: translateX(-50%);
+      background: rgba(10,12,24,0.88);
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 14px;
+      padding: 10px 12px;
+      font-size: 13px;
+      color: rgba(232,236,255,0.92);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.55), 0 0 26px rgba(120,140,255,0.10);
+      display: none;
+      max-width: min(920px, 92vw);
+      line-height: 1.45;
+      letter-spacing: 0.2px;
+    }
+
+    #fileImport { display: none; }
+
+    /* Responsive: shrink side panels */
+    @media (max-width: 1100px){
+      :root{ --dockSide: 280px; }
+      .row{ grid-template-columns: 150px 1fr 58px; }
+    }
+    @media (max-width: 920px){
+      :root{ --dockSide: 240px; --dockBottom: 168px; }
+      .demoGrid{ grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="stage">
+    <div class="demoGrid">
+      <div class="card">
+        <h2>Guide: Use the Training Mode</h2>
+        <p>Run the wizard to calibrate gaze + blink. Then start challenges to learn smooth movement and reliable clicking.</p>
+        <button onclick="alert('This is a clickable demo element.')">Demo Button</button>
+      </div>
+      <div class="card">
+        <h2>Tip: Lighting + Head Stability</h2>
+        <p>Look straight at the camera, keep your head steady, and avoid strong backlight. Calibration uses stability gating.</p>
+        <button onclick="alert('Good. Your cursor can click this too.')">Another Button</button>
+      </div>
+      <div class="card">
+        <h2>Tip: Blink Click Mode</h2>
+        <p>Long blink is the most reliable. Double-blink is supported after validation. You can also use dwell click.</p>
+        <button onclick="alert('Clicked!')">Click Target</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="cursor" aria-hidden="true"></div>
+
+  <!-- DOCKED HUD WRAPPER -->
+  <div id="hud">
+    <!-- TOP BAR -->
+    <div id="hudTop" class="hudDock">
+      <div class="title">
+        <div class="h1">Eye Cursor Trainer</div>
+        <div class="sub">Docked HUD tuner (top/left/right/bottom) + full preview</div>
+      </div>
+      <div class="actions">
+        <button id="collapseBtn">Collapse</button>
+        <button id="startBtn">Start</button>
+        <button id="stopBtn" disabled>Stop</button>
+        <span class="pill" id="fpsPill">FPS: —</span>
+        <span class="pill" id="blinkPill">BLINK: —</span>
+        <span class="pill" id="speedPill">SPEED: —</span>
+      </div>
+    </div>
+
+    <!-- LEFT SIDE: Movement + Direction + Debug -->
+    <div id="hudLeft" class="hudDock hudSide">
+      <!-- Collapsed mini view -->
+      <div class="collapseMini">
+        <button id="centerBtn" disabled>C</button>
+        <button id="wizardBtn" disabled>W</button>
+        <button id="trainingBtn" disabled>T</button>
+      </div>
+
+      <div class="hudScroll collapseHide">
+        <div class="sectionTitle">Movement</div>
+        <div class="row"><label for="maxSpeed">Max speed (px/s)</label><input id="maxSpeed" type="range" min="300" max="3200" step="25"><div class="val" id="maxSpeedVal"></div></div>
+        <div class="row"><label for="sensitivity">Sensitivity gain</label><input id="sensitivity" type="range" min="0.60" max="2.60" step="0.05"><div class="val" id="sensitivityVal"></div></div>
+        <div class="row"><label for="pushOut">Push-out stretch</label><input id="pushOut" type="range" min="0" max="1.25" step="0.02"><div class="val" id="pushOutVal"></div></div>
+        <div class="row"><label for="assist">Precision assist</label><input id="assist" type="range" min="0" max="0.55" step="0.01"><div class="val" id="assistVal"></div></div>
+        <div class="row"><label for="deadzone">Soft deadzone</label><input id="deadzone" type="range" min="0" max="0.18" step="0.005"><div class="val" id="deadzoneVal"></div></div>
+        <div class="row"><label for="minCutoff">Filter (min cutoff)</label><input id="minCutoff" type="range" min="0.2" max="3.0" step="0.05"><div class="val" id="minCutoffVal"></div></div>
+        <div class="row"><label for="beta">Filter (beta)</label><input id="beta" type="range" min="0" max="0.09" step="0.002"><div class="val" id="betaVal"></div></div>
+
+        <div class="sectionTitle">Direction</div>
+        <div class="switchRow">
+          <label><input id="invertX" type="checkbox"> Invert left/right</label>
+          <label><input id="invertY" type="checkbox"> Invert up/down</label>
+        </div>
+
+        <div class="sectionTitle">Debug / Preview</div>
+        <div class="switchRow">
+          <label><input id="showPreview" type="checkbox" checked> Preview</label>
+          <label><input id="fullPreview" type="checkbox"> Full preview</label>
+          <label><input id="debugDraw" type="checkbox" checked> Debug overlay</label>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT SIDE: Click settings -->
+    <div id="hudRight" class="hudDock hudSide">
+      <div class="hudScroll">
+        <div class="sectionTitle">Click</div>
+        <div class="switchRow">
+          <label><input id="dwellClick" type="checkbox" checked> Dwell click</label>
+          <label><input id="blinkClick" type="checkbox" checked> Blink click</label>
+        </div>
+
+        <div class="row"><label for="dwellMs">Dwell time (ms)</label><input id="dwellMs" type="range" min="300" max="1600" step="10"><div class="val" id="dwellMsVal"></div></div>
+        <div class="row"><label for="dwellRadius">Dwell radius (px)</label><input id="dwellRadius" type="range" min="10" max="48" step="1"><div class="val" id="dwellRadiusVal"></div></div>
+
+        <div class="switchRow">
+          <label><input type="radio" name="blinkMode" value="long" checked> Long blink</label>
+          <label><input type="radio" name="blinkMode" value="double"> Double blink</label>
+        </div>
+
+        <div class="row"><label for="longBlinkMs">Long blink (ms)</label><input id="longBlinkMs" type="range" min="160" max="560" step="10"><div class="val" id="longBlinkMsVal"></div></div>
+        <div class="row"><label for="dblWindowMs">Double window (ms)</label><input id="dblWindowMs" type="range" min="300" max="950" step="10"><div class="val" id="dblWindowMsVal"></div></div>
+        <div class="row"><label for="clickCooldownMs">Click cooldown (ms)</label><input id="clickCooldownMs" type="range" min="350" max="1400" step="10"><div class="val" id="clickCooldownMsVal"></div></div>
+
+        <div class="sectionTitle">Blink Safety</div>
+        <div class="row"><label for="blinkQualityGate">Blink quality gate (%)</label><input id="blinkQualityGate" type="range" min="0" max="100" step="1"><div class="val" id="blinkQualityGateVal"></div></div>
+        <div class="tiny">If false clicks occur, raise the quality gate or cooldown; if clicks are missed, lower the gate slightly.</div>
+      </div>
+    </div>
+
+    <!-- BOTTOM BAR: Actions + Quality + Status + Import/Export -->
+    <div id="hudBottom" class="hudDock">
+      <div class="row2 collapseHide">
+        <button id="centerBtnBottom" style="display:none"></button><!-- placeholder to avoid accidental duplicate id -->
+        <button id="centerBtn" disabled>Center</button>
+        <button id="wizardBtn" disabled>Calibration Wizard</button>
+        <button id="trainingBtn" disabled>Training Mode</button>
+
+        <button id="exportBtn">Export JSON</button>
+        <button id="importBtn">Import JSON</button>
+        <input id="fileImport" type="file" accept="application/json" />
+      </div>
+
+      <div class="collapseMini">
+        <span class="pill" id="qualityMini">Q: —</span>
+        <span class="pill" id="modeMini">HUD</span>
+      </div>
+
+      <div class="collapseHide">
+        <div class="sectionTitle" style="margin-top:0;">Scan Quality</div>
+        <div class="bar"><div id="qualityBar"></div></div>
+        <div class="tiny" id="qualityText">Quality: —</div>
+
+        <div id="status">Idle. Press Start. (Must be served over https:// or localhost to access camera.)</div>
+        <div class="hint">
+          Shortcuts: <b>W</b>=Wizard, <b>T</b>=Training, <b>C</b>=Center. Validation: press <b>SPACE</b> when looking at the dot.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Preview -->
+  <div id="previewWrap">
+    <video id="video" autoplay playsinline></video>
+    <canvas id="overlay"></canvas>
+  </div>
+
+  <canvas id="gameCanvas"></canvas>
+
+  <!-- Wizard -->
+  <div id="wizard">
+    <div id="wizardPanel">
+      <h3 id="wizTitle">Wizard</h3>
+      <p id="wizText">…</p>
+      <div class="meta">
+        <div class="box" id="wizBoxLeft">…</div>
+        <div class="box" id="wizBoxRight">…</div>
+      </div>
+      <div class="buttons">
+        <button id="wizBackBtn" disabled>Back</button>
+        <button id="wizCancelBtn">Cancel</button>
+        <button id="wizNextBtn" disabled>Next</button>
+      </div>
+      <div class="tiny" style="margin-top:8px; opacity:0.82;">
+        Tip: During capture, keep your head still and only move your eyes. If scan quality drops, capture pauses automatically.
+      </div>
+    </div>
+  </div>
+
+  <div id="calibDot"></div>
+  <div id="toast"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+
+  <script>
+    /**********************
+     * Utilities
+     **********************/
+    function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+    function lerp(a, b, t) { return a + (b - a) * t; }
+    function mean(arr){ return arr.reduce((a,b)=>a+b,0) / Math.max(1, arr.length); }
+    function stddev(arr){
+      if (arr.length < 2) return 0;
+      const m = mean(arr);
+      const v = arr.reduce((a,x)=>a+(x-m)*(x-m),0) / (arr.length-1);
+      return Math.sqrt(v);
+    }
+    function median(arr){
+      if (!arr.length) return null;
+      const s = [...arr].sort((a,b)=>a-b);
+      const mid = Math.floor(s.length / 2);
+      return s.length % 2 ? s[mid] : (s[mid-1] + s[mid]) / 2;
+    }
+    function nowMs(){ return performance.now(); }
+
+    function toast(msg, ms=2200){
+      const el = document.getElementById("toast");
+      el.textContent = msg;
+      el.style.display = "block";
+      clearTimeout(toast._t);
+      toast._t = setTimeout(()=>{ el.style.display = "none"; }, ms);
+    }
+
+    /**********************
+     * One Euro Filter
+     **********************/
+    class LowPass {
+      constructor(alpha, initVal=0) { this.alpha = alpha; this.s = initVal; this.init = false; }
+      setAlpha(a){ this.alpha = a; }
+      filter(x){
+        if (!this.init){ this.s = x; this.init = true; return x; }
+        this.s = this.alpha * x + (1 - this.alpha) * this.s;
+        return this.s;
+      }
+      reset(){ this.init = false; }
+    }
+    function alphaFromCutoff(cutoff, dt){
+      const tau = 1 / (2 * Math.PI * cutoff);
+      return 1 / (1 + tau / Math.max(1e-6, dt));
+    }
+    class OneEuro {
+      constructor(minCutoff=1.2, beta=0.015, dCutoff=1.0){
+        this.minCutoff = minCutoff; this.beta = beta; this.dCutoff = dCutoff;
+        this.xFilt = new LowPass(1.0); this.dxFilt = new LowPass(1.0);
+        this.lastX = null; this.lastT = null;
+      }
+      setParams(minCutoff, beta){ this.minCutoff = minCutoff; this.beta = beta; }
+      filter(x, tSec){
+        if (this.lastT == null){
+          this.lastT = tSec; this.lastX = x;
+          this.xFilt.reset(); this.dxFilt.reset();
+          return this.xFilt.filter(x);
+        }
+        const dt = Math.max(1e-4, tSec - this.lastT);
+        const dx = (x - this.lastX) / dt;
+        this.lastX = x; this.lastT = tSec;
+
+        const aD = alphaFromCutoff(this.dCutoff, dt);
+        this.dxFilt.setAlpha(aD);
+        const dxHat = this.dxFilt.filter(dx);
+
+        const cutoff = this.minCutoff + this.beta * Math.abs(dxHat);
+        const a = alphaFromCutoff(cutoff, dt);
+        this.xFilt.setAlpha(a);
+        return this.xFilt.filter(x);
+      }
+      reset(){ this.lastT = null; this.lastX = null; this.xFilt.reset(); this.dxFilt.reset(); }
+    }
+
+    /**********************
+     * Settings
+     **********************/
+    const LS_KEY = "eye_cursor_trainer_v4_docked_hud";
+
+    const DEFAULTS = {
+      maxSpeed: 1750,
+      sensitivity: 1.00,
+      pushOut: 0.35,
+
+      assist: 0.18,
+      deadzone: 0.030,
+      minCutoff: 1.25,
+      beta: 0.018,
+
+      invertX: false,
+      invertY: false,
+
+      dwellClick: true,
+      dwellMs: 760,
+      dwellRadius: 18,
+
+      blinkClick: true,
+      blinkMode: "long",
+      longBlinkMs: 260,
+      dblWindowMs: 560,
+      clickCooldownMs: 780,
+
+      blinkQualityGate: 70,
+
+      showPreview: true,
+      fullPreview: true,
+      debugDraw: true,
+      hudCollapsed: false,
+
+      gazeCal: null,
+      blinkCal: null,
+
+      calibrationMaxRmsePx: 90
+    };
+
+    function loadSettings(){
+      try {
+        const raw = localStorage.getItem(LS_KEY);
+        if (!raw) return structuredClone(DEFAULTS);
+        const parsed = JSON.parse(raw);
+        const merged = { ...structuredClone(DEFAULTS), ...parsed };
+
+        if (parsed?.fullPreview === undefined) merged.fullPreview = true;
+        if (parsed?.hudCollapsed === undefined) merged.hudCollapsed = false;
+
+        merged.sensitivity = clamp(Number(merged.sensitivity ?? DEFAULTS.sensitivity), 0.60, 2.60);
+        merged.pushOut = clamp(Number(merged.pushOut ?? DEFAULTS.pushOut), 0, 1.25);
+        merged.blinkQualityGate = clamp(Number(merged.blinkQualityGate ?? DEFAULTS.blinkQualityGate), 0, 100);
+
+        return merged;
+      } catch {
+        return structuredClone(DEFAULTS);
+      }
+    }
+    let settings = loadSettings();
+    function saveSettings(){ localStorage.setItem(LS_KEY, JSON.stringify(settings)); }
+
+    /**********************
+     * DOM
+     **********************/
+    const cursorEl = document.getElementById("cursor");
+    const statusEl = document.getElementById("status");
+    const fpsPill = document.getElementById("fpsPill");
+    const blinkPill = document.getElementById("blinkPill");
+    const speedPill = document.getElementById("speedPill");
+
+    const qualityBar = document.getElementById("qualityBar");
+    const qualityText = document.getElementById("qualityText");
+    const qualityMini = document.getElementById("qualityMini");
+
+    const previewWrap = document.getElementById("previewWrap");
+    const video = document.getElementById("video");
+    const overlay = document.getElementById("overlay");
+    const octx = overlay.getContext("2d");
+
+    const gameCanvas = document.getElementById("gameCanvas");
+    const gctx = gameCanvas.getContext("2d");
+
+    const hud = document.getElementById("hud");
+    const collapseBtn = document.getElementById("collapseBtn");
+
+    const startBtn = document.getElementById("startBtn");
+    const stopBtn = document.getElementById("stopBtn");
+    const centerBtn = document.getElementById("centerBtn");
+    const wizardBtn = document.getElementById("wizardBtn");
+    const trainingBtn = document.getElementById("trainingBtn");
+
+    const exportBtn = document.getElementById("exportBtn");
+    const importBtn = document.getElementById("importBtn");
+    const fileImport = document.getElementById("fileImport");
+
+    const inputs = {
+      maxSpeed: document.getElementById("maxSpeed"),
+      sensitivity: document.getElementById("sensitivity"),
+      pushOut: document.getElementById("pushOut"),
+
+      assist: document.getElementById("assist"),
+      deadzone: document.getElementById("deadzone"),
+      minCutoff: document.getElementById("minCutoff"),
+      beta: document.getElementById("beta"),
+
+      invertX: document.getElementById("invertX"),
+      invertY: document.getElementById("invertY"),
+
+      dwellClick: document.getElementById("dwellClick"),
+      blinkClick: document.getElementById("blinkClick"),
+      dwellMs: document.getElementById("dwellMs"),
+      dwellRadius: document.getElementById("dwellRadius"),
+
+      longBlinkMs: document.getElementById("longBlinkMs"),
+      dblWindowMs: document.getElementById("dblWindowMs"),
+      clickCooldownMs: document.getElementById("clickCooldownMs"),
+
+      blinkQualityGate: document.getElementById("blinkQualityGate"),
+
+      showPreview: document.getElementById("showPreview"),
+      fullPreview: document.getElementById("fullPreview"),
+      debugDraw: document.getElementById("debugDraw"),
+    };
+
+    const vals = {
+      maxSpeed: document.getElementById("maxSpeedVal"),
+      sensitivity: document.getElementById("sensitivityVal"),
+      pushOut: document.getElementById("pushOutVal"),
+
+      assist: document.getElementById("assistVal"),
+      deadzone: document.getElementById("deadzoneVal"),
+      minCutoff: document.getElementById("minCutoffVal"),
+      beta: document.getElementById("betaVal"),
+      dwellMs: document.getElementById("dwellMsVal"),
+      dwellRadius: document.getElementById("dwellRadiusVal"),
+      longBlinkMs: document.getElementById("longBlinkMsVal"),
+      dblWindowMs: document.getElementById("dblWindowMsVal"),
+      clickCooldownMs: document.getElementById("clickCooldownMsVal"),
+
+      blinkQualityGate: document.getElementById("blinkQualityGateVal")
+    };
+
+    function updatePreviewLayout(){
+      previewWrap.classList.toggle("full", !!settings.fullPreview);
+    }
+
+    function updateValueLabels(){
+      vals.maxSpeed.textContent = Math.round(settings.maxSpeed);
+      vals.sensitivity.textContent = Number(settings.sensitivity).toFixed(2);
+      vals.pushOut.textContent = Number(settings.pushOut).toFixed(2);
+
+      vals.assist.textContent = Number(settings.assist).toFixed(2);
+      vals.deadzone.textContent = Number(settings.deadzone).toFixed(3);
+      vals.minCutoff.textContent = Number(settings.minCutoff).toFixed(2);
+      vals.beta.textContent = Number(settings.beta).toFixed(3);
+      vals.dwellMs.textContent = Math.round(settings.dwellMs);
+      vals.dwellRadius.textContent = Math.round(settings.dwellRadius);
+      vals.longBlinkMs.textContent = Math.round(settings.longBlinkMs);
+      vals.dblWindowMs.textContent = Math.round(settings.dblWindowMs);
+      vals.clickCooldownMs.textContent = Math.round(settings.clickCooldownMs);
+      vals.blinkQualityGate.textContent = `${Math.round(settings.blinkQualityGate)}%`;
+    }
+
+    function setUIFromSettings(){
+      inputs.maxSpeed.value = settings.maxSpeed;
+      inputs.sensitivity.value = settings.sensitivity;
+      inputs.pushOut.value = settings.pushOut;
+
+      inputs.assist.value = settings.assist;
+      inputs.deadzone.value = settings.deadzone;
+      inputs.minCutoff.value = settings.minCutoff;
+      inputs.beta.value = settings.beta;
+
+      inputs.invertX.checked = !!settings.invertX;
+      inputs.invertY.checked = !!settings.invertY;
+
+      inputs.dwellClick.checked = settings.dwellClick;
+      inputs.blinkClick.checked = settings.blinkClick;
+      inputs.dwellMs.value = settings.dwellMs;
+      inputs.dwellRadius.value = settings.dwellRadius;
+
+      inputs.longBlinkMs.value = settings.longBlinkMs;
+      inputs.dblWindowMs.value = settings.dblWindowMs;
+      inputs.clickCooldownMs.value = settings.clickCooldownMs;
+
+      inputs.blinkQualityGate.value = settings.blinkQualityGate;
+
+      document.querySelectorAll('input[name="blinkMode"]').forEach(r => r.checked = (r.value === settings.blinkMode));
+
+      inputs.showPreview.checked = settings.showPreview;
+      inputs.fullPreview.checked = !!settings.fullPreview;
+      inputs.debugDraw.checked = settings.debugDraw;
+
+      previewWrap.style.display = settings.showPreview ? "block" : "none";
+      updatePreviewLayout();
+
+      hud.classList.toggle("collapsed", !!settings.hudCollapsed);
+      collapseBtn.textContent = settings.hudCollapsed ? "Expand" : "Collapse";
+
+      updateValueLabels();
+    }
+
+    function bindRange(key, parser=Number){
+      inputs[key].addEventListener("input", () => {
+        settings[key] = parser(inputs[key].value);
+        updateValueLabels();
+        updatePreviewLayout();
+        saveSettings();
+      });
+    }
+
+    [
+      "maxSpeed","sensitivity","pushOut",
+      "assist","deadzone","minCutoff","beta",
+      "dwellMs","dwellRadius","longBlinkMs","dblWindowMs","clickCooldownMs",
+      "blinkQualityGate"
+    ].forEach(k => bindRange(k));
+
+    inputs.invertX.addEventListener("change", () => { settings.invertX = inputs.invertX.checked; saveSettings(); });
+    inputs.invertY.addEventListener("change", () => { settings.invertY = inputs.invertY.checked; saveSettings(); });
+
+    inputs.dwellClick.addEventListener("change", () => { settings.dwellClick = inputs.dwellClick.checked; saveSettings(); });
+    inputs.blinkClick.addEventListener("change", () => { settings.blinkClick = inputs.blinkClick.checked; saveSettings(); });
+    document.querySelectorAll('input[name="blinkMode"]').forEach(r => {
+      r.addEventListener("change", () => {
+        settings.blinkMode = document.querySelector('input[name="blinkMode"]:checked').value;
+        saveSettings();
+      });
+    });
+
+    inputs.showPreview.addEventListener("change", () => {
+      settings.showPreview = inputs.showPreview.checked;
+      previewWrap.style.display = settings.showPreview ? "block" : "none";
+      saveSettings();
+    });
+
+    inputs.fullPreview.addEventListener("change", () => {
+      settings.fullPreview = inputs.fullPreview.checked;
+      updatePreviewLayout();
+      saveSettings();
+    });
+
+    inputs.debugDraw.addEventListener("change", () => { settings.debugDraw = inputs.debugDraw.checked; saveSettings(); });
+
+    collapseBtn.addEventListener("click", () => {
+      settings.hudCollapsed = !settings.hudCollapsed;
+      hud.classList.toggle("collapsed", !!settings.hudCollapsed);
+      collapseBtn.textContent = settings.hudCollapsed ? "Expand" : "Collapse";
+      saveSettings();
+    });
+
+    exportBtn.addEventListener("click", () => {
+      const blob = new Blob([JSON.stringify(settings, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "eye_cursor_trainer_settings.json";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    });
+    importBtn.addEventListener("click", () => fileImport.click());
+    fileImport.addEventListener("change", async () => {
+      const file = fileImport.files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const parsed = JSON.parse(text);
+        settings = { ...structuredClone(DEFAULTS), ...parsed };
+
+        settings.sensitivity = clamp(Number(settings.sensitivity ?? DEFAULTS.sensitivity), 0.60, 2.60);
+        settings.pushOut = clamp(Number(settings.pushOut ?? DEFAULTS.pushOut), 0, 1.25);
+        settings.blinkQualityGate = clamp(Number(settings.blinkQualityGate ?? DEFAULTS.blinkQualityGate), 0, 100);
+
+        saveSettings();
+        setUIFromSettings();
+        toast("Imported settings.");
+      } catch (e) {
+        toast(`Import failed: ${e?.message || e}`, 3200);
+      } finally {
+        fileImport.value = "";
+      }
+    });
+
+    setUIFromSettings();
+
+    /**********************
+     * Virtual cursor + click dispatch
+     **********************/
+    let cursorX = window.innerWidth / 2;
+    let cursorY = window.innerHeight / 2;
+    let vX = 0, vY = 0;
+
+    function renderCursor(){
+      cursorEl.style.left = `${cursorX}px`;
+      cursorEl.style.top  = `${cursorY}px`;
+    }
+
+    function resetCursor(){
+      cursorX = window.innerWidth / 2;
+      cursorY = window.innerHeight / 2;
+      vX = 0; vY = 0;
+      stableAnchor = { x: cursorX, y: cursorY };
+      stableSince = null;
+      euroX.reset(); euroY.reset();
+      renderCursor();
+    }
+
+    function dispatchVirtualClick(x, y){
+      cursorEl.classList.add("clicking");
+      setTimeout(() => cursorEl.classList.remove("clicking"), 120);
+
+      trainer.onClick(x, y);
+
+      const el = document.elementFromPoint(x, y);
+      if (!el) return;
+      const opts = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y };
+      el.dispatchEvent(new MouseEvent("mousedown", opts));
+      el.dispatchEvent(new MouseEvent("mouseup", opts));
+      el.dispatchEvent(new MouseEvent("click", opts));
+    }
+
+    /**********************
+     * Dwell click logic
+     **********************/
+    let stableAnchor = { x: cursorX, y: cursorY };
+    let stableSince = null;
+    let lastDwellClickAt = 0;
+
+    function updateDwellClick(now){
+      if (!settings.dwellClick || trainer.blockDwell) return;
+
+      const dx = cursorX - stableAnchor.x;
+      const dy = cursorY - stableAnchor.y;
+      const dist = Math.hypot(dx, dy);
+
+      if (dist <= settings.dwellRadius) {
+        if (stableSince === null) stableSince = now;
+
+        const cooldownMs = 600;
+        if ((now - stableSince) >= settings.dwellMs && (now - lastDwellClickAt) >= cooldownMs) {
+          lastDwellClickAt = now;
+          stableSince = null;
+          stableAnchor = { x: cursorX, y: cursorY };
+          dispatchVirtualClick(cursorX, cursorY);
+        }
+      } else {
+        stableAnchor = { x: cursorX, y: cursorY };
+        stableSince = null;
+      }
+    }
+
+    /**********************
+     * FaceMesh landmark helpers
+     **********************/
+    const RIGHT_EYE = [33, 160, 158, 133, 153, 144];
+    const LEFT_EYE  = [362, 385, 387, 263, 373, 380];
+
+    function dist2D(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+    function earForEye(lm, idx){
+      const p1 = lm[idx[0]], p2 = lm[idx[1]], p3 = lm[idx[2]];
+      const p4 = lm[idx[3]], p5 = lm[idx[4]], p6 = lm[idx[5]];
+      const num = dist2D(p2,p6) + dist2D(p3,p5);
+      const den = 2*dist2D(p1,p4) + 1e-6;
+      return num / den;
+    }
+
+    function ratioInEye(iris, cornerA, cornerB, lidTop, lidBot){
+      const xMin = Math.min(cornerA.x, cornerB.x);
+      const xMax = Math.max(cornerA.x, cornerB.x);
+      const yMin = Math.min(lidTop.y, lidBot.y);
+      const yMax = Math.max(lidTop.y, lidBot.y);
+      const rx = (iris.x - xMin) / (xMax - xMin + 1e-6);
+      const ry = (iris.y - yMin) / (yMax - yMin + 1e-6);
+      return { rx: clamp(rx, 0, 1), ry: clamp(ry, 0, 1) };
+    }
+
+    /**********************
+     * Scan quality gating
+     **********************/
+    const rxBuf = [];
+    const ryBuf = [];
+    const earBuf = [];
+    const BUF_MAX = 30;
+
+    function pushBuf(buf, v){
+      buf.push(v);
+      if (buf.length > BUF_MAX) buf.shift();
+    }
+
+    function computeScanQuality(hasFace, rx, ry, ear){
+      if (!hasFace) return { q: 0, reason: "No face" };
+      if (!Number.isFinite(rx) || !Number.isFinite(ry)) return { q: 0, reason: "No iris" };
+      pushBuf(rxBuf, rx);
+      pushBuf(ryBuf, ry);
+      if (Number.isFinite(ear)) pushBuf(earBuf, ear);
+
+      const srx = stddev(rxBuf);
+      const sry = stddev(ryBuf);
+      const qx = clamp(1 - (srx / 0.020), 0, 1);
+      const qy = clamp(1 - (sry / 0.025), 0, 1);
+      const q = Math.round(100 * (0.55*qx + 0.45*qy));
+
+      let reason = "Stable";
+      if (q < 35) reason = "Unstable (head/lighting)";
+      else if (q < 70) reason = "Improving (hold steady)";
+      return { q, reason, srx, sry };
+    }
+
+    function updateQualityUI(qInfo){
+      qualityBar.style.width = `${qInfo.q}%`;
+      qualityText.textContent = `Quality: ${qInfo.q}% — ${qInfo.reason}`;
+      if (qualityMini) qualityMini.textContent = `Q: ${qInfo.q}%`;
+    }
+
+    function isStableForCapture(qInfo){ return qInfo.q >= 78; }
+
+    /**********************
+     * Calibration model (2nd order polynomial)
+     **********************/
+    function features(rx, ry){ return [1, rx, ry, rx*ry, rx*rx, ry*ry]; }
+
+    function solveLeastSquares(A, b){
+      const N = A.length;
+      const M = A[0].length;
+      const AtA = Array.from({length:M}, ()=>Array(M).fill(0));
+      const Atb = Array(M).fill(0);
+
+      for (let i=0;i<N;i++){
+        const row = A[i];
+        for (let r=0;r<M;r++){
+          Atb[r] += row[r] * b[i];
+          for (let c=0;c<M;c++){
+            AtA[r][c] += row[r] * row[c];
+          }
+        }
+      }
+
+      const aug = AtA.map((row, i) => [...row, Atb[i]]);
+      for (let col=0; col<M; col++){
+        let pivot = col;
+        for (let r=col+1; r<M; r++){
+          if (Math.abs(aug[r][col]) > Math.abs(aug[pivot][col])) pivot = r;
+        }
+        if (Math.abs(aug[pivot][col]) < 1e-10) return null;
+        [aug[col], aug[pivot]] = [aug[pivot], aug[col]];
+
+        const div = aug[col][col];
+        for (let c=col; c<=M; c++) aug[col][c] /= div;
+
+        for (let r=0; r<M; r++){
+          if (r === col) continue;
+          const factor = aug[r][col];
+          for (let c=col; c<=M; c++){
+            aug[r][c] -= factor * aug[col][c];
+          }
+        }
+      }
+      return aug.map(r => r[M]);
+    }
+
+    function fitCalibration(samples){
+      const A = samples.map(s => features(s.rx, s.ry));
+      const bx = samples.map(s => s.nx);
+      const by = samples.map(s => s.ny);
+
+      const cx = solveLeastSquares(A, bx);
+      const cy = solveLeastSquares(A, by);
+      if (!cx || !cy) return null;
+
+      const errs = samples.map(s => {
+        const f = features(s.rx, s.ry);
+        const nx = f.reduce((acc,v,i)=>acc + v*cx[i], 0);
+        const ny = f.reduce((acc,v,i)=>acc + v*cy[i], 0);
+        const px = nx * window.innerWidth;
+        const py = ny * window.innerHeight;
+        return Math.hypot(px - s.txPx, py - s.tyPx);
+      });
+      const rmse = Math.sqrt(errs.reduce((a,e)=>a+e*e,0) / Math.max(1, errs.length));
+      return { type: "poly2", cx, cy, rmsePx: rmse, createdAt: new Date().toISOString() };
+    }
+
+    function applyCalibration(rx, ry){
+      if (!settings.gazeCal || settings.gazeCal.type !== "poly2") {
+        return { nx: clamp(rx, 0, 1), ny: clamp(ry, 0, 1), source: "raw" };
+      }
+      const cal = settings.gazeCal;
+      const f = features(rx, ry);
+      const nx = f.reduce((acc,v,i)=>acc + v*cal.cx[i], 0);
+      const ny = f.reduce((acc,v,i)=>acc + v*cal.cy[i], 0);
+      return { nx: clamp(nx, 0, 1), ny: clamp(ny, 0, 1), source: "cal" };
+    }
+
+    /**********************
+     * Movement (hybrid free velocity + precision assist)
+     **********************/
+    const euroX = new OneEuro(settings.minCutoff, settings.beta);
+    const euroY = new OneEuro(settings.minCutoff, settings.beta);
+
+    function softDeadzone(v, dz){
+      const av = Math.abs(v);
+      if (av <= dz){
+        const t = av / Math.max(1e-6, dz);
+        const atten = t*t*t * 0.12;
+        return Math.sign(v) * atten;
+      }
+      const scaled = (av - dz) / (1 - dz);
+      const s = scaled*scaled*(3 - 2*scaled);
+      return Math.sign(v) * clamp(s, 0, 1);
+    }
+
+    function applyMovement(nx, ny, dt, tNowMs){
+      euroX.setParams(settings.minCutoff, settings.beta);
+      euroY.setParams(settings.minCutoff, settings.beta);
+      const tSec = tNowMs / 1000;
+
+      let fx = euroX.filter(nx, tSec);
+      let fy = euroY.filter(ny, tSec);
+
+      if (settings.invertX) fx = 1 - fx;
+      if (settings.invertY) fy = 1 - fy;
+
+      const stretch = 1 + (settings.pushOut ?? 0);
+      const fxPush = clamp(0.5 + (fx - 0.5) * stretch, 0, 1);
+      const fyPush = clamp(0.5 + (fy - 0.5) * stretch, 0, 1);
+
+      let ix = (fxPush - 0.5) * 2;
+      let iy = (fyPush - 0.5) * 2;
+
+      const gain = clamp(Number(settings.sensitivity ?? 1.0), 0.60, 2.60);
+      ix = clamp(ix * gain, -1, 1);
+      iy = clamp(iy * gain, -1, 1);
+
+      ix = softDeadzone(ix, settings.deadzone);
+      iy = softDeadzone(iy, settings.deadzone);
+
+      const exp = 1.55;
+      const sx = Math.pow(Math.abs(ix), exp);
+      const sy = Math.pow(Math.abs(iy), exp);
+
+      const maxSp = settings.maxSpeed;
+      const vTargetX = Math.sign(ix) * sx * maxSp;
+      const vTargetY = Math.sign(iy) * sy * maxSp;
+
+      const inertia = 0.62;
+      const blend = 1 - inertia;
+      vX = lerp(vX, vTargetX, blend);
+      vY = lerp(vY, vTargetY, blend);
+
+      const inputMag = Math.hypot(ix, iy);
+      const stopness = clamp(1 - inputMag, 0, 1);
+      const friction = 2.1 + stopness * 9.0;
+      vX *= Math.exp(-friction * dt);
+      vY *= Math.exp(-friction * dt);
+
+      cursorX = clamp(cursorX + vX * dt, 0, window.innerWidth);
+      cursorY = clamp(cursorY + vY * dt, 0, window.innerHeight);
+
+      const speed = Math.hypot(vX, vY);
+      const speedNorm = clamp(speed / (maxSp + 1e-6), 0, 1);
+
+      const assistNow = settings.assist * (1 - speedNorm);
+      if (assistNow > 0.0001){
+        const px = fxPush * window.innerWidth;
+        const py = fyPush * window.innerHeight;
+        cursorX = lerp(cursorX, px, assistNow);
+        cursorY = lerp(cursorY, py, assistNow);
+      }
+
+      return { fx: fxPush, fy: fyPush, speedNorm, inputMag };
+    }
+
+    /**********************
+     * Blink click (EAR-based, validated thresholds)
+     **********************/
+    let eyeState = "OPEN";
+    let closeStart = null;
+    let closedConfirmed = false;
+    let lastClickAt = 0;
+    let lastBlinkEvent = 0;
+    let debounceUntil = 0;
+    let longBlinkFired = false;
+
+    function currentBlinkThresholds(openEarEstimate){
+      if (settings.blinkCal && Number.isFinite(settings.blinkCal.tClose) && Number.isFinite(settings.blinkCal.tOpen)) {
+        return { tClose: settings.blinkCal.tClose, tOpen: settings.blinkCal.tOpen, src: "cal" };
+      }
+      const base = openEarEstimate ?? 0.27;
+      const tClose = clamp(base * 0.72, 0.10, 0.34);
+      const tOpen  = clamp(base * 0.80, 0.12, 0.38);
+      return { tClose, tOpen, src: "auto" };
+    }
+
+    function tryBlinkClick(tNow, speedNorm, qNow){
+      if (!settings.blinkClick || trainer.blockBlink) return;
+
+      const gate = clamp(Number(settings.blinkQualityGate ?? 70), 0, 100);
+      if ((qNow ?? 0) < gate) return;
+
+      if ((tNow - lastClickAt) < settings.clickCooldownMs) return;
+      if (speedNorm > 0.60) return;
+
+      lastClickAt = tNow;
+      dispatchVirtualClick(cursorX, cursorY);
+    }
+
+    function updateBlink(tNow, ear, openEarEstimate, speedNorm, qNow){
+      if (!Number.isFinite(ear)) return { ear, state: eyeState, note: "ear n/a" };
+      if (tNow < debounceUntil) return { ear, state: eyeState, note: "debounce" };
+
+      const { tClose, tOpen, src } = currentBlinkThresholds(openEarEstimate);
+
+      if (eyeState === "OPEN") {
+        if (ear < tClose) {
+          eyeState = "CLOSED";
+          closeStart = tNow;
+          closedConfirmed = false;
+          longBlinkFired = false;
+          debounceUntil = tNow + 25;
+        }
+      } else {
+        const dur = tNow - (closeStart ?? tNow);
+        if (!closedConfirmed && dur >= 55) closedConfirmed = true;
+
+        if (settings.blinkMode === "long" && closedConfirmed && !longBlinkFired && dur >= settings.longBlinkMs) {
+          longBlinkFired = true;
+          tryBlinkClick(tNow, speedNorm, qNow);
+        }
+
+        if (ear > tOpen) {
+          eyeState = "OPEN";
+          debounceUntil = tNow + 55;
+
+          if (closedConfirmed && dur <= 320) {
+            if (settings.blinkMode === "double") {
+              if ((tNow - lastBlinkEvent) <= settings.dblWindowMs) {
+                lastBlinkEvent = 0;
+                tryBlinkClick(tNow, speedNorm, qNow);
+              } else {
+                lastBlinkEvent = tNow;
+              }
+            }
+          }
+
+          closeStart = null;
+          closedConfirmed = false;
+          longBlinkFired = false;
+        }
+      }
+
+      return { ear, tClose, tOpen, src, state: eyeState };
+    }
+
+    /**********************
+     * Debug draw
+     **********************/
+    function drawDebug(lm, irisL, irisR, rx, ry, blinkInfo){
+      if (!settings.debugDraw) {
+        octx.clearRect(0,0,overlay.width,overlay.height);
+        return;
+      }
+      octx.save();
+      octx.clearRect(0,0,overlay.width,overlay.height);
+
+      const dot = (p, r, color) => {
+        octx.fillStyle = color;
+        octx.beginPath();
+        octx.arc(p.x * overlay.width, p.y * overlay.height, r, 0, Math.PI*2);
+        octx.fill();
+      };
+
+      dot(irisL, 3, "rgba(70,255,220,0.95)");
+      dot(irisR, 3, "rgba(70,255,220,0.95)");
+
+      dot(lm[33], 2, "rgba(255,255,255,0.85)");
+      dot(lm[133],2, "rgba(255,255,255,0.85)");
+      dot(lm[159],2, "rgba(255,255,255,0.85)");
+      dot(lm[145],2, "rgba(255,255,255,0.85)");
+      dot(lm[362],2, "rgba(255,255,255,0.85)");
+      dot(lm[263],2, "rgba(255,255,255,0.85)");
+      dot(lm[386],2, "rgba(255,255,255,0.85)");
+      dot(lm[374],2, "rgba(255,255,255,0.85)");
+
+      octx.fillStyle = "rgba(255,255,255,0.95)";
+      octx.font = "12px ui-monospace, Menlo, Monaco, 'Cascadia Mono', monospace";
+      const cal = settings.gazeCal ? `cal:ON rmse~${Math.round(settings.gazeCal.rmsePx)}px` : "cal:OFF";
+      octx.fillText(
+        `rx=${rx.toFixed(3)} ry=${ry.toFixed(3)} ear=${(blinkInfo.ear ?? 0).toFixed(3)} ${cal} blink=${blinkInfo.src ?? ""} ${blinkInfo.state ?? ""}`,
+        10, 18
+      );
+
+      octx.restore();
+    }
+
+    /**********************
+     * Wizard (solid scanner)
+     **********************/
+    const wizard = document.getElementById("wizard");
+    const wizTitle = document.getElementById("wizTitle");
+    const wizText = document.getElementById("wizText");
+    const wizBoxLeft = document.getElementById("wizBoxLeft");
+    const wizBoxRight = document.getElementById("wizBoxRight");
+    const wizBackBtn = document.getElementById("wizBackBtn");
+    const wizCancelBtn = document.getElementById("wizCancelBtn");
+    const wizNextBtn = document.getElementById("wizNextBtn");
+    const calibDot = document.getElementById("calibDot");
+
+    const CALIB_POINTS = (() => {
+      const xs = [0.14, 0.50, 0.86];
+      const ys = [0.18, 0.52, 0.86];
+      const pts = [];
+      for (let j=0;j<ys.length;j++){
+        for (let i=0;i<xs.length;i++){
+          pts.push({ name: `P${j*3+i+1}`, nx: xs[i], ny: ys[j] });
+        }
+      }
+      return pts;
+    })();
+
+    const wizardState = {
+      open: false,
+      step: 0,
+      capture: {
+        active: false,
+        pointIndex: 0,
+        pointSamples: [],
+        allSamples: [],
+        stableHoldMs: 240,
+        requiredSamples: 28,
+        lastStableStart: null,
+        timeoutAt: 0
+      },
+      blink: {
+        phase: 0,
+        openBuf: [],
+        blinkMins: [],
+        neededBlinks: 6,
+        lastBlinkMin: Infinity,
+        inClosure: false
+      },
+      validate: {
+        phase: 0,
+        points: [],
+        idx: 0,
+        samples: []
+      }
+    };
+
+    function openWizard(){
+      if (!running) return;
+      wizardState.open = true;
+      wizardState.step = 0;
+
+      wizardState.capture.active = false;
+      wizardState.capture.pointIndex = 0;
+      wizardState.capture.pointSamples = [];
+      wizardState.capture.allSamples = [];
+      wizardState.capture.lastStableStart = null;
+      wizardState.capture.timeoutAt = nowMs() + 9000;
+
+      wizardState.blink.phase = 0;
+      wizardState.blink.openBuf = [];
+      wizardState.blink.blinkMins = [];
+      wizardState.blink.lastBlinkMin = Infinity;
+      wizardState.blink.inClosure = false;
+
+      wizardState.validate.phase = 0;
+      wizardState.validate.points = [];
+      wizardState.validate.idx = 0;
+      wizardState.validate.samples = [];
+
+      calibDot.style.display = "none";
+      wizard.style.display = "block";
+      trainer.pauseChallenges(true);
+      updateWizardUI();
+    }
+
+    function closeWizard(msg){
+      wizard.style.display = "none";
+      calibDot.style.display = "none";
+      wizardState.open = false;
+      wizardState.capture.active = false;
+      trainer.pauseChallenges(false);
+      if (msg) toast(msg, 2500);
+    }
+
+    function formatGazeCalBox(){
+      if (!settings.gazeCal) return "Not calibrated.";
+      return `Type: ${settings.gazeCal.type}<br>RMSE (fit): ~${Math.round(settings.gazeCal.rmsePx)} px<br>Created: ${settings.gazeCal.createdAt}`;
+    }
+
+    function formatBlinkCalBox(){
+      if (!settings.blinkCal) return "Not calibrated.";
+      const b = settings.blinkCal;
+      return `Open EAR: ${b.openEar.toFixed(3)}<br>Closed EAR: ${b.closedEar.toFixed(3)}<br>tClose: ${b.tClose.toFixed(3)}<br>tOpen: ${b.tOpen.toFixed(3)}`;
+    }
+
+    function pickRandomValidationPoints(n){
+      const candidates = [
+        {nx:0.18, ny:0.20}, {nx:0.82, ny:0.20}, {nx:0.82, ny:0.86}, {nx:0.18, ny:0.86}, {nx:0.50, ny:0.52},
+        {nx:0.50, ny:0.20}, {nx:0.50, ny:0.86}, {nx:0.18, ny:0.52}, {nx:0.82, ny:0.52}
+      ];
+      const s = [...candidates].sort(()=>Math.random()-0.5);
+      return s.slice(0, n);
+    }
+
+    function summarizeValidation(){
+      const v = wizardState.validate;
+      if (!v.samples.length) return { ok: false, html: "No samples." };
+      const errs = v.samples.map(s => s.errPx);
+      const rmse = Math.sqrt(errs.reduce((a,e)=>a+e*e,0) / errs.length);
+      const p50 = median(errs);
+      const p90 = [...errs].sort((a,b)=>a-b)[Math.floor(0.90*(errs.length-1))];
+      const ok = rmse <= settings.calibrationMaxRmsePx;
+      let html = `RMSE: ${Math.round(rmse)} px<br>Median: ${Math.round(p50)} px<br>P90: ${Math.round(p90)} px<br>Threshold: ${settings.calibrationMaxRmsePx} px<br>`;
+      html += ok ? "<span style='color:rgba(70,255,220,0.95)'><b>Status: PASS</b></span>" : "<span style='color:rgba(255,140,140,0.95)'><b>Status: FAIL</b></span>";
+      return { ok, rmse, html };
+    }
+
+    function showCalibDotForPoint(i){
+      const p = CALIB_POINTS[i];
+      calibDot.style.display = "block";
+      calibDot.style.left = `${p.nx * window.innerWidth}px`;
+      calibDot.style.top  = `${p.ny * window.innerHeight}px`;
+    }
+
+    function showValidationDot(){
+      const v = wizardState.validate;
+      const p = v.points[v.idx];
+      calibDot.style.display = "block";
+      calibDot.style.left = `${p.nx * window.innerWidth}px`;
+      calibDot.style.top  = `${p.ny * window.innerHeight}px`;
+    }
+
+    function startValidation(){
+      wizardState.validate.phase = 1;
+      wizardState.validate.samples = [];
+      wizardState.validate.idx = 0;
+      wizardState.validate.points = pickRandomValidationPoints(5);
+      showValidationDot();
+    }
+
+    function captureValidationSample(){
+      const v = wizardState.validate;
+      if (v.phase !== 1) return;
+      if (!lastFrame.hasFace || !Number.isFinite(lastFrame.rx) || !Number.isFinite(lastFrame.ry)) return;
+
+      const { nx, ny } = applyCalibration(lastFrame.rx, lastFrame.ry);
+      const px = nx * window.innerWidth;
+      const py = ny * window.innerHeight;
+
+      const p = v.points[v.idx];
+      const tx = p.nx * window.innerWidth;
+      const ty = p.ny * window.innerHeight;
+      const errPx = Math.hypot(px - tx, py - ty);
+
+      v.samples.push({ nx, ny, px, py, tx, ty, errPx });
+
+      v.idx += 1;
+      if (v.idx >= v.points.length){
+        v.phase = 2;
+        calibDot.style.display = "none";
+      } else {
+        showValidationDot();
+      }
+      updateWizardUI();
+    }
+
+    function updateWizardUI(){
+      wizBackBtn.disabled = (wizardState.step === 0);
+      wizNextBtn.disabled = true;
+
+      const step = wizardState.step;
+
+      if (step === 0){
+        wizTitle.textContent = "Calibration Wizard — Clean Scan Gate";
+        wizText.textContent =
+          "This wizard captures only when scan quality is stable. Next: blink calibration, then gaze grid calibration, then validation.";
+        wizBoxLeft.innerHTML =
+          `<b>Requirements</b><br>` +
+          `• Face visible (avoid strong backlight)<br>` +
+          `• Keep head still, move eyes only<br>` +
+          `• Quality must stay above ~78%<br>`;
+        wizBoxRight.innerHTML =
+          `<b>Outputs</b><br>` +
+          `• Solid gaze calibration (2nd-order fit)<br>` +
+          `• Validated blink thresholds (EAR)<br>` +
+          `• Validation score (pixels)<br>`;
+        wizNextBtn.textContent = "Start Blink Calibration";
+        wizNextBtn.disabled = false;
+      }
+
+      if (step === 1){
+        wizTitle.textContent = "Step 1 — Blink Calibration (Validated)";
+        const b = wizardState.blink;
+        if (b.phase === 0) {
+          wizText.textContent =
+            "Keep your eyes open naturally for ~2 seconds to learn your open-eye baseline EAR. Hold steady.";
+          wizBoxLeft.innerHTML =
+            `<b>Progress</b><br>` +
+            `Open samples: ${b.openBuf.length}/60<br>` +
+            `Valid blinks: ${b.blinkMins.length}/${b.neededBlinks}<br>`;
+          wizBoxRight.innerHTML =
+            `<b>Tips</b><br>` +
+            `• Relax eyelids (no squint)<br>` +
+            `• If quality drops, baseline pauses<br>`;
+          wizNextBtn.textContent = "Continue";
+          wizNextBtn.disabled = true;
+        } else if (b.phase === 1) {
+          wizText.textContent =
+            "Blink normally. We capture your blink minimum EAR and validate consistency.";
+          wizBoxLeft.innerHTML =
+            `<b>Progress</b><br>` +
+            `Baseline: 60/60<br>` +
+            `Valid blinks: ${b.blinkMins.length}/${b.neededBlinks}<br>`;
+          wizBoxRight.innerHTML =
+            `<b>Rule</b><br>` +
+            `Normal blink only. Forced long blinks can skew thresholds.`;
+          wizNextBtn.textContent = "Continue";
+          wizNextBtn.disabled = (b.blinkMins.length < b.neededBlinks);
+        } else {
+          wizText.textContent = "Blink calibration complete.";
+          wizBoxLeft.innerHTML = `<b>Saved</b><br>${formatBlinkCalBox()}`;
+          wizBoxRight.innerHTML = `<b>Next</b><br>We will calibrate gaze with a stability-gated 3×3 grid.`;
+          wizNextBtn.textContent = "Start Gaze Calibration";
+          wizNextBtn.disabled = false;
+        }
+      }
+
+      if (step === 2){
+        wizTitle.textContent = "Step 2 — Gaze Calibration (Solid Scanner)";
+        const c = wizardState.capture;
+        const p = CALIB_POINTS[c.pointIndex];
+        wizText.textContent =
+          "Look at the dot. Capture begins only when scan quality is stable. If stability drops, capture pauses.";
+        wizBoxLeft.innerHTML =
+          `<b>Point</b><br>` +
+          `Index: ${c.pointIndex+1}/${CALIB_POINTS.length}<br>` +
+          `Samples: ${c.pointSamples.length}/${c.requiredSamples}<br>` +
+          `Stable hold: ${c.lastStableStart ? "YES" : "NO"}<br>`;
+        wizBoxRight.innerHTML =
+          `<b>Target</b><br>` +
+          `Name: ${p.name}<br>` +
+          `Position: (${Math.round(p.nx*100)}%, ${Math.round(p.ny*100)}%)<br>` +
+          `Tip: keep eyes on dot until it jumps.<br>`;
+        wizNextBtn.textContent = "Next";
+        wizNextBtn.disabled = true;
+      }
+
+      if (step === 3){
+        wizTitle.textContent = "Step 3 — Validation (Accuracy Check)";
+        const v = wizardState.validate;
+
+        if (v.phase === 0){
+          wizText.textContent =
+            "We will validate with 5 points. When the dot appears, look at it and press SPACE to capture.";
+          wizBoxLeft.innerHTML =
+            `<b>How</b><br>` +
+            `• Look at dot<br>` +
+            `• Press SPACE once<br>` +
+            `• Repeat for all points<br>`;
+          wizBoxRight.innerHTML =
+            `<b>Meaning</b><br>` +
+            `Validation yields a strict pixel RMSE. If it fails, recalibrate in better lighting/stability.`;
+          wizNextBtn.textContent = "Start Validation";
+          wizNextBtn.disabled = false;
+        } else if (v.phase === 1){
+          const p = v.points[v.idx];
+          wizText.textContent = `Validation ${v.idx+1}/${v.points.length}. Look at the dot and press SPACE.`;
+          wizBoxLeft.innerHTML =
+            `<b>Progress</b><br>` +
+            `Captured: ${v.samples.length}/${v.points.length}<br>` +
+            `Current: (${Math.round(p.nx*100)}%, ${Math.round(p.ny*100)}%)<br>`;
+          wizBoxRight.innerHTML =
+            `<b>Tip</b><br>` +
+            `If quality is low, wait until it improves before pressing SPACE.`;
+          wizNextBtn.textContent = "Continue";
+          wizNextBtn.disabled = true;
+        } else {
+          const summary = summarizeValidation();
+          wizText.textContent = summary.ok
+            ? "Validation passed. Your calibration is clean."
+            : "Validation failed. Your scan needs a cleaner capture.";
+
+          wizBoxLeft.innerHTML = `<b>Results</b><br>${summary.html}`;
+          wizBoxRight.innerHTML =
+            `<b>Recommendation</b><br>` +
+            (summary.ok
+              ? "Proceed to training for skill-building."
+              : "Retry gaze calibration. Reduce glare and keep head steadier.");
+
+          wizNextBtn.textContent = summary.ok ? "Finish" : "Retry Gaze Calibration";
+          wizNextBtn.disabled = false;
+        }
+      }
+
+      if (step === 4){
+        wizTitle.textContent = "Done — Summary";
+        wizText.textContent =
+          "Calibration saved. Start Training Mode to learn smooth movement and clicking.";
+        wizBoxLeft.innerHTML = `<b>Gaze</b><br>${formatGazeCalBox()}`;
+        wizBoxRight.innerHTML = `<b>Blink</b><br>${formatBlinkCalBox()}`;
+        wizNextBtn.textContent = "Close";
+        wizNextBtn.disabled = false;
+      }
+    }
+
+    wizCancelBtn.addEventListener("click", () => closeWizard("Wizard cancelled."));
+    wizBackBtn.addEventListener("click", () => {
+      if (wizardState.step > 0) {
+        wizardState.step -= 1;
+        calibDot.style.display = "none";
+        wizardState.capture.active = false;
+        wizardState.validate.phase = 0;
+        updateWizardUI();
+      }
+    });
+
+    wizNextBtn.addEventListener("click", () => {
+      const step = wizardState.step;
+
+      if (step === 0) {
+        wizardState.step = 1;
+        wizardState.blink.phase = 0;
+        updateWizardUI();
+        return;
+      }
+
+      if (step === 1) {
+        if (wizardState.blink.phase < 2) return;
+        wizardState.step = 2;
+        wizardState.capture.active = true;
+        wizardState.capture.pointIndex = 0;
+        wizardState.capture.pointSamples = [];
+        wizardState.capture.allSamples = [];
+        wizardState.capture.lastStableStart = null;
+        wizardState.capture.timeoutAt = nowMs() + 9000;
+        showCalibDotForPoint(0);
+        updateWizardUI();
+        return;
+      }
+
+      if (step === 3) {
+        const v = wizardState.validate;
+        if (v.phase === 0){
+          startValidation();
+          updateWizardUI();
+          return;
+        }
+        if (v.phase === 2){
+          const summary = summarizeValidation();
+          if (summary.ok){
+            wizardState.step = 4;
+            calibDot.style.display = "none";
+            updateWizardUI();
+          } else {
+            wizardState.step = 2;
+            wizardState.capture.active = true;
+            wizardState.capture.pointIndex = 0;
+            wizardState.capture.pointSamples = [];
+            wizardState.capture.allSamples = [];
+            wizardState.capture.lastStableStart = null;
+            wizardState.capture.timeoutAt = nowMs() + 9000;
+            showCalibDotForPoint(0);
+            updateWizardUI();
+          }
+          return;
+        }
+      }
+
+      if (step === 4) {
+        closeWizard("Calibration saved.");
+        return;
+      }
+    });
+
+    /**********************
+     * Training / Challenges
+     **********************/
+    const trainer = {
+      active: false,
+      step: 0,
+      score: 0,
+      streak: 0,
+      startTime: 0,
+      targets: [],
+      mode: "none",
+      blockBlink: false,
+      blockDwell: false,
+      paused: false,
+
+      pauseChallenges(flag){ this.paused = flag; },
+
+      reset(){
+        this.active = false;
+        this.step = 0;
+        this.score = 0;
+        this.streak = 0;
+        this.targets = [];
+        this.mode = "none";
+        this.blockBlink = false;
+        this.blockDwell = false;
+        this.startTime = 0;
+      },
+
+      start(){
+        this.active = true;
+        this.mode = "tutorial";
+        this.step = 0;
+        this.score = 0;
+        this.streak = 0;
+        this.startTime = nowMs();
+        this.targets = [];
+        this.spawnTutorialStep();
+        toast("Training started: follow the on-screen tasks.", 3000);
+      },
+
+      nextStep(){
+        this.step += 1;
+        this.spawnTutorialStep();
+      },
+
+      spawnTutorialStep(){
+        this.targets = [];
+        this.blockBlink = false;
+        this.blockDwell = false;
+
+        if (this.step === 0){
+          this.targets = [
+            {type:"hover", x:0.18, y:0.30, r:44, done:false, hold:0},
+            {type:"hover", x:0.82, y:0.30, r:44, done:false, hold:0},
+            {type:"hover", x:0.82, y:0.78, r:44, done:false, hold:0},
+            {type:"hover", x:0.18, y:0.78, r:44, done:false, hold:0},
+          ];
+          toast("Step 1/4: Move the eye cursor into each ring (no click).", 3200);
+          return;
+        }
+
+        if (this.step === 1){
+          this.targets = Array.from({length:5}, (_,i)=>({
+            type:"click", clickMode:"dwell",
+            x: 0.25 + 0.12*i,
+            y: 0.55 + (i%2? -0.12 : 0.12),
+            r: 30, done:false
+          }));
+          this.blockBlink = true;
+          toast("Step 2/4: Dwell-click each target (blink disabled for this step).", 3400);
+          return;
+        }
+
+        if (this.step === 2){
+          this.targets = Array.from({length:5}, (_,i)=>({
+            type:"click", clickMode:"blink",
+            x: 0.25 + 0.12*i,
+            y: 0.35 + (i%2? -0.10 : 0.10),
+            r: 30, done:false
+          }));
+          this.blockDwell = true;
+          toast("Step 3/4: Blink-click each target (dwell disabled for this step).", 3400);
+          return;
+        }
+
+        if (this.step === 3){
+          this.targets = Array.from({length:12}, ()=>({
+            type:"click",
+            clickMode:"either",
+            x: 0.15 + Math.random()*0.70,
+            y: 0.18 + Math.random()*0.70,
+            r: 26, done:false
+          }));
+          toast("Step 4/4: Mini-run. Hit all targets as fast as you can (blink or dwell).", 3600);
+          return;
+        }
+
+        const elapsed = ((nowMs() - this.startTime)/1000).toFixed(1);
+        toast(`Training complete. Score: ${this.score}. Time: ${elapsed}s.`, 5200);
+        this.reset();
+      },
+
+      update(dt){
+        if (!this.active || this.paused) return;
+
+        for (const t of this.targets){
+          if (t.done) continue;
+          const px = t.x * window.innerWidth;
+          const py = t.y * window.innerHeight;
+          const d = Math.hypot(cursorX - px, cursorY - py);
+
+          if (t.type === "hover"){
+            if (d <= t.r){
+              t.hold += dt;
+              if (t.hold >= 0.45){
+                t.done = true;
+                this.score += 10;
+                toast("Good. Target reached.", 900);
+              }
+            } else {
+              t.hold = 0;
+            }
+          }
+        }
+
+        if (this.targets.length && this.targets.every(t => t.done)){
+          this.nextStep();
+        }
+      },
+
+      onClick(x, y){
+        if (!this.active || this.paused) return;
+
+        for (const t of this.targets){
+          if (t.done) continue;
+          if (t.type !== "click") continue;
+
+          const px = t.x * window.innerWidth;
+          const py = t.y * window.innerHeight;
+          const d = Math.hypot(x - px, y - py);
+          if (d <= t.r){
+            t.done = true;
+            this.score += 15;
+            this.streak += 1;
+            if (this.streak % 3 === 0) this.score += 10;
+            toast(`Hit. Score: ${this.score}`, 900);
+            break;
+          }
+        }
+
+        if (this.targets.length && this.targets.every(t => t.done)){
+          this.nextStep();
+        }
+      },
+
+      draw(){
+        const w = gameCanvas.width, h = gameCanvas.height;
+        gctx.clearRect(0,0,w,h);
+        if (!this.active) return;
+
+        gctx.save();
+        gctx.lineWidth = 3;
+        gctx.font = "13px ui-monospace, Menlo, Monaco, 'Cascadia Mono', monospace";
+        gctx.fillStyle = "rgba(232,236,255,0.92)";
+
+        const elapsed = ((nowMs() - this.startTime)/1000).toFixed(1);
+        gctx.fillText(`Training: step ${Math.min(this.step+1,4)}/4  score ${this.score}  time ${elapsed}s`, 16, h - 18);
+
+        for (const t of this.targets){
+          const px = t.x * w;
+          const py = t.y * h;
+          const done = !!t.done;
+
+          gctx.strokeStyle = done ? "rgba(70,255,220,0.35)" : "rgba(255,255,255,0.70)";
+          gctx.beginPath();
+          gctx.arc(px, py, t.r, 0, Math.PI*2);
+          gctx.stroke();
+
+          gctx.fillStyle = done ? "rgba(70,255,220,0.10)" : "rgba(120,140,255,0.10)";
+          gctx.beginPath();
+          gctx.arc(px, py, Math.max(6, t.r*0.33), 0, Math.PI*2);
+          gctx.fill();
+
+          if (t.type === "hover" && !done){
+            const prog = clamp((t.hold ?? 0) / 0.45, 0, 1);
+            gctx.strokeStyle = "rgba(70,255,220,0.85)";
+            gctx.beginPath();
+            gctx.arc(px, py, t.r + 8, -Math.PI/2, -Math.PI/2 + prog * Math.PI*2);
+            gctx.stroke();
+          }
+        }
+
+        gctx.restore();
+      }
+    };
+
+    /**********************
+     * Wizard frame processing
+     **********************/
+    function wizardProcessFrame(qInfo, ear, rx, ry, tNow){
+      if (!wizardState.open) return;
+
+      if (wizardState.step === 1){
+        const b = wizardState.blink;
+
+        if (b.phase === 0){
+          if (isStableForCapture(qInfo) && Number.isFinite(ear)){
+            b.openBuf.push(ear);
+          }
+          if (b.openBuf.length >= 60){
+            b.openEar = median(b.openBuf);
+            b.phase = 1;
+            toast("Baseline captured. Now blink normally.", 2200);
+          }
+          updateWizardUI();
+          return;
+        }
+
+        if (b.phase === 1){
+          const openEar = b.openEar ?? median(b.openBuf) ?? 0.28;
+          const startClose = openEar * 0.78;
+          const endOpen = openEar * 0.88;
+
+          if (!isStableForCapture(qInfo)) {
+            updateWizardUI();
+            return;
+          }
+
+          if (!b.inClosure){
+            if (ear < startClose){
+              b.inClosure = true;
+              b.lastBlinkMin = ear;
+            }
+          } else {
+            b.lastBlinkMin = Math.min(b.lastBlinkMin, ear);
+            if (ear > endOpen){
+              b.inClosure = false;
+
+              const amp = openEar - b.lastBlinkMin;
+              if (amp >= 0.045 && b.lastBlinkMin > 0.06 && b.lastBlinkMin < openEar*0.92){
+                b.blinkMins.push(b.lastBlinkMin);
+                toast(`Blink captured (${b.blinkMins.length}/${b.neededBlinks}).`, 900);
+              }
+              b.lastBlinkMin = Infinity;
+
+              if (b.blinkMins.length >= b.neededBlinks){
+                const closedEar = median(b.blinkMins);
+                const openEar2 = openEar;
+                const spread = stddev(b.blinkMins);
+
+                const ok = (openEar2 - closedEar) >= 0.05 && spread <= 0.020 && closedEar < openEar2*0.85;
+                if (!ok){
+                  toast("Blink samples inconsistent. Try again with relaxed natural blinks.", 3200);
+                  b.blinkMins = [];
+                  updateWizardUI();
+                  return;
+                }
+
+                const tClose = lerp(openEar2, closedEar, 0.65);
+                const tOpen  = lerp(openEar2, closedEar, 0.45);
+
+                settings.blinkCal = { openEar: openEar2, closedEar, tClose, tOpen, createdAt: new Date().toISOString() };
+                saveSettings();
+
+                b.phase = 2;
+                toast("Blink calibration saved.", 2000);
+              }
+            }
+          }
+
+          updateWizardUI();
+          return;
+        }
+
+        updateWizardUI();
+        return;
+      }
+
+      if (wizardState.step === 2 && wizardState.capture.active){
+        const c = wizardState.capture;
+
+        if (tNow > c.timeoutAt && c.pointSamples.length < 5){
+          toast("Hold steadier and improve lighting. Capture is gated by stability.", 2800);
+          c.timeoutAt = tNow + 9000;
+        }
+
+        if (!Number.isFinite(rx) || !Number.isFinite(ry)){
+          c.lastStableStart = null;
+          return;
+        }
+
+        if (isStableForCapture(qInfo)){
+          if (c.lastStableStart == null){
+            c.lastStableStart = tNow;
+          }
+          const held = tNow - c.lastStableStart;
+
+          if (held >= c.stableHoldMs){
+            c.pointSamples.push({ rx, ry });
+
+            if (c.pointSamples.length >= c.requiredSamples){
+              const p = CALIB_POINTS[c.pointIndex];
+              const rxs = c.pointSamples.map(s=>s.rx);
+              const rys = c.pointSamples.map(s=>s.ry);
+              const rxMed = median(rxs);
+              const ryMed = median(rys);
+
+              c.allSamples.push({
+                rx: rxMed, ry: ryMed,
+                nx: p.nx, ny: p.ny,
+                txPx: p.nx * window.innerWidth,
+                tyPx: p.ny * window.innerHeight
+              });
+
+              c.pointSamples = [];
+              c.lastStableStart = null;
+
+              c.pointIndex += 1;
+              if (c.pointIndex >= CALIB_POINTS.length){
+                const cal = fitCalibration(c.allSamples);
+                if (!cal){
+                  toast("Calibration fit failed. Retrying…", 2600);
+                  c.pointIndex = 0;
+                  c.allSamples = [];
+                  showCalibDotForPoint(0);
+                  updateWizardUI();
+                  return;
+                }
+
+                settings.gazeCal = cal;
+                saveSettings();
+
+                toast(`Gaze calibration fit RMSE ~${Math.round(cal.rmsePx)} px. Next: validation.`, 3600);
+                calibDot.style.display = "none";
+                c.active = false;
+
+                wizardState.step = 3;
+                wizardState.validate.phase = 0;
+                updateWizardUI();
+              } else {
+                showCalibDotForPoint(c.pointIndex);
+                c.timeoutAt = tNow + 9000;
+                updateWizardUI();
+              }
+            } else {
+              updateWizardUI();
+            }
+          } else {
+            updateWizardUI();
+          }
+        } else {
+          c.lastStableStart = null;
+          updateWizardUI();
+        }
+      }
+    }
+
+    /**********************
+     * FaceMesh runtime
+     **********************/
+    let faceMesh = null;
+    let camera = null;
+    let running = false;
+
+    const lastFrame = {
+      hasFace: false,
+      rx: NaN,
+      ry: NaN,
+      ear: NaN,
+      openEarEstimate: null,
+      blinkInfo: {},
+      qInfo: {q:0, reason:"—"},
+      speedNorm: 0,
+      inputMag: 0
+    };
+
+    const RIGHT_IRIS = [469, 470, 471, 472];
+    const LEFT_IRIS  = [474, 475, 476, 477];
+
+    function averageLandmarks(lm, idxs){
+      let x = 0, y = 0;
+      for (const i of idxs){ x += lm[i].x; y += lm[i].y; }
+      return { x: x / idxs.length, y: y / idxs.length };
+    }
+
+    function updateStatus(text){
+      statusEl.textContent = text;
+    }
+
+    function resizeAll(){
+      gameCanvas.width = window.innerWidth;
+      gameCanvas.height = window.innerHeight;
+
+      cursorX = clamp(cursorX, 0, window.innerWidth);
+      cursorY = clamp(cursorY, 0, window.innerHeight);
+      renderCursor();
+    }
+
+    window.addEventListener("resize", () => {
+      resizeAll();
+      if (wizardState.open && wizardState.step === 2 && wizardState.capture.active){
+        showCalibDotForPoint(wizardState.capture.pointIndex);
+      }
+      if (wizardState.open && wizardState.step === 3 && wizardState.validate.phase === 1){
+        showValidationDot();
+      }
+    });
+
+    resizeAll();
+    renderCursor();
+
+    let lastT = null;
+    let fpsBuf = [];
+    let lastFaceSeenAt = 0;
+
+    async function startSystem(){
+      if (running) return;
+      updateStatus("Starting camera…");
+
+      faceMesh = new FaceMesh({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+      });
+      faceMesh.setOptions({
+        maxNumFaces: 1,
+        refineLandmarks: true,
+        minDetectionConfidence: 0.6,
+        minTrackingConfidence: 0.6
+      });
+
+      faceMesh.onResults(onResults);
+
+      video.addEventListener("loadedmetadata", () => {
+        overlay.width = video.videoWidth || 640;
+        overlay.height = video.videoHeight || 480;
+      }, { once: true });
+
+      camera = new Camera(video, {
+        onFrame: async () => {
+          if (!running) return;
+          await faceMesh.send({ image: video });
+        },
+        width: 640,
+        height: 480
+      });
+
+      try {
+        running = true;
+        await camera.start();
+
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        centerBtn.disabled = false;
+        wizardBtn.disabled = false;
+        trainingBtn.disabled = false;
+
+        updateStatus("Running. Use Wizard for clean calibration, then Training Mode.");
+        toast("Camera running. Press W for wizard.", 2600);
+      } catch (e){
+        running = false;
+        updateStatus(`Camera start failed: ${e?.message || e}`);
+        toast("Camera permission denied or not available.", 3200);
+      }
+    }
+
+    function stopSystem(){
+      running = false;
+      try { camera?.stop(); } catch {}
+      camera = null;
+      faceMesh = null;
+
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      centerBtn.disabled = true;
+      wizardBtn.disabled = true;
+      trainingBtn.disabled = true;
+
+      octx.clearRect(0,0,overlay.width,overlay.height);
+      gctx.clearRect(0,0,gameCanvas.width,gameCanvas.height);
+
+      updateStatus("Stopped.");
+      toast("Stopped.", 1200);
+    }
+
+    startBtn.addEventListener("click", startSystem);
+    stopBtn.addEventListener("click", stopSystem);
+
+    centerBtn.addEventListener("click", () => { resetCursor(); toast("Centered.", 1200); });
+    wizardBtn.addEventListener("click", openWizard);
+    trainingBtn.addEventListener("click", () => {
+      if (!running) return;
+      trainer.start();
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.repeat) return;
+
+      if (e.code === "KeyC" && running) { resetCursor(); toast("Centered.", 1200); }
+      if (e.code === "KeyW" && running) { openWizard(); }
+      if (e.code === "KeyT" && running) { trainer.start(); }
+
+      if (e.code === "Space" && wizardState.open && wizardState.step === 3 && wizardState.validate.phase === 1){
+        e.preventDefault();
+        captureValidationSample();
+      }
+    });
+
+    /**********************
+     * Main onResults
+     **********************/
+    function onResults(results){
+      const tNow = nowMs();
+      if (lastT == null) lastT = tNow;
+      const dt = clamp((tNow - lastT)/1000, 0.001, 0.08);
+      lastT = tNow;
+
+      fpsBuf.push(1/dt);
+      if (fpsBuf.length > 20) fpsBuf.shift();
+      fpsPill.textContent = `FPS: ${Math.round(mean(fpsBuf))}`;
+
+      let hasFace = false;
+      let rx = NaN, ry = NaN;
+      let ear = NaN;
+      let irisL = null, irisR = null;
+
+      const faces = results.multiFaceLandmarks;
+      if (faces && faces.length){
+        hasFace = true;
+        lastFaceSeenAt = tNow;
+
+        const lm = faces[0];
+
+        try {
+          irisR = averageLandmarks(lm, RIGHT_IRIS);
+          irisL = averageLandmarks(lm, LEFT_IRIS);
+        } catch {
+          irisR = lm[468] ?? lm[33];
+          irisL = lm[473] ?? lm[362];
+        }
+
+        const earR = earForEye(lm, RIGHT_EYE);
+        const earL = earForEye(lm, LEFT_EYE);
+        ear = (earR + earL) / 2;
+
+        const rRat = ratioInEye(irisR, lm[33], lm[133], lm[159], lm[145]);
+        const lRat = ratioInEye(irisL, lm[362], lm[263], lm[386], lm[374]);
+
+        rx = (rRat.rx + lRat.rx) / 2;
+        ry = (rRat.ry + lRat.ry) / 2;
+
+        const openEarEstimate = settings.blinkCal?.openEar ?? (earBuf.length ? median(earBuf) : null);
+
+        const qInfo = computeScanQuality(true, rx, ry, ear);
+        updateQualityUI(qInfo);
+
+        wizardProcessFrame(qInfo, ear, rx, ry, tNow);
+
+        let speedNorm = lastFrame.speedNorm ?? 0;
+        let inputMag = lastFrame.inputMag ?? 0;
+
+        if (Number.isFinite(rx) && Number.isFinite(ry)){
+          const cal = applyCalibration(rx, ry);
+
+          const mv = applyMovement(cal.nx, cal.ny, dt, tNow);
+          speedNorm = mv.speedNorm;
+          inputMag = mv.inputMag ?? 0;
+
+          renderCursor();
+
+          updateDwellClick(tNow);
+
+          const blinkInfo = updateBlink(tNow, ear, openEarEstimate, speedNorm, qInfo.q);
+
+          drawDebug(lm, irisL, irisR, rx, ry, blinkInfo);
+          lastFrame.blinkInfo = blinkInfo;
+
+          blinkPill.textContent = `BLINK: ${blinkInfo.state ?? "—"} (${(blinkInfo.ear ?? 0).toFixed(3)})`;
+          speedPill.textContent = `SPEED: ${(Math.round(speedNorm*100))}%  IN:${(inputMag ?? 0).toFixed(2)}`;
+        } else {
+          updateQualityUI({q:0, reason:"No iris"});
+        }
+
+        trainer.update(dt);
+        trainer.draw();
+
+        lastFrame.hasFace = true;
+        lastFrame.rx = rx;
+        lastFrame.ry = ry;
+        lastFrame.ear = ear;
+        lastFrame.openEarEstimate = openEarEstimate;
+        lastFrame.qInfo = qInfo;
+        lastFrame.speedNorm = speedNorm;
+        lastFrame.inputMag = inputMag;
+
+        const calState = settings.gazeCal ? `cal ON (~${Math.round(settings.gazeCal.rmsePx)}px fit)` : "cal OFF";
+        const blinkState = settings.blinkCal ? `blink ON (tClose ${settings.blinkCal.tClose.toFixed(3)})` : "blink auto";
+        updateStatus(
+          `Tracking. ${calState}. ${blinkState}. ` +
+          `Quality ${qInfo.q}%. ` +
+          `InvertX=${settings.invertX?"ON":"OFF"} InvertY=${settings.invertY?"ON":"OFF"} ` +
+          `Sens=${Number(settings.sensitivity).toFixed(2)} Push=${Number(settings.pushOut).toFixed(2)} Gate=${Math.round(settings.blinkQualityGate)}%.`
+        );
+
+      } else {
+        const since = tNow - lastFaceSeenAt;
+        const slow = clamp(since / 700, 0, 1);
+        vX *= (1 - 0.15*slow);
+        vY *= (1 - 0.15*slow);
+        cursorX = clamp(cursorX + vX * dt, 0, window.innerWidth);
+        cursorY = clamp(cursorY + vY * dt, 0, window.innerHeight);
+        renderCursor();
+
+        updateQualityUI({q:0, reason:"No face"});
+        octx.clearRect(0,0,overlay.width,overlay.height);
+
+        trainer.update(dt);
+        trainer.draw();
+
+        blinkPill.textContent = `BLINK: —`;
+        speedPill.textContent = `SPEED: —`;
+
+        lastFrame.hasFace = false;
+        updateStatus("No face detected. Ensure your face is centered and well lit.");
+      }
+    }
+
+    /**********************
+     * Wizard UI button wiring
+     **********************/
+    wizCancelBtn.addEventListener("click", () => closeWizard("Wizard cancelled."));
+    wizard.addEventListener("click", (e) => {
+      if (e.target === wizard) closeWizard("Closed.");
+    });
+
+    /**********************
+     * Initial UI state
+     **********************/
+    previewWrap.style.display = settings.showPreview ? "block" : "none";
+    updatePreviewLayout();
+    resetCursor();
+
+    toast("Press Start to enable camera. Then press W for calibration wizard.", 4200);
+  </script>
+</body>
+</html>
