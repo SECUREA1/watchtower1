@@ -20,12 +20,16 @@
       --accent:#ffb000;
       --rim:#ff4a4a;
       --line:#7a86b3;
+      --vh: 100vh;
+      --vw: 100vw;
     }
-    html,body{height:100%;background:var(--bg);margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:var(--text);}
-    .wrap{display:flex;justify-content:center;align-items:flex-start;padding:18px;}
+    html,body{height:100%;min-height:var(--vh);background:var(--bg);margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:var(--text);}
+    .wrap{display:flex;justify-content:center;align-items:flex-start;min-height:var(--vh);padding:18px;}
     .gameShell{
       position:relative;
       width:min(960px, 96vw);
+      max-width:calc(var(--vw) - 24px);
+      max-height:calc(var(--vh) - 24px);
       aspect-ratio: 16 / 9;
       border-radius:14px;
       overflow:hidden;
@@ -402,6 +406,52 @@
       font-size:12px;
       line-height:1.35;
       font-weight:750;
+    }
+
+    @media (max-width: 900px){
+      .wrap{padding:10px; align-items:center;}
+      .gameShell{
+        width:100%;
+        max-width:100%;
+        border-radius:10px;
+      }
+      .hud{
+        flex-wrap:wrap;
+        gap:8px;
+        font-size:12px;
+      }
+      .hud .pill{
+        flex:1 1 140px;
+        justify-content:center;
+      }
+      .hud .targets{
+        flex:1 1 100%;
+        justify-content:center;
+        flex-wrap:wrap;
+        gap:8px;
+      }
+      .hud .hint{display:none;}
+      .toast{top:64px;}
+      .tuner{
+        left:10px;
+        top:70px;
+        width:calc(100% - 20px);
+        max-height:calc(100% - 82px);
+      }
+      .debugVideo{
+        right:8px;
+        bottom:8px;
+        width:min(200px, 44%);
+      }
+    }
+
+    @media (max-width: 520px){
+      .wrap{padding:8px;}
+      .hud{padding:8px 10px;}
+      .toast{top:58px;}
+      .loginTop{flex-direction:column; align-items:flex-start;}
+      .scanArea{height:240px;}
+      .countBig{font-size:44px;}
     }
   </style>
 </head>
@@ -814,6 +864,19 @@
     const scanHintRight = document.getElementById('scanHintRight');
 
     // ================= UTIL =================
+    const isMobile = window.matchMedia('(max-width: 900px), (pointer: coarse)').matches;
+
+    function updateViewportVars(){
+      const vw = window.visualViewport?.width ?? window.innerWidth;
+      const vh = window.visualViewport?.height ?? window.innerHeight;
+      document.documentElement.style.setProperty('--vw', `${vw}px`);
+      document.documentElement.style.setProperty('--vh', `${vh}px`);
+    }
+
+    updateViewportVars();
+    window.addEventListener('resize', updateViewportVars, {passive:true});
+    window.visualViewport?.addEventListener('resize', updateViewportVars, {passive:true});
+
     const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
     const nowMs = ()=>performance.now();
 
@@ -889,6 +952,15 @@
 
     function applyDisplayTransform(){
       stage.style.transform = `translate(${settings.screen_offset_x}px, ${settings.screen_offset_y}px) scale(${settings.screen_scale})`;
+    }
+
+    function applyMobileAssist(){
+      if (!isMobile) return;
+      settings.grab_radius = Math.max(settings.grab_radius, 68.0);
+      settings.hold_max_follow_px_per_frame = Math.max(settings.hold_max_follow_px_per_frame, 90.0);
+      settings.pinch_release_grace_frames = Math.max(settings.pinch_release_grace_frames, 4);
+      settings.throw_cap = Math.max(settings.throw_cap, 55.0);
+      clampSettings(settings);
     }
 
     // ================= STATUS =================
@@ -1889,6 +1961,52 @@
     let cameraRunning = false;
     let processingFrame = false;
 
+    function getCameraConstraints(){
+      const base = {
+        audio: false,
+        video: {
+          facingMode: { ideal: "user" },
+          width: { ideal: isMobile ? 1280 : 640 },
+          height: { ideal: isMobile ? 720 : 360 },
+          frameRate: { ideal: 30, max: 60 },
+          aspectRatio: { ideal: 16 / 9 },
+          resizeMode: "crop-and-scale"
+        }
+      };
+
+      const supported = navigator.mediaDevices?.getSupportedConstraints?.() ?? {};
+      if (!supported.frameRate) delete base.video.frameRate;
+      if (!supported.aspectRatio) delete base.video.aspectRatio;
+      if (!supported.resizeMode) delete base.video.resizeMode;
+      if (!supported.facingMode) base.video.facingMode = "user";
+      return base;
+    }
+
+    async function getCameraStream(){
+      const primary = getCameraConstraints();
+      try{
+        return await navigator.mediaDevices.getUserMedia(primary);
+      } catch (err){
+        try{
+          return await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: { facingMode: "user" }
+          });
+        } catch (fallbackErr){
+          return await navigator.mediaDevices.getUserMedia({ audio:false, video:true });
+        }
+      }
+    }
+
+    function stopHandTracking(){
+      if (camStream){
+        camStream.getTracks().forEach((t)=>t.stop());
+        camStream = null;
+      }
+      cameraRunning = false;
+      latestHands = [];
+    }
+
     function distNorm(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
 
     function computePinchNormalized(pid, lm){
@@ -2097,14 +2215,7 @@
           });
         }
 
-        camStream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: {
-            facingMode: "user",
-            width: { ideal: 640 },
-            height: { ideal: 360 }
-          }
-        });
+        camStream = await getCameraStream();
 
         video.srcObject = camStream;
         await video.play();
@@ -2137,6 +2248,14 @@
 
     startHandTracking();
     shell.addEventListener('pointerdown', ()=>{ if (!cameraRunning) startHandTracking(); }, {passive:true});
+    document.addEventListener('visibilitychange', ()=>{
+      if (document.hidden){
+        stopHandTracking();
+      } else if (!cameraRunning){
+        startHandTracking();
+      }
+    }, {passive:true});
+    window.addEventListener('pagehide', stopHandTracking, {passive:true});
 
     // ================= LOGIN / HAND SCAN LOGIC =================
     const login = {
@@ -2560,6 +2679,7 @@
     function applyPreset(name){
       settings = {...PRESETS[name]};
       clampSettings(settings);
+      applyMobileAssist();
       applyDisplayTransform();
       sound.updateVolumes();
 
@@ -2587,6 +2707,7 @@
         if (!raw){ setStatus("Load failed (no saved settings)"); return; }
         settings = {...DEFAULT_SETTINGS, ...JSON.parse(raw)};
         clampSettings(settings);
+        applyMobileAssist();
         applyDisplayTransform();
         sound.updateVolumes();
 
@@ -2683,11 +2804,16 @@
 
     // ================= INIT =================
     function init(){
+      let hasStoredSettings = false;
       try{
         const raw = localStorage.getItem("bball_tuner_settings");
-        if (raw) settings = {...DEFAULT_SETTINGS, ...JSON.parse(raw)};
+        if (raw){
+          settings = {...DEFAULT_SETTINGS, ...JSON.parse(raw)};
+          hasStoredSettings = true;
+        }
       } catch {}
       clampSettings(settings);
+      if (!hasStoredSettings) applyMobileAssist();
 
       applyDisplayTransform();
       syncHoopsSVG();
