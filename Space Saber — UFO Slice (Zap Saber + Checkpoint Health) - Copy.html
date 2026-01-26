@@ -1,0 +1,2776 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Space Saber — UFO Slice (Sound Tuner Edition)</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin:0; background:#070a0f; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; overflow:hidden; }
+
+    .hud {
+      position: fixed; inset: 12px 12px auto 12px;
+      display:flex; gap:10px; align-items:center; z-index:10; pointer-events:none; flex-wrap:wrap;
+    }
+    .pill {
+      background: rgba(0,0,0,0.55);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-size: 13px;
+      color: #e6edf3;
+      backdrop-filter: blur(6px);
+      white-space: nowrap;
+    }
+    .barWrap {
+      display:flex; align-items:center; gap:10px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(0,0,0,0.55);
+      border: 1px solid rgba(255,255,255,0.12);
+      backdrop-filter: blur(6px);
+    }
+    .bar {
+      width: 240px;
+      height: 12px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.10);
+      overflow: hidden;
+      position: relative;
+    }
+    .barFill {
+      height: 100%;
+      width: 100%;
+      background: linear-gradient(90deg, rgba(0,255,160,0.85), rgba(120,255,220,0.85));
+      border-radius: 999px;
+      transition: width 80ms linear;
+    }
+    .segDots { position:absolute; inset:0; display:flex; pointer-events:none; opacity: 0.28; }
+    .segDots span { flex:1; border-right: 1px solid rgba(255,255,255,0.45); }
+    .segDots span:last-child { border-right:none; }
+
+    .stage { position:fixed; inset:0; display:grid; place-items:center; }
+    .wrap {
+      position: relative;
+      width: min(100vw, 1000px);
+      aspect-ratio: 4 / 3;
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.12);
+      background:#000;
+      box-shadow: 0 18px 60px rgba(0,0,0,0.45);
+    }
+    video, canvas {
+      position:absolute; inset:0; width:100%; height:100%;
+      object-fit: cover;
+      transform: rotateY(180deg);
+    }
+    canvas { pointer-events:none; }
+
+    .controls {
+      position: fixed; inset: auto 12px 12px 12px;
+      display:flex; gap:10px; z-index:10; align-items:center;
+    }
+    button {
+      background:#1f6feb; color:white; border:0;
+      padding:10px 14px; border-radius: 12px;
+      font-weight: 700; cursor:pointer;
+    }
+    button.secondary { background:#30363d; }
+    button:disabled { opacity:0.55; cursor:not-allowed; }
+
+    .hint {
+      position: fixed; right:12px; top:12px; z-index:10;
+      max-width: 540px;
+      background: rgba(0,0,0,0.55);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 14px;
+      padding: 10px 12px;
+      color: #e6edf3;
+      backdrop-filter: blur(6px);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+    .hint b { color:#fff; }
+
+    /* ---------- Sound Tuner UI ---------- */
+    .tunerWrap {
+      position: fixed;
+      right: 12px;
+      bottom: 12px;
+      z-index: 20;
+      width: min(420px, calc(100vw - 24px));
+      pointer-events: auto;
+    }
+    .tunerPanel {
+      background: rgba(0,0,0,0.62);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 14px;
+      padding: 10px 12px;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 14px 44px rgba(0,0,0,0.45);
+    }
+    .tunerHeader {
+      display:flex; align-items:center; justify-content:space-between; gap:10px;
+      margin-bottom: 8px;
+    }
+    .tunerTitle {
+      font-weight: 800;
+      color: #e6edf3;
+      font-size: 14px;
+      letter-spacing: 0.2px;
+    }
+    .tunerBtns { display:flex; gap:8px; }
+    .tbtn {
+      background:#30363d; color:#e6edf3; border:0;
+      padding: 7px 10px; border-radius: 10px;
+      font-weight: 700; cursor:pointer; font-size: 12px;
+    }
+    .tbtn.primary { background:#1f6feb; color:#fff; }
+    .tunerBody { display:none; margin-top: 8px; }
+    .tunerBody.open { display:block; }
+
+    .grid {
+      display:grid;
+      grid-template-columns: 1fr 120px;
+      gap: 8px 10px;
+      align-items:center;
+    }
+    .lbl {
+      color:#cdd9e5;
+      font-size: 12px;
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .val { color:#8b949e; font-variant-numeric: tabular-nums; }
+    input[type="range"] { width: 100%; }
+    .note {
+      margin-top: 8px;
+      color:#8b949e;
+      font-size: 12px;
+      line-height: 1.3;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="hud">
+    <div class="pill" id="statusPill">Loading hand tracker…</div>
+    <div class="pill" id="scorePill">Score: 0</div>
+    <div class="pill" id="comboPill">Combo: x1</div>
+
+    <div class="barWrap">
+      <div class="pill" style="padding:0;border:none;background:transparent;">HP</div>
+      <div class="bar" aria-label="health bar">
+        <div class="barFill" id="hpFill"></div>
+        <div class="segDots" aria-hidden="true" id="hpSeg"></div>
+      </div>
+      <div class="pill" id="cpPill" style="padding:6px 10px;">CP: 3</div>
+    </div>
+
+    <div class="pill" id="powerPill" style="display:none;">Overcharge: 20s</div>
+  </div>
+
+  <div class="hint">
+    <b>UFO Slice — Zap Saber + Space Ships</b><br/>
+    • Make a <b>closed fist</b> → saber ON (electric zaps instead of hum)<br/>
+    • Slice <b>UFOs</b> + <b>ships</b> (ships take <b>2 hits</b>)<br/>
+    • Slice blaster bolts to <b>deflect</b> (bonus points)<br/>
+    • <b>3 checkpoint bars × 15 hits</b> each = <b>45 hits</b> before death<br/>
+    • Touch <b>OVERCHARGE</b> with <b>index fingertip</b> → extended blade
+  </div>
+
+  <div class="stage">
+    <div class="wrap">
+      <video id="webcam" autoplay playsinline muted></video>
+      <canvas id="overlay"></canvas>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button id="startBtn">Enable Webcam + Start</button>
+    <button id="pauseBtn" class="secondary" disabled>Pause</button>
+    <button id="resetBtn" class="secondary" disabled>Reset</button>
+  </div>
+
+  <!-- Sound Tuner -->
+  <div class="tunerWrap">
+    <div class="tunerPanel">
+      <div class="tunerHeader">
+        <div class="tunerTitle">Sound Tuner</div>
+        <div class="tunerBtns">
+          <button class="tbtn" id="toggleTuner">Open</button>
+          <button class="tbtn" id="resetTuner">Defaults</button>
+          <button class="tbtn primary" id="testLaser">Test Laser</button>
+        </div>
+      </div>
+
+      <div class="tunerBody" id="tunerBody">
+        <div class="grid">
+          <div class="lbl"><span>Master</span><span class="val" id="v_master"></span></div>
+          <input type="range" id="s_master" min="0" max="1.2" step="0.01" />
+
+          <div class="lbl"><span>Music</span><span class="val" id="v_music"></span></div>
+          <input type="range" id="s_music" min="0" max="1.2" step="0.01" />
+
+          <div class="lbl"><span>Ambience</span><span class="val" id="v_amb"></span></div>
+          <input type="range" id="s_amb" min="0" max="1.2" step="0.01" />
+
+          <div class="lbl"><span>SFX</span><span class="val" id="v_sfx"></span></div>
+          <input type="range" id="s_sfx" min="0" max="1.2" step="0.01" />
+
+          <div class="lbl"><span>Saber Zap (loop)</span><span class="val" id="v_saberZap"></span></div>
+          <input type="range" id="s_saberZap" min="0" max="1.2" step="0.01" />
+
+          <div class="lbl"><span>Saber Whoosh</span><span class="val" id="v_saberWhoosh"></span></div>
+          <input type="range" id="s_saberWhoosh" min="0" max="1.2" step="0.01" />
+
+          <div class="lbl"><span>Saber Spark (micro zaps)</span><span class="val" id="v_saberSpark"></span></div>
+          <input type="range" id="s_saberSpark" min="0" max="1.2" step="0.01" />
+
+          <div class="lbl"><span>Laser Volume</span><span class="val" id="v_laserVol"></span></div>
+          <input type="range" id="s_laserVol" min="0" max="1.2" step="0.01" />
+
+          <div class="lbl"><span>Laser Brightness (less static = lower)</span><span class="val" id="v_laserCutoff"></span></div>
+          <input type="range" id="s_laserCutoff" min="800" max="5200" step="10" />
+
+          <div class="lbl"><span>Laser Click / Static</span><span class="val" id="v_laserClick"></span></div>
+          <input type="range" id="s_laserClick" min="0" max="1.2" step="0.01" />
+
+          <div class="lbl"><span>Slice</span><span class="val" id="v_slice"></span></div>
+          <input type="range" id="s_slice" min="0" max="1.2" step="0.01" />
+
+          <div class="lbl"><span>Explosions</span><span class="val" id="v_boom"></span></div>
+          <input type="range" id="s_boom" min="0" max="1.2" step="0.01" />
+
+          <div class="lbl"><span>Low-HP Alarm</span><span class="val" id="v_alarm"></span></div>
+          <input type="range" id="s_alarm" min="0" max="1.2" step="0.01" />
+        </div>
+
+        <div class="note">
+          Tip: To reduce “staticy” laser feel, lower <b>Laser Click</b> and/or lower <b>Laser Brightness</b>.
+          The new laser synth is already softened versus the previous one.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
+
+    // ---------- DOM ----------
+    const video = document.getElementById("webcam");
+    const canvas = document.getElementById("overlay");
+    const ctx = canvas.getContext("2d", { alpha: true });
+
+    const statusPill = document.getElementById("statusPill");
+    const scorePill  = document.getElementById("scorePill");
+    const comboPill  = document.getElementById("comboPill");
+    const powerPill  = document.getElementById("powerPill");
+
+    const hpFill = document.getElementById("hpFill");
+    const hpSeg  = document.getElementById("hpSeg");
+    const cpPill = document.getElementById("cpPill");
+
+    const startBtn = document.getElementById("startBtn");
+    const pauseBtn = document.getElementById("pauseBtn");
+    const resetBtn = document.getElementById("resetBtn");
+
+    // Tuner UI
+    const toggleTunerBtn = document.getElementById("toggleTuner");
+    const resetTunerBtn  = document.getElementById("resetTuner");
+    const testLaserBtn   = document.getElementById("testLaser");
+    const tunerBody      = document.getElementById("tunerBody");
+
+    // sliders
+    const SL = {
+      master:      document.getElementById("s_master"),
+      music:       document.getElementById("s_music"),
+      amb:         document.getElementById("s_amb"),
+      sfx:         document.getElementById("s_sfx"),
+      saberZap:    document.getElementById("s_saberZap"),
+      saberWhoosh: document.getElementById("s_saberWhoosh"),
+      saberSpark:  document.getElementById("s_saberSpark"),
+      laserVol:    document.getElementById("s_laserVol"),
+      laserCutoff: document.getElementById("s_laserCutoff"),
+      laserClick:  document.getElementById("s_laserClick"),
+      slice:       document.getElementById("s_slice"),
+      boom:        document.getElementById("s_boom"),
+      alarm:       document.getElementById("s_alarm"),
+    };
+    const VL = {
+      master:      document.getElementById("v_master"),
+      music:       document.getElementById("v_music"),
+      amb:         document.getElementById("v_amb"),
+      sfx:         document.getElementById("v_sfx"),
+      saberZap:    document.getElementById("v_saberZap"),
+      saberWhoosh: document.getElementById("v_saberWhoosh"),
+      saberSpark:  document.getElementById("v_saberSpark"),
+      laserVol:    document.getElementById("v_laserVol"),
+      laserCutoff: document.getElementById("v_laserCutoff"),
+      laserClick:  document.getElementById("v_laserClick"),
+      slice:       document.getElementById("v_slice"),
+      boom:        document.getElementById("v_boom"),
+      alarm:       document.getElementById("v_alarm"),
+    };
+
+    // ---------- MediaPipe ----------
+    let handLandmarker = null;
+    let runningMode = "IMAGE";
+    let webcamRunning = false;
+    let lastVideoTime = -1;
+    let lastFrameMs = performance.now();
+    let latestResults = null;
+
+    // ---------- Game coords ----------
+    const GAME_W = 640;
+    const GAME_H = 480;
+
+    // ---------- Checkpoint health (3 bars × 15 hits = 45 hits) ----------
+    const CHECKPOINT_BARS = 3;
+    const HITS_PER_BAR = 15;
+    const TOTAL_HITS_TO_DEATH = CHECKPOINT_BARS * HITS_PER_BAR; // 45
+
+    // Damage values
+    const DMG_ESCAPE = 1;
+    const DMG_HEAVY = 6;
+
+    // Performance caps
+    const MAX_PARTICLES = 520;
+    const MAX_TRAILS    = 70;
+    const MAX_TARGETS   = 18;
+    const MAX_BOLTS     = 26;
+
+    // ---------- Sound Tuning Defaults ----------
+    const TUNE_DEFAULTS = Object.freeze({
+      master: 0.92,
+      music:  1.00,
+      amb:    1.00,
+      sfx:    1.00,
+
+      saberZap:    0.80,   // LOWER by default (less intense)
+      saberWhoosh: 0.85,
+      saberSpark:  0.70,
+
+      laserVol:    0.55,   // LOWER by default (less impactful)
+      laserCutoff: 2200,   // LOWER cutoff (less static/harsh)
+      laserClick:  0.35,   // LOWER click noise
+
+      slice: 0.95,
+      boom:  0.90,
+      alarm: 0.65
+    });
+
+    function loadTune() {
+      try {
+        const raw = localStorage.getItem("space_saber_tune");
+        if (!raw) return { ...TUNE_DEFAULTS };
+        const parsed = JSON.parse(raw);
+        return { ...TUNE_DEFAULTS, ...parsed };
+      } catch {
+        return { ...TUNE_DEFAULTS };
+      }
+    }
+    function saveTune(tune) {
+      try { localStorage.setItem("space_saber_tune", JSON.stringify(tune)); } catch {}
+    }
+
+    // ---------- Sound Engine (with tuner hooks + softer laser) ----------
+    class SoundEngine {
+      constructor() {
+        this.ctx = null;
+        this.master = null;
+        this.comp = null;
+        this.limiter = null;
+
+        this.musicBus = null;
+        this.sfxBus = null;
+        this.ambBus = null;
+        this.reverbBus = null;
+
+        this.started = false;
+        this.enabled = true;
+        this.musicEnabled = true;
+
+        this.ambience = null;
+        this.jingle = null;
+
+        this.saber = {
+          left:  { on:false, gain:null, loop:null, whoosh:null, pan:null, lastSpeed:0, lastZapAt:0 },
+          right: { on:false, gain:null, loop:null, whoosh:null, pan:null, lastSpeed:0, lastZapAt:0 },
+        };
+
+        this.lowHp = { active:false, osc:null, tone:null, gain:null, shaper:null, noise:null };
+
+        this.tune = { ...TUNE_DEFAULTS };
+      }
+
+      applyTuning(nextTune) {
+        this.tune = { ...this.tune, ...nextTune };
+
+        if (!this.ctx) return;
+
+        // buses
+        if (this.master) this.master.gain.value = this.tune.master;
+        if (this.musicBus) this.musicBus.gain.value = (this.musicEnabled ? 0.42 : 0.0) * this.tune.music;
+        if (this.ambBus)   this.ambBus.gain.value   = 0.22 * this.tune.amb;
+        if (this.sfxBus)   this.sfxBus.gain.value   = 0.95 * this.tune.sfx;
+
+        // live saber loops: adjust active gains immediately
+        ["left","right"].forEach(hand => {
+          const s = this.saber[hand];
+          if (s?.gain) {
+            const now = this.ctx.currentTime;
+            s.gain.gain.cancelScheduledValues(now);
+            const base = 0.52 * this.tune.saberZap;
+            s.gain.gain.linearRampToValueAtTime(s.on ? base : 0.0, now + 0.08);
+          }
+          if (s?.loop?.gateDepth) s.loop.gateDepth.gain.value = 0.020 * this.tune.saberZap;
+          if (s?.whoosh?.gain)    s.whoosh.gain.gain.value = 0.01 * this.tune.saberWhoosh;
+        });
+
+        // lowHP volume
+        if (this.lowHp.active && this.lowHp.gain) {
+          const now = this.ctx.currentTime;
+          this.lowHp.gain.gain.cancelScheduledValues(now);
+          // alarm gate already modulates; this is overall level
+          this.lowHp.gain.gain.linearRampToValueAtTime(0.18 * this.tune.alarm, now + 0.06);
+        }
+      }
+
+      async start() {
+        if (!this.enabled) return;
+
+        if (!this.ctx) {
+          const AC = window.AudioContext || window.webkitAudioContext;
+          this.ctx = new AC({ latencyHint: "interactive" });
+          await this.ctx.resume();
+
+          this.master = this.ctx.createGain();
+          this.master.gain.value = this.tune.master;
+
+          this.comp = this.ctx.createDynamicsCompressor();
+          this.comp.threshold.value = -18;
+          this.comp.knee.value = 20;
+          this.comp.ratio.value = 4;
+          this.comp.attack.value = 0.01;
+          this.comp.release.value = 0.12;
+
+          this.limiter = this.ctx.createWaveShaper();
+          this.limiter.curve = this._makeSoftClipCurve(0.92);
+          this.limiter.oversample = "2x";
+
+          this.musicBus = this.ctx.createGain(); this.musicBus.gain.value = (this.musicEnabled ? 0.42 : 0.0) * this.tune.music;
+          this.ambBus   = this.ctx.createGain(); this.ambBus.gain.value   = 0.22 * this.tune.amb;
+          this.sfxBus   = this.ctx.createGain(); this.sfxBus.gain.value   = 0.95 * this.tune.sfx;
+
+          this.reverbBus = this.ctx.createGain();
+          this.reverbBus.gain.value = 0.18;
+
+          const reverb = this._makeReverbNetwork();
+          this.reverbBus.connect(reverb.input);
+          reverb.output.connect(this.master);
+
+          this.musicBus.connect(this.master);
+          this.ambBus.connect(this.master);
+          this.sfxBus.connect(this.master);
+
+          this.master.connect(this.comp);
+          this.comp.connect(this.limiter);
+          this.limiter.connect(this.ctx.destination);
+        } else {
+          await this.ctx.resume();
+        }
+
+        if (this.started) return;
+        this.started = true;
+
+        this._startArcadeAmbience();
+        this._startNoirOperaJingle();
+
+        this.setSaberOn("left", false);
+        this.setSaberOn("right", false);
+      }
+
+      stopAll() {
+        if (!this.ctx) return;
+        this._stopLoop(this.ambience); this.ambience = null;
+        this._stopJingle();
+        this.setLowHpAlarm(false);
+        this._stopSaber("left");
+        this._stopSaber("right");
+      }
+
+      // ----- Saber control -----
+      setSaberOn(hand, on) {
+        if (!this.ctx || !this.started) return;
+        const s = this.saber[hand];
+        if (!s) return;
+
+        if (on && !s.on) {
+          s.on = true;
+          this._igniteSaber();
+          this._startSaberZapLoop(hand);
+        } else if (!on && s.on) {
+          s.on = false;
+          this._retractSaber();
+          this._stopSaberZapLoop(hand);
+        }
+      }
+
+      setSaberMotion(hand, speedNorm) {
+        if (!this.ctx || !this.started) return;
+        const s = this.saber[hand];
+        if (!s || !s.on) return;
+
+        const sp = this._clamp(speedNorm, 0, 1.8);
+        const now = this.ctx.currentTime;
+
+        // whoosh follows speed
+        if (s.whoosh?.gain) {
+          s.whoosh.gain.gain.cancelScheduledValues(now);
+          const base = 0.008 * this.tune.saberWhoosh;
+          s.whoosh.gain.gain.linearRampToValueAtTime(base + sp * (0.22 * this.tune.saberWhoosh), now + 0.05);
+        }
+
+        // zap loop tone follows speed (softened by default)
+        if (s.loop?.bp) {
+          s.loop.bp.frequency.cancelScheduledValues(now);
+          s.loop.bp.frequency.linearRampToValueAtTime(1200 + sp * 1900, now + 0.06);
+        }
+
+        // more motion => slightly more crackle, but restrained by tuning
+        if (s.loop?.gateDepth) {
+          s.loop.gateDepth.gain.cancelScheduledValues(now);
+          const depth = (0.014 + sp * 0.040) * this.tune.saberZap;
+          s.loop.gateDepth.gain.linearRampToValueAtTime(depth, now + 0.06);
+        }
+
+        // swing transient on spikes
+        if (sp - s.lastSpeed > 0.60) {
+          this.playSaberSwing(hand, sp);
+        }
+
+        // occasional micro-zap (scaled down)
+        const tNowMs = performance.now();
+        const rateMs = 260 - sp * 100;
+        if (tNowMs - s.lastZapAt > rateMs) {
+          s.lastZapAt = tNowMs + Math.random() * 70;
+          this._microZap(
+            1650 + sp * 700,
+            0.02 + sp * 0.012,
+            (0.06 + sp * 0.04) * this.tune.saberSpark,
+            (hand === "left") ? -0.22 : 0.22
+          );
+        }
+
+        s.lastSpeed = sp;
+      }
+
+      // ----- Events -----
+      playUIConfirm() { this._coin(0.10); }
+      playPause(on)   { this._menuBlip(on ? 520 : 360, 0.10); }
+
+      playSlice(combo=1) {
+        const c = this._clamp(combo, 1, 9);
+        const k = this.tune.slice;
+        this._noiseWhoosh(0.06, 900 + c*80, 0.11*k, 0.10, (Math.random()*2-1)*0.2);
+        this._zap(1150 + c*45, 0.032, 0.10*k);
+        this._pop(240 + c*16, 0.08, 0.12*k);
+        this._noiseBurst(0.05, 1400, 0.07*k, 0.07);
+        this._sparkle(1400 + c*55, 0.08, 0.06*k);
+      }
+
+      // NEW: Softer, less static laser
+      playLaser(strength=1.0) {
+        const s = this._clamp(strength, 0.3, 1.3);
+        const pan = (Math.random()*2-1) * 0.35;
+
+        // main pew (triangle-based, lowpassed)
+        this._pewSoft(
+          1050,            // start freq
+          380,             // end freq
+          0.09,            // dur
+          0.14*s*this.tune.laserVol,
+          pan,
+          this.tune.laserCutoff
+        );
+
+        // optional click/static (now tunable, default low)
+        const clickAmt = 0.06 * s * this.tune.laserClick * this.tune.laserVol;
+        if (clickAmt > 0.001) this._clickNoise(0.018, clickAmt, pan);
+      }
+
+      playHit() { this._thud(110, 0.08, 0.10*this.tune.sfx); this._menuBlip(560, 0.08, 0.05*this.tune.sfx); }
+      playCheckpoint() { this._powerUpChord(0.95*this.tune.sfx); this._kick(0.12, 0.18*this.tune.sfx); }
+      playOvercharge() { this._powerUpChord(1.0*this.tune.sfx); this._riser(320, 1700, 0.28, 0.12*this.tune.sfx); this._coin(0.10*this.tune.sfx); }
+      playBomb() { this._bombBoom(0.90*this.tune.boom); this._noiseBurst(0.28, 240, 0.20*this.tune.boom, 0.16); this._squeal(880, 0.12, 0.07*this.tune.boom); }
+      playGameOver() { this._downer(620, 90, 0.55, 0.16*this.tune.sfx); this._noiseBurst(0.16, 220, 0.12*this.tune.sfx, 0.12); }
+
+      playSaberSwing(hand, intensity=1.0) {
+        const i = this._clamp(intensity, 0, 1.8);
+        const pan = (hand === "left") ? -0.28 : 0.28;
+        const k = this.tune.sfx;
+        this._noiseWhoosh(0.08, 720 + i*950, 0.09*k*this.tune.saberWhoosh, 0.10, pan);
+        this._microZap(1650 + i*700, 0.028, 0.07*k*this.tune.saberSpark, pan);
+      }
+
+      // ----- Low HP alarm -----
+      setLowHpAlarm(active) {
+        if (!this.ctx || !this.started) return;
+        if (active && !this.lowHp.active) this._startLowHp();
+        if (!active && this.lowHp.active) this._stopLowHp();
+      }
+
+      // ---------- Ambience ----------
+      _startArcadeAmbience() {
+        const ctx = this.ctx;
+        const out = ctx.createGain();
+        out.gain.value = 0.45;
+
+        const noise = this._makeNoiseNode();
+        const hp = ctx.createBiquadFilter();
+        hp.type = "highpass";
+        hp.frequency.value = 520;
+
+        const lp = ctx.createBiquadFilter();
+        lp.type = "lowpass";
+        lp.frequency.value = 1600;
+
+        const g = ctx.createGain();
+        g.gain.value = 0.009;
+
+        const pulse = ctx.createOscillator();
+        pulse.type = "sine";
+        pulse.frequency.value = 0.85;
+        const pulseGain = ctx.createGain();
+        pulseGain.gain.value = 0.006;
+        pulse.connect(pulseGain.gain);
+
+        const coil = ctx.createOscillator();
+        coil.type = "triangle";
+        coil.frequency.value = 54;
+        const coilGain = ctx.createGain();
+        coilGain.gain.value = 0.010;
+
+        noise.connect(hp);
+        hp.connect(lp);
+        lp.connect(g);
+
+        g.connect(out);
+        out.connect(this.ambBus);
+        out.connect(this.reverbBus);
+
+        coil.connect(coilGain);
+        coilGain.connect(out);
+
+        pulse.start();
+        noise.start();
+        coil.start();
+
+        this.ambience = { out, noise, hp, lp, g, pulse, pulseGain, coil, coilGain };
+      }
+
+      // ---------- Background music ----------
+      _startNoirOperaJingle() {
+        if (!this.musicEnabled) return;
+        const ctx = this.ctx;
+
+        const tempo = 118;
+        const stepPerBeat = 4;
+        const secPerStep = 60 / tempo / stepPerBeat;
+
+        const patternLen = 64;
+        const root = 196;
+
+        const bassPat = [
+          0,0,0,0,  0,0,7,0,   0,0,0,0,  3,0,7,0,
+          0,0,0,0,  5,0,7,0,   0,0,0,0,  3,0,7,0,
+          0,0,0,0,  0,0,7,0,   0,0,0,0,  3,0,7,0,
+          0,0,0,0,  8,0,11,0,  7,0,5,0,  3,0,2,0
+        ];
+
+        const leadPat = [
+          0,0,7,0,   0,0,10,0,  7,0,5,0,  3,0,2,0,
+          0,0,7,0,   0,0,11,0,  10,0,7,0, 5,0,3,0,
+          0,0,7,0,   0,0,10,0,  12,0,10,0,7,0,5,0,
+          3,0,2,0,   0,0,7,0,   10,0,7,0, 5,0,3,0
+        ];
+
+        const stabSteps = new Set([0, 16, 32, 48]);
+
+        const out = ctx.createGain();
+        out.gain.value = 0.95;
+        out.connect(this.musicBus);
+        out.connect(this.reverbBus);
+
+        const state = { out, tempo, secPerStep, patternLen, root, bassPat, leadPat, stabSteps, step: 0, nextTime: ctx.currentTime + 0.08, timer: null };
+
+        const scheduleAhead = 0.14;
+        const tick = () => {
+          if (!this.jingle) return;
+          while (state.nextTime < ctx.currentTime + scheduleAhead) {
+            this._scheduleNoirOperaStep(state, state.step, state.nextTime);
+            state.step = (state.step + 1) % state.patternLen;
+            state.nextTime += state.secPerStep;
+          }
+        };
+
+        state.timer = setInterval(tick, 25);
+        this.jingle = state;
+      }
+
+      _stopJingle() {
+        if (!this.jingle) return;
+        if (this.jingle.timer) clearInterval(this.jingle.timer);
+        try { this.jingle.out.disconnect(); } catch {}
+        this.jingle = null;
+      }
+
+      _scheduleNoirOperaStep(st, step, t) {
+        if (step % 16 === 0) this._kickAt(t, 0.12, 0.18);
+        if (step % 16 === 8) this._kickAt(t, 0.10, 0.14);
+        if (step % 16 === 4) this._clapAt(t, 0.11, 0.11);
+        if (step % 16 === 12) this._clapAt(t, 0.11, 0.11);
+        if (step % 8 === 2 || step % 8 === 6) this._hatAt(t, 0.03, 0.055);
+
+        const b = st.bassPat[step] ?? 0;
+        if (b !== 0 || step % 16 === 0) {
+          const hz = st.root * Math.pow(2, (b/12)) / 2;
+          this._synthAt(t, hz, 0.10, 0.11, "square", 820, 0.0);
+        }
+
+        const lp = st.leadPat[step] ?? 0;
+        if (lp !== 0) {
+          const hz = st.root * Math.pow(2, (lp/12));
+          const pan = (step % 16 < 8) ? -0.12 : 0.12;
+          this._brassAt(t, hz, 0.09, 0.13, pan);
+          if (step % 16 === 0) this._sparkleAt(t + 0.03, hz * 2.0, 0.05, 0.04, pan);
+        }
+
+        if (st.stabSteps.has(step)) {
+          const chord = [0, 7, 10];
+          chord.forEach((semi, i) => {
+            const hz = st.root * Math.pow(2, semi/12);
+            this._organPadAt(t, hz, 0.55, 0.065 - i*0.01, (i-1)*0.07);
+          });
+        }
+      }
+
+      // ---------- Saber zap loop (tunable) ----------
+      _igniteSaber() { this._riser(240, 1600, 0.18, 0.08*this.tune.sfx); this._coin(0.06*this.tune.sfx); }
+      _retractSaber(){ this._downer(820, 170, 0.16, 0.08*this.tune.sfx); }
+
+      _startSaberZapLoop(hand) {
+        const ctx = this.ctx;
+        const s = this.saber[hand];
+        if (s.gain) return;
+
+        const out = ctx.createGain();
+        out.gain.value = 0.0;
+
+        const pan = ctx.createStereoPanner();
+        pan.pan.value = (hand === "left") ? -0.28 : 0.28;
+
+        out.connect(pan);
+        pan.connect(this.sfxBus);
+        pan.connect(this.reverbBus);
+
+        const n = this._makeNoiseNode();
+
+        const hp = ctx.createBiquadFilter();
+        hp.type = "highpass";
+        hp.frequency.value = 260;
+
+        const bp = ctx.createBiquadFilter();
+        bp.type = "bandpass";
+        bp.frequency.value = 1500;     // softened
+        bp.Q.value = 0.75;
+
+        const drive = ctx.createWaveShaper();
+        drive.curve = this._makeDriveCurve(0.42); // reduced drive = less static/harsh
+        drive.oversample = "2x";
+
+        const gateLfo = ctx.createOscillator();
+        gateLfo.type = "square";
+        gateLfo.frequency.value = 5.4 + Math.random() * 1.8;
+
+        const gateDepth = ctx.createGain();
+        gateDepth.gain.value = 0.020 * this.tune.saberZap;
+
+        const gate = ctx.createGain();
+        gate.gain.value = 0.0;
+
+        gateLfo.connect(gateDepth);
+        gateDepth.connect(gate.gain);
+
+        const tTone = ctx.createOscillator();
+        tTone.type = "triangle";
+        tTone.frequency.value = (hand === "left") ? 92 : 100;
+        const tGain = ctx.createGain();
+        tGain.gain.value = 0.008 * this.tune.saberZap;
+
+        const whooshNoise = this._makeNoiseNode();
+        const whooshBP = ctx.createBiquadFilter();
+        whooshBP.type = "bandpass";
+        whooshBP.frequency.value = 900;
+        whooshBP.Q.value = 0.65;
+
+        const whooshGain = ctx.createGain();
+        whooshGain.gain.value = 0.01 * this.tune.saberWhoosh;
+
+        n.connect(hp);
+        hp.connect(bp);
+        bp.connect(drive);
+        drive.connect(gate);
+        gate.connect(out);
+
+        tTone.connect(tGain);
+        tGain.connect(out);
+
+        whooshNoise.connect(whooshBP);
+        whooshBP.connect(whooshGain);
+        whooshGain.connect(out);
+
+        n.start();
+        gateLfo.start();
+        tTone.start();
+        whooshNoise.start();
+
+        const now = ctx.currentTime;
+        const base = 0.52 * this.tune.saberZap;
+        out.gain.setValueAtTime(0.0, now);
+        out.gain.linearRampToValueAtTime(base, now + 0.12);
+
+        this._microZap(1700, 0.025, 0.06*this.tune.saberSpark, (hand === "left") ? -0.22 : 0.22);
+
+        s.gain = out;
+        s.pan = pan;
+        s.loop = { n, hp, bp, drive, gateLfo, gateDepth, gate, tTone, tGain };
+        s.whoosh = { noise: whooshNoise, bp: whooshBP, gain: whooshGain };
+        s.lastSpeed = 0;
+        s.lastZapAt = performance.now();
+      }
+
+      _stopSaberZapLoop(hand) {
+        const ctx = this.ctx;
+        const s = this.saber[hand];
+        if (!s.gain) return;
+
+        const now = ctx.currentTime;
+        s.gain.gain.cancelScheduledValues(now);
+        s.gain.gain.linearRampToValueAtTime(0.0, now + 0.14);
+        setTimeout(() => this._stopSaber(hand), 200);
+      }
+
+      _stopSaber(hand) {
+        const s = this.saber[hand];
+        if (!s) return;
+
+        if (s.loop) {
+          this._stopNode(s.loop.n);
+          this._stopNode(s.loop.gateLfo);
+          this._stopNode(s.loop.tTone);
+          this._stopNode(s.whoosh?.noise);
+
+          try { s.loop.hp?.disconnect(); } catch {}
+          try { s.loop.bp?.disconnect(); } catch {}
+          try { s.loop.drive?.disconnect(); } catch {}
+          try { s.loop.gateDepth?.disconnect(); } catch {}
+          try { s.loop.gate?.disconnect(); } catch {}
+          try { s.loop.tGain?.disconnect(); } catch {}
+
+          s.loop = null;
+        }
+
+        if (s.whoosh) {
+          try { s.whoosh.bp?.disconnect(); } catch {}
+          try { s.whoosh.gain?.disconnect(); } catch {}
+          s.whoosh = null;
+        }
+
+        if (s.gain) { try { s.gain.disconnect(); } catch {} s.gain = null; }
+        if (s.pan)  { try { s.pan.disconnect(); } catch {} s.pan = null; }
+
+        s.lastSpeed = 0;
+      }
+
+      _microZap(freq=1800, dur=0.03, gain=0.08, panVal=0) {
+        const ctx = this.ctx;
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        const pan = ctx.createStereoPanner();
+        pan.pan.value = panVal;
+
+        o.type = "sawtooth";
+        const t = ctx.currentTime;
+        o.frequency.setValueAtTime(freq, t);
+        o.frequency.exponentialRampToValueAtTime(freq * 0.62, t + dur);
+
+        const gg = gain * this.tune.sfx;
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(gg, t + 0.007);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+
+        // soften top end
+        const lp = ctx.createBiquadFilter();
+        lp.type = "lowpass";
+        lp.frequency.value = 3600;
+
+        o.connect(g);
+        g.connect(lp);
+        lp.connect(pan);
+        pan.connect(this.sfxBus);
+        pan.connect(this.reverbBus);
+
+        o.start(t); o.stop(t + dur + 0.02);
+      }
+
+      // ---------- Low HP alarm (tunable overall level) ----------
+      _startLowHp() {
+        const ctx = this.ctx;
+
+        const gate = ctx.createOscillator();
+        gate.type = "square";
+        gate.frequency.value = 4.8;
+
+        const gateShaper = ctx.createWaveShaper();
+        gateShaper.curve = this._makeGateCurve();
+        gateShaper.oversample = "2x";
+
+        const g = ctx.createGain();
+        g.gain.value = 0.0;
+
+        gate.connect(gateShaper);
+        gateShaper.connect(g.gain);
+
+        const a = ctx.createOscillator();
+        a.type = "triangle";
+        a.frequency.value = 740;
+
+        const b = ctx.createOscillator();
+        b.type = "sawtooth";
+        b.frequency.value = 784;
+
+        const aGain = ctx.createGain(); aGain.gain.value = 0.050;
+        const bGain = ctx.createGain(); bGain.gain.value = 0.024;
+
+        const lp = ctx.createBiquadFilter();
+        lp.type = "lowpass";
+        lp.frequency.value = 1600;
+        lp.Q.value = 0.8;
+
+        const n = this._makeNoiseNode();
+        const bp = ctx.createBiquadFilter();
+        bp.type = "bandpass";
+        bp.frequency.value = 1100;
+        bp.Q.value = 0.7;
+
+        const nGain = ctx.createGain();
+        nGain.gain.value = 0.010;
+
+        const sub = ctx.createOscillator();
+        sub.type = "sine";
+        sub.frequency.value = 58;
+        const subGain = ctx.createGain();
+        subGain.gain.value = 0.026;
+
+        a.connect(aGain);
+        b.connect(bGain);
+        aGain.connect(lp);
+        bGain.connect(lp);
+
+        n.connect(bp);
+        bp.connect(nGain);
+        nGain.connect(lp);
+
+        sub.connect(subGain);
+        subGain.connect(lp);
+
+        lp.connect(g);
+        g.connect(this.sfxBus);
+
+        // overall alarm level
+        const now = ctx.currentTime;
+        g.gain.setValueAtTime(0.0, now);
+        g.gain.linearRampToValueAtTime(0.18 * this.tune.alarm, now + 0.08);
+
+        const send = ctx.createGain();
+        send.gain.value = 0.12;
+        g.connect(send);
+        send.connect(this.reverbBus);
+
+        gate.start();
+        a.start();
+        b.start();
+        n.start();
+        sub.start();
+
+        this.lowHp = { active:true, osc: gate, tone: { a, b, sub }, gain: g, shaper: gateShaper, noise: { n, bp, nGain }, lp, send };
+      }
+
+      _stopLowHp() {
+        const l = this.lowHp;
+        if (!l.active) return;
+        l.active = false;
+
+        this._stopNode(l.osc);
+        this._stopNode(l.tone?.a);
+        this._stopNode(l.tone?.b);
+        this._stopNode(l.tone?.sub);
+        this._stopNode(l.noise?.n);
+
+        try { l.gain?.disconnect(); } catch {}
+        try { l.shaper?.disconnect(); } catch {}
+        try { l.noise?.bp?.disconnect(); } catch {}
+        try { l.noise?.nGain?.disconnect(); } catch {}
+        try { l.lp?.disconnect(); } catch {}
+        try { l.send?.disconnect(); } catch {}
+
+        this.lowHp = { active:false, osc:null, tone:null, gain:null, shaper:null, noise:null };
+      }
+
+      // ---------- “brass” + “organ pad” helpers ----------
+      _brassAt(t, hz, dur=0.09, gain=0.13, panVal=0) {
+        const ctx = this.ctx;
+        const o = ctx.createOscillator();
+        o.type = "sawtooth";
+        o.frequency.value = hz;
+
+        const f = ctx.createBiquadFilter();
+        f.type = "bandpass";
+        f.frequency.value = Math.min(2200, hz * 4.0);
+        f.Q.value = 0.9;
+
+        const g = ctx.createGain();
+        const pan = ctx.createStereoPanner();
+        pan.pan.value = panVal;
+
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(gain*this.tune.music, t + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+
+        o.connect(f); f.connect(g);
+        g.connect(pan);
+        pan.connect(this.musicBus);
+        pan.connect(this.reverbBus);
+
+        o.start(t); o.stop(t + dur + 0.02);
+      }
+
+      _organPadAt(t, hz, dur=0.55, gain=0.06, panVal=0) {
+        const ctx = this.ctx;
+        const o1 = ctx.createOscillator();
+        const o2 = ctx.createOscillator();
+        o1.type = "square";
+        o2.type = "triangle";
+        o1.frequency.value = hz;
+        o2.frequency.value = hz * 2;
+
+        const f = ctx.createBiquadFilter();
+        f.type = "lowpass";
+        f.frequency.value = 900;
+        f.Q.value = 0.7;
+
+        const g = ctx.createGain();
+        const pan = ctx.createStereoPanner();
+        pan.pan.value = panVal;
+
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(gain*this.tune.music, t + 0.05);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+
+        o1.connect(f);
+        o2.connect(f);
+        f.connect(g);
+        g.connect(pan);
+        pan.connect(this.musicBus);
+        pan.connect(this.reverbBus);
+
+        o1.start(t); o2.start(t);
+        o1.stop(t + dur + 0.02); o2.stop(t + dur + 0.02);
+      }
+
+      // ---------- Softer laser helper ----------
+      _pewSoft(f0=1050, f1=380, dur=0.09, gain=0.10, panVal=0, cutoff=2200) {
+        const ctx = this.ctx;
+
+        const o1 = ctx.createOscillator();
+        o1.type = "triangle";
+        const o2 = ctx.createOscillator();
+        o2.type = "sine";
+
+        const g = ctx.createGain();
+        const pan = ctx.createStereoPanner();
+        pan.pan.value = panVal;
+
+        const lp = ctx.createBiquadFilter();
+        lp.type = "lowpass";
+        lp.frequency.value = cutoff;
+        lp.Q.value = 0.7;
+
+        const t = ctx.currentTime;
+        o1.frequency.setValueAtTime(f0, t);
+        o1.frequency.exponentialRampToValueAtTime(f1, t + dur);
+
+        o2.frequency.setValueAtTime(f0*2.0, t);
+        o2.frequency.exponentialRampToValueAtTime(f1*1.6, t + dur);
+
+        const gg = gain * this.tune.sfx; // sfx bus still handles overall
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(gg, t + 0.012);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+
+        o1.connect(lp);
+        o2.connect(lp);
+        lp.connect(g);
+        g.connect(pan);
+        pan.connect(this.sfxBus);
+        pan.connect(this.reverbBus);
+
+        o1.start(t); o2.start(t);
+        o1.stop(t + dur + 0.02); o2.stop(t + dur + 0.02);
+      }
+
+      // ---------- Generic one-shots ----------
+      _coin(gain=0.10) { this._ping(1200, 0.07, gain); this._ping(1800, 0.06, gain*0.85); }
+
+      _menuBlip(freq=520, dur=0.07, gain=0.07) {
+        const ctx = this.ctx;
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = "square";
+        const t = ctx.currentTime;
+        o.frequency.setValueAtTime(freq, t);
+        o.frequency.exponentialRampToValueAtTime(freq*0.72, t+dur);
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(gain*this.tune.sfx, t+0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
+        o.connect(g);
+        g.connect(this.sfxBus);
+        o.start(t); o.stop(t+dur+0.02);
+      }
+
+      _pop(freq=220, dur=0.08, gain=0.12) {
+        const ctx = this.ctx;
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = "triangle";
+        const t = ctx.currentTime;
+        o.frequency.setValueAtTime(freq, t);
+        o.frequency.exponentialRampToValueAtTime(freq*0.55, t + dur);
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(gain*this.tune.sfx, t+0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
+        o.connect(g);
+        g.connect(this.sfxBus);
+        g.connect(this.reverbBus);
+        o.start(t); o.stop(t+dur+0.03);
+      }
+
+      _sparkle(baseFreq=1600, dur=0.08, gain=0.07) {
+        const t = this.ctx.currentTime;
+        this._sparkleAt(t, baseFreq, dur, gain, (Math.random()*2-1)*0.25);
+      }
+
+      _sparkleAt(t, baseFreq=1600, dur=0.08, gain=0.07, panVal=0) {
+        const ctx = this.ctx;
+        const pan = ctx.createStereoPanner();
+        pan.pan.value = panVal;
+        pan.connect(this.sfxBus);
+        pan.connect(this.reverbBus);
+
+        const freqs = [baseFreq, baseFreq*1.26, baseFreq*1.5];
+        freqs.forEach((f, i) => {
+          const o = ctx.createOscillator();
+          const g = ctx.createGain();
+          o.type = "sine";
+          o.frequency.value = f;
+          const tt = t + i*0.018;
+          g.gain.setValueAtTime(0.0001, tt);
+          g.gain.exponentialRampToValueAtTime(gain*(0.75 - i*0.15)*this.tune.sfx, tt + 0.01);
+          g.gain.exponentialRampToValueAtTime(0.0001, tt + dur);
+          o.connect(g); g.connect(pan);
+          o.start(tt); o.stop(tt + dur + 0.02);
+        });
+      }
+
+      _clickNoise(dur=0.02, gain=0.08, panVal=0) {
+        const ctx = this.ctx;
+        const n = this._makeNoiseNode();
+        const hp = ctx.createBiquadFilter();
+        hp.type = "highpass";
+        hp.frequency.value = 1400; // softer
+
+        const lp = ctx.createBiquadFilter();
+        lp.type = "lowpass";
+        lp.frequency.value = 2600; // reduce fizz
+
+        const g = ctx.createGain();
+        const pan = ctx.createStereoPanner();
+        pan.pan.value = panVal;
+
+        const t = ctx.currentTime;
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(gain*this.tune.sfx, t + 0.006);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+
+        n.connect(hp); hp.connect(lp); lp.connect(g);
+        g.connect(pan);
+        pan.connect(this.sfxBus);
+
+        n.start(t);
+        setTimeout(() => {
+          this._stopNode(n);
+          try { hp.disconnect(); lp.disconnect(); g.disconnect(); pan.disconnect(); } catch {}
+        }, (dur + 0.06) * 1000);
+      }
+
+      _powerUpChord(k=1.0) {
+        const ctx = this.ctx;
+        const t = ctx.currentTime;
+        const base = 440;
+        [0, 7, 12].forEach((semi, i) => {
+          const o = ctx.createOscillator();
+          const g = ctx.createGain();
+          o.type = "triangle";
+          o.frequency.value = base * Math.pow(2, semi/12);
+          g.gain.setValueAtTime(0.0001, t);
+          g.gain.exponentialRampToValueAtTime((0.10 - i*0.02)*k*this.tune.sfx, t + 0.01);
+          g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+          o.connect(g);
+          g.connect(this.sfxBus);
+          g.connect(this.reverbBus);
+          o.start(t); o.stop(t + 0.20);
+        });
+      }
+
+      _bombBoom(k=1.0) { this._kick(0.14, 0.22*k); this._thud(55, 0.22, 0.30*k); }
+
+      _squeal(freq=980, dur=0.12, gain=0.10) {
+        const ctx = this.ctx;
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = "sawtooth";
+        const t = ctx.currentTime;
+        o.frequency.setValueAtTime(freq, t);
+        o.frequency.exponentialRampToValueAtTime(freq*1.4, t + dur);
+
+        const lp = ctx.createBiquadFilter();
+        lp.type = "lowpass";
+        lp.frequency.value = 2200;
+
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(gain*this.tune.sfx, t + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        o.connect(lp); lp.connect(g);
+        g.connect(this.sfxBus); g.connect(this.reverbBus);
+        o.start(t); o.stop(t + dur + 0.02);
+      }
+
+      _kick(dur=0.12, gain=0.18){ this._kickAt(this.ctx.currentTime, dur, gain); }
+      _kickAt(t, dur=0.12, gain=0.18) {
+        const ctx = this.ctx;
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = "sine";
+        o.frequency.setValueAtTime(140, t);
+        o.frequency.exponentialRampToValueAtTime(45, t + dur);
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(gain*this.tune.music, t + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        o.connect(g); g.connect(this.musicBus);
+        o.start(t); o.stop(t + dur + 0.03);
+      }
+
+      _clapAt(t, dur=0.10, gain=0.11) {
+        const ctx = this.ctx;
+        const n = this._makeNoiseNode();
+        const bp = ctx.createBiquadFilter();
+        bp.type = "bandpass";
+        bp.frequency.value = 1700;
+        bp.Q.value = 0.85;
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(gain*this.tune.music, t + 0.005);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        n.connect(bp); bp.connect(g);
+        g.connect(this.musicBus);
+        n.start(t);
+        setTimeout(() => {
+          this._stopNode(n);
+          try { bp.disconnect(); g.disconnect(); } catch {}
+        }, (dur + 0.08) * 1000);
+      }
+
+      _hatAt(t, dur=0.03, gain=0.06) {
+        const ctx = this.ctx;
+        const n = this._makeNoiseNode();
+        const hp = ctx.createBiquadFilter();
+        hp.type = "highpass";
+        hp.frequency.value = 5200;
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(gain*this.tune.music, t + 0.003);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        n.connect(hp); hp.connect(g);
+        g.connect(this.musicBus);
+        n.start(t);
+        setTimeout(() => {
+          this._stopNode(n);
+          try { hp.disconnect(); g.disconnect(); } catch {}
+        }, (dur + 0.05) * 1000);
+      }
+
+      _synthAt(t, hz, dur=0.08, gain=0.10, type="triangle", cutoff=1800, panVal=0) {
+        const ctx = this.ctx;
+        const o = ctx.createOscillator();
+        o.type = type;
+        o.frequency.value = hz;
+
+        const f = ctx.createBiquadFilter();
+        f.type = "lowpass";
+        f.frequency.value = cutoff;
+        f.Q.value = 0.7;
+
+        const g = ctx.createGain();
+        const pan = ctx.createStereoPanner();
+        pan.pan.value = panVal;
+
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(gain*this.tune.music, t + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+
+        o.connect(f); f.connect(g);
+        g.connect(pan);
+        pan.connect(this.musicBus);
+        pan.connect(this.reverbBus);
+
+        o.start(t); o.stop(t + dur + 0.02);
+      }
+
+      _ping(freq, dur, gain=0.08) {
+        const ctx = this.ctx;
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = "triangle";
+        o.frequency.value = freq;
+
+        const t = ctx.currentTime;
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(gain*this.tune.sfx, t + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+
+        o.connect(g); g.connect(this.sfxBus); g.connect(this.reverbBus);
+        o.start(t); o.stop(t + dur + 0.02);
+      }
+
+      _zap(freq, dur, gain=0.10) {
+        const ctx = this.ctx;
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = "sawtooth";
+        const t = ctx.currentTime;
+        o.frequency.setValueAtTime(freq, t);
+        o.frequency.exponentialRampToValueAtTime(freq * 0.65, t + dur);
+
+        const lp = ctx.createBiquadFilter();
+        lp.type = "lowpass";
+        lp.frequency.value = 3300;
+
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(gain*this.tune.sfx, t + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+
+        o.connect(g); g.connect(lp); lp.connect(this.sfxBus); lp.connect(this.reverbBus);
+        o.start(t); o.stop(t + dur + 0.03);
+      }
+
+      _thud(freq, dur, gain=0.18) {
+        const ctx = this.ctx;
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = "sine";
+        const t = ctx.currentTime;
+        o.frequency.setValueAtTime(freq, t);
+        o.frequency.exponentialRampToValueAtTime(30, t + dur);
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(gain*this.tune.sfx, t + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        o.connect(g); g.connect(this.sfxBus);
+        o.start(t); o.stop(t + dur + 0.05);
+      }
+
+      _riser(f0, f1, dur, gain=0.14) {
+        const ctx = this.ctx;
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = "triangle";
+        const t = ctx.currentTime;
+        o.frequency.setValueAtTime(f0, t);
+        o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(gain*this.tune.sfx, t + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        o.connect(g); g.connect(this.sfxBus); g.connect(this.reverbBus);
+        o.start(t); o.stop(t + dur + 0.02);
+      }
+
+      _downer(f0, f1, dur, gain=0.14) {
+        const ctx = this.ctx;
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = "triangle";
+        const t = ctx.currentTime;
+        o.frequency.setValueAtTime(f0, t);
+        o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(gain*this.tune.sfx, t + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        o.connect(g); g.connect(this.sfxBus); g.connect(this.reverbBus);
+        o.start(t); o.stop(t + dur + 0.03);
+      }
+
+      _noiseBurst(dur, centerHz, gain=0.12, rev=0.16) {
+        const ctx = this.ctx;
+        const n = this._makeNoiseNode();
+        const bp = ctx.createBiquadFilter();
+        bp.type = "bandpass";
+        bp.frequency.value = centerHz;
+        bp.Q.value = 0.8;
+
+        const g = ctx.createGain();
+        const t = ctx.currentTime;
+
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(gain*this.tune.sfx, t + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+
+        n.connect(bp); bp.connect(g);
+        g.connect(this.sfxBus);
+
+        const send = ctx.createGain();
+        send.gain.value = rev;
+        g.connect(send); send.connect(this.reverbBus);
+
+        n.start(t);
+        setTimeout(() => {
+          this._stopNode(n);
+          try { g.disconnect(); send.disconnect(); bp.disconnect(); } catch {}
+        }, (dur + 0.10) * 1000);
+      }
+
+      _noiseWhoosh(dur, centerHz, gain=0.12, rev=0.12, panVal=0) {
+        const ctx = this.ctx;
+        const n = this._makeNoiseNode();
+        const bp = ctx.createBiquadFilter();
+        bp.type = "bandpass";
+        bp.frequency.value = centerHz;
+        bp.Q.value = 0.6;
+
+        const g = ctx.createGain();
+        const pan = ctx.createStereoPanner();
+        pan.pan.value = panVal;
+
+        const t = ctx.currentTime;
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(gain*this.tune.sfx, t + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+
+        n.connect(bp); bp.connect(g);
+        g.connect(pan);
+        pan.connect(this.sfxBus);
+
+        const send = ctx.createGain();
+        send.gain.value = rev;
+        pan.connect(send); send.connect(this.reverbBus);
+
+        n.start(t);
+        setTimeout(() => {
+          this._stopNode(n);
+          try { g.disconnect(); bp.disconnect(); pan.disconnect(); send.disconnect(); } catch {}
+        }, (dur + 0.10) * 1000);
+      }
+
+      // ---------- Helpers ----------
+      _makeNoiseNode() {
+        const ctx = this.ctx;
+        const len = ctx.sampleRate * 2;
+        const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * 0.48;
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        src.loop = true;
+        return src;
+      }
+
+      _makeSoftClipCurve(amount=0.9) {
+        const n = 44100;
+        const curve = new Float32Array(n);
+        const k = amount * 25;
+        for (let i = 0; i < n; i++) {
+          const x = (i * 2) / n - 1;
+          curve[i] = (1 + k) * x / (1 + k * Math.abs(x));
+        }
+        return curve;
+      }
+
+      _makeDriveCurve(amount=0.6) {
+        const n = 44100;
+        const curve = new Float32Array(n);
+        const k = 1 + amount * 40;
+        for (let i = 0; i < n; i++) {
+          const x = (i * 2) / n - 1;
+          curve[i] = Math.tanh(k * x) * 0.85;
+        }
+        return curve;
+      }
+
+      _makeGateCurve() {
+        const n = 1024;
+        const curve = new Float32Array(n);
+        for (let i=0;i<n;i++){
+          const x = (i*2)/n - 1;
+          curve[i] = x > 0 ? 1 : 0;
+        }
+        return curve;
+      }
+
+      _makeReverbNetwork() {
+        const ctx = this.ctx;
+        const input = ctx.createGain();
+        const output = ctx.createGain();
+        output.gain.value = 0.9;
+
+        const taps = [0.028, 0.042, 0.062, 0.095];
+        const feedback = 0.18;
+
+        const fb = ctx.createGain();
+        fb.gain.value = feedback;
+
+        let prev = input;
+        taps.forEach((d, idx) => {
+          const delay = ctx.createDelay(0.3);
+          delay.delayTime.value = d;
+
+          const filt = ctx.createBiquadFilter();
+          filt.type = "lowpass";
+          filt.frequency.value = 2600 - idx*340;
+
+          const g = ctx.createGain();
+          g.gain.value = 0.30 - idx*0.05;
+
+          prev.connect(delay);
+          delay.connect(filt);
+          filt.connect(g);
+          g.connect(output);
+
+          g.connect(fb);
+          prev = g;
+        });
+
+        fb.connect(input);
+        return { input, output };
+      }
+
+      _stopLoop(loopObj) {
+        if (!loopObj) return;
+        if (loopObj.timer) clearTimeout(loopObj.timer);
+        Object.values(loopObj).forEach(v => {
+          if (v && typeof v === "object" && (v.stop || v.disconnect)) this._stopNode(v);
+        });
+        try { loopObj.out?.disconnect(); } catch {}
+      }
+
+      _stopNode(node) {
+        if (!node) return;
+        try { node.stop(); } catch {}
+        try { node.disconnect(); } catch {}
+      }
+
+      _clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+    }
+
+    const SND = new SoundEngine();
+
+    // ---------- SVG assets ----------
+    function svgToImage(svgString) {
+      return new Promise((resolve, reject) => {
+        const blob = new Blob([svgString], { type: "image/svg+xml" });
+        const url = URL.createObjectURL(blob);
+        const img = new Image();
+        img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+        img.onerror = (e) => { URL.revokeObjectURL(url); reject(e); };
+        img.src = url;
+      });
+    }
+
+    function lightsaberSVG({ blade = "#00ff66", hiltTint = "#9aa4ad" } = {}) {
+      return `
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="520" viewBox="0 0 80 520">
+  <defs>
+    <linearGradient id="metal" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#2a2f36"/>
+      <stop offset="0.25" stop-color="${hiltTint}"/>
+      <stop offset="0.5" stop-color="#e7eef6"/>
+      <stop offset="0.75" stop-color="${hiltTint}"/>
+      <stop offset="1" stop-color="#20242a"/>
+    </linearGradient>
+    <linearGradient id="bladeCore" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="${blade}" stop-opacity="0.55"/>
+      <stop offset="0.35" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="0.65" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="${blade}" stop-opacity="0.55"/>
+    </linearGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="7" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="softShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="2" result="b"/>
+      <feOffset dx="0" dy="2" result="o"/>
+      <feMerge><feMergeNode in="o"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <g filter="url(#glow)">
+    <rect x="30" y="20" width="20" height="340" rx="10" fill="${blade}" opacity="0.30"/>
+    <rect x="32" y="20" width="16" height="340" rx="8" fill="url(#bladeCore)" opacity="0.99"/>
+  </g>
+
+  <g filter="url(#softShadow)">
+    <rect x="22" y="360" width="36" height="18" rx="5" fill="#0f1216" />
+    <rect x="25" y="362" width="30" height="14" rx="4" fill="url(#metal)" />
+    <rect x="26" y="378" width="28" height="95" rx="10" fill="url(#metal)" />
+    <rect x="29" y="392" width="22" height="18" rx="6" fill="#1b222b" opacity="0.9"/>
+    <rect x="29" y="416" width="22" height="26" rx="8" fill="#0f1319" opacity="0.9"/>
+    <circle cx="40" cy="405" r="3.5" fill="#ff2d2d"/>
+    <rect x="24" y="472" width="32" height="12" rx="6" fill="#0d1117"/>
+    <rect x="22" y="484" width="36" height="18" rx="8" fill="#0a0d12"/>
+  </g>
+</svg>`;
+    }
+
+    function ufoSVG({ body="#7df0ff", glow="#bffaff" } = {}) {
+      return `
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160">
+  <defs>
+    <radialGradient id="uGlow" cx="50%" cy="50%" r="60%">
+      <stop offset="0" stop-color="${glow}" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="${glow}" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="uMetal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e6edf6"/>
+      <stop offset="0.45" stop-color="${body}"/>
+      <stop offset="1" stop-color="#1a2a34"/>
+    </linearGradient>
+    <filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="4" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <circle cx="80" cy="86" r="62" fill="url(#uGlow)"/>
+  <g filter="url(#soft)">
+    <ellipse cx="80" cy="78" rx="52" ry="26" fill="url(#uMetal)" stroke="#ffffff" stroke-opacity="0.18" stroke-width="3"/>
+    <ellipse cx="80" cy="62" rx="24" ry="16" fill="#ffffff" fill-opacity="0.18" stroke="#ffffff" stroke-opacity="0.20" stroke-width="2"/>
+    <ellipse cx="80" cy="66" rx="18" ry="10" fill="#bffaff" fill-opacity="0.22"/>
+    <g opacity="0.85">
+      <circle cx="48" cy="82" r="3.2" fill="#ff4b4b"/>
+      <circle cx="62" cy="87" r="3.2" fill="#ffe14a"/>
+      <circle cx="80" cy="90" r="3.2" fill="#34f59a"/>
+      <circle cx="98" cy="87" r="3.2" fill="#42a5ff"/>
+      <circle cx="112" cy="82" r="3.2" fill="#ff8a3d"/>
+    </g>
+  </g>
+</svg>`;
+    }
+
+    function shipSVG({ tint="#ffb17d", glow="#ffe2c8" } = {}) {
+      return `
+<svg xmlns="http://www.w3.org/2000/svg" width="180" height="180" viewBox="0 0 180 180">
+  <defs>
+    <radialGradient id="sGlow" cx="50%" cy="55%" r="60%">
+      <stop offset="0" stop-color="${glow}" stop-opacity="0.85"/>
+      <stop offset="1" stop-color="${glow}" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="sMetal" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f3f6fb"/>
+      <stop offset="0.45" stop-color="${tint}"/>
+      <stop offset="1" stop-color="#1d2228"/>
+    </linearGradient>
+    <filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="4" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <circle cx="90" cy="92" r="72" fill="url(#sGlow)"/>
+  <g filter="url(#soft)">
+    <path d="M90 26 L118 72 L162 92 L118 112 L90 158 L62 112 L18 92 L62 72 Z"
+          fill="url(#sMetal)" stroke="#ffffff" stroke-opacity="0.18" stroke-width="3"/>
+    <path d="M90 46 L106 80 L90 92 L74 80 Z" fill="#ffffff" fill-opacity="0.16"/>
+    <circle cx="90" cy="92" r="8" fill="#ff2d2d" opacity="0.9"/>
+  </g>
+</svg>`;
+    }
+
+    function mineSVG() {
+      return `
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160">
+  <defs>
+    <radialGradient id="m" cx="35%" cy="35%" r="70%">
+      <stop offset="0" stop-color="#fff1b0"/>
+      <stop offset="0.45" stop-color="#ff4b4b"/>
+      <stop offset="1" stop-color="#0b0f14"/>
+    </radialGradient>
+    <filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="4" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <g filter="url(#soft)">
+    <circle cx="80" cy="80" r="34" fill="url(#m)" stroke="#ffffff" stroke-opacity="0.14" stroke-width="3"/>
+    <g stroke="#ff9a3d" stroke-width="6" stroke-linecap="round" opacity="0.85">
+      <line x1="80" y1="20" x2="80" y2="44"/>
+      <line x1="80" y1="116" x2="80" y2="140"/>
+      <line x1="20" y1="80" x2="44" y2="80"/>
+      <line x1="116" y1="80" x2="140" y2="80"/>
+      <line x1="35" y1="35" x2="52" y2="52"/>
+      <line x1="108" y1="108" x2="125" y2="125"/>
+      <line x1="125" y1="35" x2="108" y2="52"/>
+      <line x1="52" y1="108" x2="35" y2="125"/>
+    </g>
+  </g>
+</svg>`;
+    }
+
+    function starfieldSVG({ w = 1024, h = 768, stars = 280, nebula = true } = {}) {
+      const s = [];
+      for (let i = 0; i < stars; i++) {
+        const x = Math.random() * w, y = Math.random() * h;
+        const r = Math.random() * 1.7 + 0.3;
+        const a = Math.random() * 0.7 + 0.15;
+        s.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r.toFixed(2)}" fill="white" opacity="${a.toFixed(2)}"/>`);
+      }
+      const neb = nebula ? `
+<defs>
+  <filter id="neb">
+    <feTurbulence type="fractalNoise" baseFrequency="0.0035" numOctaves="3" />
+    <feColorMatrix type="matrix"
+      values="1 0 0 0 0
+              0 0.65 0 0 0
+              0 0 1 0 0
+              0 0 0 0.20 0"/>
+    <feGaussianBlur stdDeviation="10"/>
+  </filter>
+</defs>
+<rect x="0" y="0" width="${w}" height="${h}" filter="url(#neb)" opacity="0.85"/>` : "";
+      return `
+<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+  <rect width="${w}" height="${h}" fill="#05070c"/>
+  ${neb}
+  ${s.join("\n")}
+</svg>`;
+    }
+
+    const ASSETS = { sabers:{}, targets:{}, bg:{}, bolt:null };
+
+    async function loadVisualAssets() {
+      ASSETS.sabers.green = await svgToImage(lightsaberSVG({ blade: "#00ff66" }));
+      ASSETS.sabers.blue  = await svgToImage(lightsaberSVG({ blade: "#42a5ff" }));
+
+      ASSETS.targets.ufoA  = await svgToImage(ufoSVG({ body:"#7df0ff", glow:"#bffaff" }));
+      ASSETS.targets.ufoB  = await svgToImage(ufoSVG({ body:"#34f59a", glow:"#d7fff0" }));
+      ASSETS.targets.shipA = await svgToImage(shipSVG({ tint:"#ffb17d", glow:"#ffe2c8" }));
+      ASSETS.targets.shipB = await svgToImage(shipSVG({ tint:"#ffe14a", glow:"#fff8c9" }));
+      ASSETS.targets.mine  = await svgToImage(mineSVG());
+
+      ASSETS.bolt = await svgToImage(`
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <filter id="g" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="4" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <linearGradient id="l" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff4b4b" stop-opacity="0.4"/>
+      <stop offset="0.45" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#ff4b4b" stop-opacity="0.4"/>
+    </linearGradient>
+  </defs>
+  <g filter="url(#g)">
+    <rect x="14" y="26" width="36" height="12" rx="6" fill="#ff4b4b" opacity="0.35"/>
+    <rect x="16" y="27" width="32" height="10" rx="5" fill="url(#l)" opacity="0.95"/>
+  </g>
+</svg>`);
+
+      ASSETS.bg.far  = await svgToImage(starfieldSVG({ w:1024, h:768, stars:220, nebula:false }));
+      ASSETS.bg.near = await svgToImage(starfieldSVG({ w:1024, h:768, stars:380, nebula:true }));
+    }
+
+    // ---------- State ----------
+    const state = {
+      score: 0,
+      combo: 1,
+      lastSliceMs: 0,
+
+      hitsRemaining: TOTAL_HITS_TO_DEATH,
+      invulnMs: 0,
+      slowMoMs: 0,
+      screenFlash: 0,
+      shake: 0,
+
+      paused: false,
+      gameOver: false,
+
+      targets: [],
+      bolts: [],
+      particles: [],
+      trails: [],
+      swordSegments: [],
+
+      button: { w: 140, h: 52, x: GAME_W - 140 - 10, y: GAME_H - 52 - 10 },
+      overchargeStartMs: null,
+      overchargeSeconds: 20,
+      extensionPx: 0,
+      overchargeCooldownMs: 0,
+
+      spawnAcc: 0,
+      timeAlive: 0,
+      difficulty: 1.0,
+    };
+
+    const lastSeg = { left: null, right: null };
+
+    // Build checkpoint segment dots
+    (function buildHpDots() {
+      hpSeg.innerHTML = "";
+      for (let i = 0; i < CHECKPOINT_BARS; i++) hpSeg.appendChild(document.createElement("span"));
+    })();
+
+    function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+    function randInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+
+    function barsRemaining() { return Math.ceil(state.hitsRemaining / HITS_PER_BAR); }
+
+    function updateHUD() {
+      scorePill.textContent = `Score: ${state.score}`;
+      comboPill.textContent = `Combo: x${state.combo}`;
+
+      const cp = barsRemaining();
+      cpPill.textContent = `CP: ${cp}`;
+
+      const frac = state.hitsRemaining / TOTAL_HITS_TO_DEATH;
+      hpFill.style.width = `${clamp(frac, 0, 1) * 100}%`;
+
+      const low = frac < 0.33;
+      hpFill.style.background = low
+        ? "linear-gradient(90deg, rgba(255,80,80,0.90), rgba(255,190,120,0.85))"
+        : "linear-gradient(90deg, rgba(0,255,160,0.85), rgba(120,255,220,0.85))";
+
+      SND.setLowHpAlarm(frac < 0.20 && !state.gameOver && !state.paused && webcamRunning);
+    }
+
+    function triggerCheckpointPulse(reason="") {
+      state.invulnMs = 900;
+      state.slowMoMs = 650;
+      state.screenFlash = 1.0;
+      SND.playCheckpoint();
+      statusPill.textContent = reason ? `Checkpoint triggered: ${reason}` : "Checkpoint triggered!";
+    }
+
+    function takeDamage(amount, reason="") {
+      if (state.gameOver) return;
+      if (state.invulnMs > 0) return;
+
+      const beforeBars = barsRemaining();
+      state.hitsRemaining = Math.max(0, state.hitsRemaining - amount);
+      updateHUD();
+
+      const afterBars = barsRemaining();
+      if (afterBars < beforeBars && state.hitsRemaining > 0) triggerCheckpointPulse(reason);
+
+      if (state.hitsRemaining <= 0 && !state.gameOver) {
+        state.gameOver = true;
+        SND.playGameOver();
+        statusPill.textContent = "No checkpoints left. Game Over.";
+        updateHUD();
+      }
+    }
+
+    function resetGame() {
+      state.score = 0;
+      state.combo = 1;
+      state.lastSliceMs = 0;
+
+      state.hitsRemaining = TOTAL_HITS_TO_DEATH;
+      state.invulnMs = 0;
+      state.slowMoMs = 0;
+      state.screenFlash = 0;
+      state.shake = 0;
+
+      state.paused = false;
+      state.gameOver = false;
+
+      state.targets = [];
+      state.bolts = [];
+      state.particles = [];
+      state.trails = [];
+      state.swordSegments = [];
+
+      state.overchargeStartMs = null;
+      state.extensionPx = 0;
+      state.overchargeCooldownMs = 0;
+
+      state.spawnAcc = 0;
+      state.timeAlive = 0;
+      state.difficulty = 1.0;
+
+      lastSeg.left = null;
+      lastSeg.right = null;
+      SND.setSaberOn("left", false);
+      SND.setSaberOn("right", false);
+      SND.setLowHpAlarm(false);
+
+      updateHUD();
+      powerPill.style.display = "none";
+      statusPill.textContent = "Running. Make a fist and slice the UFOs!";
+    }
+
+    // ---------- Hand helpers ----------
+    const FINGER_TIPS  = [4, 8, 12, 16, 20];
+    const FINGER_BASES = [1, 5, 9, 13, 17];
+
+    function isFistClosed(landmarksNorm) {
+      const thresholdX = 0.18;
+      const thresholdY = 0.18;
+      for (let i = 0; i < 5; i++) {
+        const tip = landmarksNorm[FINGER_TIPS[i]];
+        const base = landmarksNorm[FINGER_BASES[i]];
+        if (Math.abs(tip.x - base.x) > thresholdX || Math.abs(tip.y - base.y) > thresholdY) return false;
+      }
+      return true;
+    }
+
+    function normToPx(p, w, h) { return { x: p.x * w, y: p.y * h }; }
+
+    // ---------- Geometry ----------
+    function distPointToSegment(px, py, ax, ay, bx, by) {
+      const abx = bx - ax, aby = by - ay;
+      const apx = px - ax, apy = py - ay;
+      const ab2 = abx*abx + aby*aby || 1e-9;
+      let t = (apx*abx + apy*aby) / ab2;
+      t = t < 0 ? 0 : (t > 1 ? 1 : t);
+      const cx = ax + t*abx;
+      const cy = ay + t*aby;
+      return Math.hypot(px - cx, py - cy);
+    }
+
+    // ---------- Background draw ----------
+    function drawTiled(img, offsetX, offsetY) {
+      const w = canvas.width, h = canvas.height;
+      const iw = img.width, ih = img.height;
+      const ox = ((offsetX % iw) + iw) % iw;
+      const oy = ((offsetY % ih) + ih) % ih;
+      for (let x = -iw; x < w + iw; x += iw) {
+        for (let y = -ih; y < h + ih; y += ih) {
+          ctx.drawImage(img, x - ox, y - oy);
+        }
+      }
+    }
+
+    function drawWarpGrid() {
+      const w = canvas.width, h = canvas.height;
+      const horizon = h * 0.44;
+      ctx.save();
+      ctx.globalAlpha = 0.14;
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "white";
+      for (let i = 0; i < 18; i++) {
+        const p = i / 18;
+        const y = horizon + p * p * (h - horizon);
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+      }
+      for (let i = -12; i <= 12; i++) {
+        const x = w * 0.5 + i * (w * 0.06);
+        ctx.beginPath();
+        ctx.moveTo(x, h);
+        ctx.lineTo(w * 0.5 + i * (w * 0.005), horizon);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // ---------- Overcharge ----------
+    function fingertipHitsButton(ixGame, iyGame) {
+      return (
+        ixGame >= state.button.x &&
+        ixGame <= state.button.x + state.button.w &&
+        iyGame >= state.button.y &&
+        iyGame <= state.button.y + state.button.h
+      );
+    }
+
+    function updateOvercharge(nowMs) {
+      if (state.overchargeStartMs == null) {
+        state.extensionPx = 0;
+        powerPill.style.display = "none";
+        return;
+      }
+      const elapsed = (nowMs - state.overchargeStartMs) / 1000;
+      const left = state.overchargeSeconds - elapsed;
+      if (left > 0) {
+        state.extensionPx = 220;
+        powerPill.style.display = "block";
+        powerPill.textContent = `Overcharge: ${Math.ceil(left)}s`;
+      } else {
+        state.overchargeStartMs = null;
+        state.extensionPx = 0;
+        powerPill.style.display = "none";
+      }
+    }
+
+    // ---------- Button draw ----------
+    function roundRect(ctx, x, y, w, h, r) {
+      const rr = Math.min(r, w/2, h/2);
+      ctx.beginPath();
+      ctx.moveTo(x+rr, y);
+      ctx.arcTo(x+w, y, x+w, y+h, rr);
+      ctx.arcTo(x+w, y+h, x, y+h, rr);
+      ctx.arcTo(x, y+h, x, y, rr);
+      ctx.arcTo(x, y, x+w, y, rr);
+      ctx.closePath();
+    }
+
+    function drawOverchargeButton(sx, sy) {
+      const bx = state.button.x * sx, by = state.button.y * sy;
+      const bw = state.button.w * sx, bh = state.button.h * sy;
+
+      ctx.save();
+      ctx.fillStyle = "rgba(255,0,60,0.92)";
+      ctx.strokeStyle = "rgba(255,255,255,0.25)";
+      ctx.lineWidth = 2;
+      roundRect(ctx, bx, by, bw, bh, 14);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.font = `${Math.max(14, 16*sx)}px system-ui`;
+      ctx.fillStyle = "white";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("OVERCHARGE", bx + bw/2, by + bh/2);
+      ctx.restore();
+    }
+
+    // ---------- Saber draw + trails ----------
+    function drawLightsaberSprite({ basePx, dirAngle, saberImg, totalLenPx }) {
+      const imgW = saberImg.width;
+      const imgH = saberImg.height;
+
+      const scaleX = 0.58;
+      const targetH = Math.max(150, totalLenPx + 180);
+      const flick = 1 + ((Math.random()*2 - 1) * 0.02);
+      const scaleY = (targetH / imgH) * flick;
+      const alpha  = 0.90 + Math.random()*0.10;
+
+      ctx.save();
+      ctx.translate(basePx.x, basePx.y);
+      ctx.rotate(dirAngle + Math.PI/2);
+      ctx.globalAlpha = alpha;
+
+      ctx.shadowColor = "rgba(255,255,255,0.20)";
+      ctx.shadowBlur = 16;
+
+      const drawW = saberImg.width * scaleX;
+      const drawH = saberImg.height * scaleY;
+      ctx.drawImage(saberImg, -drawW/2, -drawH, drawW, drawH);
+      ctx.restore();
+
+      const ux = Math.cos(dirAngle), uy = Math.sin(dirAngle);
+      const end = { x: basePx.x + ux * (totalLenPx + 170), y: basePx.y + uy * (totalLenPx + 170) };
+      return { ax: basePx.x, ay: basePx.y, bx: end.x, by: end.y };
+    }
+
+    function pushTrail(segGame) {
+      state.trails.push({ ...segGame, life: 0.10, max: 0.10 });
+      if (state.trails.length > MAX_TRAILS) state.trails.shift();
+    }
+
+    function drawTrails(sx, sy) {
+      ctx.save();
+      ctx.lineCap = "round";
+      for (const t of state.trails) {
+        const a = Math.max(0, t.life / t.max);
+        ctx.globalAlpha = a * 0.62;
+        ctx.lineWidth = 12 * a;
+        ctx.shadowColor = "rgba(255,255,255,0.18)";
+        ctx.shadowBlur = 22 * a;
+        ctx.strokeStyle = "rgba(120,255,220,0.85)";
+        ctx.beginPath();
+        ctx.moveTo(t.ax * sx, t.ay * sy);
+        ctx.lineTo(t.bx * sx, t.by * sy);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // ---------- Targets ----------
+    function chooseTargetSprite(type) {
+      if (type === "ufo") return (Math.random() < 0.5) ? ASSETS.targets.ufoA : ASSETS.targets.ufoB;
+      if (type === "ship") return (Math.random() < 0.5) ? ASSETS.targets.shipA : ASSETS.targets.shipB;
+      return ASSETS.targets.mine;
+    }
+
+    function spawnTarget() {
+      if (state.targets.length >= MAX_TARGETS) return;
+      state.difficulty = 1 + state.timeAlive * 0.018;
+
+      const roll = Math.random();
+      const type = (roll < 0.60) ? "ufo" : (roll < 0.92) ? "ship" : "mine";
+
+      const mode = Math.random();
+      let x, y, vx, vy;
+
+      if (mode < 0.55) {
+        const r = randInt(24, 38);
+        x = randInt(r, GAME_W - r);
+        y = GAME_H + r + 12;
+        vy = -randInt(340, 560) * state.difficulty * 0.78;
+        vx =  randInt(-140, 140);
+      } else if (mode < 0.78) {
+        const r = randInt(24, 38);
+        x = -r - 10;
+        y = randInt(120, GAME_H - 120);
+        vx = randInt(180, 300) * (0.9 + state.difficulty*0.06);
+        vy = randInt(-90, 90);
+      } else {
+        const r = randInt(24, 38);
+        x = GAME_W + r + 10;
+        y = randInt(120, GAME_H - 120);
+        vx = -randInt(180, 300) * (0.9 + state.difficulty*0.06);
+        vy = randInt(-90, 90);
+      }
+
+      const baseR = (type === "ship") ? randInt(28, 42) : (type === "mine") ? randInt(26, 38) : randInt(22, 34);
+      const hp = (type === "ship") ? 2 : 1;
+      const score = (type === "ship") ? 25 : (type === "mine") ? 18 : 15;
+
+      state.targets.push({
+        type,
+        img: chooseTargetSprite(type),
+        x, y, vx, vy, r: baseR,
+        hp,
+        score,
+        rot: Math.random() * Math.PI * 2,
+        rotSpeed: (Math.random()*2 - 1) * (type === "ship" ? 1.1 : 1.8),
+        t0: state.timeAlive,
+        fireCd: 0.6 + Math.random()*0.9,
+      });
+    }
+
+    function spawnBoltsFromTarget(t, count=1) {
+      if (state.bolts.length >= MAX_BOLTS) return;
+      for (let i=0;i<count;i++){
+        state.bolts.push({
+          x: t.x + randInt(-10, 10),
+          y: t.y + randInt(-6, 6),
+          vx: randInt(-20, 20),
+          vy: 320 + state.difficulty*80 + randInt(-40, 40),
+          r: 10,
+          life: 2.2
+        });
+        if (state.bolts.length >= MAX_BOLTS) break;
+      }
+      SND.playLaser(0.9);
+    }
+
+    function spawnSparks(x, y, palette) {
+      for (let i = 0; i < 16; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const sp = 120 + Math.random() * 240;
+        state.particles.push({
+          x, y,
+          vx: Math.cos(a) * sp,
+          vy: Math.sin(a) * sp - 70,
+          life: 0.45 + Math.random() * 0.35,
+          max: 0.9,
+          size: 2 + Math.random() * 3.0,
+          color: palette[randInt(0, palette.length - 1)]
+        });
+      }
+      if (state.particles.length > MAX_PARTICLES) state.particles.splice(0, state.particles.length - MAX_PARTICLES);
+    }
+
+    function spawnExplosion(x, y) {
+      for (let i = 0; i < 52; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const sp = 200 + Math.random() * 380;
+        state.particles.push({
+          x, y,
+          vx: Math.cos(a) * sp,
+          vy: Math.sin(a) * sp,
+          life: 0.85 + Math.random() * 0.5,
+          max: 1.2,
+          size: 3 + Math.random() * 5,
+          color: ["#ff4b4b", "#ff9a3d", "#fff1b0"][randInt(0,2)]
+        });
+      }
+      if (state.particles.length > MAX_PARTICLES) state.particles.splice(0, state.particles.length - MAX_PARTICLES);
+    }
+
+    function sliceComboTick() {
+      const now = performance.now();
+      if (now - state.lastSliceMs < 600) state.combo = Math.min(9, state.combo + 1);
+      else state.combo = 1;
+      state.lastSliceMs = now;
+      updateHUD();
+    }
+
+    // ---------- Hands -> sabers + sound ----------
+    function drawHandsAndSabers(results, sx, sy) {
+      state.swordSegments = [];
+      const w = canvas.width, h = canvas.height;
+
+      if (!results?.landmarks?.length || state.gameOver) {
+        SND.setSaberOn("left", false);
+        SND.setSaberOn("right", false);
+        lastSeg.left = null;
+        lastSeg.right = null;
+        return;
+      }
+
+      let fistLeft = false;
+      let fistRight = false;
+
+      for (let handIdx = 0; handIdx < results.landmarks.length; handIdx++) {
+        const lm = results.landmarks[handIdx];
+        const handed = results.handednesses?.[handIdx]?.[0]?.categoryName || "Right";
+        const key = (handed === "Right") ? "right" : "left";
+
+        // index fingertip button press (debounced)
+        const idxTipPx = normToPx(lm[8], w, h);
+        const ixGame = (idxTipPx.x / w) * GAME_W;
+        const iyGame = (idxTipPx.y / h) * GAME_H;
+
+        if (!state.gameOver && state.overchargeCooldownMs <= 0 && fingertipHitsButton(ixGame, iyGame)) {
+          state.overchargeStartMs = performance.now();
+          state.overchargeCooldownMs = 500;
+          SND.playOvercharge();
+        }
+
+        const fist = isFistClosed(lm);
+        if (!fist) {
+          if (key === "left") lastSeg.left = null;
+          else lastSeg.right = null;
+          continue;
+        }
+
+        if (key === "left") fistLeft = true;
+        else fistRight = true;
+
+        SND.setSaberOn(key, true);
+
+        const baseIndexPx = normToPx(lm[5], w, h);
+        const basePinkyPx = normToPx(lm[17], w, h);
+
+        const dx = (baseIndexPx.x - basePinkyPx.x);
+        const dy = (baseIndexPx.y - basePinkyPx.y);
+        const angle = Math.atan2(dy, dx);
+
+        const baseLen = Math.min(340, Math.max(120, Math.hypot(basePinkyPx.x - baseIndexPx.x, basePinkyPx.y - baseIndexPx.y) * 2.4));
+        const totalLen = baseLen + state.extensionPx;
+
+        const saberImg = (key === "right") ? ASSETS.sabers.green : ASSETS.sabers.blue;
+        const segPx = drawLightsaberSprite({ basePx: baseIndexPx, dirAngle: angle, saberImg, totalLenPx: totalLen });
+
+        const segGame = {
+          ax: (segPx.ax / w) * GAME_W, ay: (segPx.ay / h) * GAME_H,
+          bx: (segPx.bx / w) * GAME_W, by: (segPx.by / h) * GAME_H
+        };
+
+        state.swordSegments.push(segGame);
+        pushTrail(segGame);
+
+        const prev = lastSeg[key];
+        let speedNorm = 0;
+        if (prev) {
+          const da = Math.hypot(segGame.ax - prev.ax, segGame.ay - prev.ay);
+          const db = Math.hypot(segGame.bx - prev.bx, segGame.by - prev.by);
+          const d = (da + db) * 0.5;
+          speedNorm = Math.min(1.8, d / 18);
+        }
+        lastSeg[key] = segGame;
+        SND.setSaberMotion(key, speedNorm);
+      }
+
+      if (!fistLeft) { SND.setSaberOn("left", false); lastSeg.left = null; }
+      if (!fistRight){ SND.setSaberOn("right", false); lastSeg.right = null; }
+    }
+
+    // ---------- Update ----------
+    function updateOverlays(dt) {
+      state.invulnMs = Math.max(0, state.invulnMs - dt*1000);
+      state.slowMoMs = Math.max(0, state.slowMoMs - dt*1000);
+      state.screenFlash = Math.max(0, state.screenFlash - dt*1.8);
+      state.overchargeCooldownMs = Math.max(0, state.overchargeCooldownMs - dt*1000);
+      state.shake = Math.max(0, state.shake - dt*2.2);
+    }
+
+    function updateGame(dt, nowMs) {
+      if (state.paused || state.gameOver) return;
+
+      const slowFactor = state.slowMoMs > 0 ? 0.55 : 1.0;
+      const tdt = dt * slowFactor;
+
+      state.timeAlive += tdt;
+      updateOvercharge(nowMs);
+      updateOverlays(tdt);
+
+      const baseInterval = Math.max(0.22, 0.55 - state.timeAlive * 0.012);
+      state.spawnAcc += tdt;
+      while (state.spawnAcc > baseInterval) {
+        state.spawnAcc -= baseInterval;
+        spawnTarget();
+        if (Math.random() < 0.15) spawnTarget();
+      }
+
+      // targets
+      for (let i = state.targets.length - 1; i >= 0; i--) {
+        const t = state.targets[i];
+        const wiggle = Math.sin((state.timeAlive - t.t0) * (t.type === "ship" ? 2.2 : 2.8)) * (t.type === "ship" ? 30 : 22);
+        t.x += (t.vx + wiggle) * tdt;
+        t.y += t.vy * tdt;
+
+        if (t.y > 0 && t.y < GAME_H + 140 && (Math.abs(t.vy) > 120)) t.vy += 420 * tdt;
+
+        t.rot += t.rotSpeed * tdt;
+
+        // firing
+        t.fireCd -= tdt;
+        const canFire = (t.type !== "mine") && t.y > 60 && t.y < GAME_H - 120;
+        const fireChance = 0.10 + state.difficulty * 0.01;
+        if (canFire && t.fireCd <= 0 && Math.random() < fireChance) {
+          t.fireCd = 0.55 + Math.random() * 1.05;
+          spawnBoltsFromTarget(t, (Math.random() < 0.22) ? 2 : 1);
+        }
+
+        const escaped = (t.y < -t.r - 60) || (t.x < -t.r - 80) || (t.x > GAME_W + t.r + 80) || (t.y > GAME_H + t.r + 140);
+        if (escaped) {
+          state.targets.splice(i, 1);
+          state.combo = 1;
+          SND.playHit();
+
+          if (t.type === "mine") {
+            takeDamage(DMG_HEAVY, "Mine drifted through");
+            state.screenFlash = Math.min(1.0, state.screenFlash + 0.35);
+          } else {
+            takeDamage(DMG_ESCAPE, "Ship escaped");
+          }
+          updateHUD();
+        }
+      }
+
+      // bolts
+      for (let i = state.bolts.length - 1; i >= 0; i--) {
+        const b = state.bolts[i];
+        b.x += b.vx * tdt;
+        b.y += b.vy * tdt;
+        b.life -= tdt;
+
+        if (b.y > GAME_H + 40 || b.life <= 0) {
+          state.bolts.splice(i, 1);
+          if (b.y > GAME_H) {
+            SND.playHit();
+            takeDamage(DMG_ESCAPE, "Blaster hit the deck");
+            updateHUD();
+          }
+        }
+      }
+
+      // trails + particles
+      for (let i = state.trails.length - 1; i >= 0; i--) {
+        const t = state.trails[i];
+        t.life -= tdt;
+        if (t.life <= 0) state.trails.splice(i, 1);
+      }
+
+      for (let i = state.particles.length - 1; i >= 0; i--) {
+        const p = state.particles[i];
+        p.vy += 220 * tdt;
+        p.x  += p.vx * tdt;
+        p.y  += p.vy * tdt;
+        p.life -= tdt;
+        if (p.life <= 0) state.particles.splice(i, 1);
+      }
+
+      // collisions
+      if (state.swordSegments.length) {
+        // deflect bolts
+        for (let i = state.bolts.length - 1; i >= 0; i--) {
+          const b = state.bolts[i];
+          let hit = false;
+          for (const s of state.swordSegments) {
+            const d = distPointToSegment(b.x, b.y, s.ax, s.ay, s.bx, s.by);
+            if (d <= b.r + 4) { hit = true; break; }
+          }
+          if (hit) {
+            state.bolts.splice(i, 1);
+            state.score += 8 * state.combo;
+            spawnSparks(b.x, b.y, ["#7df0ff","#bffaff","#ffffff"]);
+            SND.playLaser(0.85);
+            sliceComboTick();
+          }
+        }
+
+        // slice targets
+        for (let i = state.targets.length - 1; i >= 0; i--) {
+          const t = state.targets[i];
+          let sliced = false;
+
+          for (const s of state.swordSegments) {
+            const d = distPointToSegment(t.x, t.y, s.ax, s.ay, s.bx, s.by);
+            if (d <= t.r + 4) { sliced = true; break; }
+          }
+          if (!sliced) continue;
+
+          sliceComboTick();
+
+          if (t.type === "mine") {
+            SND.playBomb();
+            spawnExplosion(t.x, t.y);
+            takeDamage(DMG_HEAVY, "Sliced mine");
+            state.screenFlash = Math.min(1.0, state.screenFlash + 0.55);
+            state.shake = Math.min(1.0, state.shake + 0.7);
+            updateHUD();
+            state.targets.splice(i, 1);
+            continue;
+          }
+
+          t.hp -= 1;
+
+          if (t.hp > 0) {
+            SND.playSlice(state.combo);
+            spawnSparks(t.x, t.y, ["#ffe2c8","#ffb17d","#ffffff"]);
+            state.score += 10 * state.combo;
+            updateHUD();
+          } else {
+            SND.playSlice(state.combo);
+            if (state.extensionPx > 0 && Math.random() < 0.80) SND.playLaser(0.75 + state.combo * 0.03);
+
+            state.score += t.score * state.combo;
+            spawnSparks(t.x, t.y, (t.type === "ufo")
+              ? ["#7df0ff","#bffaff","#ffffff"]
+              : ["#ffb17d","#ffe2c8","#fff1b0"]);
+            state.targets.splice(i, 1);
+            updateHUD();
+          }
+        }
+      }
+    }
+
+    // ---------- Draw ----------
+    function drawGame() {
+      if (video.videoWidth && video.videoHeight) {
+        if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+        }
+      }
+
+      const w = canvas.width, h = canvas.height;
+      const sx = w / GAME_W, sy = h / GAME_H;
+
+      ctx.clearRect(0, 0, w, h);
+
+      const sh = state.shake * 10;
+      const sxh = (Math.random()*2-1) * sh;
+      const syh = (Math.random()*2-1) * sh;
+
+      ctx.save();
+      ctx.translate(sxh, syh);
+
+      const t = performance.now() * 0.02;
+      if (ASSETS.bg.far)  drawTiled(ASSETS.bg.far,  t * 0.08, t * 0.05);
+      if (ASSETS.bg.near) drawTiled(ASSETS.bg.near, t * 0.25, t * 0.18);
+      drawWarpGrid();
+
+      drawTrails(sx, sy);
+
+      // targets
+      for (const tt of state.targets) {
+        const px = tt.x * sx, py = tt.y * sy;
+        const pr = tt.r * Math.min(sx, sy);
+        ctx.save();
+        ctx.translate(px, py);
+        ctx.rotate(tt.rot);
+        ctx.globalAlpha = 0.98;
+        ctx.drawImage(tt.img, -pr, -pr, pr*2, pr*2);
+
+        if (tt.hp > 1) {
+          ctx.globalAlpha = 0.55;
+          ctx.strokeStyle = "rgba(255,255,255,0.35)";
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.arc(0, 0, pr*1.05, 0, Math.PI*2);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+
+      // bolts
+      for (const b of state.bolts) {
+        const px = b.x * sx, py = b.y * sy;
+        const pr = b.r * Math.min(sx, sy);
+        ctx.save();
+        ctx.globalAlpha = 0.95;
+        ctx.drawImage(ASSETS.bolt, px - pr, py - pr, pr*2, pr*2);
+        ctx.restore();
+      }
+
+      // particles
+      ctx.save();
+      for (const p of state.particles) {
+        const a = Math.max(0, p.life / p.max);
+        ctx.globalAlpha = a;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x * sx, p.y * sy, p.size, 0, Math.PI*2);
+        ctx.fill();
+      }
+      ctx.restore();
+
+      drawOverchargeButton(sx, sy);
+      drawHandsAndSabers(latestResults, sx, sy);
+
+      if (state.invulnMs > 0) {
+        ctx.save();
+        ctx.globalAlpha = 0.10 + 0.10*Math.sin(performance.now()*0.02);
+        ctx.fillStyle = "rgba(120,255,220,1)";
+        ctx.fillRect(0,0,w,h);
+        ctx.restore();
+      }
+
+      if (state.screenFlash > 0) {
+        ctx.save();
+        ctx.globalAlpha = 0.25 * state.screenFlash;
+        ctx.fillStyle = "white";
+        ctx.fillRect(0,0,w,h);
+        ctx.restore();
+      }
+
+      if (state.gameOver) {
+        ctx.save();
+        ctx.fillStyle = "rgba(0,0,0,0.62)";
+        ctx.fillRect(0,0,w,h);
+        ctx.fillStyle = "white";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.font = "700 46px system-ui";
+        ctx.fillText("GAME OVER", w/2, h*0.42);
+        ctx.font = "600 18px system-ui";
+        ctx.fillText("Hit Reset to try again", w/2, h*0.52);
+        ctx.restore();
+      }
+
+      ctx.restore();
+    }
+
+    // ---------- Main loop ----------
+    async function frame() {
+      if (!webcamRunning) return;
+
+      const nowMs = performance.now();
+      let dt = (nowMs - lastFrameMs) / 1000;
+      lastFrameMs = nowMs;
+      dt = clamp(dt, 0.001, 0.033);
+
+      if (runningMode === "IMAGE") {
+        runningMode = "VIDEO";
+        await handLandmarker.setOptions({ runningMode: "VIDEO" });
+      }
+      if (lastVideoTime !== video.currentTime) {
+        lastVideoTime = video.currentTime;
+        latestResults = handLandmarker.detectForVideo(video, nowMs);
+      }
+
+      updateGame(dt, nowMs);
+      drawGame();
+
+      requestAnimationFrame(frame);
+    }
+
+    // ---------- Controls ----------
+    async function enableCamAndStart() {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      video.srcObject = stream;
+      await new Promise(res => video.addEventListener("loadeddata", res, { once:true }));
+
+      webcamRunning = true;
+      state.paused = false;
+      state.gameOver = false;
+
+      pauseBtn.disabled = false;
+      resetBtn.disabled = false;
+      startBtn.disabled = true;
+
+      statusPill.textContent = "Running. Make a fist and slice the UFOs!";
+      lastFrameMs = performance.now();
+
+      for (let i = 0; i < 5; i++) spawnTarget();
+      updateHUD();
+
+      requestAnimationFrame(frame);
+    }
+
+    function togglePause() {
+      state.paused = !state.paused;
+      pauseBtn.textContent = state.paused ? "Resume" : "Pause";
+      statusPill.textContent = state.paused ? "Paused." : "Running.";
+      SND.playPause(state.paused);
+      if (state.paused) SND.setLowHpAlarm(false);
+      updateHUD();
+    }
+
+    // ---------- Setup ----------
+    async function createHandLandmarker() {
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
+      );
+
+      try {
+        handLandmarker = await HandLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+            delegate: "GPU",
+          },
+          runningMode,
+          numHands: 2,
+        });
+      } catch {
+        handLandmarker = await HandLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+            delegate: "CPU",
+          },
+          runningMode,
+          numHands: 2,
+        });
+      }
+
+      statusPill.textContent = "Loading space assets…";
+      await loadVisualAssets();
+      statusPill.textContent = "Ready. Click “Enable Webcam + Start”.";
+      updateHUD();
+    }
+
+    startBtn.addEventListener("click", async () => {
+      startBtn.disabled = true;
+      statusPill.textContent = "Requesting webcam + starting audio…";
+      try {
+        // Apply saved tuning before audio starts (so buses are set correctly)
+        const tune = loadTune();
+        SND.applyTuning(tune);
+        syncTunerUI(tune);
+
+        await SND.start();     // user gesture => audio unlock
+        SND.playUIConfirm();
+        await enableCamAndStart();
+      } catch (e) {
+        statusPill.textContent = "Webcam blocked or unavailable.";
+        startBtn.disabled = false;
+      }
+    });
+
+    pauseBtn.addEventListener("click", togglePause);
+    resetBtn.addEventListener("click", () => resetGame());
+
+    window.addEventListener("keydown", (e) => {
+      if (e.key === " " && !pauseBtn.disabled) togglePause();
+      if (e.key.toLowerCase() === "r" && !resetBtn.disabled) resetGame();
+    });
+
+    window.addEventListener("beforeunload", () => {
+      try { SND.stopAll(); } catch {}
+    });
+
+    // ---------- Sound tuner wiring ----------
+    let tune = loadTune();
+
+    function fmt01(v){ return Number(v).toFixed(2); }
+    function fmtHz(v){ return `${Math.round(Number(v))} Hz`; }
+
+    function syncTunerUI(t) {
+      SL.master.value = t.master;      VL.master.textContent = fmt01(t.master);
+      SL.music.value  = t.music;       VL.music.textContent  = fmt01(t.music);
+      SL.amb.value    = t.amb;         VL.amb.textContent    = fmt01(t.amb);
+      SL.sfx.value    = t.sfx;         VL.sfx.textContent    = fmt01(t.sfx);
+
+      SL.saberZap.value    = t.saberZap;    VL.saberZap.textContent    = fmt01(t.saberZap);
+      SL.saberWhoosh.value = t.saberWhoosh; VL.saberWhoosh.textContent = fmt01(t.saberWhoosh);
+      SL.saberSpark.value  = t.saberSpark;  VL.saberSpark.textContent  = fmt01(t.saberSpark);
+
+      SL.laserVol.value    = t.laserVol;    VL.laserVol.textContent    = fmt01(t.laserVol);
+      SL.laserCutoff.value = t.laserCutoff; VL.laserCutoff.textContent = fmtHz(t.laserCutoff);
+      SL.laserClick.value  = t.laserClick;  VL.laserClick.textContent  = fmt01(t.laserClick);
+
+      SL.slice.value = t.slice; VL.slice.textContent = fmt01(t.slice);
+      SL.boom.value  = t.boom;  VL.boom.textContent  = fmt01(t.boom);
+      SL.alarm.value = t.alarm; VL.alarm.textContent = fmt01(t.alarm);
+    }
+
+    function applyFromUI() {
+      tune = {
+        master:      Number(SL.master.value),
+        music:       Number(SL.music.value),
+        amb:         Number(SL.amb.value),
+        sfx:         Number(SL.sfx.value),
+
+        saberZap:    Number(SL.saberZap.value),
+        saberWhoosh: Number(SL.saberWhoosh.value),
+        saberSpark:  Number(SL.saberSpark.value),
+
+        laserVol:    Number(SL.laserVol.value),
+        laserCutoff: Number(SL.laserCutoff.value),
+        laserClick:  Number(SL.laserClick.value),
+
+        slice: Number(SL.slice.value),
+        boom:  Number(SL.boom.value),
+        alarm: Number(SL.alarm.value),
+      };
+      syncTunerUI(tune);
+      saveTune(tune);
+      SND.applyTuning(tune);
+    }
+
+    Object.values(SL).forEach(sl => sl.addEventListener("input", applyFromUI));
+
+    toggleTunerBtn.addEventListener("click", () => {
+      const open = tunerBody.classList.toggle("open");
+      toggleTunerBtn.textContent = open ? "Close" : "Open";
+    });
+
+    resetTunerBtn.addEventListener("click", () => {
+      tune = { ...TUNE_DEFAULTS };
+      syncTunerUI(tune);
+      saveTune(tune);
+      SND.applyTuning(tune);
+    });
+
+    testLaserBtn.addEventListener("click", async () => {
+      // Ensure audio context is running (requires user gesture; this button counts)
+      if (!SND.started) {
+        try { await SND.start(); } catch {}
+      }
+      SND.playLaser(1.0);
+    });
+
+    // Initialize tuner UI immediately (even before Start)
+    syncTunerUI(tune);
+
+    // boot
+    resetGame();
+    createHandLandmarker();
+  </script>
+</body>
+</html>
