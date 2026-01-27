@@ -1,0 +1,670 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Hand Cube Control: Open=Rotate | Fist=Move | Pinch+Spread=Expand | Pinch+Push/Pull=Zoom</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0b0f14; overflow: hidden; }
+    #app { position: fixed; inset: 0; }
+
+    #hud {
+      position: fixed; left: 12px; bottom: 12px;
+      display: grid; gap: 8px;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      color: #cfd8e3; font-size: 12px;
+      user-select: none;
+      max-width: min(820px, calc(100vw - 24px));
+      z-index: 10;
+    }
+
+    #debugRow { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+
+    #video { display: none; }
+    #overlay {
+      width: 320px; height: 240px;
+      border-radius: 10px;
+      background: #111823;
+      border: 1px solid rgba(255,255,255,.08);
+      display: block;
+    }
+
+    .panel {
+      padding: 10px 12px; border-radius: 10px;
+      background: rgba(17, 24, 35, .85);
+      border: 1px solid rgba(255,255,255,.08);
+      backdrop-filter: blur(6px);
+      line-height: 1.35;
+    }
+
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .pill {
+      display: inline-flex; gap: 8px; align-items: center;
+      padding: 6px 10px; border-radius: 999px;
+      background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.08);
+      white-space: nowrap;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #6b7280; }
+    .dot.on { background: #22c55e; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <div id="hud">
+    <div class="panel">
+      <div class="row">
+        <div class="pill"><span id="camDot" class="dot"></span><span id="camState">Camera: initializing…</span></div>
+        <div class="pill"><span id="handDot" class="dot"></span><span id="handState">Hand: not detected</span></div>
+        <div class="pill"><span class="mono">Mode</span>: <span id="modeState">—</span></div>
+        <div class="pill"><span class="mono">Scale</span>: <span id="scaleReadout">1.00</span></div>
+        <div class="pill"><span class="mono">Zoom(Z)</span>: <span id="zoomReadout">6.50</span></div>
+        <div class="pill"><span class="mono">Pos</span>: <span id="posReadout">0.00, 1.15</span></div>
+      </div>
+
+      <div style="margin-top:8px; opacity:.92">
+        <b>Gesture contract (clean + explicit)</b>
+        <ul style="margin:6px 0 0 18px; padding:0">
+          <li><b>OPEN hand</b> → rotate cube (smooth, “easy” rotation)</li>
+          <li><b>FIST</b> → move cube freely on the page (grab + drag, no jumping)</li>
+          <li><b>PINCH</b> (thumb + index) → enables pinch mode:
+            <ul style="margin:6px 0 0 18px; padding:0">
+              <li><b>Pinch + spread fingers</b> → expand/contract (cube scale)</li>
+              <li><b>Pinch + push/pull hand forward/back</b> → zoom in/out (camera Z)</li>
+            </ul>
+          </li>
+        </ul>
+        Camera permissions require <span class="mono">https://</span> or <span class="mono">http://localhost</span>.
+      </div>
+    </div>
+
+    <div id="debugRow">
+      <video id="video" playsinline></video>
+      <canvas id="overlay" width="320" height="240"></canvas>
+    </div>
+  </div>
+
+  <!-- Three.js -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+
+  <!-- MediaPipe Hands -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/hands.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3/drawing_utils.js"></script>
+
+  <script>
+    /**********************************************************************
+     * 1) CONFIG (all tuning knobs in one place)
+     **********************************************************************/
+    const CFG = {
+      // Pinch detection in pixels (hysteresis), scaled by frame width.
+      PINCH_START_PX_BASE: 38,
+      PINCH_END_PX_BASE: 60,
+
+      // Expand/contract bounds (cube scale)
+      SCALE_MIN: 0.35,
+      SCALE_MAX: 3.25,
+
+      // Zoom bounds (camera Z)
+      CAM_Z_MIN: 3.2,
+      CAM_Z_MAX: 12.0,
+
+      // How strongly wrist.z affects zoom while pinching
+      // (MediaPipe z: more negative typically means closer to camera).
+      DEPTH_SENSITIVITY: 9.0,
+
+      // Move range (world units)
+      MOVE_SENSITIVITY_X: 6.0, // how far cube moves for wrist x delta
+      MOVE_SENSITIVITY_Y: 5.0, // how far cube moves for wrist y delta
+      POS_X_LIMIT: 3.2,
+      POS_Y_MIN: 0.55,
+      POS_Y_MAX: 2.75,
+
+      // Gesture classification (simple but robust)
+      FIST_EXTENDED_MAX: 1, // <= 1 extended fingers => fist
+      OPEN_EXTENDED_MIN: 3, // >= 3 extended fingers => open
+
+      // Mode stabilization to prevent flicker (frames)
+      MODE_STABLE_FRAMES: 3,
+
+      // Smoothing
+      SMOOTH_ROT: 0.18,
+      SMOOTH_POS: 0.16,
+      SMOOTH_SCALE: 0.18,
+      SMOOTH_ZOOM: 0.14,
+
+      // EMA filtering for noisy values
+      EMA_ALPHA_PINCH: 0.35,
+      EMA_ALPHA_Z: 0.28,
+
+      // Rotation “feel”
+      ROTATION_GAIN_YAW: 1.10,
+      ROTATION_GAIN_PITCH: 1.10,
+      ROTATION_GAIN_ROLL: 0.95,
+
+      // Camera feed size (higher = better landmark quality, more CPU)
+      CAM_WIDTH: 960,
+      CAM_HEIGHT: 540,
+    };
+
+    /**********************************************************************
+     * 2) SMALL MATH HELPERS
+     **********************************************************************/
+    function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+    function lerp(a, b, t) { return a + (b - a) * t; }
+    function wrapAngle(a) {
+      while (a > Math.PI) a -= 2 * Math.PI;
+      while (a < -Math.PI) a += 2 * Math.PI;
+      return a;
+    }
+
+    function vsub(a, b) { return { x: a.x - b.x, y: a.y - b.y, z: (a.z || 0) - (b.z || 0) }; }
+    function cross(u, v) {
+      return { x: u.y * v.z - u.z * v.y, y: u.z * v.x - u.x * v.z, z: u.x * v.y - u.y * v.x };
+    }
+    function norm(u) {
+      const m = Math.hypot(u.x, u.y, u.z) || 1;
+      return { x: u.x / m, y: u.y / m, z: u.z / m };
+    }
+
+    // Pixel distance between 2 normalized landmarks (x,y in [0..1]) for “pull pixels apart”.
+    function dist2px(a, b, frameW, frameH) {
+      const dx = (a.x - b.x) * frameW;
+      const dy = (a.y - b.y) * frameH;
+      return Math.hypot(dx, dy);
+    }
+
+    /**********************************************************************
+     * 3) THREE.JS SETUP (render quality + scene)
+     **********************************************************************/
+    const appEl = document.getElementById("app");
+
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.Fog(0x0b0f14, 7, 22);
+
+    const camera3 = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 200);
+    camera3.position.set(0, 1.15, 6.5);
+
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: false,
+      powerPreference: "high-performance"
+    });
+
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2.5));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
+
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    appEl.appendChild(renderer.domElement);
+
+    // Lights
+    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.05);
+    dirLight.position.set(5.5, 7.5, 4.0);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.set(1024, 1024);
+    dirLight.shadow.camera.near = 1;
+    dirLight.shadow.camera.far = 30;
+    dirLight.shadow.camera.left = -10;
+    dirLight.shadow.camera.right = 10;
+    dirLight.shadow.camera.top = 10;
+    dirLight.shadow.camera.bottom = -10;
+    scene.add(dirLight);
+
+    // Cube
+    const cube = new THREE.Mesh(
+      new THREE.BoxGeometry(1.7, 1.7, 1.7),
+      new THREE.MeshStandardMaterial({ color: 0x93c5fd, metalness: 0.2, roughness: 0.22 })
+    );
+    cube.position.set(0, 1.15, 0);
+    cube.castShadow = true;
+    scene.add(cube);
+
+    // Crisp edges
+    const edges = new THREE.LineSegments(
+      new THREE.EdgesGeometry(cube.geometry, 15),
+      new THREE.LineBasicMaterial({ color: 0xe5e7eb, transparent: true, opacity: 0.55 })
+    );
+    cube.add(edges);
+
+    // Ground
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(60, 60),
+      new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.0, roughness: 1.0 })
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = 0;
+    ground.receiveShadow = true;
+    scene.add(ground);
+
+    /**********************************************************************
+     * 4) HUD (status readouts)
+     **********************************************************************/
+    const HUD = {
+      camDot: document.getElementById("camDot"),
+      camState: document.getElementById("camState"),
+      handDot: document.getElementById("handDot"),
+      handState: document.getElementById("handState"),
+      modeState: document.getElementById("modeState"),
+      scaleReadout: document.getElementById("scaleReadout"),
+      zoomReadout: document.getElementById("zoomReadout"),
+      posReadout: document.getElementById("posReadout"),
+    };
+
+    function updateHud(state) {
+      HUD.modeState.textContent = state.mode;
+      HUD.scaleReadout.textContent = state.currentScale.toFixed(2);
+      HUD.zoomReadout.textContent = state.currentCamZ.toFixed(2);
+      HUD.posReadout.textContent = `${state.currentPos.x.toFixed(2)}, ${state.currentPos.y.toFixed(2)}`;
+
+      if (state.handDetected) {
+        HUD.handDot.classList.add("on");
+        HUD.handState.textContent = "Hand: detected";
+      } else {
+        HUD.handDot.classList.remove("on");
+        HUD.handState.textContent = "Hand: not detected";
+      }
+    }
+
+    /**********************************************************************
+     * 5) CONTROL STATE (single source of truth)
+     **********************************************************************/
+    const State = {
+      handDetected: false,
+
+      // Mode: ROTATE | MOVE | PINCH
+      mode: "—",
+      modeCandidate: "—",
+      modeCandidateFrames: 0,
+
+      // Rotation
+      targetRot: new THREE.Euler(0, 0, 0, "XYZ"),
+      currentRot: new THREE.Euler(0, 0, 0, "XYZ"),
+
+      // Position
+      targetPos: new THREE.Vector3(cube.position.x, cube.position.y, cube.position.z),
+      currentPos: new THREE.Vector3(cube.position.x, cube.position.y, cube.position.z),
+
+      // Scale (expand/contract)
+      targetScale: 1.0,
+      currentScale: 1.0,
+
+      // Zoom (camera Z)
+      targetCamZ: camera3.position.z,
+      currentCamZ: camera3.position.z,
+
+      // Pinch gate + baselines
+      pinching: false,
+      emaPinchPx: 0,
+      pinchBasePx: 0,
+      pinchBaseScale: 1.0,
+      pinchBaseWristZ: 0,
+      pinchBaseCamZ: camera3.position.z,
+      emaWristZ: 0,
+
+      // Move “grab” anchors so fist movement is free and does not jump
+      moveActive: false,
+      moveAnchorWristX: 0,
+      moveAnchorWristY: 0,
+      moveAnchorPosX: 0,
+      moveAnchorPosY: 0,
+    };
+
+    /**********************************************************************
+     * 6) HAND POSE CLASSIFICATION (open vs fist)
+     *
+     * We count extended fingers using a simple heuristic:
+     * tip.y < pip.y (finger points upward in image) => extended.
+     **********************************************************************/
+    function isFingerExtended(lm, tipIdx, pipIdx) {
+      return lm[tipIdx].y < lm[pipIdx].y;
+    }
+
+    function countExtendedFingers(lm) {
+      let n = 0;
+      if (isFingerExtended(lm, 8, 6))   n++; // index
+      if (isFingerExtended(lm, 12, 10)) n++; // middle
+      if (isFingerExtended(lm, 16, 14)) n++; // ring
+      if (isFingerExtended(lm, 20, 18)) n++; // pinky
+      return n;
+    }
+
+    function classifyOpenOrFist(lm) {
+      const extended = countExtendedFingers(lm);
+      const isFist = extended <= CFG.FIST_EXTENDED_MAX;
+      const isOpen = extended >= CFG.OPEN_EXTENDED_MIN;
+      if (isFist) return "FIST";
+      if (isOpen) return "OPEN";
+      return "OPEN"; // default behavior: rotate
+    }
+
+    /**********************************************************************
+     * 7) PINCH STATE MACHINE (pinch gates both zoom + expand)
+     *
+     * Accurate definition:
+     * - Pinch is true when thumb-index distance <= threshold (in px).
+     * - Use hysteresis so it doesn’t flicker (different start/end thresholds).
+     * - On pinch START we capture baselines:
+     *     pinchBasePx, pinchBaseScale, pinchBaseWristZ, pinchBaseCamZ
+     * - While pinching:
+     *     expand: scale = baseScale * (pinchPx / basePx)
+     *     zoom:  cameraZ moves by push/pull (wrist.z delta from baseline)
+     **********************************************************************/
+    function updatePinchState(lm, frameW, frameH) {
+      const thumbTip = lm[4];
+      const indexTip = lm[8];
+      const wrist = lm[0];
+
+      const rawPx = dist2px(thumbTip, indexTip, frameW, frameH);
+      State.emaPinchPx = (State.emaPinchPx === 0)
+        ? rawPx
+        : lerp(State.emaPinchPx, rawPx, CFG.EMA_ALPHA_PINCH);
+
+      // scale thresholds with frame width so “pixel pinch” stays consistent
+      const scaleFactor = Math.max(0.75, Math.min(1.6, frameW / 640));
+      const startPx = CFG.PINCH_START_PX_BASE * scaleFactor;
+      const endPx   = CFG.PINCH_END_PX_BASE   * scaleFactor;
+
+      if (!State.pinching && State.emaPinchPx <= startPx) {
+        // PINCH START: capture baselines
+        State.pinching = true;
+        State.pinchBasePx = Math.max(State.emaPinchPx, 1e-3);
+        State.pinchBaseScale = State.targetScale;
+        State.pinchBaseWristZ = wrist.z || 0;
+        State.pinchBaseCamZ = State.targetCamZ;
+        State.emaWristZ = wrist.z || 0;
+        return true;
+      }
+
+      if (State.pinching && State.emaPinchPx >= endPx) {
+        // PINCH END: stop changing zoom/scale
+        State.pinching = false;
+        return false;
+      }
+
+      return State.pinching;
+    }
+
+    function applyPinchControls(lm) {
+      // Expand/contract via pinch spread
+      const ratio = State.emaPinchPx / State.pinchBasePx;
+      const nextScale = State.pinchBaseScale * ratio;
+      State.targetScale = clamp(nextScale, CFG.SCALE_MIN, CFG.SCALE_MAX);
+
+      // Zoom via push/pull (wrist.z)
+      const wrist = lm[0];
+      const wzRaw = wrist.z || 0;
+      State.emaWristZ = lerp(State.emaWristZ, wzRaw, CFG.EMA_ALPHA_Z);
+
+      const dz = State.emaWristZ - State.pinchBaseWristZ;
+      const zoomFactor = Math.exp(-CFG.DEPTH_SENSITIVITY * dz);
+      const desiredZ = State.pinchBaseCamZ / zoomFactor;
+      State.targetCamZ = clamp(desiredZ, CFG.CAM_Z_MIN, CFG.CAM_Z_MAX);
+    }
+
+    /**********************************************************************
+     * 8) MOVE (FIST) CONTROL (free movement, grab + drag)
+     *
+     * Accurate definition:
+     * - When entering MOVE, we anchor:
+     *     wrist.x/y and cube current position.
+     * - While in MOVE, the cube follows the delta of wrist.x/y from the anchor.
+     * - This prevents “jumping” and feels like grabbing the cube and moving it.
+     **********************************************************************/
+    function beginMoveIfNeeded(lm) {
+      if (State.moveActive) return;
+      const wrist = lm[0];
+      State.moveActive = true;
+      State.moveAnchorWristX = wrist.x;
+      State.moveAnchorWristY = wrist.y;
+      State.moveAnchorPosX = State.currentPos.x;
+      State.moveAnchorPosY = State.currentPos.y;
+    }
+
+    function endMoveIfNeeded() {
+      State.moveActive = false;
+    }
+
+    function applyMoveControls(lm) {
+      beginMoveIfNeeded(lm);
+
+      const wrist = lm[0];
+      const dx = wrist.x - State.moveAnchorWristX; // normalized
+      const dy = wrist.y - State.moveAnchorWristY; // normalized
+
+      // Map normalized delta to world units.
+      // dy is inverted so moving hand up moves cube up.
+      const worldDx = -dx * CFG.MOVE_SENSITIVITY_X;
+      const worldDy = -dy * CFG.MOVE_SENSITIVITY_Y;
+
+      const x = State.moveAnchorPosX + worldDx;
+      const y = State.moveAnchorPosY + worldDy;
+
+      State.targetPos.x = clamp(x, -CFG.POS_X_LIMIT, CFG.POS_X_LIMIT);
+      State.targetPos.y = clamp(y, CFG.POS_Y_MIN, CFG.POS_Y_MAX);
+    }
+
+    /**********************************************************************
+     * 9) ROTATE (OPEN) CONTROL
+     *
+     * Accurate definition:
+     * - Use palm orientation from wrist->indexMCP and wrist->pinkyMCP vectors.
+     * - Convert palm normal into yaw/pitch targets; include roll from index direction.
+     * - Apply gains + clamping for stable, “easy” control.
+     **********************************************************************/
+    function applyRotateControls(lm) {
+      const wrist = lm[0];
+      const indexMCP = lm[5];
+      const pinkyMCP = lm[17];
+
+      const u = vsub(indexMCP, wrist);
+      const v = vsub(pinkyMCP, wrist);
+      const n = norm(cross(u, v)); // palm normal
+
+      let yaw   = Math.atan2(n.x, n.z) * CFG.ROTATION_GAIN_YAW;
+      let pitch = Math.atan2(n.y, Math.hypot(n.x, n.z)) * CFG.ROTATION_GAIN_PITCH;
+      let roll  = Math.atan2(u.y, u.x) * CFG.ROTATION_GAIN_ROLL;
+
+      yaw   = clamp(yaw,   -1.6,  1.6);
+      pitch = clamp(-pitch, -1.25, 1.25);
+      roll  = clamp(roll,  -2.2,  2.2);
+
+      State.targetRot.set(pitch, yaw, roll, "XYZ");
+    }
+
+    /**********************************************************************
+     * 10) MODE DECISION (priority + stabilization)
+     *
+     * Priority is explicit and matches your contract:
+     *   PINCH (zoom + expand) > FIST (move) > OPEN (rotate)
+     **********************************************************************/
+    function proposeMode(lm, frameW, frameH) {
+      const pinch = updatePinchState(lm, frameW, frameH);
+      if (pinch) return "PINCH";
+
+      const pose = classifyOpenOrFist(lm);
+      if (pose === "FIST") return "MOVE";
+      return "ROTATE";
+    }
+
+    function stabilizeMode(nextMode) {
+      if (State.modeCandidate !== nextMode) {
+        State.modeCandidate = nextMode;
+        State.modeCandidateFrames = 1;
+        return;
+      }
+
+      State.modeCandidateFrames++;
+
+      if (State.mode !== State.modeCandidate && State.modeCandidateFrames >= CFG.MODE_STABLE_FRAMES) {
+        // Mode change is now committed
+        State.mode = State.modeCandidate;
+
+        // Handle enter/exit hooks cleanly
+        if (State.mode !== "MOVE") endMoveIfNeeded();
+
+        // If we exit pinch, pinch state machine already stops updates.
+      }
+    }
+
+    /**********************************************************************
+     * 11) MEDIAPIPE INPUT + DEBUG DRAW
+     **********************************************************************/
+    const videoEl = document.getElementById("video");
+    const overlay = document.getElementById("overlay");
+    const octx = overlay.getContext("2d");
+
+    const hands = new Hands({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/${file}`
+    });
+
+    hands.setOptions({
+      maxNumHands: 1,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.7,
+      minTrackingConfidence: 0.7,
+      selfieMode: true
+    });
+
+    hands.onResults((results) => {
+      // Draw camera + landmarks into overlay
+      octx.save();
+      octx.clearRect(0, 0, overlay.width, overlay.height);
+
+      if (results.image) {
+        octx.drawImage(results.image, 0, 0, overlay.width, overlay.height);
+      }
+
+      const lm = results.multiHandLandmarks && results.multiHandLandmarks[0];
+
+      if (lm) {
+        State.handDetected = true;
+
+        drawConnectors(octx, lm, HAND_CONNECTIONS, { lineWidth: 2 });
+        drawLandmarks(octx, lm, { radius: 2 });
+
+        const frameW = videoEl.videoWidth || overlay.width;
+        const frameH = videoEl.videoHeight || overlay.height;
+
+        const nextMode = proposeMode(lm, frameW, frameH);
+        stabilizeMode(nextMode);
+
+        // Apply only the controls for the committed mode.
+        // This ensures:
+        // - Zoom/expand only while pinching
+        // - Fist movement is clean and free
+        // - Open rotation remains easy and stable
+        if (State.mode === "PINCH") {
+          applyPinchControls(lm);
+          // Do not rotate/move while pinching (keeps gesture intent unambiguous).
+          endMoveIfNeeded();
+        } else if (State.mode === "MOVE") {
+          applyMoveControls(lm);
+        } else { // ROTATE
+          applyRotateControls(lm);
+          endMoveIfNeeded();
+        }
+      } else {
+        // No hand: reset detection + pinch gate + move anchors (but keep visual cube state)
+        State.handDetected = false;
+
+        State.pinching = false;
+        State.emaPinchPx = 0;
+        State.emaWristZ = 0;
+        endMoveIfNeeded();
+
+        State.mode = "—";
+        State.modeCandidate = "—";
+        State.modeCandidateFrames = 0;
+      }
+
+      octx.restore();
+    });
+
+    async function startCamera() {
+      try {
+        HUD.camState.textContent = "Camera: requesting permission…";
+
+        const cam = new Camera(videoEl, {
+          onFrame: async () => { await hands.send({ image: videoEl }); },
+          width: CFG.CAM_WIDTH,
+          height: CFG.CAM_HEIGHT
+        });
+
+        await cam.start();
+        HUD.camDot.classList.add("on");
+        HUD.camState.textContent = "Camera: running";
+      } catch (err) {
+        HUD.camDot.classList.remove("on");
+        HUD.camState.textContent = "Camera: blocked/unavailable";
+        console.error(err);
+      }
+    }
+
+    /**********************************************************************
+     * 12) RENDER LOOP (smoothly approach targets)
+     **********************************************************************/
+    function renderLoop() {
+      requestAnimationFrame(renderLoop);
+
+      // Smooth rotation
+      State.currentRot.x = lerp(State.currentRot.x, State.targetRot.x, CFG.SMOOTH_ROT);
+      State.currentRot.y = lerp(State.currentRot.y, State.targetRot.y, CFG.SMOOTH_ROT);
+      State.currentRot.z = lerp(State.currentRot.z, State.targetRot.z, CFG.SMOOTH_ROT);
+
+      State.currentRot.x = wrapAngle(State.currentRot.x);
+      State.currentRot.y = wrapAngle(State.currentRot.y);
+      State.currentRot.z = wrapAngle(State.currentRot.z);
+
+      cube.rotation.set(State.currentRot.x, State.currentRot.y, State.currentRot.z);
+
+      // Smooth position
+      State.currentPos.x = lerp(State.currentPos.x, State.targetPos.x, CFG.SMOOTH_POS);
+      State.currentPos.y = lerp(State.currentPos.y, State.targetPos.y, CFG.SMOOTH_POS);
+      cube.position.set(State.currentPos.x, State.currentPos.y, 0);
+
+      // Smooth scale (expand/contract only changes while pinching, but smoothing always runs)
+      State.currentScale = lerp(State.currentScale, State.targetScale, CFG.SMOOTH_SCALE);
+      cube.scale.setScalar(State.currentScale);
+
+      // Smooth zoom (camera Z only changes while pinching, but smoothing always runs)
+      State.currentCamZ = lerp(State.currentCamZ, State.targetCamZ, CFG.SMOOTH_ZOOM);
+      camera3.position.z = State.currentCamZ;
+
+      updateHud(State);
+      renderer.render(scene, camera3);
+    }
+
+    /**********************************************************************
+     * 13) RESIZE HANDLING
+     **********************************************************************/
+    window.addEventListener("resize", () => {
+      camera3.aspect = window.innerWidth / window.innerHeight;
+      camera3.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2.5));
+    });
+
+    /**********************************************************************
+     * 14) START
+     **********************************************************************/
+    startCamera();
+    renderLoop();
+
+    /*
+      Run locally for camera permissions:
+        python -m http.server 8000
+      Open:
+        http://localhost:8000
+    */
+  </script>
+</body>
+</html>
