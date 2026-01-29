@@ -1654,6 +1654,9 @@
   // Balls + physics (6 balls fixed)
   // -----------------------
   const BALL_COUNT = 6;
+  const BALL_RADIUS = 0.4;
+  const BALL_SAFE_MARGIN = 0.08;
+  const BALL_FRONT_FRACTION = 0.1;
   const balls = [];
 
   const GRAVITY = -9.5;
@@ -1665,7 +1668,36 @@
       /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
   }
 
-  function frontClusterSpawn(i, distance=2.2){
+  function getNearestHoopDistance(dir){
+    let best = null;
+    for(const H of hoops){
+      const rimWorld = new THREE.Vector3();
+      H.rim.getWorldPosition(rimWorld);
+      const toRim = rimWorld.sub(camera.position);
+      const forward = toRim.dot(dir);
+      if(forward > 0 && (best === null || forward < best)) best = forward;
+    }
+    return best;
+  }
+
+  function getFrontClusterDistance(){
+    const dir = new THREE.Vector3();
+    camera.getWorldDirection(dir);
+    const hoopDistance = getNearestHoopDistance(dir);
+    const base = (hoopDistance ?? 12.0) * BALL_FRONT_FRACTION;
+    const vFov = THREE.MathUtils.degToRad(camera.fov);
+    const minDistance = (BALL_RADIUS + BALL_SAFE_MARGIN) / Math.tan(vFov / 2);
+    return Math.max(base, minDistance);
+  }
+
+  function getVisibleSpread(distance){
+    const vFov = THREE.MathUtils.degToRad(camera.fov);
+    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
+    const maxX = Math.max(0, Math.tan(hFov / 2) * distance - (BALL_RADIUS + BALL_SAFE_MARGIN));
+    return { maxX };
+  }
+
+  function frontClusterSpawn(i, distance){
     const dir = new THREE.Vector3();
     camera.getWorldDirection(dir);
     dir.y = 0;
@@ -1675,16 +1707,18 @@
     const right = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0,1,0)).normalize();
     const col = i % 3;
     const row = Math.floor(i / 3);
-    const spreadX = (col - 1) * 0.75;
-    const spreadZ = row * 0.55;
+    const baseDistance = distance ?? getFrontClusterDistance();
+    const { maxX } = getVisibleSpread(baseDistance);
+    const spreadX = (col - 1) * Math.min(0.75, maxX * 0.6);
+    const spreadZ = row * Math.min(0.55, maxX * 0.45);
 
-    const base = camera.position.clone().addScaledVector(dir, distance + spreadZ);
+    const base = camera.position.clone().addScaledVector(dir, baseDistance + spreadZ);
     return base.addScaledVector(right, spreadX).setY(FLOOR_Y);
   }
 
   function randomBallPos() {
     if(isMobileViewport()){
-      return frontClusterSpawn(Math.floor(Math.random() * BALL_COUNT), 2.4);
+      return frontClusterSpawn(Math.floor(Math.random() * BALL_COUNT));
     }
     return new THREE.Vector3(
       THREE.MathUtils.randFloat(-6.5, 6.5),
@@ -1695,28 +1729,21 @@
 
   function freeThrowSpawn(i){
     if(isMobileViewport()){
-      return frontClusterSpawn(i, 2.2);
+      return frontClusterSpawn(i);
     }
-    // Put all 6 balls around the free-throw action zone (100% playable)
-    const base = new THREE.Vector3(0, FLOOR_Y, 12.5);
-    const ringR = 1.2 + (i % 3) * 0.55;
-    const a = (i / BALL_COUNT) * Math.PI * 2;
-    return base.clone().add(new THREE.Vector3(Math.cos(a)*ringR, 0, Math.sin(a)*ringR*0.65));
+    return frontClusterSpawn(i);
   }
 
   function nearPlayerSpawn(i){
     if(isMobileViewport()){
-      return frontClusterSpawn(i, 2.0);
+      return frontClusterSpawn(i);
     }
-    const base = new THREE.Vector3(camera.position.x, FLOOR_Y, camera.position.z);
-    const ringR = 1.6 + (i % 3) * 0.65;
-    const a = (i / BALL_COUNT) * Math.PI * 2;
-    return base.clone().add(new THREE.Vector3(Math.cos(a)*ringR, 0, Math.sin(a)*ringR));
+    return frontClusterSpawn(i);
   }
 
-  function makeBall() {
+  function makeBall(i) {
     const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(0.4, 32, 32),
+      new THREE.SphereGeometry(BALL_RADIUS, 32, 32),
       baseBallMat.clone()
     );
     mesh.material.emissive = new THREE.Color(0x000000);
@@ -1724,11 +1751,11 @@
 
     const ball = {
       mesh,
-      radius: 0.4,
+      radius: BALL_RADIUS,
       velocity: new THREE.Vector3(0,0,0),
       prevPos: new THREE.Vector3(0,0,0),
       reset(pos){
-        const p = pos ? pos.clone() : randomBallPos();
+        const p = pos ? pos.clone() : frontClusterSpawn(i);
         this.mesh.position.copy(p);
         this.velocity.set(0,0,0);
         this.prevPos.copy(this.mesh.position);
@@ -1739,7 +1766,7 @@
     return ball;
   }
 
-  for(let i=0;i<BALL_COUNT;i++) balls.push(makeBall());
+  for(let i=0;i<BALL_COUNT;i++) balls.push(makeBall(i));
 
   // Full-court scoreboard
   const score = { A: 0, B: 0 };
