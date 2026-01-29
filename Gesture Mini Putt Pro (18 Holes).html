@@ -5,7 +5,19 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Gesture Mini Putt Pro (18 Holes)</title>
   <style>
-    :root { color-scheme: dark; }
+    :root {
+      color-scheme: dark;
+      --accent: #ffd60a;
+      --accent-strong: rgba(255,214,10,.98);
+      --accent-soft: rgba(255,214,10,.55);
+      --accent-glow: rgba(255,214,10,.35);
+      --accent-ice: rgba(160,220,255,.80);
+      --panel-glow: rgba(46,229,157,.16);
+      --electric-accent: #7cf4ff;
+      --electric-accent-strong: rgba(124,244,255,.98);
+      --electric-accent-soft: rgba(124,244,255,.60);
+      --electric-accent-glow: rgba(124,244,255,.35);
+    }
     * { box-sizing: border-box; }
 
     body{
@@ -17,6 +29,9 @@
       display:flex;
       padding:16px;
       gap:16px;
+    }
+    body[data-theme="electric"]{
+      background: radial-gradient(1200px 800px at 20% 10%, rgba(32,24,68,1) 0%, rgba(10,8,24,1) 55%, rgba(5,6,18,1) 100%);
     }
 
     .stage{ flex:1; min-width:0; display:flex; flex-direction:column; gap:14px; }
@@ -105,8 +120,10 @@
     }
     .bar > i{
       display:block; height:100%; width:0%;
-      background: linear-gradient(90deg, rgba(255,214,10,.75), rgba(255,214,10,.95));
-      border-radius:999px; box-shadow: 0 0 16px rgba(255,214,10,.35);
+      background: linear-gradient(90deg, rgba(255,214,10,.75), var(--accent-strong));
+      border-radius:999px;
+      box-shadow: 0 0 16px var(--accent-glow);
+      transition: width .08s linear;
     }
 
     .hint{
@@ -130,6 +147,37 @@
       backdrop-filter: blur(8px);
       padding:14px;
       display:flex; flex-direction:column; gap:12px;
+      position:relative;
+      overflow:hidden;
+    }
+    aside.panel::before{
+      content:"";
+      position:absolute;
+      inset:auto -100px -120px auto;
+      width:260px; height:260px;
+      background: radial-gradient(circle at 30% 30%, var(--panel-glow), rgba(46,229,157,0) 62%);
+      transform: rotate(-10deg);
+      pointer-events:none;
+      filter: blur(2px);
+      animation: floatGlow2 8s ease-in-out infinite;
+    }
+    body[data-theme="electric"] .tag{
+      border-color: rgba(124,244,255,.35);
+      color: #dff8ff;
+    }
+    body[data-theme="electric"] .topbar::before{
+      background: radial-gradient(circle at 30% 30%, rgba(124,244,255,.22), rgba(124,244,255,0) 60%);
+    }
+    body[data-theme="electric"] .bar > i{
+      background: linear-gradient(90deg, rgba(124,244,255,.70), var(--electric-accent-strong));
+      box-shadow: 0 0 18px var(--electric-accent-glow);
+    }
+    body[data-theme="electric"] aside.panel::before{
+      background: radial-gradient(circle at 30% 30%, rgba(124,244,255,.18), rgba(124,244,255,0) 62%);
+    }
+    @keyframes floatGlow2{
+      0%,100%{ transform: translate(0,0) rotate(-10deg); opacity:.55;}
+      50%{ transform: translate(-14px, -10px) rotate(-4deg); opacity:.85;}
     }
 
     .actions{ display:flex; gap:10px; flex-wrap:wrap; }
@@ -438,7 +486,640 @@
     }
 
     /*****************************************************************
-     * MINI PUTT MODEL
+     * THEMES
+     *****************************************************************/
+    const GAME_MODES = [
+      { id: "classic", name: "Classic", grassA: "#1f8a48", grassB:"#146b30", deco:"#b7ff9f", defaults: { friction: 0.986, maxSpeed: 1100 }, mechanics: { boostPads: 0, wind: 0, ice: 0, sandBias: 0.10 } },
+      { id: "electric", name: "Electric Carnival", grassA: "#1a1644", grassB:"#0a0820", deco:"#7cf4ff", defaults: { friction: 0.987, maxSpeed: 1250 }, mechanics: { boostPads: 2, wind: 0, ice: 0, sandBias: 0.06, electric: 1 } },
+      { id: "neon", name: "Neon Rush", grassA: "#16865b", grassB:"#0b5b3f", deco:"#ffd60a", defaults: { friction: 0.988, maxSpeed: 1200 }, mechanics: { boostPads: 2, wind: 0, ice: 0, sandBias: 0.05 } },
+      { id: "ice", name: "Ice Drift", grassA: "#1b7aa1", grassB:"#0e3f67", deco:"#cfe9ff", defaults: { friction: 0.993, maxSpeed: 1050 }, mechanics: { boostPads: 0, wind: 0, ice: 1, sandBias: 0.02 } },
+      { id: "desert", name: "Desert Storm", grassA: "#a4833a", grassB:"#6f5420", deco:"#ffe08a", defaults: { friction: 0.984, maxSpeed: 1125 }, mechanics: { boostPads: 0, wind: 1, ice: 0, sandBias: 0.30 } },
+      { id: "aurora", name: "Aurora Night", grassA: "#124a5e", grassB:"#071a2c", deco:"#2ee59d", defaults: { friction: 0.989, maxSpeed: 1150 }, mechanics: { boostPads: 1, wind: 0, ice: 0, sandBias: 0.08 } },
+    ];
+    function modeById(id){ return GAME_MODES.find(m => m.id === id) || GAME_MODES[0]; }
+    let selectedMode = GAME_MODES[0];
+
+    const BALL_COLORS = [
+      { id: "neon-blue", name: "Neon Blue", core: "#4fe7ff", rim: "#dffcff", glow: "rgba(79,231,255,.7)" },
+      { id: "volt-green", name: "Volt Green", core: "#76f78d", rim: "#d6ffd7", glow: "rgba(118,247,141,.7)" },
+      { id: "pulse-magenta", name: "Pulse Magenta", core: "#ff5bd8", rim: "#ffd6f3", glow: "rgba(255,91,216,.7)" },
+      { id: "spark-gold", name: "Spark Gold", core: "#ffd657", rim: "#fff1b8", glow: "rgba(255,214,87,.7)" },
+      { id: "arctic-white", name: "Arctic White", core: "#f2fbff", rim: "#ffffff", glow: "rgba(210,245,255,.7)" },
+    ];
+
+    const BALL_SKINS = [
+      { id: "classic", name: "Classic Shell" },
+      { id: "neon-core", name: "Neon Core" },
+      { id: "energy-ring", name: "Energy Ring" },
+      { id: "charged-glow", name: "Charged Glow" },
+    ];
+
+    function ballColorById(id){
+      return BALL_COLORS.find((c) => c.id === id) || BALL_COLORS[0];
+    }
+    function ballSkinById(id){
+      return BALL_SKINS.find((s) => s.id === id) || BALL_SKINS[0];
+    }
+
+    /*****************************************************************
+     * PERSISTENCE
+     *****************************************************************/
+    const LS = { settings: "gmp_settings_v2", enroll: "gmp_enroll_v2" };
+
+    function loadSettings(){
+      try{
+        const raw = localStorage.getItem(LS.settings);
+        if (!raw) return;
+        const s = JSON.parse(raw);
+        if (typeof s.name === "string") Login.loginName.value = s.name;
+        if (typeof s.theme === "string") Login.loginTheme.value = s.theme;
+        if (typeof s.ballColor === "string") Login.loginBallColor.value = s.ballColor;
+        if (typeof s.ballSkin === "string") Login.loginBallSkin.value = s.ballSkin;
+        if (typeof s.controlMode === "string") controlMode = s.controlMode;
+
+        if (typeof s.friction === "number") UI.friction.value = s.friction.toFixed(3);
+        if (typeof s.maxSpeed === "number") UI.maxSpeed.value = String(Math.round(s.maxSpeed));
+        if (typeof s.smoothing === "number") UI.smoothing.value = s.smoothing.toFixed(2);
+
+        // normalized pinch threshold
+        if (typeof s.pinchThresholdN === "number") UI.pinchThreshold.value = s.pinchThresholdN.toFixed(2);
+
+        if (typeof s.gaugeSensitivity === "number") UI.gaugeSensitivity.value = s.gaugeSensitivity.toFixed(2);
+      } catch {}
+    }
+    function saveSettings(){
+      try{
+        const s = {
+          name: Login.loginName.value || "Player 1",
+          theme: Login.loginTheme.value || "classic",
+          ballColor: Login.loginBallColor.value || "neon-blue",
+          ballSkin: Login.loginBallSkin.value || "classic",
+          controlMode,
+          friction: parseFloat(UI.friction.value),
+          maxSpeed: parseFloat(UI.maxSpeed.value),
+          smoothing: parseFloat(UI.smoothing.value),
+          pinchThresholdN: parseFloat(UI.pinchThreshold.value),
+          gaugeSensitivity: parseFloat(UI.gaugeSensitivity.value),
+        };
+        localStorage.setItem(LS.settings, JSON.stringify(s));
+      } catch {}
+    }
+
+    function hasEnrollment(){
+      try{
+        const raw = localStorage.getItem(LS.enroll);
+        if (!raw) return false;
+        const obj = JSON.parse(raw);
+        return Array.isArray(obj.vec) && obj.vec.length >= 8;
+      } catch { return false; }
+    }
+    function getEnrollment(){
+      try{
+        const raw = localStorage.getItem(LS.enroll);
+        if (!raw) return null;
+        const obj = JSON.parse(raw);
+        if (!Array.isArray(obj.vec)) return null;
+        return obj;
+      } catch { return null; }
+    }
+    function setEnrollment(vec){
+      try{ localStorage.setItem(LS.enroll, JSON.stringify({ vec, t: Date.now() })); } catch {}
+    }
+    function wipeEnrollment(){
+      try{ localStorage.removeItem(LS.enroll); } catch {}
+    }
+
+    /*****************************************************************
+     * LOGIN STATE
+     *****************************************************************/
+    let appState = "LOGIN"; // LOGIN | PLAY
+    let controlMode = isLikelyMobile() ? "gesture" : "gesture"; // default gesture
+    let gestureEnabled = false;
+
+    function refreshLoginPreview(){
+      const nm = (Login.loginName.value || "").trim() || "Player 1";
+      applyThemeTokens(modeById(Login.loginTheme.value));
+      Login.prevName.textContent = nm;
+      Login.prevTheme.textContent = modeById(Login.loginTheme.value).name;
+      Login.prevBallColor.textContent = ballColorById(Login.loginBallColor.value).name;
+      Login.prevBallSkin.textContent = ballSkinById(Login.loginBallSkin.value).name;
+      Login.prevControls.textContent = controlMode === "gesture" ? "Gesture" : "Mouse";
+      Login.prevEnroll.textContent = hasEnrollment() ? "Enrolled" : "Not set";
+    }
+    function refreshControlPills(){
+      Login.pillGesture.classList.toggle("on", controlMode === "gesture");
+      Login.pillMouse.classList.toggle("on", controlMode === "mouse");
+      refreshLoginPreview();
+    }
+    function applyThemeTokens(mode){
+      const root = document.documentElement;
+      if (mode.id === "electric"){
+        root.style.setProperty("--accent", "#7cf4ff");
+        root.style.setProperty("--accent-strong", "rgba(124,244,255,.98)");
+        root.style.setProperty("--accent-soft", "rgba(124,244,255,.60)");
+        root.style.setProperty("--accent-glow", "rgba(124,244,255,.35)");
+        root.style.setProperty("--panel-glow", "rgba(124,244,255,.18)");
+      } else {
+        root.style.setProperty("--accent", "#ffd60a");
+        root.style.setProperty("--accent-strong", "rgba(255,214,10,.98)");
+        root.style.setProperty("--accent-soft", "rgba(255,214,10,.55)");
+        root.style.setProperty("--accent-glow", "rgba(255,214,10,.35)");
+        root.style.setProperty("--panel-glow", "rgba(46,229,157,.16)");
+      }
+      document.body.dataset.theme = mode.id || "classic";
+    }
+    function openLogin(){
+      appState = "LOGIN";
+      Login.overlay.classList.remove("hidden");
+      Login.overlay.setAttribute("aria-hidden", "false");
+      refreshLoginPreview();
+      toast("Login opened", 1.1);
+    }
+    function closeLogin(){
+      Login.overlay.classList.add("hidden");
+      Login.overlay.setAttribute("aria-hidden", "true");
+      appState = "PLAY";
+    }
+
+    /*****************************************************************
+     * HAND FEATURES (Enrollment / Login verify)
+     *****************************************************************/
+    function featureVectorFromLandmarks(lm){
+      const wrist = lm[0];
+      const mcpMid = lm[9] || lm[0];
+      const scale = Math.max(0.0001, Math.hypot(mcpMid.x - wrist.x, mcpMid.y - wrist.y));
+      function d(i,j){
+        const a = lm[i], b = lm[j];
+        return Math.hypot(a.x-b.x, a.y-b.y) / scale;
+      }
+      const v = [
+        d(4,8), d(4,12), d(4,16), d(4,20),
+        d(8,12), d(12,16), d(16,20),
+        d(0,8), d(0,12), d(0,20),
+      ];
+      if (lm[5] && lm[17]){
+        v.push(Math.hypot(lm[5].x-lm[17].x, lm[5].y-lm[17].y) / scale);
+      } else v.push(0.0);
+      for (let i=0;i<v.length;i++) v[i] = clamp(v[i], 0.0, 6.0);
+      return v;
+    }
+    function cosineSim(a,b){
+      let dot=0, na=0, nb=0;
+      const n = Math.min(a.length, b.length);
+      for (let i=0;i<n;i++){
+        dot += a[i]*b[i];
+        na += a[i]*a[i];
+        nb += b[i]*b[i];
+      }
+      if (na <= 1e-12 || nb <= 1e-12) return 0;
+      return dot / (Math.sqrt(na) * Math.sqrt(nb));
+    }
+
+    /*****************************************************************
+     * MEDIAPIPE CAMERA + RESTORED EASY PINCH LOGIC
+     *
+     * Key changes vs strict pinch:
+     * - Uses normalized pinch distance: dist(thumb_tip,index_tip)/hand_span
+     * - Hysteresis: pinch releases only above threshold + margin
+     * - Frame confirmation: requires a couple consecutive frames below threshold
+     * - Mobile defaults: higher threshold, shorter cooldown
+     *****************************************************************/
+    const video = document.getElementById("input_video");
+    let mpHands = null;
+    let mpCamera = null;
+
+    const HandState = {
+      has: false,
+      lm: null,
+      indexTip: null,
+      thumbTip: null,
+      indexNorm: { x: 0.5, y: 0.5 },
+
+      pinchN: 1.0,          // normalized pinch distance (smaller = tighter pinch)
+      pinchDown: false,     // debounced pinch state
+      pinchClick: false,    // rising-edge click
+      _downFrames: 0,
+      _upFrames: 0,
+
+      lastClickAt: 0,
+      lastSeenAt: 0,
+    };
+
+    // Easier on mobile
+    const MOBILE = isLikelyMobile();
+    const PINCH_COOLDOWN_MS = MOBILE ? 140 : 190;
+    const PINCH_DOWN_FRAMES = MOBILE ? 2 : 2;   // confirm pinch down quickly
+    const PINCH_UP_FRAMES   = MOBILE ? 2 : 2;   // confirm release quickly
+    const PINCH_HYST        = MOBILE ? 0.08 : 0.07; // hysteresis margin
+
+    async function startCameraPipeline(){
+      if (mpCamera && mpHands) return true;
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+        return false;
+      }
+      try{
+        mpHands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+        mpHands.setOptions({
+          maxNumHands: 1,
+          modelComplexity: 1,
+          minDetectionConfidence: MOBILE ? 0.65 : 0.70,
+          minTrackingConfidence: MOBILE ? 0.65 : 0.70,
+        });
+        mpHands.onResults(onHandResults);
+
+        mpCamera = new Camera(video, {
+          onFrame: async () => {
+            if (!mpHands) return;
+            await mpHands.send({ image: video });
+          },
+          width: 640,
+          height: 480,
+        });
+
+        await mpCamera.start();
+        return true;
+      } catch (e){
+        console.error(e);
+        await stopCameraPipeline();
+        return false;
+      }
+    }
+
+    async function stopCameraPipeline(){
+      try{ if (mpCamera && typeof mpCamera.stop === "function") await mpCamera.stop(); } catch {}
+      mpCamera = null;
+
+      try{
+        if (video && video.srcObject){
+          const tracks = video.srcObject.getTracks?.() || [];
+          tracks.forEach(t => t.stop());
+          video.srcObject = null;
+        }
+      } catch {}
+
+      try{ if (mpHands && typeof mpHands.close === "function") mpHands.close(); } catch {}
+      mpHands = null;
+
+      HandState.has = false;
+      HandState.lm = null;
+      HandState._downFrames = 0;
+      HandState._upFrames = 0;
+      HandState.pinchDown = false;
+      HandState.pinchClick = false;
+    }
+
+    function computePinchNormalized(lm){
+      // normalized pinch: dist(thumb_tip,index_tip) / hand_span
+      const thumb = lm[4];
+      const indexTip = lm[8];
+      const indexMcp = lm[5] || lm[8];
+      const pinkyMcp = lm[17] || lm[0];
+
+      const pinch = Math.hypot(thumb.x - indexTip.x, thumb.y - indexTip.y);
+
+      // hand span baseline (more stable than wrist-to-tip)
+      const span = Math.max(0.0001, Math.hypot(indexMcp.x - pinkyMcp.x, indexMcp.y - pinkyMcp.y));
+
+      // normalized; clamp to keep stable
+      return clamp(pinch / span, 0.0, 2.0);
+    }
+
+    function updateDebouncedPinch(pinchN){
+      const thr = parseFloat(UI.pinchThreshold.value); // normalized threshold
+      const now = performance.now();
+
+      HandState.pinchClick = false;
+      HandState.pinchN = pinchN;
+
+      // debounced with hysteresis
+      if (!HandState.pinchDown){
+        if (pinchN < thr){
+          HandState._downFrames += 1;
+          if (HandState._downFrames >= PINCH_DOWN_FRAMES){
+            HandState.pinchDown = true;
+            HandState._upFrames = 0;
+
+            if (now - HandState.lastClickAt > PINCH_COOLDOWN_MS){
+              HandState.pinchClick = true;
+              HandState.lastClickAt = now;
+            }
+          }
+        } else {
+          HandState._downFrames = 0;
+        }
+      } else {
+        // release only above threshold + hysteresis
+        if (pinchN > (thr + PINCH_HYST)){
+          HandState._upFrames += 1;
+          if (HandState._upFrames >= PINCH_UP_FRAMES){
+            HandState.pinchDown = false;
+            HandState._downFrames = 0;
+            HandState._upFrames = 0;
+          }
+        } else {
+          HandState._upFrames = 0;
+        }
+      }
+    }
+
+    function drawScanScreen(results){
+      // black scan screen with faint darkened video + landmarks
+      const W = Login.scanCanvas.width;
+      const H = Login.scanCanvas.height;
+
+      // base black
+      scanCtx.setTransform(1,0,0,1,0,0);
+      scanCtx.fillStyle = "#000";
+      scanCtx.fillRect(0,0,W,H);
+
+      // draw video darker
+      if (results && results.image){
+        scanCtx.globalAlpha = 0.85;
+        scanCtx.drawImage(results.image, 0, 0, W, H);
+        scanCtx.globalAlpha = 1;
+        scanCtx.fillStyle = "rgba(0,0,0,.55)";
+        scanCtx.fillRect(0,0,W,H);
+      }
+
+      // draw landmarks if any
+      if (results && results.multiHandLandmarks && results.multiHandLandmarks.length){
+        const lm = results.multiHandLandmarks[0];
+
+        // MediaPipe drawing utils works on any canvas context
+        try{
+          drawConnectors(scanCtx, lm, window.HAND_CONNECTIONS || HAND_CONNECTIONS, { color: "#2ee59d", lineWidth: 3 });
+          drawLandmarks(scanCtx, lm, { color: "#ffd60a", lineWidth: 2 });
+        } catch {
+          // ignore if drawing utils missing
+        }
+
+        // highlight thumb-index line
+        const t = lm[4], i = lm[8];
+        scanCtx.beginPath();
+        scanCtx.strokeStyle = "rgba(255,214,10,.85)";
+        scanCtx.lineWidth = 4;
+        scanCtx.moveTo((1 - t.x) * W, t.y * H);
+        scanCtx.lineTo((1 - i.x) * W, i.y * H);
+        scanCtx.stroke();
+      }
+
+      // crosshair
+      scanCtx.globalAlpha = 0.25;
+      scanCtx.strokeStyle = "rgba(255,255,255,.8)";
+      scanCtx.lineWidth = 1;
+      scanCtx.beginPath();
+      scanCtx.moveTo(W*0.5, 0);
+      scanCtx.lineTo(W*0.5, H);
+      scanCtx.moveTo(0, H*0.5);
+      scanCtx.lineTo(W, H*0.5);
+      scanCtx.stroke();
+      scanCtx.globalAlpha = 1;
+    }
+
+    function onHandResults(results){
+      // Always render scan screen while login overlay visible
+      if (!Login.overlay.classList.contains("hidden")) {
+        drawScanScreen(results);
+      }
+
+      // optional debug panel
+      if (cameraWrap.classList.contains("show")) {
+        debugCtx.save();
+        debugCtx.clearRect(0, 0, debugCanvas.width, debugCanvas.height);
+        debugCtx.drawImage(results.image, 0, 0, debugCanvas.width, debugCanvas.height);
+      }
+
+      HandState.has = false;
+      HandState.lm = null;
+
+      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0){
+        const lm = results.multiHandLandmarks[0];
+        HandState.has = true;
+        HandState.lm = lm;
+        HandState.lastSeenAt = performance.now();
+
+        if (cameraWrap.classList.contains("show")){
+          try{
+            drawConnectors(debugCtx, lm, window.HAND_CONNECTIONS || HAND_CONNECTIONS, { color: "#2ee59d", lineWidth: 3 });
+            drawLandmarks(debugCtx, lm, { color: "#ffd60a", lineWidth: 2 });
+          } catch {}
+          debugCtx.restore();
+        }
+
+        const indexTip = lm[8];
+        // mirror x for natural feel
+        HandState.indexNorm.x = 1 - indexTip.x;
+        HandState.indexNorm.y = indexTip.y;
+
+        // restored pinch
+        const pinchN = computePinchNormalized(lm);
+        updateDebouncedPinch(pinchN);
+      } else {
+        // if no hand, still clear pinch click
+        HandState.pinchClick = false;
+        if (cameraWrap.classList.contains("show")) debugCtx.restore();
+      }
+    }
+
+    /*****************************************************************
+     * SCAN FLOW (requires 2 pinch-click validation)
+     *****************************************************************/
+    function setBadge(ok){
+      if (ok){
+        Login.scanBadge.classList.add("good");
+        Login.scanBadge.classList.remove("bad");
+        Login.scanBadgeText.textContent = "Positive Scan: Hand detected";
+      } else {
+        Login.scanBadge.classList.add("bad");
+        Login.scanBadge.classList.remove("good");
+        Login.scanBadgeText.textContent = "No hand detected";
+      }
+    }
+    function setScanUI(phase, instr, pct, clicksDone){
+      Login.scanPhase.textContent = phase;
+      Login.scanInstr.textContent = instr;
+      Login.scanProg.style.width = `${clamp(pct,0,100)}%`;
+      Login.scanClicks.textContent = `${clicksDone} / 2`;
+    }
+
+    const Scan = {
+      running: false,
+      phase: "idle", // warmup | validateClicks | open | pinch | done | fail
+      t0: 0,
+
+      warmupSeconds: 0.6,
+      validateTimeoutSeconds: 8.0,
+      openHoldSeconds: 1.3,
+      pinchTarget: 5,
+
+      clicksNeeded: 2,
+      clicksDone: 0,
+
+      openSamples: [],
+      pinchSamples: [],
+      jitterSamples: [],
+      lastIndexX: null,
+      lastIndexY: null,
+
+      _pinchClicksCollected: 0,
+    };
+
+    function startScan(){
+      Scan.running = true;
+      Scan.phase = "warmup";
+      Scan.t0 = performance.now();
+
+      Scan.clicksDone = 0;
+      Scan.openSamples = [];
+      Scan.pinchSamples = [];
+      Scan.jitterSamples = [];
+      Scan.lastIndexX = null;
+      Scan.lastIndexY = null;
+
+      Login.scanOutPinch.textContent = "—";
+      Login.scanOutSmooth.textContent = "—";
+      setScanUI("Warmup", "Starting camera feed…", 0, 0);
+      toast("Scan started", 1.0);
+      blip(520, 60, 0.04);
+    }
+
+    function finishScanApply(){
+      const openMed = median(Scan.openSamples);
+      const pinchMed = median(Scan.pinchSamples);
+
+      // threshold midpoint between open and pinch; clamp to safe range
+      let thr = (openMed > 0 && pinchMed > 0) ? (openMed + pinchMed) * 0.5 : parseFloat(UI.pinchThreshold.value);
+      // easier bias on mobile: slightly higher threshold
+      if (MOBILE) thr *= 1.05;
+      thr = clamp(thr, 0.20, 0.70);
+
+      const jitterMed = median(Scan.jitterSamples);
+      // translate jitter into smoothing suggestion
+      let sugg = 0.30;
+      if (jitterMed > 0.018) sugg = 0.44;
+      else if (jitterMed > 0.012) sugg = 0.38;
+      else sugg = MOBILE ? 0.32 : 0.28;
+
+      UI.pinchThreshold.value = thr.toFixed(2);
+      UI.smoothing.value = sugg.toFixed(2);
+
+      Login.scanOutPinch.textContent = thr.toFixed(2);
+      Login.scanOutSmooth.textContent = sugg.toFixed(2);
+
+      syncSettingLabels();
+      saveSettings();
+
+      Scan.running = false;
+      Scan.phase = "done";
+      setScanUI("Done", "Calibration applied", 100, Scan.clicksDone);
+      toast("Scan complete — calibration applied", 1.6);
+      blip(740, 90, 0.05);
+    }
+
+    function failScan(msg){
+      Scan.running = false;
+      Scan.phase = "fail";
+      setScanUI("Failed", msg, 0, Scan.clicksDone);
+      toast(msg, 1.8);
+      blip(220, 120, 0.05);
+    }
+
+    function updateScanLoop(){
+      if (!Scan.running) return;
+
+      const now = performance.now();
+      setBadge(HandState.has);
+
+      if (Scan.phase === "warmup"){
+        const elapsed = (now - Scan.t0)/1000;
+        const pct = clamp((elapsed / Scan.warmupSeconds)*100, 0, 100);
+        setScanUI("Warmup", "Starting camera feed…", pct, Scan.clicksDone);
+
+        if (elapsed >= Scan.warmupSeconds){
+          Scan.phase = "validateClicks";
+          Scan.t0 = performance.now();
+          setScanUI("Validate Clicks", "Pinch-click 2 times (thumb + index)", 0, Scan.clicksDone);
+          blip(440, 55, 0.05);
+        }
+        return;
+      }
+
+      // require hand visible
+      if (!HandState.has || !HandState.lm){
+        setScanUI("Waiting", "Put your hand in frame", 0, Scan.clicksDone);
+        return;
+      }
+
+      // collect jitter sample from index tip movement
+      const ix = HandState.lm[8]?.x ?? 0.5;
+      const iy = HandState.lm[8]?.y ?? 0.5;
+      if (Scan.lastIndexX != null){
+        const dx = ix - Scan.lastIndexX;
+        const dy = iy - Scan.lastIndexY;
+        Scan.jitterSamples.push(Math.sqrt(dx*dx + dy*dy));
+      }
+      Scan.lastIndexX = ix;
+      Scan.lastIndexY = iy;
+
+      if (Scan.phase === "validateClicks"){
+        const elapsed = (now - Scan.t0)/1000;
+        const pct = clamp((elapsed / Scan.validateTimeoutSeconds)*100, 0, 100);
+
+        if (HandState.pinchClick){
+          Scan.clicksDone = Math.min(Scan.clicksNeeded, Scan.clicksDone + 1);
+          blip(660, 45, 0.04);
+          toast(`Click validated: ${Scan.clicksDone}/2`, 0.9);
+        }
+
+        setScanUI("Validate Clicks", "Pinch-click 2 times (thumb + index)", pct, Scan.clicksDone);
+
+        if (Scan.clicksDone >= Scan.clicksNeeded){
+          Scan.phase = "open";
+          Scan.t0 = performance.now();
+          setScanUI("Open Hold", "Hold hand open and steady", 0, Scan.clicksDone);
+          blip(520, 55, 0.04);
+        } else if (elapsed >= Scan.validateTimeoutSeconds){
+          failScan("Click validation timed out — try again");
+        }
+        return;
+      }
+
+      if (Scan.phase === "open"){
+        // open-hand: collect pinchN while NOT pinching
+        // even if user lightly pinches, we still collect but bias to larger values over time
+        Scan.openSamples.push(HandState.pinchN);
+
+        const elapsed = (now - Scan.t0)/1000;
+        const pct = clamp((elapsed / Scan.openHoldSeconds)*100, 0, 100);
+        setScanUI("Open Hold", "Hold open and steady…", pct, Scan.clicksDone);
+
+        if (elapsed >= Scan.openHoldSeconds && Scan.openSamples.length > 10){
+          Scan.phase = "pinch";
+          Scan.t0 = performance.now();
+          setScanUI("Pinch Sampling", "Pinch-click 5 times", 0, Scan.clicksDone);
+          blip(520, 60, 0.04);
+        }
+        return;
+      }
+
+      if (Scan.phase === "pinch"){
+        if (HandState.pinchClick){
+          Scan.pinchSamples.push(HandState.pinchN);
+          blip(760, 35, 0.03);
+        }
+        const count = Scan.pinchSamples.length;
+        const pct = clamp((count / Scan.pinchTarget)*100, 0, 100);
+        setScanUI("Pinch Sampling", `Pinch clicks: ${count}/${Scan.pinchTarget}`, pct, Scan.clicksDone);
+
+        if (count >= Scan.pinchTarget){
+          finishScanApply();
+        }
+        return;
+      }
+    }
+
+    /*****************************************************************
+     * GAME MODEL
      *****************************************************************/
     const BALL_R = 12;
     const HOLE_R = 15;
@@ -634,6 +1315,26 @@
               break;
             }
           }
+          if (ok && tunnels.length){
+            for (const t of tunnels){
+              if (p.x > t.x-30 && p.x < t.x+t.w+30 && p.y > t.y-30 && p.y < t.y+t.h+30){
+                ok = false;
+                p.y += 18;
+                p.y = clamp(p.y, bounds.y+40, bounds.y+bounds.h-40);
+                break;
+              }
+            }
+          }
+          if (ok && windmills.length){
+            for (const w of windmills){
+              if (len2(p.x - w.x, p.y - w.y) < (w.r + 40)*(w.r + 40)){
+                ok = false;
+                p.x += 20;
+                p.x = clamp(p.x, bounds.x+40, bounds.x+bounds.w-40);
+                break;
+              }
+            }
+          }
           if (ok) break;
         }
       }
@@ -663,7 +1364,7 @@
 
       ball.x = h.start.x;
       ball.y = h.start.y;
-      ball.vx = 0; ball.vy = 0;
+      ball.vx = 0; ball.vy = 0; ball.charge = 0;
 
       aim.x = ball.x + 160;
       aim.y = ball.y;
@@ -679,6 +1380,8 @@
       finished = false;
 
       grassPattern = makeGrassPattern();
+      ballTrail.length = 0;
+      impactBursts.length = 0;
 
       showBanner(`Hole ${holeIndex + 1} — Par ${h.par} (${h.theme.name})`, 1.6);
       updateUI();
@@ -705,6 +1408,11 @@
       if (h.feature && h.feature.type === "windmill"){
         h.feature.a += h.feature.speed * dt;
       }
+      if (h.windmills && h.windmills.length){
+        for (const w of h.windmills){
+          w.a += w.speed * dt;
+        }
+      }
 
       // integrate
       ball.x += ball.vx * dt;
@@ -714,6 +1422,23 @@
 
       if (len2(ball.vx, ball.vy) < 6){
         ball.vx = 0; ball.vy = 0;
+      }
+
+      if (h.tunnels && h.tunnels.length){
+        for (const t of h.tunnels){
+          if (ball.x > t.x && ball.x < t.x + t.w && ball.y > t.y && ball.y < t.y + t.h){
+            const dirx = Math.cos(t.angle);
+            const diry = Math.sin(t.angle);
+            const speed = Math.max(60, len(ball.vx, ball.vy));
+            ball.vx = smooth(ball.vx, dirx * speed, 0.18);
+            ball.vy = smooth(ball.vy, diry * speed, 0.18);
+            if (selectedMode.id === "electric"){
+              ball.vx += dirx * 80 * dt;
+              ball.vy += diry * 80 * dt;
+              ball.charge = clamp(ball.charge + 0.35 * dt, 0, 1);
+            }
+          }
+        }
       }
 
       const minX = h.bounds.x + BALL_R;
@@ -729,7 +1454,9 @@
 
         ball.x = h.start.x;
         ball.y = h.start.y;
-        ball.vx = 0; ball.vy = 0;
+        ball.vx = 0; ball.vy = 0; ball.charge = 0;
+        ballTrail.length = 0;
+        impactBursts.length = 0;
 
         cueLocked = false;
         showBanner("Out of bounds — +1 penalty, respotted", 1.6);
@@ -755,6 +1482,9 @@
           ball.y = cy + ny * (BALL_R + 0.2);
 
           const vn = ball.vx*nx + ball.vy*ny;
+          const chargeBoost = (selectedMode.id === "electric") ? (1 + ball.charge * 0.25) : 1;
+          const impactPower = clamp(len(ball.vx, ball.vy) / maxSpeed, 0.2, 1);
+          const impactColor = (selectedMode.id === "electric") ? "124,244,255" : "255,214,10";
 
           if (o.type === "wall"){
             ball.vx -= (1.85 * vn) * nx;
@@ -822,6 +1552,10 @@
           ball.vx = 0; ball.vy = 0;
         }
       }
+
+      updateBallCharge(dt);
+      updateTrail();
+      updateFx(dt);
     }
 
     function strikeBall(){
@@ -836,6 +1570,7 @@
 
       ball.vx = Math.cos(ang) * speed;
       ball.vy = Math.sin(ang) * speed;
+      ball.charge = clamp(power * 1.05, 0.15, 1);
 
       strokesThisHole += 1;
       totalStrokes += 1;
@@ -849,6 +1584,8 @@
      * VISUALS
      *****************************************************************/
     let grassPattern = null;
+    const ballTrail = [];
+    const impactBursts = [];
 
     function makeGrassPattern(){
       const tile = document.createElement("canvas");
@@ -878,6 +1615,103 @@
       t.globalAlpha = 1;
 
       return ctx.createPattern(tile, "repeat");
+    }
+
+    function updateBallCharge(dt){
+      const speed = len(ball.vx, ball.vy);
+      const target = clamp(speed / (maxSpeed * 0.9), 0, 1);
+      const chargeBoost = (selectedMode.id === "electric") ? 0.15 : 0;
+      ball.charge = smooth(ball.charge, clamp(target + chargeBoost, 0, 1), dt * 4);
+    }
+
+    function addImpact(x, y, intensity, color){
+      impactBursts.push({
+        x,
+        y,
+        life: 0.6,
+        t: 0,
+        intensity: clamp(intensity, 0.2, 1),
+        color,
+      });
+    }
+
+    function updateFx(dt){
+      for (let i = impactBursts.length - 1; i >= 0; i--){
+        const b = impactBursts[i];
+        b.t += dt;
+        if (b.t >= b.life){
+          impactBursts.splice(i, 1);
+        }
+      }
+    }
+
+    function updateTrail(){
+      const speed = len(ball.vx, ball.vy);
+      if (speed > 40){
+        ballTrail.push({
+          x: ball.x,
+          y: ball.y,
+          alpha: clamp(speed / (maxSpeed * 0.8), 0.2, 1),
+          charge: ball.charge,
+        });
+        if (ballTrail.length > 22){
+          ballTrail.shift();
+        }
+      }
+      for (let i = ballTrail.length - 1; i >= 0; i--){
+        ballTrail[i].alpha *= 0.92;
+        if (ballTrail[i].alpha < 0.06){
+          ballTrail.splice(i, 1);
+        }
+      }
+    }
+
+    function drawBallTrail(){
+      if (!ballTrail.length) return;
+      const color = ballColorById(player.ballColor);
+      ctx.save();
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      for (let i = 0; i < ballTrail.length - 1; i++){
+        const p = ballTrail[i];
+        const n = ballTrail[i + 1];
+        const alpha = p.alpha * 0.45;
+        ctx.strokeStyle = `rgba(124,244,255,${alpha})`;
+        if (selectedMode.id !== "electric"){
+          ctx.strokeStyle = `rgba(255,255,255,${alpha * 0.45})`;
+        }
+        ctx.lineWidth = 6 + p.charge * 10;
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(n.x, n.y);
+        ctx.stroke();
+
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = color.glow;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 6 + p.charge * 12, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+      ctx.restore();
+    }
+
+    function drawImpacts(){
+      if (!impactBursts.length) return;
+      ctx.save();
+      for (const b of impactBursts){
+        const life = 1 - b.t / b.life;
+        const radius = (18 + b.intensity * 30) * (1 + (1 - life));
+        const alpha = life * 0.7;
+        const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, radius);
+        g.addColorStop(0, `rgba(${b.color},${(alpha * 0.65).toFixed(2)})`);
+        g.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
     }
 
     function drawCourse(){
@@ -968,6 +1802,40 @@
         ctx.restore();
       }
 
+      if (h.windmills && h.windmills.length){
+        for (const w of h.windmills){
+          ctx.save();
+          ctx.beginPath();
+          ctx.fillStyle = "rgba(0,0,0,.35)";
+          ctx.arc(w.x+4, w.y+6, w.r+12, 0, Math.PI*2);
+          ctx.fill();
+
+          ctx.beginPath();
+          ctx.fillStyle = "rgba(255,255,255,.08)";
+          ctx.arc(w.x, w.y, w.r+10, 0, Math.PI*2);
+          ctx.fill();
+
+          ctx.translate(w.x, w.y);
+          ctx.rotate(w.a);
+          for (let i=0;i<4;i++){
+            ctx.rotate(Math.PI/2);
+            ctx.save();
+            ctx.fillStyle = "rgba(124,244,255,.25)";
+            ctx.beginPath();
+            const bx = 8, by = -5, bw = 42, bh = 10, br = 6;
+            ctx.moveTo(bx+br, by);
+            ctx.arcTo(bx+bw, by, bx+bw, by+bh, br);
+            ctx.arcTo(bx+bw, by+bh, bx, by+bh, br);
+            ctx.arcTo(bx, by+bh, bx, by, br);
+            ctx.arcTo(bx, by, bx+bw, by, br);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+          }
+          ctx.restore();
+        }
+      }
+
       // cup
       ctx.beginPath();
       ctx.fillStyle = "rgba(0,0,0,.45)";
@@ -1008,15 +1876,30 @@
     }
 
     function drawBall(){
+      const color = ballColorById(player.ballColor);
+      const skin = ballSkinById(player.ballSkin);
+      const charge = clamp(ball.charge, 0, 1);
+
+      ctx.save();
       ctx.beginPath();
       ctx.fillStyle = "rgba(0,0,0,.35)";
       ctx.ellipse(ball.x+3, ball.y+5, BALL_R*1.0, BALL_R*0.8, 0, 0, Math.PI*2);
       ctx.fill();
 
+      if (charge > 0.1 || selectedMode.id === "electric"){
+        const glow = ctx.createRadialGradient(ball.x, ball.y, BALL_R * 0.6, ball.x, ball.y, BALL_R * (2.4 + charge));
+        glow.addColorStop(0, color.glow);
+        glow.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(ball.x, ball.y, BALL_R * (2.4 + charge * 1.2), 0, Math.PI*2);
+        ctx.fill();
+      }
+
       const g = ctx.createRadialGradient(ball.x - BALL_R*0.35, ball.y - BALL_R*0.35, BALL_R*0.2, ball.x, ball.y, BALL_R*1.3);
-      g.addColorStop(0, "rgba(255,255,255,.80)");
-      g.addColorStop(0.22, "rgba(255,255,255,.95)");
-      g.addColorStop(0.9, "rgba(0,0,0,.35)");
+      g.addColorStop(0, color.rim);
+      g.addColorStop(0.28, color.core);
+      g.addColorStop(0.8, "rgba(10,10,10,.40)");
       g.addColorStop(1, "rgba(0,0,0,.55)");
 
       ctx.beginPath();
@@ -1024,16 +1907,40 @@
       ctx.arc(ball.x, ball.y, BALL_R, 0, Math.PI*2);
       ctx.fill();
 
+      if (skin.id === "neon-core"){
+        ctx.beginPath();
+        ctx.fillStyle = color.glow;
+        ctx.arc(ball.x, ball.y, BALL_R*0.45, 0, Math.PI*2);
+        ctx.fill();
+      }
+
+      if (skin.id === "energy-ring" || skin.id === "charged-glow"){
+        ctx.beginPath();
+        ctx.strokeStyle = color.rim;
+        ctx.lineWidth = 3;
+        ctx.arc(ball.x, ball.y, BALL_R*0.82, 0, Math.PI*2);
+        ctx.stroke();
+      }
+
       ctx.beginPath();
       ctx.strokeStyle = "rgba(0,0,0,.35)";
       ctx.lineWidth = 2;
       ctx.arc(ball.x, ball.y, BALL_R, 0, Math.PI*2);
       ctx.stroke();
 
+      if (skin.id === "charged-glow"){
+        ctx.beginPath();
+        ctx.strokeStyle = `rgba(255,255,255,${0.25 + charge * 0.5})`;
+        ctx.lineWidth = 1.5;
+        ctx.arc(ball.x, ball.y, BALL_R*1.08, 0, Math.PI*2);
+        ctx.stroke();
+      }
+
       ctx.beginPath();
       ctx.fillStyle = "rgba(255,255,255,.30)";
       ctx.arc(ball.x - BALL_R*0.28, ball.y - BALL_R*0.28, BALL_R*0.18, 0, Math.PI*2);
       ctx.fill();
+      ctx.restore();
     }
 
     function drawAimAndPutter(){
@@ -1179,6 +2086,8 @@
         drawCourse();
         drawAimAndPutter();
         drawPowerGauge();
+        drawBallTrail();
+        drawImpacts();
         drawBall();
         drawEndOverlay();
       });
