@@ -2,579 +2,1089 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Mobile Mini Putt — Pinch Lock + Pinch Shoot</title>
-
-  <!-- MediaPipe Hands (core only) -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
-
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Gesture Mini Putt Pro — Easy Pinch + Scan Validate</title>
   <style>
-    :root{
-      color-scheme: dark;
-      --bg0:#070a10;
-      --bg1:#0a1322;
-      --panel: rgba(8,10,16,.70);
-      --panel2: rgba(0,0,0,.35);
-      --line: rgba(255,255,255,.12);
-      --text: #eaf1ff;
-      --muted:#bcd0ea;
-      --accent:#ffd60a;
-      --good:#2ee59d;
-      --danger:#ff6b6b;
-    }
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
 
-    *{ box-sizing:border-box; }
-    html,body{ height:100%; margin:0; background: radial-gradient(1200px 800px at 20% 10%, #16233a 0%, var(--bg0) 60%, #05060a 100%); color:var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
-
-    /* Mobile-first layout: green gets the screen, UI sits top/bottom */
-    .app{
-      height:100%;
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: radial-gradient(1200px 800px at 20% 10%, #16233a 0%, #070a10 55%, #05060a 100%);
+      color:#e9f0fb;
+      min-height:100vh;
       display:flex;
-      flex-direction:column;
-      gap:10px;
-      padding: max(10px, env(safe-area-inset-top)) 10px max(12px, env(safe-area-inset-bottom));
+      padding:16px;
+      gap:16px;
+      overflow-x:hidden;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
     }
+
+    /* ----------------------------- */
+    /* Icons (inline svg helpers)    */
+    /* ----------------------------- */
+    .ico{ width:16px; height:16px; display:inline-block; vertical-align:-3px; margin-right:8px; opacity:.9; }
+
+    /* ----------------------------- */
+    /* Stage layout                  */
+    /* ----------------------------- */
+    .stage{ flex:1; min-width:0; display:flex; flex-direction:column; gap:14px; }
 
     .topbar{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:10px;
-      padding:10px 12px;
-      border:1px solid var(--line);
+      display:flex; align-items:center; justify-content:space-between; gap:12px;
+      padding:12px 14px;
+      border:1px solid rgba(255,255,255,.08);
+      background: linear-gradient(180deg, rgba(16,26,40,.88), rgba(10,14,20,.82));
       border-radius:14px;
-      background: linear-gradient(180deg, rgba(16,26,40,.85), rgba(10,14,20,.78));
-      backdrop-filter: blur(10px);
-      box-shadow: 0 14px 40px rgba(0,0,0,.35);
-      min-height: 54px;
-    }
-
-    .brand{
-      display:flex;
-      flex-direction:column;
-      gap:2px;
-      min-width: 0;
-    }
-    .brand .t{
-      font-weight:950;
-      letter-spacing:.2px;
-      font-size:14px;
-      white-space:nowrap;
-      overflow:hidden;
-      text-overflow:ellipsis;
-    }
-    .brand .s{
-      font-size:12px;
-      color:var(--muted);
-      white-space:nowrap;
-      overflow:hidden;
-      text-overflow:ellipsis;
-    }
-
-    .chips{
-      display:flex;
-      gap:8px;
-      align-items:center;
-      flex-wrap:wrap;
-      justify-content:flex-end;
-    }
-    .chip{
-      padding:6px 10px;
-      border-radius:999px;
-      border:1px solid var(--line);
-      background: rgba(0,0,0,.22);
-      font-size:12px;
-      font-weight:900;
-      color: var(--text);
-      white-space:nowrap;
-    }
-    .chip span{ color: var(--muted); font-weight:800; margin-right:6px; }
-
-    .stage{
+      box-shadow: 0 18px 40px rgba(0,0,0,.35);
+      backdrop-filter: blur(8px);
       position:relative;
-      flex:1;
-      min-height: 52vh;
-      border-radius:16px;
       overflow:hidden;
-      border:1px solid var(--line);
-      background: rgba(0,0,0,.20);
-      box-shadow: 0 18px 55px rgba(0,0,0,.45);
-      touch-action:none; /* allow aim via touch on canvas */
+    }
+    .topbar::before{
+      content:"";
+      position:absolute;
+      inset:-120px -120px auto auto;
+      width:260px; height:260px;
+      background: radial-gradient(circle at 30% 30%, rgba(255,214,10,.20), rgba(255,214,10,0) 60%);
+      transform: rotate(18deg);
+      pointer-events:none;
+      filter: blur(2px);
+      animation: floatGlow 7s ease-in-out infinite;
+    }
+    @keyframes floatGlow{
+      0%,100%{ transform: translate(0,0) rotate(18deg); opacity:.65;}
+      50%{ transform: translate(-18px, 8px) rotate(24deg); opacity:.85;}
     }
 
-    canvas#course{
-      position:absolute; inset:0;
-      width:100%; height:100%;
-      display:block;
+    .brand{ display:flex; align-items:center; gap:10px; white-space:nowrap; }
+    .brand .title{ font-weight:950; letter-spacing:.2px; font-size:16px; display:flex; align-items:center; gap:10px; }
+    .brand .tag{
+      font-size:12px; color:#bcd0ea;
+      border:1px solid rgba(255,255,255,.12);
+      padding:2px 8px; border-radius:999px; background:rgba(0,0,0,.2);
     }
 
-    /* Banner / instruction */
+    .stats{ display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end; align-items:center; }
+    .chip{
+      border:1px solid rgba(255,255,255,.1);
+      background: rgba(0,0,0,.22);
+      padding:6px 10px; border-radius:12px;
+      display:flex; gap:8px; align-items:center; white-space:nowrap;
+    }
+    .chip b{ font-size:12px; color:#bcd0ea; font-weight:800; }
+    .chip span{ font-weight:950; font-size:13px; }
+
+    .canvasWrap{
+      position:relative;
+      flex:1; min-height:440px;
+      border-radius:18px; overflow:hidden;
+      border:1px solid rgba(255,255,255,.08);
+      box-shadow: 0 22px 60px rgba(0,0,0,.45);
+      background: rgba(0,0,0,.18);
+    }
+    canvas#course{ width:100%; height:100%; display:block; }
+
+    .overlay{ position:absolute; inset:0; pointer-events:none; }
+
     .banner{
       position:absolute;
-      top:12px; left:50%;
-      transform: translateX(-50%);
-      padding:8px 12px;
+      top:16px; left:50%;
+      transform:translateX(-50%) translateY(-10px);
+      padding:10px 14px;
       border-radius:999px;
-      border:1px solid rgba(255,255,255,.14);
-      background: rgba(0,0,0,.38);
-      backdrop-filter: blur(8px);
-      font-size:12px;
-      font-weight:900;
-      max-width: calc(100% - 22px);
-      white-space:nowrap;
-      overflow:hidden;
-      text-overflow:ellipsis;
+      border:1px solid rgba(255,255,255,.12);
+      background: linear-gradient(180deg, rgba(5,8,12,.70), rgba(5,8,12,.30));
+      box-shadow: 0 10px 30px rgba(0,0,0,.35);
+      backdrop-filter: blur(10px);
+      font-weight:950; letter-spacing:.2px;
       opacity:0;
-      transition: opacity .18s ease;
+      transition:opacity .22s ease, transform .22s ease;
+      max-width: calc(100% - 28px);
+      text-overflow: ellipsis; white-space: nowrap; overflow: hidden;
+    }
+    .banner.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+    .hud{
+      position:absolute;
+      bottom:14px; left:14px; right:14px;
+      display:flex; align-items:flex-end; justify-content:space-between; gap:12px;
       pointer-events:none;
     }
-    .banner.show{ opacity:1; }
 
-    /* Bottom controls: thumb-friendly */
-    .bottomBar{
-      display:flex;
-      flex-direction:column;
-      gap:10px;
-      border:1px solid var(--line);
+    .power{
+      width:min(380px, 56vw);
+      padding:10px 12px;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.1);
+      background: rgba(0,0,0,.22);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 12px 32px rgba(0,0,0,.35);
+    }
+    .power .row{ display:flex; justify-content:space-between; align-items:center; }
+    .power .row .label{ color:#bcd0ea; font-size:12px; font-weight:900; letter-spacing:.25px; }
+    .power .row .val{ font-weight:950; font-size:13px; }
+    .bar{
+      margin-top:8px; height:10px;
+      border-radius:999px; background: rgba(255,255,255,.08);
+      overflow:hidden; position:relative;
+    }
+    .bar > i{
+      display:block; height:100%; width:0%;
+      background: linear-gradient(90deg, rgba(255,214,10,.75), rgba(255,214,10,.98));
+      border-radius:999px;
+      box-shadow: 0 0 16px rgba(255,214,10,.35);
+      transition: width .08s linear;
+    }
+
+    .hint{
+      max-width: 56%;
+      padding:10px 12px;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.1);
+      background: rgba(0,0,0,.22);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 12px 32px rgba(0,0,0,.35);
+      color:#cfe0f6; font-size:12px; line-height:1.35;
+    }
+    .hint b{ color:#ffffff; }
+
+    aside.panel{
+      width:440px; max-width:48vw;
+      border-radius:16px;
+      border:1px solid rgba(255,255,255,.08);
+      background: linear-gradient(180deg, rgba(16,26,40,.88), rgba(10,14,20,.85));
+      box-shadow: 0 18px 40px rgba(0,0,0,.35);
+      backdrop-filter: blur(10px);
+      padding:14px;
+      display:flex; flex-direction:column; gap:12px;
+      position:relative;
+      overflow:hidden;
+    }
+    aside.panel::before{
+      content:"";
+      position:absolute;
+      inset:auto -100px -120px auto;
+      width:260px; height:260px;
+      background: radial-gradient(circle at 30% 30%, rgba(46,229,157,.16), rgba(46,229,157,0) 62%);
+      transform: rotate(-10deg);
+      pointer-events:none;
+      filter: blur(2px);
+      animation: floatGlow2 8s ease-in-out infinite;
+    }
+    @keyframes floatGlow2{
+      0%,100%{ transform: translate(0,0) rotate(-10deg); opacity:.55;}
+      50%{ transform: translate(-14px, -10px) rotate(-4deg); opacity:.85;}
+    }
+
+    .actions{ display:flex; gap:10px; flex-wrap:wrap; }
+    button{
+      border:1px solid rgba(255,255,255,.12);
+      background: rgba(0,0,0,.28);
+      color:#e9f0fb;
       border-radius:14px;
       padding:10px 12px;
-      background: linear-gradient(180deg, rgba(16,26,40,.82), rgba(10,14,20,.78));
-      backdrop-filter: blur(10px);
-      box-shadow: 0 14px 40px rgba(0,0,0,.35);
-      touch-action:auto;
-    }
-
-    .row{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:10px;
-      flex-wrap:wrap;
-    }
-
-    .btnRow{
-      display:flex;
-      gap:10px;
-      width:100%;
-    }
-
-    button{
-      flex: 1;
-      border-radius:14px;
-      border:1px solid var(--line);
-      background: rgba(0,0,0,.25);
-      color: var(--text);
-      padding:12px 12px;
       font-weight:950;
       cursor:pointer;
       box-shadow: 0 10px 22px rgba(0,0,0,.25);
-    }
-    button:active{ transform: translateY(1px); }
-    .primary{
-      border-color: rgba(255,214,10,.40);
-      background: rgba(255,214,10,.14);
-    }
-    .danger{
-      border-color: rgba(255,107,107,.35);
-      background: rgba(255,107,107,.12);
-    }
-
-    .powerWrap{
-      width:100%;
-      display:flex;
-      flex-direction:column;
-      gap:6px;
-      padding:10px;
-      border-radius:14px;
-      border:1px solid var(--line);
-      background: rgba(0,0,0,.22);
-    }
-    .powerTop{
-      display:flex; justify-content:space-between; gap:10px;
-      font-size:12px; color: var(--muted);
-      font-weight:900;
-    }
-    .powerTop b{ color: var(--text); }
-    input[type="range"]{
-      width:100%;
-      accent-color: var(--accent);
-    }
-
-    /* Settings drawer */
-    .drawer{
-      position:fixed;
-      left:0; right:0; bottom:0;
-      transform: translateY(110%);
-      transition: transform .22s ease;
-      z-index:50;
-      padding: 10px 10px max(12px, env(safe-area-inset-bottom));
-    }
-    .drawer.show{ transform: translateY(0%); }
-    .drawerCard{
-      border:1px solid var(--line);
-      border-radius:16px;
-      background: rgba(10,14,20,.88);
-      backdrop-filter: blur(12px);
-      box-shadow: 0 20px 80px rgba(0,0,0,.65);
+      transition: transform .06s ease, background .15s ease, border-color .15s ease, opacity .15s ease;
+      flex:1; min-width: 170px;
+      position:relative;
       overflow:hidden;
-      max-width: 980px;
-      margin: 0 auto;
     }
-    .drawerHead{
-      padding:12px 14px;
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      gap:10px;
-      border-bottom:1px solid rgba(255,255,255,.10);
+    button::after{
+      content:"";
+      position:absolute;
+      inset:0;
+      background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.08), rgba(255,255,255,0));
+      transform: translateX(-120%);
+      transition: transform .45s ease;
+      pointer-events:none;
+    }
+    button:hover::after{ transform: translateX(120%); }
+    button:hover{ background: rgba(0,0,0,.36); }
+    button:active{ transform: translateY(1px); }
+    button.primary{
+      background: rgba(255,214,10,.16);
+      border-color: rgba(255,214,10,.35);
+    }
+    button.primary:hover{ background: rgba(255,214,10,.22); }
+    button.danger{
+      background: rgba(255,80,80,.12);
+      border-color: rgba(255,80,80,.25);
+    }
+    button.danger:hover{ background: rgba(255,80,80,.18); }
+    button:disabled{
+      opacity:.55;
+      cursor:not-allowed;
+      transform:none;
+    }
+
+    .section{
+      border:1px solid rgba(255,255,255,.08);
+      background: rgba(0,0,0,.2);
+      border-radius:14px;
+      padding:12px;
+      position:relative;
+      z-index:1;
+    }
+    .section h3{
+      margin:0 0 8px 0;
+      font-size:12px; color:#bcd0ea;
+      letter-spacing:.3px;
+      text-transform:uppercase;
+      font-weight:950;
+      display:flex; align-items:center;
+    }
+
+    .grid2{ display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+    .kpi{
+      padding:10px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.08);
       background: rgba(255,255,255,.03);
     }
-    .drawerHead .h{
-      font-weight:950;
-      letter-spacing:.2px;
-    }
-    .drawerBody{
-      padding:12px 14px 14px;
-      display:grid;
-      grid-template-columns: 1fr 1fr;
-      gap:12px;
-    }
-    .ctl{
-      border:1px solid rgba(255,255,255,.10);
-      border-radius:14px;
-      padding:10px;
-      background: rgba(0,0,0,.22);
-    }
-    .ctl .k{
-      font-size:12px;
-      color: var(--muted);
-      font-weight:900;
-      display:flex;
-      justify-content:space-between;
-      gap:10px;
-      margin-bottom:8px;
-    }
-    .ctl .k span{
-      color: var(--text);
-      font-weight:950;
-    }
-    .drawerFoot{
-      padding:12px 14px;
-      border-top:1px solid rgba(255,255,255,.10);
-      display:flex;
-      gap:10px;
-    }
+    .kpi .t{ font-size:11px; color:#bcd0ea; font-weight:900; letter-spacing:.25px; }
+    .kpi .v{ margin-top:3px; font-size:14px; font-weight:950; }
 
-    /* Start overlay (simplified “login”) */
-    .startOverlay{
+    .rowCtl{
+      display:grid;
+      grid-template-columns: 1fr auto;
+      align-items:center;
+      gap:10px;
+      margin-top:10px;
+    }
+    .rowCtl label{ font-size:12px; color:#cfe0f6; font-weight:900; }
+    input[type="range"]{ width:100%; }
+
+    .mini{ font-size:12px; color:#bcd0ea; line-height:1.35; }
+    .mini code{ color:#fff; }
+
+    /* ----------------------------- */
+    /* Login Overlay                 */
+    /* ----------------------------- */
+    .loginOverlay{
       position:fixed; inset:0;
+      z-index: 60;
       display:flex;
       align-items:center;
       justify-content:center;
       padding:18px;
-      background: radial-gradient(1200px 900px at 25% 10%, rgba(22,35,58,.92), rgba(7,10,16,.94) 55%, rgba(5,6,10,.97));
-      z-index:60;
-    }
-    .startCard{
-      width:min(760px, 100%);
-      border-radius:18px;
-      border:1px solid rgba(255,255,255,.12);
-      background: rgba(10,14,20,.86);
-      backdrop-filter: blur(12px);
-      box-shadow: 0 26px 80px rgba(0,0,0,.65);
+      background:
+        radial-gradient(1200px 900px at 20% 10%, rgba(22,35,58,.92) 0%, rgba(7,10,16,.94) 55%, rgba(5,6,10,.96) 100%);
       overflow:hidden;
     }
-    .startHead{
+    .loginOverlay.hidden{ display:none; }
+
+    .bgParticles{
+      position:absolute; inset:0;
+      pointer-events:none;
+      opacity:.95;
+    }
+    .loginCard{
+      width:min(1060px, 100%);
+      border-radius:18px;
+      border:1px solid rgba(255,255,255,.10);
+      background: linear-gradient(180deg, rgba(16,26,40,.92), rgba(10,14,20,.90));
+      box-shadow: 0 24px 70px rgba(0,0,0,.55);
+      backdrop-filter: blur(12px);
+      overflow:hidden;
+      transform: translateY(0);
+      animation: popIn .32s ease;
+      position:relative;
+      z-index:1;
+    }
+    @keyframes popIn{
+      from{ transform: translateY(10px); opacity:.0; }
+      to{ transform: translateY(0); opacity:1; }
+    }
+
+    .loginHead{
       padding:14px 16px;
-      border-bottom:1px solid rgba(255,255,255,.10);
-      display:flex;
-      justify-content:space-between;
-      align-items:flex-start;
-      gap:10px;
+      display:flex; align-items:center; justify-content:space-between; gap:12px;
+      border-bottom: 1px solid rgba(255,255,255,.08);
     }
-    .startHead .h{
+    .loginHead .left{ display:flex; flex-direction:column; gap:2px; }
+    .loginHead .left .h{ font-weight:950; letter-spacing:.2px; font-size:16px; display:flex; align-items:center; gap:10px; }
+    .loginHead .left .p{ font-size:12px; color:#bcd0ea; line-height:1.35; }
+
+    .loginBody{
+      padding: 14px 16px 16px 16px;
+      display:grid;
+      grid-template-columns: 1.08fr .92fr;
+      gap:14px;
+    }
+    .pane{
+      border:1px solid rgba(255,255,255,.08);
+      border-radius:14px;
+      background: rgba(0,0,0,.18);
+      padding:12px;
+      min-height: 340px;
+      position:relative;
+    }
+    .pane h4{
+      margin:0 0 8px 0;
+      font-size:12px; color:#bcd0ea;
+      letter-spacing:.3px;
+      text-transform:uppercase;
       font-weight:950;
-      font-size:16px;
+      display:flex; align-items:center;
     }
-    .startHead .p{
-      margin-top:4px;
+    .desc{ color:#cfe0f6; font-size:12px; line-height:1.4; margin-bottom:10px; }
+
+    .fieldRow{ display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:10px; }
+    .field{
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:14px;
+      padding:10px;
+      background: rgba(255,255,255,.03);
+    }
+    .field label{
+      display:block;
       font-size:12px;
-      color: var(--muted);
+      color:#bcd0ea;
+      font-weight:950;
+      margin-bottom:6px;
+      letter-spacing:.25px;
+    }
+    .field input, .field select{
+      width:100%;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.14);
+      background: rgba(0,0,0,.25);
+      color:#e9f0fb;
+      padding:10px 10px;
+      outline:none;
+      font-weight:900;
+    }
+
+    .pillRow{ display:flex; gap:10px; flex-wrap:wrap; margin-top: 8px; }
+    .pill{
+      flex:1; min-width: 230px;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.10);
+      background: rgba(255,255,255,.03);
+      padding:10px;
+      cursor:pointer;
+      transition: transform .06s ease, background .15s ease, border-color .15s ease;
+    }
+    .pill:hover{ background: rgba(255,255,255,.05); }
+    .pill:active{ transform: translateY(1px); }
+    .pill.on{
+      border-color: rgba(255,214,10,.40);
+      background: rgba(255,214,10,.08);
+    }
+    .pill .t{ font-weight:950; display:flex; align-items:center; gap:8px; }
+    .pill .s{ margin-top:4px; font-size:12px; color:#bcd0ea; line-height:1.35; }
+
+    .loginFoot{
+      padding:14px 16px;
+      border-top: 1px solid rgba(255,255,255,.08);
+      display:flex; align-items:center; justify-content:space-between; gap:10px;
+      flex-wrap:wrap;
+    }
+    .loginFoot .note{
+      font-size:12px;
+      color:#bcd0ea;
       line-height:1.35;
       max-width: 70ch;
     }
-    .startBody{
-      padding:14px 16px 16px;
-      display:flex;
-      flex-direction:column;
-      gap:12px;
+    .loginFoot .btns{
+      display:flex; gap:10px; flex-wrap:wrap;
+      min-width: 380px;
+      justify-content:flex-end;
     }
-    .startGrid{
-      display:grid;
-      grid-template-columns: 1fr 1fr;
-      gap:10px;
-    }
-    @media (max-width: 720px){
-      .startGrid{ grid-template-columns: 1fr; }
-      .drawerBody{ grid-template-columns: 1fr; }
-      .chips .chip.hideMobile{ display:none; }
-    }
+    .loginFoot button{ min-width: 170px; }
 
-    .note{
-      font-size:12px;
-      color: var(--muted);
-      line-height:1.35;
+    .toast{
+      position:fixed;
+      bottom:16px;
+      left:50%;
+      transform:translateX(-50%) translateY(14px);
+      z-index: 100;
+      padding:10px 14px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.12);
+      background: linear-gradient(180deg, rgba(5,8,12,.75), rgba(5,8,12,.35));
+      box-shadow: 0 10px 30px rgba(0,0,0,.35);
+      backdrop-filter: blur(10px);
+      font-weight:950; letter-spacing:.2px;
+      opacity:0;
+      transition: opacity .18s ease, transform .18s ease;
+      max-width: min(88vw, 980px);
+      white-space: nowrap;
+      overflow:hidden;
+      text-overflow: ellipsis;
+      pointer-events:none;
+    }
+    .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+    /* Scan canvas on login */
+    .scanWrap{
+      margin-top:10px;
+      border-radius:14px;
       border:1px solid rgba(255,255,255,.10);
-      background: rgba(0,0,0,.22);
+      background: rgba(0,0,0,.35);
+      overflow:hidden;
+      position:relative;
+    }
+    canvas#scanCanvas{
+      width:100%;
+      aspect-ratio: 4 / 3;
+      display:block;
+      background: #000;
+    }
+    .scanBadge{
+      position:absolute;
+      top:10px; left:10px;
+      display:flex; align-items:center; gap:10px;
+      padding:8px 10px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.14);
+      background: rgba(0,0,0,.40);
+      backdrop-filter: blur(10px);
+      font-weight:950;
+      font-size:12px;
+    }
+    .scanBadge.good{ border-color: rgba(46,229,157,.35); }
+    .scanBadge.bad{ border-color: rgba(255,80,80,.35); }
+    .scanBadge .dot{
+      width:10px; height:10px; border-radius:999px;
+      background: rgba(255,80,80,.85);
+      box-shadow: 0 0 10px rgba(255,80,80,.22);
+    }
+    .scanBadge.good .dot{
+      background: rgba(46,229,157,.92);
+      box-shadow: 0 0 12px rgba(46,229,157,.25);
+    }
+    .scanSteps{
+      position:absolute;
+      bottom:10px; left:10px; right:10px;
       padding:10px 12px;
       border-radius:14px;
+      border:1px solid rgba(255,255,255,.12);
+      background: rgba(0,0,0,.46);
+      backdrop-filter: blur(10px);
+      font-size:12px;
+      line-height:1.35;
+      color:#cfe0f6;
+    }
+    .scanSteps b{ color:#fff; }
+    .scanProg{
+      margin-top:8px; height:10px;
+      border-radius:999px; overflow:hidden;
+      background: rgba(255,255,255,.10);
+    }
+    .scanProg > i{
+      display:block; height:100%; width:0%;
+      background: linear-gradient(90deg, rgba(46,229,157,.55), rgba(46,229,157,.95));
+      box-shadow: 0 0 18px rgba(46,229,157,.18);
+      transition: width .08s linear;
     }
 
-    video#cam{ display:none; }
+    .cameraWrap{ display:none; }
+    .cameraWrap.show{ display:block; }
     canvas#debug{
-      position:fixed;
-      right:12px;
-      bottom: calc(12px + env(safe-area-inset-bottom));
-      width: min(260px, 44vw);
+      width:100%;
       aspect-ratio: 4 / 3;
-      border-radius:14px;
-      border:1px solid rgba(255,255,255,.12);
-      background: #04060a;
-      box-shadow: 0 18px 60px rgba(0,0,0,.55);
-      display:none;
-      z-index:55;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.08);
+      background:#04060a;
     }
-    canvas#debug.show{ display:block; }
+    video#input_video{ display:none; }
+
+    @media (max-width: 980px){
+      body{ flex-direction:column; }
+      aside.panel{ width:100%; max-width:none; }
+      .hint{ display:none; }
+      .loginBody{ grid-template-columns: 1fr; }
+      .loginFoot .btns{ min-width: 0; width:100%; justify-content:stretch; }
+      .fieldRow{ grid-template-columns: 1fr; }
+      button{ min-width: 150px; }
+    }
   </style>
 </head>
 
 <body>
-  <div class="startOverlay" id="startOverlay">
-    <div class="startCard">
-      <div class="startHead">
-        <div>
-          <div class="h">Mobile Mini Putt — Pinch to Play</div>
+  <!-- LOGIN / SCAN OVERLAY -->
+  <div class="loginOverlay" id="loginOverlay" aria-hidden="false">
+    <canvas class="bgParticles" id="bgParticles"></canvas>
+
+    <div class="loginCard">
+      <div class="loginHead">
+        <div class="left">
+          <div class="h">
+            <!-- Flag icon -->
+            <svg class="ico" viewBox="0 0 24 24" fill="none">
+              <path d="M6 22V3" stroke="rgba(255,214,10,.9)" stroke-width="2" stroke-linecap="round"/>
+              <path d="M6 4c4 0 4 2 8 2s4-2 8-2v10c-4 0-4 2-8 2s-4-2-8-2V4Z" fill="rgba(255,214,10,.25)" stroke="rgba(255,214,10,.55)" stroke-width="1.5"/>
+            </svg>
+            Gesture Mini Putt Pro — Easy Pinch Login Scan
+          </div>
           <div class="p">
-            Simplified mobile flow: <b>Start → Camera Permission → Play</b>.
-            <br/>Gesture flow: <b>Pinch = Lock</b> → <b>Release</b> → <b>Pinch = Shoot</b>.
-            Power can be set with the <b>thumb slider</b> (recommended on phones).
+            Gesture mode: <b>Pinch #1</b> locks + power select, <b>Pinch #2</b> shoots instantly. Scan requires <b>2 pinch-clicks</b> to validate.
+          </div>
+        </div>
+
+        <div class="pill" style="max-width: 360px; cursor:default;">
+          <div class="t">
+            <svg class="ico" viewBox="0 0 24 24" fill="none">
+              <path d="M3 10.5V8a5 5 0 0 1 5-5h8a5 5 0 0 1 5 5v2.5" stroke="rgba(46,229,157,.9)" stroke-width="2" stroke-linecap="round"/>
+              <path d="M2 12.5a3 3 0 0 1 3-3h2v10H5a3 3 0 0 1-3-3v-4Z" fill="rgba(46,229,157,.12)" stroke="rgba(46,229,157,.45)" stroke-width="1.5"/>
+              <path d="M22 12.5a3 3 0 0 0-3-3h-2v10h2a3 3 0 0 0 3-3v-4Z" fill="rgba(46,229,157,.12)" stroke="rgba(46,229,157,.45)" stroke-width="1.5"/>
+            </svg>
+            Camera Requirement
+          </div>
+          <div class="s">Use <b>https://</b> or <b>http://localhost</b>. Camera won’t reliably work from <b>file://</b>.</div>
+        </div>
+      </div>
+
+      <div class="loginBody">
+        <div class="pane">
+          <h4>
+            <svg class="ico" viewBox="0 0 24 24" fill="none">
+              <path d="M12 2a4 4 0 0 1 4 4v2h2a3 3 0 0 1 3 3v6a5 5 0 0 1-5 5H8a5 5 0 0 1-5-5v-6a3 3 0 0 1 3-3h2V6a4 4 0 0 1 4-4Z" stroke="rgba(255,255,255,.70)" stroke-width="2"/>
+              <path d="M9 12h6" stroke="rgba(255,214,10,.85)" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            Profile & Controls
+          </h4>
+
+          <div class="desc">
+            <b>Gesture (recommended):</b> Pinch index + thumb.
+            <br/>• <b>Pinch #1</b> locks aim + enables power select
+            <br/>• Move index tip <b>up/down</b> to set power
+            <br/>• <b>Pinch #2</b> shoots instantly
+          </div>
+
+          <div class="fieldRow">
+            <div class="field">
+              <label>Player Name</label>
+              <input id="loginName" placeholder="Player 1" />
+            </div>
+            <div class="field">
+              <label>Theme</label>
+              <select id="loginTheme">
+                <option value="classic">Classic</option>
+                <option value="neon">Neon Rush</option>
+                <option value="ice">Ice Drift</option>
+                <option value="desert">Desert Storm</option>
+                <option value="aurora">Aurora Night</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="pillRow">
+            <div class="pill on" id="pillGesture">
+              <div class="t">
+                <svg class="ico" viewBox="0 0 24 24" fill="none">
+                  <path d="M7 14c0-2 2-4 5-4s5 2 5 4" stroke="rgba(255,214,10,.9)" stroke-width="2" stroke-linecap="round"/>
+                  <path d="M9 14v6m6-6v6" stroke="rgba(255,214,10,.55)" stroke-width="2" stroke-linecap="round"/>
+                  <path d="M12 9c1.8 0 3-1.2 3-3S13.8 3 12 3 9 4.2 9 6s1.2 3 3 3Z" fill="rgba(255,214,10,.20)" stroke="rgba(255,214,10,.55)" stroke-width="1.5"/>
+                </svg>
+                Gesture (Camera + Easy Pinch)
+              </div>
+              <div class="s">Login starts camera, shows scan screen, validates <b>2 pinch-clicks</b>, then calibrates and starts.</div>
+            </div>
+
+            <div class="pill" id="pillMouse">
+              <div class="t">
+                <svg class="ico" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 2c4.4 0 8 3.6 8 8v4c0 4.4-3.6 8-8 8s-8-3.6-8-8v-4c0-4.4 3.6-8 8-8Z" stroke="rgba(255,255,255,.70)" stroke-width="2"/>
+                  <path d="M12 6v4" stroke="rgba(255,214,10,.85)" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                Mouse (No Camera)
+              </div>
+              <div class="s">Start instantly. Click to lock, move up/down for power, click again to shoot.</div>
+            </div>
+          </div>
+
+          <!-- Scan Screen (black) -->
+          <div class="scanWrap">
+            <canvas id="scanCanvas" width="640" height="480"></canvas>
+            <div class="scanBadge bad" id="scanBadge">
+              <div class="dot"></div>
+              <div id="scanBadgeText">No hand detected</div>
+            </div>
+            <div class="scanSteps">
+              <div><b>Scan Phase:</b> <span id="scanPhase">Idle</span></div>
+              <div style="margin-top:4px;"><b>Instruction:</b> <span id="scanInstr">Click Login + Start Scan</span></div>
+              <div style="margin-top:4px;"><b>Validated clicks:</b> <span id="scanClicks">0 / 2</span></div>
+              <div class="scanProg"><i id="scanProg"></i></div>
+              <div style="margin-top:8px;">
+                <span style="color:#bcd0ea;">Pinch threshold (normalized):</span>
+                <b id="scanOutPinch">—</b>
+                <span style="color:#bcd0ea; margin-left:10px;">Smoothing:</span>
+                <b id="scanOutSmooth">—</b>
+              </div>
+            </div>
+          </div>
+
+          <div class="actions" style="margin-top:10px;">
+            <button id="enrollBtn">
+              <svg class="ico" viewBox="0 0 24 24" fill="none">
+                <path d="M12 2l3 6 6 .8-4.4 4 1.1 6.2L12 16.9 6.3 19l1.1-6.2L3 8.8 9 8l3-6Z" fill="rgba(255,214,10,.18)" stroke="rgba(255,214,10,.55)" stroke-width="1.5"/>
+              </svg>
+              Enroll Gesture
+            </button>
+            <button id="wipeBtn" class="danger">
+              <svg class="ico" viewBox="0 0 24 24" fill="none">
+                <path d="M7 7l10 10M17 7L7 17" stroke="rgba(255,80,80,.9)" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+              Wipe Enrollment
+            </button>
+          </div>
+
+          <div class="mini" style="margin-top:10px;">
+            Enrollment is optional. If enrolled, login verifies your gesture quickly <i>before</i> scan.
+          </div>
+        </div>
+
+        <div class="pane">
+          <h4>
+            <svg class="ico" viewBox="0 0 24 24" fill="none">
+              <path d="M4 19V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14" stroke="rgba(255,255,255,.70)" stroke-width="2" stroke-linecap="round"/>
+              <path d="M7 7h10M7 11h10M7 15h7" stroke="rgba(255,214,10,.85)" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            Preview & Notes
+          </h4>
+
+          <div class="desc">These settings apply immediately when the game begins.</div>
+
+          <div class="section">
+            <h3 style="margin-bottom:10px;">
+              <svg class="ico" viewBox="0 0 24 24" fill="none">
+                <path d="M12 2v20" stroke="rgba(46,229,157,.9)" stroke-width="2" stroke-linecap="round"/>
+                <path d="M2 12h20" stroke="rgba(46,229,157,.55)" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+              Live Preview
+            </h3>
+            <div class="grid2">
+              <div class="kpi"><div class="t">Controls</div><div class="v" id="prevControls">Gesture</div></div>
+              <div class="kpi"><div class="t">Player</div><div class="v" id="prevName">Player 1</div></div>
+              <div class="kpi"><div class="t">Theme</div><div class="v" id="prevTheme">Classic</div></div>
+              <div class="kpi"><div class="t">Enrollment</div><div class="v" id="prevEnroll">Not set</div></div>
+            </div>
+          </div>
+
+          <div class="section" style="margin-top:10px;">
+            <h3 style="margin-bottom:10px;">
+              <svg class="ico" viewBox="0 0 24 24" fill="none">
+                <path d="M12 3a9 9 0 1 0 9 9" stroke="rgba(255,214,10,.9)" stroke-width="2" stroke-linecap="round"/>
+                <path d="M21 3v6h-6" stroke="rgba(255,214,10,.55)" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+              Scan Steps
+            </h3>
+            <div class="mini">
+              <b>Automatic:</b> camera warmup → <b>2 pinch-click validate</b> → open-hand hold → pinch sampling → apply calibration → start round.
+              <br/><br/>
+              <b>Mobile tip:</b> Keep hand large in frame; pinch decisively (touch thumb and index tip).
+            </div>
+          </div>
+
+          <div class="section" style="margin-top:10px;">
+            <h3 style="margin-bottom:10px;">
+              <svg class="ico" viewBox="0 0 24 24" fill="none">
+                <path d="M12 2C7 2 3 6 3 11c0 6 9 11 9 11s9-5 9-11c0-5-4-9-9-9Z" fill="rgba(46,229,157,.14)" stroke="rgba(46,229,157,.45)" stroke-width="1.5"/>
+                <path d="M9.5 11.5l1.8 1.8 3.6-4" stroke="rgba(46,229,157,.9)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              Fallback
+            </h3>
+            <div class="mini">If permission is denied or camera fails, the game automatically switches to Mouse mode.</div>
           </div>
         </div>
       </div>
 
-      <div class="startBody">
-        <div class="startGrid">
-          <button class="primary" id="startGestureBtn">Play with Camera (Pinch)</button>
-          <button id="startTouchBtn">Play with Touch (No Camera)</button>
+      <div class="loginFoot">
+        <div class="note" id="footNote">
+          Note: Browsers require a user action to enable audio. Sound cues activate after you press a button here.
         </div>
-
-        <div class="startGrid">
-          <button id="flipCamBtn">Flip Camera (Front/Back)</button>
-          <button id="toggleDebugBtn">Toggle Debug View</button>
-        </div>
-
-        <div class="note" id="startStatus">
-          Status: Ready. Tap a start button to proceed. (Camera requires https or localhost.)
+        <div class="btns">
+          <button id="mouseStartBtn">
+            <svg class="ico" viewBox="0 0 24 24" fill="none">
+              <path d="M12 2c4.4 0 8 3.6 8 8v4c0 4.4-3.6 8-8 8s-8-3.6-8-8v-4c0-4.4 3.6-8 8-8Z" stroke="rgba(255,255,255,.70)" stroke-width="2"/>
+              <path d="M12 6v4" stroke="rgba(255,214,10,.85)" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            Start (Mouse)
+          </button>
+          <button id="loginBtn" class="primary">
+            <svg class="ico" viewBox="0 0 24 24" fill="none">
+              <path d="M4 12h10" stroke="rgba(255,214,10,.95)" stroke-width="2" stroke-linecap="round"/>
+              <path d="M10 8l4 4-4 4" stroke="rgba(255,214,10,.95)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M20 4v16" stroke="rgba(255,255,255,.35)" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            Login + Start Scan
+          </button>
         </div>
       </div>
     </div>
   </div>
 
-  <div class="app">
+  <div class="toast" id="toast">Ready</div>
+
+  <!-- MAIN GAME UI -->
+  <div class="stage">
     <div class="topbar">
       <div class="brand">
-        <div class="t">Mini Putt</div>
-        <div class="s" id="statusLine">Aim → Lock → Power → Shoot</div>
+        <div class="title">
+          <svg class="ico" viewBox="0 0 24 24" fill="none">
+            <path d="M6 22V3" stroke="rgba(255,214,10,.9)" stroke-width="2" stroke-linecap="round"/>
+            <path d="M6 4c4 0 4 2 8 2s4-2 8-2v10c-4 0-4 2-8 2s-4-2-8-2V4Z" fill="rgba(255,214,10,.25)" stroke="rgba(255,214,10,.55)" stroke-width="1.5"/>
+          </svg>
+          Gesture Mini Putt Pro
+        </div>
+        <div class="tag" id="modeBadge">Gesture: OFF</div>
+        <div class="tag" id="themeBadge">Theme: Classic</div>
       </div>
 
-      <div class="chips">
-        <div class="chip"><span>Hole</span><b id="holeText">1/18</b></div>
-        <div class="chip"><span>Strokes</span><b id="strokesText">0</b></div>
-        <div class="chip hideMobile"><span>Angle</span><b id="angleText">0.0°</b></div>
-        <div class="chip"><span>Power</span><b id="powerText">35%</b></div>
-        <div class="chip hideMobile"><span>Mode</span><b id="modeText">Gesture</b></div>
+      <div class="stats">
+        <div class="chip"><b>Player</b><span id="playerText">P1</span></div>
+        <div class="chip"><b>Hole</b><span id="holeText">1 / 18</span></div>
+        <div class="chip"><b>Strokes</b><span id="strokeText">0</span></div>
+        <div class="chip"><b>Total</b><span id="totalText">0</span></div>
+        <div class="chip"><b>Angle</b><span id="angleText">0.0°</span></div>
+        <div class="chip"><b>Power</b><span id="powerText">35%</span></div>
       </div>
     </div>
 
-    <div class="stage" id="stage">
+    <div class="canvasWrap" id="canvasWrap">
       <canvas id="course"></canvas>
-      <div class="banner" id="banner">Ready</div>
-    </div>
-
-    <div class="bottomBar">
-      <div class="row">
-        <div class="powerWrap">
-          <div class="powerTop">
-            <div><b>POWER</b> (mobile slider)</div>
-            <div id="powerPct">35%</div>
+      <div class="overlay">
+        <div class="banner" id="banner">Hole 1</div>
+        <div class="hud">
+          <div class="power">
+            <div class="row">
+              <div class="label" id="stateText">AIM</div>
+              <div class="val" id="powerVal">35%</div>
+            </div>
+            <div class="bar"><i id="powerBar"></i></div>
           </div>
-          <input id="powerSlider" type="range" min="2" max="100" step="1" value="35" />
+          <div class="hint">
+            <b>Gesture:</b> Aim with index tip → <b>Pinch #1</b> locks + power → move finger <b>up/down</b> → <b>Pinch #2</b> shoots.
+            <br/><b>Mouse:</b> Aim with mouse → click to lock + gauge → move up/down → click to shoot.
+          </div>
         </div>
-      </div>
-
-      <div class="btnRow">
-        <button id="settingsBtn">Settings</button>
-        <button class="primary" id="lockShootBtn">Lock / Shoot</button>
-        <button class="danger" id="resetBtn">Reset</button>
       </div>
     </div>
   </div>
 
-  <!-- Settings Drawer -->
-  <div class="drawer" id="drawer">
-    <div class="drawerCard">
-      <div class="drawerHead">
-        <div class="h">Settings</div>
-        <button id="closeDrawerBtn">Close</button>
+  <aside class="panel">
+    <div class="actions">
+      <button id="reopenLoginBtn" class="primary">Login / Scan</button>
+      <button id="newCourseBtn">New 18 Holes</button>
+    </div>
+
+    <div class="actions">
+      <button id="toggleGestureBtn">Toggle Gesture</button>
+      <button id="toggleCameraBtn">Toggle Camera Debug</button>
+    </div>
+
+    <div class="section">
+      <h3>
+        <svg class="ico" viewBox="0 0 24 24" fill="none">
+          <path d="M4 20h16" stroke="rgba(255,255,255,.55)" stroke-width="2" stroke-linecap="round"/>
+          <path d="M7 17c3-8 7-8 10 0" stroke="rgba(255,214,10,.85)" stroke-width="2" stroke-linecap="round"/>
+          <path d="M12 9v3" stroke="rgba(46,229,157,.85)" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        Round
+      </h3>
+      <div class="grid2">
+        <div class="kpi"><div class="t">Par (Hole)</div><div class="v" id="parText">3</div></div>
+        <div class="kpi"><div class="t">Theme</div><div class="v" id="themeText">Classic</div></div>
+        <div class="kpi"><div class="t">Status</div><div class="v" id="statusText">Ready</div></div>
+        <div class="kpi"><div class="t">Cue</div><div class="v" id="lockText">Free</div></div>
       </div>
-
-      <div class="drawerBody">
-        <div class="ctl">
-          <div class="k">Green friction <span id="frictionVal">0.986</span></div>
-          <input id="friction" type="range" min="0.965" max="0.995" step="0.001" value="0.986" />
-        </div>
-
-        <div class="ctl">
-          <div class="k">Max speed <span id="speedVal">1100</span></div>
-          <input id="maxSpeed" type="range" min="650" max="1600" step="25" value="1100" />
-        </div>
-
-        <div class="ctl">
-          <div class="k">Aim smoothing <span id="smoothVal">0.34</span></div>
-          <input id="smoothing" type="range" min="0.10" max="0.65" step="0.01" value="0.34" />
-        </div>
-
-        <div class="ctl">
-          <div class="k">Pinch threshold (ratio) <span id="pinchVal">0.36</span></div>
-          <input id="pinchThreshold" type="range" min="0.22" max="0.60" step="0.01" value="0.36" />
-        </div>
-
-        <div class="ctl">
-          <div class="k">Pinch hold ms <span id="holdVal">110</span></div>
-          <input id="pinchHoldMs" type="range" min="60" max="220" step="10" value="110" />
-        </div>
-
-        <div class="ctl">
-          <div class="k">Gesture cooldown ms <span id="coolVal">260</span></div>
-          <input id="pinchCooldownMs" type="range" min="160" max="520" step="20" value="260" />
-        </div>
-      </div>
-
-      <div class="drawerFoot">
-        <button id="toggleModeBtn" class="primary">Toggle Gesture / Touch</button>
-        <button id="newCourseBtn">New 18 Holes</button>
+      <div class="mini" style="margin-top:10px;">
+        Ball must come to rest to shoot again. If ball leaves the play box → <b>+1 penalty</b> and respot.
       </div>
     </div>
-  </div>
 
-  <!-- Debug -->
-  <canvas id="debug" width="640" height="480"></canvas>
-  <video id="cam" playsinline autoplay muted></video>
+    <div class="section">
+      <h3>
+        <svg class="ico" viewBox="0 0 24 24" fill="none">
+          <path d="M12 2v4" stroke="rgba(255,214,10,.85)" stroke-width="2" stroke-linecap="round"/>
+          <path d="M12 18v4" stroke="rgba(255,214,10,.85)" stroke-width="2" stroke-linecap="round"/>
+          <path d="M4.9 4.9l2.8 2.8" stroke="rgba(255,255,255,.55)" stroke-width="2" stroke-linecap="round"/>
+          <path d="M16.3 16.3l2.8 2.8" stroke="rgba(255,255,255,.55)" stroke-width="2" stroke-linecap="round"/>
+          <path d="M2 12h4" stroke="rgba(255,255,255,.55)" stroke-width="2" stroke-linecap="round"/>
+          <path d="M18 12h4" stroke="rgba(255,255,255,.55)" stroke-width="2" stroke-linecap="round"/>
+          <path d="M4.9 19.1l2.8-2.8" stroke="rgba(255,255,255,.55)" stroke-width="2" stroke-linecap="round"/>
+          <path d="M16.3 7.7l2.8-2.8" stroke="rgba(255,255,255,.55)" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        Settings (Pinch restored)
+      </h3>
+
+      <div class="rowCtl">
+        <label>Green Friction (lower = longer roll)</label>
+        <span class="mini" id="frictionVal"></span>
+      </div>
+      <input id="friction" type="range" min="0.965" max="0.995" step="0.001" value="0.986" />
+
+      <div class="rowCtl">
+        <label>Max Speed (power scale)</label>
+        <span class="mini" id="maxSpeedVal"></span>
+      </div>
+      <input id="maxSpeed" type="range" min="650" max="1600" step="25" value="1100" />
+
+      <div class="rowCtl">
+        <label>Gesture Smoothing</label>
+        <span class="mini" id="smoothVal"></span>
+      </div>
+      <input id="smoothing" type="range" min="0.08" max="0.65" step="0.01" value="0.30" />
+
+      <div class="rowCtl">
+        <label>Pinch Threshold (normalized)</label>
+        <span class="mini" id="pinchVal"></span>
+      </div>
+      <!-- Restored easier pinch: normalized threshold ~0.35-0.55 typical -->
+      <input id="pinchThreshold" type="range" min="0.20" max="0.70" step="0.01" value="0.42" />
+
+      <div class="rowCtl">
+        <label>Power Gauge Sensitivity</label>
+        <span class="mini" id="gaugeSensVal"></span>
+      </div>
+      <input id="gaugeSensitivity" type="range" min="0.50" max="2.50" step="0.05" value="1.25" />
+
+      <div class="actions" style="margin-top:10px;">
+        <button id="restartCamBtn">Restart Camera</button>
+        <button id="resetTurnBtn" class="danger">Reset Turn</button>
+      </div>
+
+      <div class="mini" style="margin-top:10px;">
+        If pinch feels hard: increase threshold (easier), reduce smoothing slightly, improve lighting, keep hand larger in frame.
+      </div>
+    </div>
+
+    <div class="section cameraWrap" id="cameraWrap">
+      <h3>Camera Debug</h3>
+      <canvas id="debug" width="640" height="480"></canvas>
+      <div class="mini" style="margin-top:10px;">
+        Debug view shows camera image + hand landmarks.
+      </div>
+    </div>
+  </aside>
+
+  <video id="input_video" playsinline autoplay muted></video>
+
+  <!-- MediaPipe Hands -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 
   <script>
-    /***********************
-     * Utilities
-     ***********************/
-    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-    const len = (x,y) => Math.sqrt(x*x + y*y);
-    const len2 = (x,y) => x*x + y*y;
-    const smooth = (prev, next, a) => prev + a * (next - prev);
+    /*****************************************************************
+     * UTIL
+     *****************************************************************/
+    function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
+    function len2(x, y){ return x*x + y*y; }
+    function len(x, y){ return Math.sqrt(x*x + y*y); }
+    function smooth(prev, next, alpha){ return prev + alpha * (next - prev); }
 
-    const isMobile = (() => {
-      const coarse = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
-      return coarse || /Android|iPhone|iPad|iPod|Mobi/i.test(navigator.userAgent || "");
-    })();
+    function median(arr){
+      if (!arr || arr.length === 0) return 0;
+      const a = arr.slice().sort((x,y)=>x-y);
+      const m = Math.floor(a.length/2);
+      return a.length % 2 ? a[m] : (a[m-1] + a[m]) * 0.5;
+    }
+    function isLikelyMobile(){
+      return /Android|iPhone|iPad|iPod|Mobi/i.test(navigator.userAgent || "");
+    }
 
-    /***********************
-     * UI
-     ***********************/
+    /*****************************************************************
+     * TOAST
+     *****************************************************************/
+    const toastEl = document.getElementById("toast");
+    let toastTimer = 0;
+    function toast(msg, seconds=1.4){
+      toastEl.textContent = msg;
+      toastEl.classList.add("show");
+      toastTimer = seconds;
+    }
+
+    /*****************************************************************
+     * BACKGROUND PARTICLES (Login screen)
+     *****************************************************************/
+    const bg = document.getElementById("bgParticles");
+    const bgc = bg.getContext("2d");
+    let bgW=0,bgH=0, bgDpr=1;
+    const pCount = 62;
+    const particles = [];
+    function resizeBg(){
+      bgDpr = Math.max(1, Math.min(2.5, window.devicePixelRatio || 1));
+      bgW = Math.max(2, Math.floor(window.innerWidth * bgDpr));
+      bgH = Math.max(2, Math.floor(window.innerHeight * bgDpr));
+      bg.width = bgW;
+      bg.height = bgH;
+      particles.length = 0;
+      for (let i=0;i<pCount;i++){
+        particles.push({
+          x: Math.random()*bgW,
+          y: Math.random()*bgH,
+          r: (8+Math.random()*26)*bgDpr,
+          vx: (-0.16+Math.random()*0.32)*bgDpr,
+          vy: (-0.10+Math.random()*0.20)*bgDpr,
+          a: 0.08+Math.random()*0.20,
+        });
+      }
+    }
+    function tickBg(dt){
+      bgc.clearRect(0,0,bgW,bgH);
+      const g = bgc.createRadialGradient(bgW*0.2, bgH*0.15, bgH*0.1, bgW*0.2, bgH*0.15, bgH*0.9);
+      g.addColorStop(0, "rgba(255,214,10,0.08)");
+      g.addColorStop(0.55, "rgba(46,229,157,0.04)");
+      g.addColorStop(1, "rgba(0,0,0,0)");
+      bgc.fillStyle = g;
+      bgc.fillRect(0,0,bgW,bgH);
+
+      for (const p of particles){
+        p.x += p.vx * dt*60;
+        p.y += p.vy * dt*60;
+        if (p.x < -p.r) p.x = bgW + p.r;
+        if (p.x > bgW + p.r) p.x = -p.r;
+        if (p.y < -p.r) p.y = bgH + p.r;
+        if (p.y > bgH + p.r) p.y = -p.r;
+
+        bgc.beginPath();
+        bgc.fillStyle = `rgba(255,255,255,${p.a})`;
+        bgc.arc(p.x, p.y, p.r, 0, Math.PI*2);
+        bgc.fill();
+      }
+    }
+
+    /*****************************************************************
+     * AUDIO
+     *****************************************************************/
+    let audioCtx = null;
+    function initAudio(){
+      if (audioCtx) return;
+      try{ audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch { audioCtx = null; }
+    }
+    async function resumeAudio(){
+      if (!audioCtx) return;
+      try{ if (audioCtx.state === "suspended") await audioCtx.resume(); } catch {}
+    }
+    function blip(freq=440, ms=70, gain=0.05){
+      if (!audioCtx) return;
+      const t0 = audioCtx.currentTime;
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = "sine";
+      o.frequency.setValueAtTime(freq, t0);
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(gain, t0 + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + ms/1000);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(t0);
+      o.stop(t0 + ms/1000 + 0.02);
+    }
+
+    /*****************************************************************
+     * DOM
+     *****************************************************************/
+    const Login = {
+      overlay: document.getElementById("loginOverlay"),
+      pillGesture: document.getElementById("pillGesture"),
+      pillMouse: document.getElementById("pillMouse"),
+      loginBtn: document.getElementById("loginBtn"),
+      mouseStartBtn: document.getElementById("mouseStartBtn"),
+      enrollBtn: document.getElementById("enrollBtn"),
+      wipeBtn: document.getElementById("wipeBtn"),
+      footNote: document.getElementById("footNote"),
+      loginName: document.getElementById("loginName"),
+      loginTheme: document.getElementById("loginTheme"),
+      prevControls: document.getElementById("prevControls"),
+      prevName: document.getElementById("prevName"),
+      prevTheme: document.getElementById("prevTheme"),
+      prevEnroll: document.getElementById("prevEnroll"),
+
+      scanCanvas: document.getElementById("scanCanvas"),
+      scanBadge: document.getElementById("scanBadge"),
+      scanBadgeText: document.getElementById("scanBadgeText"),
+      scanPhase: document.getElementById("scanPhase"),
+      scanInstr: document.getElementById("scanInstr"),
+      scanClicks: document.getElementById("scanClicks"),
+      scanProg: document.getElementById("scanProg"),
+      scanOutPinch: document.getElementById("scanOutPinch"),
+      scanOutSmooth: document.getElementById("scanOutSmooth"),
+    };
+    const scanCtx = Login.scanCanvas.getContext("2d");
+
+    const canvas = document.getElementById("course");
+    const wrap = document.getElementById("canvasWrap");
+    const ctx = canvas.getContext("2d");
+
+    const debugCanvas = document.getElementById("debug");
+    const debugCtx = debugCanvas.getContext("2d");
+    const cameraWrap = document.getElementById("cameraWrap");
+
     const UI = {
-      startOverlay: document.getElementById("startOverlay"),
-      startGestureBtn: document.getElementById("startGestureBtn"),
-      startTouchBtn: document.getElementById("startTouchBtn"),
-      startStatus: document.getElementById("startStatus"),
-      flipCamBtn: document.getElementById("flipCamBtn"),
-      toggleDebugBtn: document.getElementById("toggleDebugBtn"),
-
-      statusLine: document.getElementById("statusLine"),
+      modeBadge: document.getElementById("modeBadge"),
+      themeBadge: document.getElementById("themeBadge"),
+      playerText: document.getElementById("playerText"),
       holeText: document.getElementById("holeText"),
-      strokesText: document.getElementById("strokesText"),
+      strokeText: document.getElementById("strokeText"),
+      totalText: document.getElementById("totalText"),
       angleText: document.getElementById("angleText"),
       powerText: document.getElementById("powerText"),
-      modeText: document.getElementById("modeText"),
-
+      parText: document.getElementById("parText"),
+      themeText: document.getElementById("themeText"),
+      statusText: document.getElementById("statusText"),
+      lockText: document.getElementById("lockText"),
       banner: document.getElementById("banner"),
+      stateText: document.getElementById("stateText"),
+      powerVal: document.getElementById("powerVal"),
+      powerBar: document.getElementById("powerBar"),
 
-      powerSlider: document.getElementById("powerSlider"),
-      powerPct: document.getElementById("powerPct"),
-
-      settingsBtn: document.getElementById("settingsBtn"),
-      lockShootBtn: document.getElementById("lockShootBtn"),
-      resetBtn: document.getElementById("resetBtn"),
-
-      drawer: document.getElementById("drawer"),
-      closeDrawerBtn: document.getElementById("closeDrawerBtn"),
-      toggleModeBtn: document.getElementById("toggleModeBtn"),
+      reopenLoginBtn: document.getElementById("reopenLoginBtn"),
+      toggleGestureBtn: document.getElementById("toggleGestureBtn"),
       newCourseBtn: document.getElementById("newCourseBtn"),
+      toggleCameraBtn: document.getElementById("toggleCameraBtn"),
+      restartCamBtn: document.getElementById("restartCamBtn"),
+      resetTurnBtn: document.getElementById("resetTurnBtn"),
 
       friction: document.getElementById("friction"),
       frictionVal: document.getElementById("frictionVal"),
       maxSpeed: document.getElementById("maxSpeed"),
-      speedVal: document.getElementById("speedVal"),
+      maxSpeedVal: document.getElementById("maxSpeedVal"),
       smoothing: document.getElementById("smoothing"),
       smoothVal: document.getElementById("smoothVal"),
       pinchThreshold: document.getElementById("pinchThreshold"),
       pinchVal: document.getElementById("pinchVal"),
-      pinchHoldMs: document.getElementById("pinchHoldMs"),
-      holdVal: document.getElementById("holdVal"),
-      pinchCooldownMs: document.getElementById("pinchCooldownMs"),
-      coolVal: document.getElementById("coolVal"),
+      gaugeSensitivity: document.getElementById("gaugeSensitivity"),
+      gaugeSensVal: document.getElementById("gaugeSensVal"),
     };
 
-    const canvas = document.getElementById("course");
-    const stage = document.getElementById("stage");
-    const ctx = canvas.getContext("2d");
-
-    const debug = document.getElementById("debug");
-    const dctx = debug.getContext("2d");
-
-    const video = document.getElementById("cam");
-
-    let debugOn = false;
-    UI.toggleDebugBtn.addEventListener("click", () => {
-      debugOn = !debugOn;
-      debug.classList.toggle("show", debugOn);
-      UI.startStatus.textContent = `Status: Debug ${debugOn ? "ON" : "OFF"}.`;
-    });
-
-    /***********************
-     * World / View
-     ***********************/
+    /*****************************************************************
+     * WORLD / CANVAS TRANSFORM
+     *****************************************************************/
     const WORLD_W = 1100;
     const WORLD_H = 550;
 
     let dpr = Math.max(1, Math.min(2.5, window.devicePixelRatio || 1));
-    const view = { w:0, h:0, scale:1, ox:0, oy:0 };
+    let view = { w: 0, h: 0, scale: 1, ox: 0, oy: 0 };
 
     function resize(){
       dpr = Math.max(1, Math.min(2.5, window.devicePixelRatio || 1));
-      const r = stage.getBoundingClientRect();
-      const pw = Math.max(2, Math.floor(r.width * dpr));
-      const ph = Math.max(2, Math.floor(r.height * dpr));
-      canvas.width = pw; canvas.height = ph;
+      const r = wrap.getBoundingClientRect();
+      const pixelW = Math.max(2, Math.floor(r.width * dpr));
+      const pixelH = Math.max(2, Math.floor(r.height * dpr));
+      canvas.width = pixelW;
+      canvas.height = pixelH;
 
-      const sx = pw / WORLD_W;
-      const sy = ph / WORLD_H;
+      const sx = pixelW / WORLD_W;
+      const sy = pixelH / WORLD_H;
       view.scale = Math.min(sx, sy);
-      view.w = pw; view.h = ph;
-      view.ox = (pw - WORLD_W * view.scale) * 0.5;
-      view.oy = (ph - WORLD_H * view.scale) * 0.5;
-    }
-    window.addEventListener("resize", resize);
-    resize();
+      view.w = pixelW;
+      view.h = pixelH;
+      view.ox = (pixelW - WORLD_W * view.scale) * 0.5;
+      view.oy = (pixelH - WORLD_H * view.scale) * 0.5;
 
-    function withWorld(drawFn){
+      grassPattern = makeGrassPattern();
+    }
+    window.addEventListener("resize", () => { resize(); resizeBg(); });
+
+    function withWorldTransform(drawFn){
       ctx.save();
       ctx.setTransform(view.scale, 0, 0, view.scale, view.ox, view.oy);
       drawFn();
@@ -590,203 +1100,7 @@
       return { x: clamp(x, 0, WORLD_W), y: clamp(y, 0, WORLD_H) };
     }
 
-    /***********************
-     * Banner
-     ***********************/
-    let bannerT = 0;
-    function showBanner(msg, seconds=1.2){
-      UI.banner.textContent = msg;
-      UI.banner.classList.add("show");
-      bannerT = seconds;
-    }
-
-    /***********************
-     * Game model
-     ***********************/
-    const BALL_R = 12;
-    const HOLE_R = 15;
-    const REST_EPS2 = 9*9;
-
-    let holes = [];
-    let holeIndex = 0;
-
-    let frictionPerFrame = parseFloat(UI.friction.value);
-    let maxSpeed = parseFloat(UI.maxSpeed.value);
-
-    let ball = { x: 200, y: WORLD_H/2, vx: 0, vy: 0 };
-    let aim  = { x: 380, y: WORLD_H/2 };
-
-    let strokes = 0;
-    let holed = false;
-
-    let cueLocked = false;
-    let lockedAngle = 0;
-    let power = 0.35;
-
-    function allStopped(){ return len2(ball.vx, ball.vy) <= REST_EPS2; }
-
-    function currentAngle(){
-      if (cueLocked) return lockedAngle;
-      return Math.atan2(aim.y - ball.y, aim.x - ball.x);
-    }
-
-    function makeHole(rng){
-      const bounds = { x: 70, y: 60, w: WORLD_W - 140, h: WORLD_H - 120 };
-      const start = { x: bounds.x + 110, y: bounds.y + 110 + rng()*(bounds.h - 220) };
-      const cup   = { x: bounds.x + bounds.w - 120, y: bounds.y + 110 + rng()*(bounds.h - 220) };
-
-      const obstacles = [];
-      const count = 4 + Math.floor(rng()*3); // 4..6
-      for (let i=0;i<count;i++){
-        const w = 90 + rng()*160;
-        const h = 28 + rng()*70;
-        const x = bounds.x + 140 + rng()*(bounds.w - 280 - w);
-        const y = bounds.y + 80 + rng()*(bounds.h - 160 - h);
-        obstacles.push({ x,y,w,h });
-      }
-      return { bounds, start, cup, obstacles };
-    }
-
-    function rand(seed){
-      let t = seed >>> 0;
-      return function(){
-        t += 0x6D2B79F5;
-        let x = Math.imul(t ^ (t >>> 15), 1 | t);
-        x ^= x + Math.imul(x ^ (x >>> 7), 61 | x);
-        return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
-      };
-    }
-
-    function newCourse(){
-      const rng = rand((Date.now() ^ (Math.random()*1e9))|0);
-      holes = Array.from({length:18}, () => makeHole(rng));
-      holeIndex = 0;
-      strokes = 0;
-      holed = false;
-      startHole(0);
-      showBanner("New 18 holes", 1.1);
-    }
-
-    function startHole(i){
-      holeIndex = clamp(i, 0, 17);
-      const h = holes[holeIndex];
-      ball.x = h.start.x; ball.y = h.start.y;
-      ball.vx = 0; ball.vy = 0;
-      aim.x = ball.x + 180; aim.y = ball.y;
-      cueLocked = false;
-      lockedAngle = currentAngle();
-      power = 0.35;
-      UI.powerSlider.value = String(Math.round(power*100));
-      showBanner(`Hole ${holeIndex+1}`, 1.0);
-      updateUI();
-    }
-
-    function resetTurn(){
-      const h = holes[holeIndex];
-      ball.x = h.start.x; ball.y = h.start.y;
-      ball.vx = 0; ball.vy = 0;
-      aim.x = ball.x + 180; aim.y = ball.y;
-      cueLocked = false;
-      lockedAngle = currentAngle();
-      power = 0.35;
-      UI.powerSlider.value = "35";
-      holed = false;
-      showBanner("Reset", 0.9);
-      updateUI();
-    }
-
-    function strike(){
-      if (!allStopped() || holed) return;
-      const ang = currentAngle();
-      const speed = clamp(power, 0.02, 1.0) * maxSpeed;
-      ball.vx = Math.cos(ang) * speed;
-      ball.vy = Math.sin(ang) * speed;
-      strokes += 1;
-      cueLocked = false;
-      updateUI();
-      showBanner("Putt!", 0.6);
-    }
-
-    function applyPhysics(dt){
-      const h = holes[holeIndex];
-      const friction = Math.pow(frictionPerFrame, dt * 60);
-
-      ball.x += ball.vx * dt;
-      ball.y += ball.vy * dt;
-
-      ball.vx *= friction;
-      ball.vy *= friction;
-
-      if (len2(ball.vx, ball.vy) < 6){ ball.vx = 0; ball.vy = 0; }
-
-      // bounds collide
-      const minX = h.bounds.x + BALL_R;
-      const maxX = h.bounds.x + h.bounds.w - BALL_R;
-      const minY = h.bounds.y + BALL_R;
-      const maxY = h.bounds.y + h.bounds.h - BALL_R;
-
-      const bounce = 0.88;
-      if (ball.x < minX){ ball.x = minX; ball.vx *= -bounce; }
-      if (ball.x > maxX){ ball.x = maxX; ball.vx *= -bounce; }
-      if (ball.y < minY){ ball.y = minY; ball.vy *= -bounce; }
-      if (ball.y > maxY){ ball.y = maxY; ball.vy *= -bounce; }
-
-      // obstacles circle vs AABB
-      for (const o of h.obstacles){
-        const cx = clamp(ball.x, o.x, o.x + o.w);
-        const cy = clamp(ball.y, o.y, o.y + o.h);
-        const dx = ball.x - cx;
-        const dy = ball.y - cy;
-        if (dx*dx + dy*dy <= BALL_R*BALL_R){
-          const d = Math.max(0.0001, Math.sqrt(dx*dx + dy*dy));
-          const nx = dx/d, ny = dy/d;
-          ball.x = cx + nx*(BALL_R + 0.2);
-          ball.y = cy + ny*(BALL_R + 0.2);
-          const vn = ball.vx*nx + ball.vy*ny;
-          ball.vx -= (1.85*vn)*nx;
-          ball.vy -= (1.85*vn)*ny;
-          ball.vx *= 0.94; ball.vy *= 0.94;
-        }
-      }
-
-      // cup pull and sink
-      const cupDx = h.cup.x - ball.x;
-      const cupDy = h.cup.y - ball.y;
-      const d2 = cupDx*cupDx + cupDy*cupDy;
-
-      const pullR = HOLE_R*3.2;
-      if (d2 < pullR*pullR){
-        const v2 = len2(ball.vx, ball.vy);
-        if (v2 < 420*420){
-          const d = Math.max(0.0001, Math.sqrt(d2));
-          const nx = cupDx/d, ny = cupDy/d;
-          const pull = (1 - d/pullR) * 210;
-          ball.vx += nx*pull*dt;
-          ball.vy += ny*pull*dt;
-        }
-      }
-
-      if (d2 <= (HOLE_R*0.9)*(HOLE_R*0.9) && len2(ball.vx, ball.vy) < 120*120){
-        ball.vx *= 0.45; ball.vy *= 0.45;
-        ball.x = smooth(ball.x, h.cup.x, 0.10);
-        ball.y = smooth(ball.y, h.cup.y, 0.10);
-        if (allStopped()){
-          ball.x = h.cup.x; ball.y = h.cup.y;
-          ball.vx = 0; ball.vy = 0;
-        }
-      }
-
-      if (!holed && allStopped() && d2 <= (HOLE_R*0.92)*(HOLE_R*0.92)){
-        holed = true;
-        cueLocked = false;
-        showBanner("Holed out! Tap/Pinch to advance", 1.6);
-      }
-    }
-
-    /***********************
-     * Drawing (simple but clean)
-     ***********************/
-    function drawRoundedRect(x,y,w,h,r){
+    function drawRoundedRectPath(x,y,w,h,r){
       const rr = Math.min(r, w/2, h/2);
       ctx.beginPath();
       ctx.moveTo(x+rr, y);
@@ -797,47 +1111,1151 @@
       ctx.closePath();
     }
 
-    function draw(){
+    /*****************************************************************
+     * THEMES
+     *****************************************************************/
+    const GAME_MODES = [
+      { id: "classic", name: "Classic", grassA: "#1f8a48", grassB:"#146b30", deco:"#b7ff9f", defaults: { friction: 0.986, maxSpeed: 1100 }, mechanics: { boostPads: 0, wind: 0, ice: 0, sandBias: 0.10 } },
+      { id: "neon", name: "Neon Rush", grassA: "#16865b", grassB:"#0b5b3f", deco:"#ffd60a", defaults: { friction: 0.988, maxSpeed: 1200 }, mechanics: { boostPads: 2, wind: 0, ice: 0, sandBias: 0.05 } },
+      { id: "ice", name: "Ice Drift", grassA: "#1b7aa1", grassB:"#0e3f67", deco:"#cfe9ff", defaults: { friction: 0.993, maxSpeed: 1050 }, mechanics: { boostPads: 0, wind: 0, ice: 1, sandBias: 0.02 } },
+      { id: "desert", name: "Desert Storm", grassA: "#a4833a", grassB:"#6f5420", deco:"#ffe08a", defaults: { friction: 0.984, maxSpeed: 1125 }, mechanics: { boostPads: 0, wind: 1, ice: 0, sandBias: 0.30 } },
+      { id: "aurora", name: "Aurora Night", grassA: "#124a5e", grassB:"#071a2c", deco:"#2ee59d", defaults: { friction: 0.989, maxSpeed: 1150 }, mechanics: { boostPads: 1, wind: 0, ice: 0, sandBias: 0.08 } },
+    ];
+    function modeById(id){ return GAME_MODES.find(m => m.id === id) || GAME_MODES[0]; }
+    let selectedMode = GAME_MODES[0];
+
+    /*****************************************************************
+     * PERSISTENCE
+     *****************************************************************/
+    const LS = { settings: "gmp_settings_v2", enroll: "gmp_enroll_v2" };
+
+    function loadSettings(){
+      try{
+        const raw = localStorage.getItem(LS.settings);
+        if (!raw) return;
+        const s = JSON.parse(raw);
+        if (typeof s.name === "string") Login.loginName.value = s.name;
+        if (typeof s.theme === "string") Login.loginTheme.value = s.theme;
+        if (typeof s.controlMode === "string") controlMode = s.controlMode;
+
+        if (typeof s.friction === "number") UI.friction.value = s.friction.toFixed(3);
+        if (typeof s.maxSpeed === "number") UI.maxSpeed.value = String(Math.round(s.maxSpeed));
+        if (typeof s.smoothing === "number") UI.smoothing.value = s.smoothing.toFixed(2);
+
+        // normalized pinch threshold
+        if (typeof s.pinchThresholdN === "number") UI.pinchThreshold.value = s.pinchThresholdN.toFixed(2);
+
+        if (typeof s.gaugeSensitivity === "number") UI.gaugeSensitivity.value = s.gaugeSensitivity.toFixed(2);
+      } catch {}
+    }
+    function saveSettings(){
+      try{
+        const s = {
+          name: Login.loginName.value || "Player 1",
+          theme: Login.loginTheme.value || "classic",
+          controlMode,
+          friction: parseFloat(UI.friction.value),
+          maxSpeed: parseFloat(UI.maxSpeed.value),
+          smoothing: parseFloat(UI.smoothing.value),
+          pinchThresholdN: parseFloat(UI.pinchThreshold.value),
+          gaugeSensitivity: parseFloat(UI.gaugeSensitivity.value),
+        };
+        localStorage.setItem(LS.settings, JSON.stringify(s));
+      } catch {}
+    }
+
+    function hasEnrollment(){
+      try{
+        const raw = localStorage.getItem(LS.enroll);
+        if (!raw) return false;
+        const obj = JSON.parse(raw);
+        return Array.isArray(obj.vec) && obj.vec.length >= 8;
+      } catch { return false; }
+    }
+    function getEnrollment(){
+      try{
+        const raw = localStorage.getItem(LS.enroll);
+        if (!raw) return null;
+        const obj = JSON.parse(raw);
+        if (!Array.isArray(obj.vec)) return null;
+        return obj;
+      } catch { return null; }
+    }
+    function setEnrollment(vec){
+      try{ localStorage.setItem(LS.enroll, JSON.stringify({ vec, t: Date.now() })); } catch {}
+    }
+    function wipeEnrollment(){
+      try{ localStorage.removeItem(LS.enroll); } catch {}
+    }
+
+    /*****************************************************************
+     * LOGIN STATE
+     *****************************************************************/
+    let appState = "LOGIN"; // LOGIN | PLAY
+    let controlMode = isLikelyMobile() ? "gesture" : "gesture"; // default gesture
+    let gestureEnabled = false;
+
+    function refreshLoginPreview(){
+      const nm = (Login.loginName.value || "").trim() || "Player 1";
+      Login.prevName.textContent = nm;
+      Login.prevTheme.textContent = modeById(Login.loginTheme.value).name;
+      Login.prevControls.textContent = controlMode === "gesture" ? "Gesture" : "Mouse";
+      Login.prevEnroll.textContent = hasEnrollment() ? "Enrolled" : "Not set";
+    }
+    function refreshControlPills(){
+      Login.pillGesture.classList.toggle("on", controlMode === "gesture");
+      Login.pillMouse.classList.toggle("on", controlMode === "mouse");
+      refreshLoginPreview();
+    }
+    function openLogin(){
+      appState = "LOGIN";
+      Login.overlay.classList.remove("hidden");
+      Login.overlay.setAttribute("aria-hidden", "false");
+      refreshLoginPreview();
+      toast("Login opened", 1.1);
+    }
+    function closeLogin(){
+      Login.overlay.classList.add("hidden");
+      Login.overlay.setAttribute("aria-hidden", "true");
+      appState = "PLAY";
+    }
+
+    /*****************************************************************
+     * HAND FEATURES (Enrollment / Login verify)
+     *****************************************************************/
+    function featureVectorFromLandmarks(lm){
+      const wrist = lm[0];
+      const mcpMid = lm[9] || lm[0];
+      const scale = Math.max(0.0001, Math.hypot(mcpMid.x - wrist.x, mcpMid.y - wrist.y));
+      function d(i,j){
+        const a = lm[i], b = lm[j];
+        return Math.hypot(a.x-b.x, a.y-b.y) / scale;
+      }
+      const v = [
+        d(4,8), d(4,12), d(4,16), d(4,20),
+        d(8,12), d(12,16), d(16,20),
+        d(0,8), d(0,12), d(0,20),
+      ];
+      if (lm[5] && lm[17]){
+        v.push(Math.hypot(lm[5].x-lm[17].x, lm[5].y-lm[17].y) / scale);
+      } else v.push(0.0);
+      for (let i=0;i<v.length;i++) v[i] = clamp(v[i], 0.0, 6.0);
+      return v;
+    }
+    function cosineSim(a,b){
+      let dot=0, na=0, nb=0;
+      const n = Math.min(a.length, b.length);
+      for (let i=0;i<n;i++){
+        dot += a[i]*b[i];
+        na += a[i]*a[i];
+        nb += b[i]*b[i];
+      }
+      if (na <= 1e-12 || nb <= 1e-12) return 0;
+      return dot / (Math.sqrt(na) * Math.sqrt(nb));
+    }
+
+    /*****************************************************************
+     * MEDIAPIPE CAMERA + RESTORED EASY PINCH LOGIC
+     *
+     * Key changes vs strict pinch:
+     * - Uses normalized pinch distance: dist(thumb_tip,index_tip)/hand_span
+     * - Hysteresis: pinch releases only above threshold + margin
+     * - Frame confirmation: requires a couple consecutive frames below threshold
+     * - Mobile defaults: higher threshold, shorter cooldown
+     *****************************************************************/
+    const video = document.getElementById("input_video");
+    let mpHands = null;
+    let mpCamera = null;
+
+    const HandState = {
+      has: false,
+      lm: null,
+      indexTip: null,
+      thumbTip: null,
+      indexNorm: { x: 0.5, y: 0.5 },
+
+      pinchN: 1.0,          // normalized pinch distance (smaller = tighter pinch)
+      pinchDown: false,     // debounced pinch state
+      pinchClick: false,    // rising-edge click
+      _downFrames: 0,
+      _upFrames: 0,
+
+      lastClickAt: 0,
+      lastSeenAt: 0,
+    };
+
+    // Easier on mobile
+    const MOBILE = isLikelyMobile();
+    const PINCH_COOLDOWN_MS = MOBILE ? 140 : 190;
+    const PINCH_DOWN_FRAMES = MOBILE ? 2 : 2;   // confirm pinch down quickly
+    const PINCH_UP_FRAMES   = MOBILE ? 2 : 2;   // confirm release quickly
+    const PINCH_HYST        = MOBILE ? 0.08 : 0.07; // hysteresis margin
+
+    async function startCameraPipeline(){
+      if (mpCamera && mpHands) return true;
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+        return false;
+      }
+      try{
+        mpHands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+        mpHands.setOptions({
+          maxNumHands: 1,
+          modelComplexity: 1,
+          minDetectionConfidence: MOBILE ? 0.65 : 0.70,
+          minTrackingConfidence: MOBILE ? 0.65 : 0.70,
+        });
+        mpHands.onResults(onHandResults);
+
+        mpCamera = new Camera(video, {
+          onFrame: async () => {
+            if (!mpHands) return;
+            await mpHands.send({ image: video });
+          },
+          width: 640,
+          height: 480,
+        });
+
+        await mpCamera.start();
+        return true;
+      } catch (e){
+        console.error(e);
+        await stopCameraPipeline();
+        return false;
+      }
+    }
+
+    async function stopCameraPipeline(){
+      try{ if (mpCamera && typeof mpCamera.stop === "function") await mpCamera.stop(); } catch {}
+      mpCamera = null;
+
+      try{
+        if (video && video.srcObject){
+          const tracks = video.srcObject.getTracks?.() || [];
+          tracks.forEach(t => t.stop());
+          video.srcObject = null;
+        }
+      } catch {}
+
+      try{ if (mpHands && typeof mpHands.close === "function") mpHands.close(); } catch {}
+      mpHands = null;
+
+      HandState.has = false;
+      HandState.lm = null;
+      HandState._downFrames = 0;
+      HandState._upFrames = 0;
+      HandState.pinchDown = false;
+      HandState.pinchClick = false;
+    }
+
+    function computePinchNormalized(lm){
+      // normalized pinch: dist(thumb_tip,index_tip) / hand_span
+      const thumb = lm[4];
+      const indexTip = lm[8];
+      const indexMcp = lm[5] || lm[8];
+      const pinkyMcp = lm[17] || lm[0];
+
+      const pinch = Math.hypot(thumb.x - indexTip.x, thumb.y - indexTip.y);
+
+      // hand span baseline (more stable than wrist-to-tip)
+      const span = Math.max(0.0001, Math.hypot(indexMcp.x - pinkyMcp.x, indexMcp.y - pinkyMcp.y));
+
+      // normalized; clamp to keep stable
+      return clamp(pinch / span, 0.0, 2.0);
+    }
+
+    function updateDebouncedPinch(pinchN){
+      const thr = parseFloat(UI.pinchThreshold.value); // normalized threshold
+      const now = performance.now();
+
+      HandState.pinchClick = false;
+      HandState.pinchN = pinchN;
+
+      // debounced with hysteresis
+      if (!HandState.pinchDown){
+        if (pinchN < thr){
+          HandState._downFrames += 1;
+          if (HandState._downFrames >= PINCH_DOWN_FRAMES){
+            HandState.pinchDown = true;
+            HandState._upFrames = 0;
+
+            if (now - HandState.lastClickAt > PINCH_COOLDOWN_MS){
+              HandState.pinchClick = true;
+              HandState.lastClickAt = now;
+            }
+          }
+        } else {
+          HandState._downFrames = 0;
+        }
+      } else {
+        // release only above threshold + hysteresis
+        if (pinchN > (thr + PINCH_HYST)){
+          HandState._upFrames += 1;
+          if (HandState._upFrames >= PINCH_UP_FRAMES){
+            HandState.pinchDown = false;
+            HandState._downFrames = 0;
+            HandState._upFrames = 0;
+          }
+        } else {
+          HandState._upFrames = 0;
+        }
+      }
+    }
+
+    function drawScanScreen(results){
+      // black scan screen with faint darkened video + landmarks
+      const W = Login.scanCanvas.width;
+      const H = Login.scanCanvas.height;
+
+      // base black
+      scanCtx.setTransform(1,0,0,1,0,0);
+      scanCtx.fillStyle = "#000";
+      scanCtx.fillRect(0,0,W,H);
+
+      // draw video darker
+      if (results && results.image){
+        scanCtx.globalAlpha = 0.85;
+        scanCtx.drawImage(results.image, 0, 0, W, H);
+        scanCtx.globalAlpha = 1;
+        scanCtx.fillStyle = "rgba(0,0,0,.55)";
+        scanCtx.fillRect(0,0,W,H);
+      }
+
+      // draw landmarks if any
+      if (results && results.multiHandLandmarks && results.multiHandLandmarks.length){
+        const lm = results.multiHandLandmarks[0];
+
+        // MediaPipe drawing utils works on any canvas context
+        try{
+          drawConnectors(scanCtx, lm, window.HAND_CONNECTIONS || HAND_CONNECTIONS, { color: "#2ee59d", lineWidth: 3 });
+          drawLandmarks(scanCtx, lm, { color: "#ffd60a", lineWidth: 2 });
+        } catch {
+          // ignore if drawing utils missing
+        }
+
+        // highlight thumb-index line
+        const t = lm[4], i = lm[8];
+        scanCtx.beginPath();
+        scanCtx.strokeStyle = "rgba(255,214,10,.85)";
+        scanCtx.lineWidth = 4;
+        scanCtx.moveTo((1 - t.x) * W, t.y * H);
+        scanCtx.lineTo((1 - i.x) * W, i.y * H);
+        scanCtx.stroke();
+      }
+
+      // crosshair
+      scanCtx.globalAlpha = 0.25;
+      scanCtx.strokeStyle = "rgba(255,255,255,.8)";
+      scanCtx.lineWidth = 1;
+      scanCtx.beginPath();
+      scanCtx.moveTo(W*0.5, 0);
+      scanCtx.lineTo(W*0.5, H);
+      scanCtx.moveTo(0, H*0.5);
+      scanCtx.lineTo(W, H*0.5);
+      scanCtx.stroke();
+      scanCtx.globalAlpha = 1;
+    }
+
+    function onHandResults(results){
+      // Always render scan screen while login overlay visible
+      if (!Login.overlay.classList.contains("hidden")) {
+        drawScanScreen(results);
+      }
+
+      // optional debug panel
+      if (cameraWrap.classList.contains("show")) {
+        debugCtx.save();
+        debugCtx.clearRect(0, 0, debugCanvas.width, debugCanvas.height);
+        debugCtx.drawImage(results.image, 0, 0, debugCanvas.width, debugCanvas.height);
+      }
+
+      HandState.has = false;
+      HandState.lm = null;
+
+      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0){
+        const lm = results.multiHandLandmarks[0];
+        HandState.has = true;
+        HandState.lm = lm;
+        HandState.lastSeenAt = performance.now();
+
+        if (cameraWrap.classList.contains("show")){
+          try{
+            drawConnectors(debugCtx, lm, window.HAND_CONNECTIONS || HAND_CONNECTIONS, { color: "#2ee59d", lineWidth: 3 });
+            drawLandmarks(debugCtx, lm, { color: "#ffd60a", lineWidth: 2 });
+          } catch {}
+          debugCtx.restore();
+        }
+
+        const indexTip = lm[8];
+        // mirror x for natural feel
+        HandState.indexNorm.x = 1 - indexTip.x;
+        HandState.indexNorm.y = indexTip.y;
+
+        // restored pinch
+        const pinchN = computePinchNormalized(lm);
+        updateDebouncedPinch(pinchN);
+      } else {
+        // if no hand, still clear pinch click
+        HandState.pinchClick = false;
+        if (cameraWrap.classList.contains("show")) debugCtx.restore();
+      }
+    }
+
+    /*****************************************************************
+     * SCAN FLOW (requires 2 pinch-click validation)
+     *****************************************************************/
+    function setBadge(ok){
+      if (ok){
+        Login.scanBadge.classList.add("good");
+        Login.scanBadge.classList.remove("bad");
+        Login.scanBadgeText.textContent = "Positive Scan: Hand detected";
+      } else {
+        Login.scanBadge.classList.add("bad");
+        Login.scanBadge.classList.remove("good");
+        Login.scanBadgeText.textContent = "No hand detected";
+      }
+    }
+    function setScanUI(phase, instr, pct, clicksDone){
+      Login.scanPhase.textContent = phase;
+      Login.scanInstr.textContent = instr;
+      Login.scanProg.style.width = `${clamp(pct,0,100)}%`;
+      Login.scanClicks.textContent = `${clicksDone} / 2`;
+    }
+
+    const Scan = {
+      running: false,
+      phase: "idle", // warmup | validateClicks | open | pinch | done | fail
+      t0: 0,
+
+      warmupSeconds: 0.6,
+      validateTimeoutSeconds: 8.0,
+      openHoldSeconds: 1.3,
+      pinchTarget: 5,
+
+      clicksNeeded: 2,
+      clicksDone: 0,
+
+      openSamples: [],
+      pinchSamples: [],
+      jitterSamples: [],
+      lastIndexX: null,
+      lastIndexY: null,
+
+      _pinchClicksCollected: 0,
+    };
+
+    function startScan(){
+      Scan.running = true;
+      Scan.phase = "warmup";
+      Scan.t0 = performance.now();
+
+      Scan.clicksDone = 0;
+      Scan.openSamples = [];
+      Scan.pinchSamples = [];
+      Scan.jitterSamples = [];
+      Scan.lastIndexX = null;
+      Scan.lastIndexY = null;
+
+      Login.scanOutPinch.textContent = "—";
+      Login.scanOutSmooth.textContent = "—";
+      setScanUI("Warmup", "Starting camera feed…", 0, 0);
+      toast("Scan started", 1.0);
+      blip(520, 60, 0.04);
+    }
+
+    function finishScanApply(){
+      const openMed = median(Scan.openSamples);
+      const pinchMed = median(Scan.pinchSamples);
+
+      // threshold midpoint between open and pinch; clamp to safe range
+      let thr = (openMed > 0 && pinchMed > 0) ? (openMed + pinchMed) * 0.5 : parseFloat(UI.pinchThreshold.value);
+      // easier bias on mobile: slightly higher threshold
+      if (MOBILE) thr *= 1.05;
+      thr = clamp(thr, 0.20, 0.70);
+
+      const jitterMed = median(Scan.jitterSamples);
+      // translate jitter into smoothing suggestion
+      let sugg = 0.30;
+      if (jitterMed > 0.018) sugg = 0.44;
+      else if (jitterMed > 0.012) sugg = 0.38;
+      else sugg = MOBILE ? 0.32 : 0.28;
+
+      UI.pinchThreshold.value = thr.toFixed(2);
+      UI.smoothing.value = sugg.toFixed(2);
+
+      Login.scanOutPinch.textContent = thr.toFixed(2);
+      Login.scanOutSmooth.textContent = sugg.toFixed(2);
+
+      syncSettingLabels();
+      saveSettings();
+
+      Scan.running = false;
+      Scan.phase = "done";
+      setScanUI("Done", "Calibration applied", 100, Scan.clicksDone);
+      toast("Scan complete — calibration applied", 1.6);
+      blip(740, 90, 0.05);
+    }
+
+    function failScan(msg){
+      Scan.running = false;
+      Scan.phase = "fail";
+      setScanUI("Failed", msg, 0, Scan.clicksDone);
+      toast(msg, 1.8);
+      blip(220, 120, 0.05);
+    }
+
+    function updateScanLoop(){
+      if (!Scan.running) return;
+
+      const now = performance.now();
+      setBadge(HandState.has);
+
+      if (Scan.phase === "warmup"){
+        const elapsed = (now - Scan.t0)/1000;
+        const pct = clamp((elapsed / Scan.warmupSeconds)*100, 0, 100);
+        setScanUI("Warmup", "Starting camera feed…", pct, Scan.clicksDone);
+
+        if (elapsed >= Scan.warmupSeconds){
+          Scan.phase = "validateClicks";
+          Scan.t0 = performance.now();
+          setScanUI("Validate Clicks", "Pinch-click 2 times (thumb + index)", 0, Scan.clicksDone);
+          blip(440, 55, 0.05);
+        }
+        return;
+      }
+
+      // require hand visible
+      if (!HandState.has || !HandState.lm){
+        setScanUI("Waiting", "Put your hand in frame", 0, Scan.clicksDone);
+        return;
+      }
+
+      // collect jitter sample from index tip movement
+      const ix = HandState.lm[8]?.x ?? 0.5;
+      const iy = HandState.lm[8]?.y ?? 0.5;
+      if (Scan.lastIndexX != null){
+        const dx = ix - Scan.lastIndexX;
+        const dy = iy - Scan.lastIndexY;
+        Scan.jitterSamples.push(Math.sqrt(dx*dx + dy*dy));
+      }
+      Scan.lastIndexX = ix;
+      Scan.lastIndexY = iy;
+
+      if (Scan.phase === "validateClicks"){
+        const elapsed = (now - Scan.t0)/1000;
+        const pct = clamp((elapsed / Scan.validateTimeoutSeconds)*100, 0, 100);
+
+        if (HandState.pinchClick){
+          Scan.clicksDone = Math.min(Scan.clicksNeeded, Scan.clicksDone + 1);
+          blip(660, 45, 0.04);
+          toast(`Click validated: ${Scan.clicksDone}/2`, 0.9);
+        }
+
+        setScanUI("Validate Clicks", "Pinch-click 2 times (thumb + index)", pct, Scan.clicksDone);
+
+        if (Scan.clicksDone >= Scan.clicksNeeded){
+          Scan.phase = "open";
+          Scan.t0 = performance.now();
+          setScanUI("Open Hold", "Hold hand open and steady", 0, Scan.clicksDone);
+          blip(520, 55, 0.04);
+        } else if (elapsed >= Scan.validateTimeoutSeconds){
+          failScan("Click validation timed out — try again");
+        }
+        return;
+      }
+
+      if (Scan.phase === "open"){
+        // open-hand: collect pinchN while NOT pinching
+        // even if user lightly pinches, we still collect but bias to larger values over time
+        Scan.openSamples.push(HandState.pinchN);
+
+        const elapsed = (now - Scan.t0)/1000;
+        const pct = clamp((elapsed / Scan.openHoldSeconds)*100, 0, 100);
+        setScanUI("Open Hold", "Hold open and steady…", pct, Scan.clicksDone);
+
+        if (elapsed >= Scan.openHoldSeconds && Scan.openSamples.length > 10){
+          Scan.phase = "pinch";
+          Scan.t0 = performance.now();
+          setScanUI("Pinch Sampling", "Pinch-click 5 times", 0, Scan.clicksDone);
+          blip(520, 60, 0.04);
+        }
+        return;
+      }
+
+      if (Scan.phase === "pinch"){
+        if (HandState.pinchClick){
+          Scan.pinchSamples.push(HandState.pinchN);
+          blip(760, 35, 0.03);
+        }
+        const count = Scan.pinchSamples.length;
+        const pct = clamp((count / Scan.pinchTarget)*100, 0, 100);
+        setScanUI("Pinch Sampling", `Pinch clicks: ${count}/${Scan.pinchTarget}`, pct, Scan.clicksDone);
+
+        if (count >= Scan.pinchTarget){
+          finishScanApply();
+        }
+        return;
+      }
+    }
+
+    /*****************************************************************
+     * GAME MODEL
+     *****************************************************************/
+    const BALL_R = 12;
+    const HOLE_R = 15;
+    const REST_EPS = 9;
+    const REST_EPS2 = REST_EPS * REST_EPS;
+
+    let frictionPerFrame = parseFloat(UI.friction.value);
+    let maxSpeed = parseFloat(UI.maxSpeed.value);
+
+    let holes = [];
+    let holeIndex = 0;
+
+    let ball = { x: 0, y: 0, vx: 0, vy: 0 };
+    let aim = { x: WORLD_W/2, y: WORLD_H/2 };
+
+    let cueLocked = false;
+    let lockedAngle = 0;
+
+    let power = 0.35;
+    let gaugeStartYNorm = 0.5;
+    let gaugeStartPower = 0.35;
+
+    let gaugeStartWorldY = 0;
+    let gaugeStartMousePower = 0.35;
+
+    let player = { name:"P1", total:0, holeStrokes:Array(18).fill(0), holed:Array(18).fill(false) };
+    let finished = false;
+
+    let bannerTimer = 0;
+    function showBanner(text, seconds=1.25){
+      UI.banner.textContent = text;
+      UI.banner.classList.add("show");
+      bannerTimer = seconds;
+    }
+
+    function allStopped(){ return len2(ball.vx, ball.vy) <= REST_EPS2; }
+
+    function currentAngle(){
+      if (cueLocked) return lockedAngle;
+      return Math.atan2(aim.y - ball.y, aim.x - ball.x);
+    }
+
+    function ballInCup(h){
+      return len2(ball.x - h.cup.x, ball.y - h.cup.y) <= (HOLE_R*0.92)*(HOLE_R*0.92) && allStopped();
+    }
+
+    function strokesThisHole(){ return player.holeStrokes[holeIndex] || 0; }
+    function totalStrokes(){ return player.total || 0; }
+
+    function updateUI(){
       const h = holes[holeIndex];
 
-      // green
-      ctx.fillStyle = "#146b30";
+      UI.modeBadge.textContent = `Gesture: ${gestureEnabled ? "ON" : "OFF"}`;
+      UI.themeBadge.textContent = `Theme: ${selectedMode.name}`;
+
+      UI.playerText.textContent = player.name || "P1";
+      UI.holeText.textContent = `${holeIndex + 1} / 18`;
+      UI.strokeText.textContent = `${strokesThisHole()}`;
+      UI.totalText.textContent = `${totalStrokes()}`;
+
+      UI.parText.textContent = `${h.par}`;
+      UI.themeText.textContent = `${selectedMode.name}`;
+      UI.lockText.textContent = cueLocked ? "Locked" : "Free";
+
+      const ang = currentAngle() * 180 / Math.PI;
+      UI.angleText.textContent = `${ang.toFixed(1)}°`;
+
+      const pct = Math.round(power * 100);
+      UI.powerText.textContent = `${pct}%`;
+      UI.powerVal.textContent = `${pct}%`;
+      UI.powerBar.style.width = `${pct}%`;
+
+      if (finished) {
+        UI.statusText.textContent = "Finished";
+        UI.stateText.textContent = "DONE";
+      } else if (!allStopped()) {
+        UI.statusText.textContent = "Ball moving";
+        UI.stateText.textContent = "SHOT";
+      } else if (player.holed[holeIndex]) {
+        UI.statusText.textContent = "Holed out";
+        UI.stateText.textContent = "NEXT";
+      } else {
+        UI.statusText.textContent = cueLocked ? "Set power, pinch/click to shoot" : "Aim, pinch/click to lock";
+        UI.stateText.textContent = cueLocked ? "LOCKED" : "AIM";
+      }
+    }
+
+    function syncSettingLabels(){
+      UI.frictionVal.textContent = parseFloat(UI.friction.value).toFixed(3);
+      UI.maxSpeedVal.textContent = `${Math.round(parseFloat(UI.maxSpeed.value))}`;
+      UI.smoothVal.textContent = parseFloat(UI.smoothing.value).toFixed(2);
+      UI.pinchVal.textContent = parseFloat(UI.pinchThreshold.value).toFixed(2);
+      UI.gaugeSensVal.textContent = parseFloat(UI.gaugeSensitivity.value).toFixed(2);
+    }
+
+    UI.friction.addEventListener("input", () => { frictionPerFrame = parseFloat(UI.friction.value); syncSettingLabels(); saveSettings(); });
+    UI.maxSpeed.addEventListener("input", () => { maxSpeed = parseFloat(UI.maxSpeed.value); syncSettingLabels(); saveSettings(); });
+    UI.smoothing.addEventListener("input", () => { syncSettingLabels(); saveSettings(); });
+    UI.pinchThreshold.addEventListener("input", () => { syncSettingLabels(); saveSettings(); });
+    UI.gaugeSensitivity.addEventListener("input", () => { syncSettingLabels(); saveSettings(); });
+
+    /*****************************************************************
+     * RNG / HOLE GEN
+     *****************************************************************/
+    function rand(seed){
+      let t = seed >>> 0;
+      return function(){
+        t += 0x6D2B79F5;
+        let x = Math.imul(t ^ (t >>> 15), 1 | t);
+        x ^= x + Math.imul(x ^ (x >>> 7), 61 | x);
+        return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+
+    function makeHole(rng){
+      const bounds = { x: 70, y: 60, w: WORLD_W - 140, h: WORLD_H - 120 };
+
+      const start = {
+        x: bounds.x + 90 + rng()*120,
+        y: bounds.y + 80 + rng()*(bounds.h - 160),
+      };
+      const cup = {
+        x: bounds.x + bounds.w - (120 + rng()*160),
+        y: bounds.y + 80 + rng()*(bounds.h - 160),
+      };
+
+      const obstacles = [];
+      const obstacleCount = 3 + Math.floor(rng()*4);
+      const sandBias = selectedMode.mechanics.sandBias;
+
+      for (let i=0;i<obstacleCount;i++){
+        const w = 70 + rng()*140;
+        const h = 24 + rng()*70;
+        const x = bounds.x + 80 + rng()*(bounds.w - 160 - w);
+        const y = bounds.y + 60 + rng()*(bounds.h - 120 - h);
+
+        const roll = rng();
+        let type = "wall";
+        if (roll < 0.55) type = "wall";
+        else if (roll < 0.82) type = "bumper";
+        else type = (rng() < sandBias ? "sand" : "wall");
+
+        if (selectedMode.id === "ice"){
+          if (type === "sand") type = "wall";
+          if (roll > 0.62) type = "bumper";
+        }
+        if (selectedMode.id === "desert"){
+          if (roll > 0.68) type = "sand";
+        }
+        obstacles.push({ x, y, w, h, type });
+      }
+
+      let feature = null;
+      const featureChance = (selectedMode.id === "classic" ? 0.55 : (selectedMode.id === "neon" ? 0.35 : 0.30));
+      if (rng() < featureChance){
+        feature = {
+          type: "spinner",
+          x: bounds.x + bounds.w*0.52 + (rng()*2-1)*120,
+          y: bounds.y + bounds.h*0.50 + (rng()*2-1)*90,
+          r: 34,
+          a: rng()*Math.PI*2,
+          speed: (rng()<0.5? -1 : 1) * (0.75 + rng()*0.95),
+        };
+      }
+
+      const pads = [];
+      if (selectedMode.mechanics.boostPads > 0){
+        for (let k=0;k<selectedMode.mechanics.boostPads;k++){
+          const px = bounds.x + 160 + rng()*(bounds.w - 320);
+          const py = bounds.y + 120 + rng()*(bounds.h - 240);
+          pads.push({ x:px, y:py, r: 26 + rng()*10, cooldown: 0 });
+        }
+      }
+
+      const wind = (selectedMode.mechanics.wind > 0)
+        ? { x: (rng()*2-1) * (22 + rng()*26), y: (rng()*2-1) * (12 + rng()*18) }
+        : { x:0, y:0 };
+
+      function clearPoint(p){
+        for (let k=0;k<60;k++){
+          let ok = true;
+          for (const o of obstacles){
+            if (p.x > o.x-30 && p.x < o.x+o.w+30 && p.y > o.y-30 && p.y < o.y+o.h+30){
+              ok = false;
+              p.y += 18;
+              p.y = clamp(p.y, bounds.y+40, bounds.y+bounds.h-40);
+              break;
+            }
+          }
+          if (ok) break;
+        }
+      }
+      clearPoint(start);
+      clearPoint(cup);
+
+      const dist = len(cup.x - start.x, cup.y - start.y);
+      const basePar = dist < 520 ? 2 : (dist < 760 ? 3 : 4);
+      const par = clamp(basePar + (obstacleCount >= 5 ? 1 : 0) + (feature ? 1 : 0), 2, 6);
+
+      return { bounds, start, cup, obstacles, feature, pads, wind, par };
+    }
+
+    function startHole(idx, fresh=false){
+      holeIndex = clamp(idx, 0, 17);
+      const h = holes[holeIndex];
+
+      ball.x = h.start.x;
+      ball.y = h.start.y;
+      ball.vx = 0; ball.vy = 0;
+
+      aim.x = ball.x + 160;
+      aim.y = ball.y;
+
+      cueLocked = false;
+      lockedAngle = currentAngle();
+
+      power = 0.35;
+      gaugeStartPower = power;
+
+      grassPattern = makeGrassPattern();
+
+      showBanner(`Hole ${holeIndex + 1} — ${selectedMode.name}`, fresh ? 1.6 : 1.2);
+      updateUI();
+    }
+
+    function make18Holes(){
+      const seed = (Date.now() ^ (Math.random()*1e9)) | 0;
+      const rng = rand(seed);
+      holes = Array.from({length:18}, () => makeHole(rng));
+
+      finished = false;
+      player.total = 0;
+      player.holeStrokes = Array(18).fill(0);
+      player.holed = Array(18).fill(false);
+
+      startHole(0, true);
+      toast("New 18-hole course generated", 1.2);
+    }
+
+    /*****************************************************************
+     * PHYSICS
+     *****************************************************************/
+    function applyPhysics(dt){
+      const h = holes[holeIndex];
+      const friction = Math.pow(frictionPerFrame, dt * 60);
+
+      if (h.feature && h.feature.type === "spinner"){
+        h.feature.a += h.feature.speed * dt;
+      }
+
+      if (selectedMode.mechanics.wind > 0 && !allStopped()){
+        ball.vx += h.wind.x * dt;
+        ball.vy += h.wind.y * dt;
+      }
+
+      ball.x += ball.vx * dt;
+      ball.y += ball.vy * dt;
+      ball.vx *= friction;
+      ball.vy *= friction;
+
+      if (len2(ball.vx, ball.vy) < 6){ ball.vx = 0; ball.vy = 0; }
+
+      if (selectedMode.mechanics.boostPads > 0 && h.pads && h.pads.length){
+        for (const pad of h.pads){
+          pad.cooldown = Math.max(0, pad.cooldown - dt);
+          const dx = ball.x - pad.x, dy = ball.y - pad.y;
+          if (dx*dx + dy*dy <= (pad.r + BALL_R)*(pad.r + BALL_R)){
+            if (pad.cooldown <= 0 && len2(ball.vx, ball.vy) > 20*20){
+              ball.vx *= 1.12;
+              ball.vy *= 1.12;
+              pad.cooldown = 0.65;
+              blip(880, 55, 0.04);
+            }
+          }
+        }
+      }
+
+      const minX = h.bounds.x + BALL_R;
+      const maxX = h.bounds.x + h.bounds.w - BALL_R;
+      const minY = h.bounds.y + BALL_R;
+      const maxY = h.bounds.y + h.bounds.h - BALL_R;
+
+      // out-of-bounds
+      if (ball.x < h.bounds.x - 40 || ball.x > h.bounds.x + h.bounds.w + 40 ||
+          ball.y < h.bounds.y - 40 || ball.y > h.bounds.y + h.bounds.h + 40){
+
+        player.total += 1;
+        player.holeStrokes[holeIndex] = (player.holeStrokes[holeIndex] || 0) + 1;
+
+        ball.x = h.start.x;
+        ball.y = h.start.y;
+        ball.vx = 0; ball.vy = 0;
+
+        cueLocked = false;
+        showBanner("Out of bounds — +1 penalty, respotted", 1.6);
+        blip(220, 120, 0.05);
+      }
+
+      const wallBounce = (selectedMode.id === "ice") ? 0.92 : 0.88;
+
+      if (ball.x < minX){ ball.x = minX; ball.vx *= -wallBounce; }
+      if (ball.x > maxX){ ball.x = maxX; ball.vx *= -wallBounce; }
+      if (ball.y < minY){ ball.y = minY; ball.vy *= -wallBounce; }
+      if (ball.y > maxY){ ball.y = maxY; ball.vy *= -wallBounce; }
+
+      for (const o of h.obstacles){
+        const cx = clamp(ball.x, o.x, o.x + o.w);
+        const cy = clamp(ball.y, o.y, o.y + o.h);
+        const dx = ball.x - cx;
+        const dy = ball.y - cy;
+        if (dx*dx + dy*dy <= BALL_R*BALL_R){
+          const d = Math.max(0.0001, Math.sqrt(dx*dx + dy*dy));
+          const nx = dx / d, ny = dy / d;
+
+          ball.x = cx + nx * (BALL_R + 0.2);
+          ball.y = cy + ny * (BALL_R + 0.2);
+
+          const vn = ball.vx*nx + ball.vy*ny;
+
+          if (o.type === "wall"){
+            const k = (selectedMode.id === "ice") ? 1.95 : 1.85;
+            ball.vx -= (k * vn) * nx;
+            ball.vy -= (k * vn) * ny;
+            ball.vx *= 0.93; ball.vy *= 0.93;
+          } else if (o.type === "bumper"){
+            const k = (selectedMode.id === "ice") ? 2.28 : 2.15;
+            ball.vx -= (k * vn) * nx;
+            ball.vy -= (k * vn) * ny;
+            ball.vx *= (selectedMode.id === "neon") ? 1.10 : 1.06;
+            ball.vy *= (selectedMode.id === "neon") ? 1.10 : 1.06;
+            blip(520, 35, 0.03);
+          } else if (o.type === "sand"){
+            ball.vx *= 0.60;
+            ball.vy *= 0.60;
+          }
+        }
+      }
+
+      if (h.feature && h.feature.type === "spinner"){
+        const f = h.feature;
+        const dx = ball.x - f.x;
+        const dy = ball.y - f.y;
+        const rr = (f.r + BALL_R);
+        if (dx*dx + dy*dy <= rr*rr){
+          const d = Math.max(0.0001, Math.sqrt(dx*dx + dy*dy));
+          const nx = dx / d, ny = dy / d;
+          ball.x = f.x + nx * rr;
+          ball.y = f.y + ny * rr;
+          const vn = ball.vx*nx + ball.vy*ny;
+          ball.vx -= (2.0 * vn) * nx;
+          ball.vy -= (2.0 * vn) * ny;
+
+          const tx = -ny, ty = nx;
+          const blade = Math.sin(f.a) * 180;
+          ball.vx += tx * blade * dt;
+          ball.vy += ty * blade * dt;
+
+          ball.vx *= 0.95; ball.vy *= 0.95;
+        }
+      }
+
+      const cupDx = h.cup.x - ball.x;
+      const cupDy = h.cup.y - ball.y;
+      const cupD2 = cupDx*cupDx + cupDy*cupDy;
+      const pullR = HOLE_R*3.2;
+
+      if (cupD2 < pullR*pullR){
+        const v2 = len2(ball.vx, ball.vy);
+        if (v2 < 420*420){
+          const d = Math.max(0.0001, Math.sqrt(cupD2));
+          const nx = cupDx / d, ny = cupDy / d;
+          const pull = (1 - d/pullR) * 210;
+          ball.vx += nx * pull * dt;
+          ball.vy += ny * pull * dt;
+        }
+      }
+
+      if (cupD2 <= (HOLE_R*0.9)*(HOLE_R*0.9) && len2(ball.vx, ball.vy) < 120*120){
+        ball.vx *= 0.45;
+        ball.vy *= 0.45;
+        ball.x = smooth(ball.x, h.cup.x, 0.10);
+        ball.y = smooth(ball.y, h.cup.y, 0.10);
+        if (allStopped()){
+          ball.x = h.cup.x;
+          ball.y = h.cup.y;
+          ball.vx = 0; ball.vy = 0;
+        }
+      }
+    }
+
+    function strikeBall(){
+      if (finished) return;
+      if (!allStopped()) return;
+      if (player.holed[holeIndex]) return;
+
+      const ang = currentAngle();
+      const speed = clamp(power, 0.02, 1.0) * maxSpeed;
+
+      ball.vx = Math.cos(ang) * speed;
+      ball.vy = Math.sin(ang) * speed;
+
+      player.holeStrokes[holeIndex] = (player.holeStrokes[holeIndex] || 0) + 1;
+      player.total += 1;
+
+      cueLocked = false;
+      showBanner("Putt!", 0.6);
+      blip(660, 50, 0.05);
+      updateUI();
+    }
+
+    function resetTurn(){
+      const h = holes[holeIndex];
+      ball.x = h.start.x;
+      ball.y = h.start.y;
+      ball.vx = 0; ball.vy = 0;
+      aim.x = ball.x + 160;
+      aim.y = ball.y;
+      cueLocked = false;
+      power = 0.35;
+      showBanner("Turn reset (ball respotted)", 1.1);
+      blip(300, 70, 0.04);
+      updateUI();
+    }
+
+    /*****************************************************************
+     * VISUALS
+     *****************************************************************/
+    let grassPattern = null;
+
+    function makeGrassPattern(){
+      const tile = document.createElement("canvas");
+      tile.width = 240;
+      tile.height = 240;
+      const t = tile.getContext("2d");
+
+      const a = selectedMode.grassA;
+      const b = selectedMode.grassB;
+
+      const g = t.createLinearGradient(0, 0, 240, 240);
+      g.addColorStop(0, a);
+      g.addColorStop(1, b);
+      t.fillStyle = g;
+      t.fillRect(0,0,240,240);
+
+      t.globalAlpha = 0.18;
+      for (let i=0;i<2200;i++){
+        const x = Math.random()*240;
+        const y = Math.random()*240;
+        const w = 1 + Math.random()*2;
+        const hgt = 4 + Math.random()*12;
+        t.fillStyle = Math.random() < 0.5 ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.25)";
+        t.fillRect(x, y, w, hgt);
+      }
+      t.globalAlpha = 1;
+
+      return ctx.createPattern(tile, "repeat");
+    }
+
+    function drawCourse(){
+      const h = holes[holeIndex];
+
+      ctx.fillStyle = grassPattern || selectedMode.grassA;
       ctx.fillRect(0,0,WORLD_W,WORLD_H);
 
-      // subtle stripes
-      ctx.save();
-      ctx.globalAlpha = 0.10;
-      for (let i=0;i<22;i++){
-        ctx.fillStyle = i%2 ? "#0f5a27" : "#1a7b3a";
-        ctx.fillRect(0, i*(WORLD_H/22), WORLD_W, WORLD_H/22);
-      }
-      ctx.restore();
+      const vg = ctx.createRadialGradient(WORLD_W*0.5, WORLD_H*0.5, WORLD_H*0.2, WORLD_W*0.5, WORLD_H*0.5, WORLD_H*0.95);
+      vg.addColorStop(0, "rgba(0,0,0,0)");
+      vg.addColorStop(1, "rgba(0,0,0,.32)");
+      ctx.fillStyle = vg;
+      ctx.fillRect(0,0,WORLD_W,WORLD_H);
 
-      // bounds frame
       ctx.save();
+      ctx.lineJoin = "round";
       ctx.strokeStyle = "rgba(90,60,35,.95)";
       ctx.lineWidth = 22;
       ctx.strokeRect(h.bounds.x, h.bounds.y, h.bounds.w, h.bounds.h);
-      ctx.strokeStyle = "rgba(255,255,255,.10)";
+      ctx.strokeStyle = "rgba(255,255,255,.08)";
       ctx.lineWidth = 3;
       ctx.strokeRect(h.bounds.x+2, h.bounds.y+2, h.bounds.w-4, h.bounds.h-4);
       ctx.restore();
 
-      // obstacles
+      // boost pads
+      if (h.pads && h.pads.length){
+        for (const pad of h.pads){
+          ctx.save();
+          ctx.globalAlpha = 0.20;
+          ctx.beginPath();
+          ctx.fillStyle = "rgba(255,214,10,1)";
+          ctx.arc(pad.x, pad.y, pad.r+10, 0, Math.PI*2);
+          ctx.fill();
+          ctx.globalAlpha = 0.85;
+          ctx.beginPath();
+          ctx.strokeStyle = "rgba(255,255,255,.55)";
+          ctx.lineWidth = 2;
+          ctx.arc(pad.x, pad.y, pad.r, 0, Math.PI*2);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+
       for (const o of h.obstacles){
         ctx.save();
         ctx.globalAlpha = 0.35;
         ctx.fillStyle = "rgba(0,0,0,1)";
-        drawRoundedRect(o.x+4, o.y+6, o.w, o.h, 10);
+        drawRoundedRectPath(o.x+4, o.y+6, o.w, o.h, 10);
         ctx.fill();
         ctx.globalAlpha = 1;
-        ctx.fillStyle = "rgba(255,255,255,.08)";
-        drawRoundedRect(o.x, o.y, o.w, o.h, 10);
+
+        if (o.type === "wall"){
+          const gg = ctx.createLinearGradient(o.x, o.y, o.x, o.y+o.h);
+          gg.addColorStop(0, "rgba(220,220,220,.22)");
+          gg.addColorStop(1, "rgba(10,10,10,.25)");
+          ctx.fillStyle = gg;
+        } else if (o.type === "bumper"){
+          ctx.fillStyle = (selectedMode.id === "ice") ? "rgba(160,220,255,.18)" : "rgba(255,214,10,.18)";
+        } else {
+          ctx.fillStyle = "rgba(200,160,90,.18)";
+        }
+        drawRoundedRectPath(o.x, o.y, o.w, o.h, 10);
         ctx.fill();
+
         ctx.strokeStyle = "rgba(255,255,255,.10)";
         ctx.lineWidth = 2;
-        drawRoundedRect(o.x, o.y, o.w, o.h, 10);
+        drawRoundedRectPath(o.x, o.y, o.w, o.h, 10);
         ctx.stroke();
+        ctx.restore();
+      }
+
+      if (h.feature && h.feature.type === "spinner"){
+        const f = h.feature;
+        ctx.save();
+        ctx.beginPath();
+        ctx.fillStyle = "rgba(0,0,0,.35)";
+        ctx.arc(f.x+4, f.y+6, f.r+12, 0, Math.PI*2);
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.fillStyle = "rgba(255,255,255,.08)";
+        ctx.arc(f.x, f.y, f.r+10, 0, Math.PI*2);
+        ctx.fill();
+
+        ctx.translate(f.x, f.y);
+        ctx.rotate(f.a);
+        for (let i=0;i<4;i++){
+          ctx.rotate(Math.PI/2);
+          ctx.save();
+          ctx.fillStyle = (selectedMode.id === "neon") ? "rgba(255,214,10,.22)" : "rgba(255,255,255,.12)";
+          ctx.beginPath();
+          const bx = 10, by = -6, bw = 46, bh = 12, br = 6;
+          ctx.moveTo(bx+br, by);
+          ctx.arcTo(bx+bw, by, bx+bw, by+bh, br);
+          ctx.arcTo(bx+bw, by+bh, bx, by+bh, br);
+          ctx.arcTo(bx, by+bh, bx, by, br);
+          ctx.arcTo(bx, by, bx+bw, by, br);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        }
         ctx.restore();
       }
 
@@ -847,549 +2265,713 @@
       ctx.arc(h.cup.x+3, h.cup.y+4, HOLE_R*1.2, 0, Math.PI*2);
       ctx.fill();
 
-      const g = ctx.createRadialGradient(h.cup.x-4, h.cup.y-4, 4, h.cup.x, h.cup.y, HOLE_R);
-      g.addColorStop(0, "rgba(40,40,40,.95)");
-      g.addColorStop(0.6, "rgba(10,10,10,.98)");
-      g.addColorStop(1, "rgba(0,0,0,1)");
+      const hg = ctx.createRadialGradient(h.cup.x-4, h.cup.y-4, 4, h.cup.x, h.cup.y, HOLE_R);
+      hg.addColorStop(0, "rgba(40,40,40,.95)");
+      hg.addColorStop(0.6, "rgba(10,10,10,.98)");
+      hg.addColorStop(1, "rgba(0,0,0,1)");
       ctx.beginPath();
-      ctx.fillStyle = g;
+      ctx.fillStyle = hg;
       ctx.arc(h.cup.x, h.cup.y, HOLE_R, 0, Math.PI*2);
       ctx.fill();
 
-      // aim line + crosshair (when stopped and not holed)
-      if (!holed && allStopped()){
-        const ang = currentAngle();
-        const dx = Math.cos(ang), dy = Math.sin(ang);
+      ctx.beginPath();
+      ctx.strokeStyle = "rgba(255,255,255,.15)";
+      ctx.lineWidth = 2;
+      ctx.arc(h.cup.x, h.cup.y, HOLE_R*1.03, 0, Math.PI*2);
+      ctx.stroke();
 
-        ctx.save();
-        ctx.setLineDash([10,10]);
-        ctx.strokeStyle = cueLocked ? "rgba(255,214,10,.80)" : "rgba(255,255,255,.55)";
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(ball.x, ball.y);
-        ctx.lineTo(ball.x + dx*260, ball.y + dy*260);
-        ctx.stroke();
-        ctx.restore();
+      // flag
+      ctx.save();
+      ctx.strokeStyle = "rgba(255,255,255,.55)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(h.cup.x, h.cup.y - HOLE_R - 2);
+      ctx.lineTo(h.cup.x, h.cup.y - HOLE_R - 62);
+      ctx.stroke();
+      ctx.fillStyle = selectedMode.deco;
+      ctx.beginPath();
+      ctx.moveTo(h.cup.x, h.cup.y - HOLE_R - 62);
+      ctx.lineTo(h.cup.x + 40, h.cup.y - HOLE_R - 52);
+      ctx.lineTo(h.cup.x, h.cup.y - HOLE_R - 42);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
 
-        // crosshair at aim
+      if (selectedMode.id === "desert"){
         ctx.save();
-        ctx.strokeStyle = cueLocked ? "rgba(255,214,10,.85)" : "rgba(46,229,157,.80)";
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(aim.x, aim.y, 10, 0, Math.PI*2);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(aim.x-16, aim.y);
-        ctx.lineTo(aim.x+16, aim.y);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(aim.x, aim.y-16);
-        ctx.lineTo(aim.x, aim.y+16);
-        ctx.stroke();
+        ctx.globalAlpha = 0.12;
+        ctx.fillStyle = "rgba(255,200,120,1)";
+        ctx.fillRect(h.bounds.x, h.bounds.y, h.bounds.w, h.bounds.h);
         ctx.restore();
       }
+      if (selectedMode.id === "aurora"){
+        ctx.save();
+        ctx.globalAlpha = 0.10;
+        const ag = ctx.createLinearGradient(h.bounds.x, h.bounds.y, h.bounds.x + h.bounds.w, h.bounds.y + h.bounds.h);
+        ag.addColorStop(0, "rgba(46,229,157,1)");
+        ag.addColorStop(0.5, "rgba(255,214,10,1)");
+        ag.addColorStop(1, "rgba(160,220,255,1)");
+        ctx.fillStyle = ag;
+        ctx.fillRect(h.bounds.x, h.bounds.y, h.bounds.w, h.bounds.h);
+        ctx.restore();
+      }
+    }
 
-      // ball
+    function drawBall(){
       ctx.beginPath();
       ctx.fillStyle = "rgba(0,0,0,.35)";
       ctx.ellipse(ball.x+3, ball.y+5, BALL_R*1.0, BALL_R*0.8, 0, 0, Math.PI*2);
       ctx.fill();
 
-      const bg = ctx.createRadialGradient(ball.x - BALL_R*0.35, ball.y - BALL_R*0.35, BALL_R*0.2, ball.x, ball.y, BALL_R*1.3);
-      bg.addColorStop(0, "rgba(255,255,255,.80)");
-      bg.addColorStop(0.22, "rgba(255,255,255,.95)");
-      bg.addColorStop(0.9, "rgba(0,0,0,.35)");
-      bg.addColorStop(1, "rgba(0,0,0,.55)");
+      const g = ctx.createRadialGradient(ball.x - BALL_R*0.35, ball.y - BALL_R*0.35, BALL_R*0.2, ball.x, ball.y, BALL_R*1.3);
+      g.addColorStop(0, "rgba(255,255,255,.80)");
+      g.addColorStop(0.22, "rgba(255,255,255,.95)");
+      g.addColorStop(0.9, "rgba(0,0,0,.35)");
+      g.addColorStop(1, "rgba(0,0,0,.55)");
+
       ctx.beginPath();
-      ctx.fillStyle = bg;
+      ctx.fillStyle = g;
       ctx.arc(ball.x, ball.y, BALL_R, 0, Math.PI*2);
       ctx.fill();
 
-      // holed overlay
-      if (holed){
-        ctx.save();
-        ctx.fillStyle = "rgba(0,0,0,.42)";
-        ctx.fillRect(0,0,WORLD_W,WORLD_H);
+      ctx.beginPath();
+      ctx.strokeStyle = "rgba(0,0,0,.35)";
+      ctx.lineWidth = 2;
+      ctx.arc(ball.x, ball.y, BALL_R, 0, Math.PI*2);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.fillStyle = "rgba(255,255,255,.30)";
+      ctx.arc(ball.x - BALL_R*0.28, ball.y - BALL_R*0.28, BALL_R*0.18, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    function drawAimAndPutter(){
+      if (finished) return;
+      if (!allStopped()) return;
+      if (player.holed[holeIndex]) return;
+
+      const ang = currentAngle();
+      const dirx = Math.cos(ang);
+      const diry = Math.sin(ang);
+
+      ctx.save();
+      ctx.setLineDash([10, 10]);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = cueLocked ? "rgba(255,214,10,.78)" : "rgba(255,255,255,.55)";
+      ctx.beginPath();
+      ctx.moveTo(ball.x, ball.y);
+      ctx.lineTo(ball.x + dirx*260, ball.y + diry*260);
+      ctx.stroke();
+      ctx.restore();
+
+      const shaftLen = 150;
+      const back = 62 + (cueLocked ? power*30 : 12);
+
+      const sx = ball.x - dirx * back;
+      const sy = ball.y - diry * back;
+      const ex = sx + dirx * shaftLen;
+      const ey = sy + diry * shaftLen;
+
+      ctx.beginPath();
+      ctx.strokeStyle = "rgba(0,0,0,.35)";
+      ctx.lineWidth = 10;
+      ctx.lineCap = "round";
+      ctx.moveTo(sx+4, sy+6);
+      ctx.lineTo(ex+4, ey+6);
+      ctx.stroke();
+
+      const shaftG = ctx.createLinearGradient(sx, sy, ex, ey);
+      shaftG.addColorStop(0, "rgba(30,18,10,.9)");
+      shaftG.addColorStop(0.55, "rgba(255,214,10,.55)");
+      shaftG.addColorStop(1, "rgba(255,255,255,.92)");
+
+      ctx.beginPath();
+      ctx.strokeStyle = shaftG;
+      ctx.lineWidth = 8;
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(ex, ey);
+      ctx.stroke();
+
+      const hx = ball.x - dirx*(BALL_R + 6);
+      const hy = ball.y - diry*(BALL_R + 6);
+      const px = -diry, py = dirx;
+
+      ctx.beginPath();
+      ctx.strokeStyle = "rgba(240,240,250,.92)";
+      ctx.lineWidth = 10;
+      ctx.moveTo(hx - px*16, hy - py*16);
+      ctx.lineTo(hx + px*16, hy + py*16);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.strokeStyle = cueLocked ? "rgba(255,214,10,.30)" : "rgba(255,255,255,.18)";
+      ctx.lineWidth = 2;
+      ctx.moveTo(hx - px*16, hy - py*16);
+      ctx.lineTo(hx + px*16, hy + py*16);
+      ctx.stroke();
+    }
+
+    function drawPowerGauge(){
+      if (!cueLocked) return;
+      if (finished) return;
+      if (!allStopped()) return;
+      if (player.holed[holeIndex]) return;
+
+      const gx = WORLD_W - 72;
+      const gy = 120;
+      const gh = WORLD_H - 240;
+      const gw = 22;
+
+      ctx.save();
+      ctx.fillStyle = "rgba(0,0,0,.35)";
+      drawRoundedRectPath(gx-6, gy-6, gw+12, gh+12, 14);
+      ctx.fill();
+
+      ctx.fillStyle = "rgba(255,255,255,.08)";
+      drawRoundedRectPath(gx, gy, gw, gh, 12);
+      ctx.fill();
+
+      const fillH = gh * power;
+      ctx.fillStyle = (selectedMode.id === "ice") ? "rgba(160,220,255,.70)" : "rgba(255,214,10,.70)";
+      drawRoundedRectPath(gx, gy + (gh - fillH), gw, fillH, 12);
+      ctx.fill();
+
+      const my = gy + (gh - fillH);
+      ctx.strokeStyle = "rgba(255,255,255,.65)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(gx-10, my);
+      ctx.lineTo(gx+gw+10, my);
+      ctx.stroke();
+
+      ctx.fillStyle = "rgba(255,255,255,.85)";
+      ctx.font = "950 14px ui-sans-serif, system-ui";
+      ctx.fillText("POWER", gx-30, gy-18);
+      ctx.font = "950 12px ui-sans-serif, system-ui";
+      ctx.fillText(`${Math.round(power*100)}%`, gx-22, gy + gh + 26);
+      ctx.restore();
+    }
+
+    function drawEndOverlay(){
+      const h = holes[holeIndex];
+      const holed = player.holed[holeIndex];
+      if (!holed && !finished) return;
+
+      ctx.save();
+      ctx.fillStyle = "rgba(0,0,0,.45)";
+      ctx.fillRect(0,0,WORLD_W,WORLD_H);
+
+      if (finished){
         ctx.fillStyle = "#ffffff";
-        ctx.font = "900 40px ui-sans-serif, system-ui";
-        ctx.fillText("Holed Out!", WORLD_W/2 - 115, WORLD_H/2 - 10);
-        ctx.font = "900 16px ui-sans-serif, system-ui";
-        ctx.fillStyle = "rgba(233,240,251,.90)";
-        ctx.fillText("Pinch / Tap to continue", WORLD_W/2 - 105, WORLD_H/2 + 22);
+        ctx.font = "950 40px ui-sans-serif, system-ui";
+        ctx.fillText("Round Complete", WORLD_W/2 - 160, WORLD_H/2 - 22);
+
+        ctx.font = "950 18px ui-sans-serif, system-ui";
+        ctx.fillStyle = "rgba(233,240,251,.92)";
+        const msg = `Total: ${player.total}`;
+        ctx.fillText(msg, WORLD_W/2 - (msg.length*4.6), WORLD_H/2 + 12);
+
+        ctx.font = "800 14px ui-sans-serif, system-ui";
+        ctx.fillStyle = "rgba(233,240,251,.80)";
+        ctx.fillText("Pinch/click to generate a new course.", WORLD_W/2 - 140, WORLD_H/2 + 44);
         ctx.restore();
-      }
-    }
-
-    /***********************
-     * UI sync
-     ***********************/
-    function syncLabels(){
-      UI.frictionVal.textContent = parseFloat(UI.friction.value).toFixed(3);
-      UI.speedVal.textContent = String(Math.round(parseFloat(UI.maxSpeed.value)));
-      UI.smoothVal.textContent = parseFloat(UI.smoothing.value).toFixed(2);
-      UI.pinchVal.textContent = parseFloat(UI.pinchThreshold.value).toFixed(2);
-      UI.holdVal.textContent = String(parseInt(UI.pinchHoldMs.value,10));
-      UI.coolVal.textContent = String(parseInt(UI.pinchCooldownMs.value,10));
-    }
-
-    function updateUI(){
-      UI.holeText.textContent = `${holeIndex+1}/18`;
-      UI.strokesText.textContent = String(strokes);
-
-      const ang = currentAngle() * 180 / Math.PI;
-      UI.angleText.textContent = `${ang.toFixed(1)}°`;
-
-      const pct = Math.round(power*100);
-      UI.powerText.textContent = `${pct}%`;
-      UI.powerPct.textContent = `${pct}%`;
-      UI.powerSlider.value = String(pct);
-
-      UI.modeText.textContent = gestureEnabled ? "Gesture" : "Touch";
-
-      if (!allStopped()){
-        UI.statusLine.textContent = "Ball moving…";
-        UI.lockShootBtn.textContent = "Locked…";
-      } else if (holed){
-        UI.statusLine.textContent = "Holed out — continue";
-        UI.lockShootBtn.textContent = "Continue";
-      } else if (!cueLocked){
-        UI.statusLine.textContent = gestureEnabled ? "Aim → Pinch to Lock" : "Aim → Tap Lock";
-        UI.lockShootBtn.textContent = "Lock";
-      } else {
-        UI.statusLine.textContent = gestureEnabled ? "Set power → Release → Pinch Shoot" : "Set power → Tap Shoot";
-        UI.lockShootBtn.textContent = "Shoot";
-      }
-    }
-
-    UI.friction.addEventListener("input", () => { frictionPerFrame = parseFloat(UI.friction.value); syncLabels(); });
-    UI.maxSpeed.addEventListener("input", () => { maxSpeed = parseFloat(UI.maxSpeed.value); syncLabels(); });
-    UI.smoothing.addEventListener("input", syncLabels);
-    UI.pinchThreshold.addEventListener("input", syncLabels);
-    UI.pinchHoldMs.addEventListener("input", syncLabels);
-    UI.pinchCooldownMs.addEventListener("input", syncLabels);
-
-    // Mobile power slider is authoritative (gesture can also adjust, but slider is easiest)
-    UI.powerSlider.addEventListener("input", () => {
-      power = clamp(parseInt(UI.powerSlider.value,10)/100, 0.02, 1.0);
-      updateUI();
-    });
-
-    /***********************
-     * Touch input (fallback / primary touch mode)
-     ***********************/
-    let gestureEnabled = true; // default if they select camera
-    let pointerDown = false;
-
-    canvas.addEventListener("pointerdown", (e) => {
-      if (gestureEnabled) return;
-      pointerDown = true;
-      const w = toWorldFromClient(e.clientX, e.clientY);
-      if (!cueLocked && allStopped() && !holed){
-        aim.x = w.x; aim.y = w.y;
-      }
-    }, { passive:false });
-
-    canvas.addEventListener("pointermove", (e) => {
-      if (gestureEnabled) return;
-      if (!pointerDown) return;
-      const w = toWorldFromClient(e.clientX, e.clientY);
-      if (!cueLocked && allStopped() && !holed){
-        aim.x = w.x; aim.y = w.y;
-      }
-    }, { passive:false });
-
-    window.addEventListener("pointerup", () => { pointerDown = false; });
-
-    function tapLockShoot(){
-      if (!allStopped()) return;
-
-      if (holed){
-        holed = false;
-        if (holeIndex < 17) startHole(holeIndex+1);
-        else newCourse();
         return;
       }
 
-      if (!cueLocked){
-        cueLocked = true;
-        lockedAngle = currentAngle();
-        showBanner("Locked — set power, tap to shoot", 1.0);
-      } else {
-        strike();
-      }
-      updateUI();
+      const hmsg = `${player.name} holed out in ${player.holeStrokes[holeIndex]} (Par ${h.par})`;
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "950 40px ui-sans-serif, system-ui";
+      ctx.fillText("Holed Out!", WORLD_W/2 - 110, WORLD_H/2 - 22);
+
+      ctx.font = "950 18px ui-sans-serif, system-ui";
+      ctx.fillStyle = "rgba(233,240,251,.92)";
+      ctx.fillText(hmsg, WORLD_W/2 - (hmsg.length*4.7), WORLD_H/2 + 12);
+
+      ctx.font = "800 14px ui-sans-serif, system-ui";
+      ctx.fillStyle = "rgba(233,240,251,.80)";
+      ctx.fillText("Pinch/click to continue to the next hole.", WORLD_W/2 - 152, WORLD_H/2 + 44);
+      ctx.restore();
     }
 
-    /***********************
-     * Gesture input (MediaPipe Hands) — Mobile stabilized
-     ***********************/
-    let facingMode = "user"; // user | environment
-    let mirrorX = true;
-
-    let mpHands = null;
-    let stream = null;
-    let cameraRunning = false;
-
-    // Smoothed aim from index tip
-    let handAimX = WORLD_W/2;
-    let handAimY = WORLD_H/2;
-
-    // Pinch ratio smoothing + hysteresis + hold-to-confirm
-    let pinchRatioSm = 1.0;
-    let pinchDown = false;
-    let pinchDownAt = 0;
-    let lastPinchActionAt = 0;
-
-    // Require release between lock and shoot
-    let lockAt = 0;
-    let sawReleaseAfterLock = true;
-
-    function setStartStatus(msg){
-      UI.startStatus.textContent = "Status: " + msg;
-    }
-
-    function stopCamera(){
-      cameraRunning = false;
-      if (stream){
-        try{
-          const tracks = stream.getTracks?.() || [];
-          tracks.forEach(t => t.stop());
-        } catch {}
-      }
-      stream = null;
-      video.srcObject = null;
-    }
-
-    async function startCamera(){
-      stopCamera();
-
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
-        throw new Error("getUserMedia not available");
-      }
-
-      mirrorX = (facingMode === "user");
-
-      // Mobile performance: keep it moderate
-      const idealW = isMobile ? 640 : 960;
-      const idealH = isMobile ? 480 : 540;
-
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode,
-          width: { ideal: idealW },
-          height: { ideal: idealH }
-        },
-        audio: false
+    function render(){
+      withWorldTransform(() => {
+        drawCourse();
+        drawAimAndPutter();
+        drawPowerGauge();
+        drawBall();
+        drawEndOverlay();
       });
-
-      video.srcObject = stream;
-      await video.play();
-
-      if (!mpHands){
-        mpHands = new Hands({
-          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
-        });
-
-        mpHands.setOptions({
-          maxNumHands: 1,
-          modelComplexity: isMobile ? 0 : 1,
-          minDetectionConfidence: 0.72,
-          minTrackingConfidence: 0.72,
-        });
-
-        mpHands.onResults(onHandResults);
-      }
-
-      cameraRunning = true;
-      requestAnimationFrame(cameraLoop);
     }
 
-    let lastSendAt = 0;
-    function cameraLoop(t){
-      if (!cameraRunning) return;
+    /*****************************************************************
+     * INPUT: MOUSE
+     *****************************************************************/
+    canvas.addEventListener("mousemove", (e) => {
+      if (appState !== "PLAY") return;
+      if (gestureEnabled) return;
+      const w = toWorldFromClient(e.clientX, e.clientY);
 
-      // Throttle send ~30fps
-      if (video.readyState >= 2 && (t - lastSendAt) > 33){
-        lastSendAt = t;
-        mpHands.send({ image: video });
+      if (cueLocked && allStopped()){
+        const sens = parseFloat(UI.gaugeSensitivity.value);
+        const dy = (gaugeStartWorldY - w.y) / 200;
+        const nextP = clamp(gaugeStartMousePower + dy * sens, 0.02, 1.00);
+        power = smooth(power, nextP, 0.35);
+      } else {
+        aim.x = w.x; aim.y = w.y;
       }
-      requestAnimationFrame(cameraLoop);
-    }
+    });
 
-    function onHandResults(results){
-      if (!gestureEnabled) return;
+    canvas.addEventListener("mousedown", (e) => {
+      if (appState !== "PLAY") return;
+      if (gestureEnabled) return;
 
-      const lm = results.multiHandLandmarks && results.multiHandLandmarks[0];
-      if (!lm){
-        // if no hand, reset pinch state so we don’t “stick”
-        pinchDown = false;
-        pinchDownAt = 0;
+      if (finished){
+        make18Holes();
         return;
       }
 
-      // Debug draw
-      if (debugOn){
-        dctx.save();
-        dctx.clearRect(0,0,debug.width,debug.height);
-        // draw video frame (mirrored if front cam)
-        dctx.save();
-        if (mirrorX){
-          dctx.translate(debug.width, 0);
-          dctx.scale(-1, 1);
+      if (player.holed[holeIndex] && allStopped()){
+        if (holeIndex >= 17){
+          finished = true;
+          showBanner("Round complete — click for new course", 2.2);
+          blip(660, 110, 0.06);
+        } else {
+          holeIndex += 1;
+          startHole(holeIndex);
         }
-        dctx.drawImage(results.image, 0,0, debug.width, debug.height);
-        dctx.restore();
-
-        if (typeof drawConnectors === "function"){
-          drawConnectors(dctx, lm, window.HAND_CONNECTIONS || HAND_CONNECTIONS, { color: "#2ee59d", lineWidth: 3 });
-          drawLandmarks(dctx, lm, { color: "#ffd60a", lineWidth: 2 });
-        }
-        dctx.restore();
+        return;
       }
 
-      const indexTip = lm[8];
-      const thumbTip = lm[4];
-      const iMcp = lm[5];
-      const pMcp = lm[17];
-
-      // Aim point
-      const nx = mirrorX ? (1 - indexTip.x) : indexTip.x;
-      const ny = indexTip.y;
-
-      const a = parseFloat(UI.smoothing.value);
-      handAimX = smooth(handAimX, nx * WORLD_W, a);
-      handAimY = smooth(handAimY, ny * WORLD_H, a);
-
-      if (allStopped() && !cueLocked && !holed){
-        aim.x = clamp(handAimX, 0, WORLD_W);
-        aim.y = clamp(handAimY, 0, WORLD_H);
-      }
-
-      // Pinch ratio (thumb-index distance / palm width)
-      const pinchDist = len(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y);
-      const palmW = Math.max(0.0001, len(iMcp.x - pMcp.x, iMcp.y - pMcp.y));
-      const ratio = pinchDist / palmW;
-
-      // Smooth ratio to reduce flutter
-      pinchRatioSm = smooth(pinchRatioSm, ratio, 0.35);
-
-      const thr = parseFloat(UI.pinchThreshold.value);
-      const pinchOn  = thr;
-      const pinchOff = thr * 1.18; // hysteresis
-
-      const now = performance.now();
-
-      // Determine pinchDown with hysteresis
-      let nextDown = pinchDown;
-      if (!pinchDown && pinchRatioSm < pinchOn) nextDown = true;
-      if ( pinchDown && pinchRatioSm > pinchOff) nextDown = false;
-
-      // Track release after lock
-      if (cueLocked && !nextDown) sawReleaseAfterLock = true;
-
-      // Hold-to-confirm
-      const holdMs = parseInt(UI.pinchHoldMs.value, 10);
-      const coolMs = parseInt(UI.pinchCooldownMs.value, 10);
-
-      if (nextDown && !pinchDown){
-        pinchDownAt = now;
-      }
-
-      // Commit pinch action if held long enough + cooldown + rising edge
-      const heldLongEnough = nextDown && pinchDownAt > 0 && (now - pinchDownAt) >= holdMs;
-      const cooldownOk = (now - lastPinchActionAt) >= coolMs;
-
-      // Update pinchDown state
-      pinchDown = nextDown;
-
-      if (!heldLongEnough || !cooldownOk) return;
-
-      // Only fire once per pinch press
-      lastPinchActionAt = now;
-      pinchDownAt = 0;
-
-      // Gesture action
       if (!allStopped()) return;
-
-      if (holed){
-        holed = false;
-        if (holeIndex < 17) startHole(holeIndex+1);
-        else newCourse();
-        updateUI();
-        return;
-      }
 
       if (!cueLocked){
         cueLocked = true;
         lockedAngle = currentAngle();
-        lockAt = now;
-        sawReleaseAfterLock = false;
-        showBanner("Locked — set power (slider), release, pinch to shoot", 1.25);
-        updateUI();
-        return;
-      }
 
-      // Must release after lock to shoot (prevents lock+shoot from jitter)
-      const minAfterLock = 180;
-      if (!sawReleaseAfterLock || (now - lockAt) < minAfterLock){
-        showBanner("Release then pinch to shoot", 0.9);
-        return;
-      }
+        const w = toWorldFromClient(e.clientX, e.clientY);
+        gaugeStartWorldY = w.y;
+        gaugeStartMousePower = power;
 
-      strike();
-      updateUI();
-    }
-
-    /***********************
-     * Buttons
-     ***********************/
-    function openDrawer(){ UI.drawer.classList.add("show"); }
-    function closeDrawer(){ UI.drawer.classList.remove("show"); }
-
-    UI.settingsBtn.addEventListener("click", openDrawer);
-    UI.closeDrawerBtn.addEventListener("click", closeDrawer);
-
-    UI.resetBtn.addEventListener("click", resetTurn);
-    UI.newCourseBtn.addEventListener("click", () => { newCourse(); closeDrawer(); });
-
-    UI.toggleModeBtn.addEventListener("click", async () => {
-      gestureEnabled = !gestureEnabled;
-      UI.modeText.textContent = gestureEnabled ? "Gesture" : "Touch";
-      showBanner(gestureEnabled ? "Gesture enabled" : "Touch enabled", 0.9);
-
-      if (gestureEnabled){
-        try{
-          if (!cameraRunning) await startCamera();
-        } catch (e){
-          console.error(e);
-          gestureEnabled = false;
-          showBanner("Camera failed — using touch", 1.2);
-        }
+        showBanner("Locked — move up/down for power, click to shoot", 1.2);
+        blip(440, 55, 0.05);
+      } else {
+        strikeBall();
       }
       updateUI();
     });
 
-    UI.lockShootBtn.addEventListener("click", () => {
-      if (gestureEnabled){
-        // Provide a safe on-screen assist even in gesture mode:
-        // - If locked, button shoots
-        // - If not locked, button locks
-        if (!allStopped()) return;
+    /*****************************************************************
+     * INPUT: GESTURE (Restored easy pinch, 2-step play)
+     *****************************************************************/
+    let handAimX = WORLD_W/2, handAimY = WORLD_H/2;
 
-        if (holed){
-          holed = false;
-          if (holeIndex < 17) startHole(holeIndex+1);
-          else newCourse();
-          updateUI();
-          return;
-        }
+    function updateGestureControl(){
+      if (!gestureEnabled) return;
+      if (appState !== "PLAY") return;
+
+      if (HandState.has){
+        const smoothA = parseFloat(UI.smoothing.value);
+        handAimX = smooth(handAimX, HandState.indexNorm.x * WORLD_W, smoothA);
+        handAimY = smooth(handAimY, HandState.indexNorm.y * WORLD_H, smoothA);
 
         if (!cueLocked){
-          cueLocked = true;
-          lockedAngle = currentAngle();
-          lockAt = performance.now();
-          sawReleaseAfterLock = true; // button implies intention; no need to enforce release
-          showBanner("Locked — set power, press Shoot or pinch", 1.0);
-        } else {
-          strike();
+          aim.x = clamp(handAimX, 0, WORLD_W);
+          aim.y = clamp(handAimY, 0, WORLD_H);
         }
-        updateUI();
-      } else {
-        tapLockShoot();
-      }
-    });
 
-    UI.flipCamBtn.addEventListener("click", async () => {
-      facingMode = (facingMode === "user") ? "environment" : "user";
-      setStartStatus(`Camera set to: ${facingMode}.`);
-      if (cameraRunning){
-        try{
-          await startCamera();
-          showBanner("Camera flipped", 0.9);
-        } catch (e){
-          console.error(e);
-          showBanner("Flip failed", 1.1);
+        // power select while locked
+        if (cueLocked && allStopped() && !finished){
+          const sens = parseFloat(UI.gaugeSensitivity.value);
+          const dy = (gaugeStartYNorm - HandState.indexNorm.y);
+          const nextP = clamp(gaugeStartPower + dy * 1.10 * sens, 0.02, 1.00);
+          power = smooth(power, nextP, 0.28);
+        }
+
+        if (HandState.pinchClick){
+          if (finished){
+            make18Holes();
+            return;
+          }
+
+          if (player.holed[holeIndex] && allStopped()){
+            if (holeIndex >= 17){
+              finished = true;
+              showBanner("Round complete — pinch for new course", 2.2);
+              blip(660, 110, 0.06);
+            } else {
+              holeIndex += 1;
+              startHole(holeIndex);
+            }
+            return;
+          }
+
+          if (!allStopped()) return;
+
+          // The requested behavior:
+          // Pinch #1 = power select + lock; Pinch #2 = instant shoot
+          if (!cueLocked){
+            cueLocked = true;
+            lockedAngle = currentAngle();
+            gaugeStartYNorm = HandState.indexNorm.y;
+            gaugeStartPower = power;
+            showBanner("Locked — move up/down for power, pinch again to shoot", 1.25);
+            blip(440, 55, 0.05);
+          } else {
+            strikeBall();
+          }
         }
       }
-    });
+    }
 
-    /***********************
-     * Start overlay flow (simplified “login”)
-     ***********************/
-    UI.startGestureBtn.addEventListener("click", async () => {
-      setStartStatus("Requesting camera permission…");
-      gestureEnabled = true;
-      UI.modeText.textContent = "Gesture";
-      try{
-        await startCamera();
-        UI.startOverlay.style.display = "none";
-        showBanner("Pinch to lock. Release. Pinch to shoot.", 1.4);
-      } catch (e){
-        console.error(e);
-        gestureEnabled = false;
-        UI.modeText.textContent = "Touch";
-        setStartStatus("Camera failed. Starting in Touch mode.");
-        UI.startOverlay.style.display = "none";
-        showBanner("Touch mode: Tap Lock / Shoot", 1.2);
-      }
-      updateUI();
-    });
-
-    UI.startTouchBtn.addEventListener("click", () => {
-      gestureEnabled = false;
-      UI.modeText.textContent = "Touch";
-      stopCamera();
-      UI.startOverlay.style.display = "none";
-      showBanner("Touch mode: Tap Lock / Shoot", 1.2);
-      updateUI();
-    });
-
-    /***********************
-     * Loop
-     ***********************/
+    /*****************************************************************
+     * GAME LOOP
+     *****************************************************************/
     let lastT = performance.now();
     function tick(t){
       const dt = Math.min(0.033, (t - lastT) / 1000);
       lastT = t;
 
-      if (bannerT > 0){
-        bannerT -= dt;
-        if (bannerT <= 0) UI.banner.classList.remove("show");
+      if (toastTimer > 0){
+        toastTimer -= dt;
+        if (toastTimer <= 0) toastEl.classList.remove("show");
       }
 
-      if (!holed){
+      if (bannerTimer > 0){
+        bannerTimer -= dt;
+        if (bannerTimer <= 0) UI.banner.classList.remove("show");
+      }
+
+      if (!Login.overlay.classList.contains("hidden")){
+        tickBg(dt);
+      }
+
+      updateScanLoop();
+
+      if (appState === "PLAY" && !finished){
         applyPhysics(dt);
-      }
 
-      // world render
-      ctx.setTransform(1,0,0,1,0,0);
-      ctx.clearRect(0,0,canvas.width,canvas.height);
-      withWorld(draw);
+        const h = holes[holeIndex];
+        if (!player.holed[holeIndex] && ballInCup(h) && allStopped()){
+          player.holed[holeIndex] = true;
+          cueLocked = false;
+          showBanner(`${player.name} holed out!`, 1.2);
+          blip(880, 90, 0.05);
+        }
+
+        updateGestureControl();
+      }
 
       updateUI();
+      render();
+
       requestAnimationFrame(tick);
     }
 
-    /***********************
-     * Boot
-     ***********************/
-    function boot(){
-      syncLabels();
+    /*****************************************************************
+     * GAME BUTTONS
+     *****************************************************************/
+    UI.reopenLoginBtn.addEventListener("click", async () => {
+      initAudio(); await resumeAudio();
+      openLogin();
+    });
+
+    UI.toggleGestureBtn.addEventListener("click", () => {
+      gestureEnabled = !gestureEnabled;
+      if (!gestureEnabled){
+        cueLocked = false;
+        showBanner("Mouse control enabled", 0.9);
+        blip(240, 70, 0.04);
+      } else {
+        showBanner("Gesture control enabled", 0.9);
+        blip(520, 70, 0.04);
+      }
+      saveSettings();
+      updateUI();
+    });
+
+    UI.newCourseBtn.addEventListener("click", () => make18Holes());
+
+    UI.toggleCameraBtn.addEventListener("click", () => {
+      cameraWrap.classList.toggle("show");
+      showBanner(cameraWrap.classList.contains("show") ? "Camera debug ON" : "Camera debug OFF", 0.9);
+    });
+
+    UI.restartCamBtn.addEventListener("click", async () => {
+      showBanner("Restarting camera…", 1.0);
+      try{
+        await stopCameraPipeline();
+        const ok = await startCameraPipeline();
+        if (ok){
+          gestureEnabled = true;
+          showBanner("Camera restarted", 1.0);
+        } else {
+          gestureEnabled = false;
+          showBanner("Camera restart failed — using mouse", 1.6);
+        }
+      } catch (e){
+        console.error(e);
+        gestureEnabled = false;
+        showBanner("Camera restart failed — using mouse", 1.6);
+      }
+      updateUI();
+    });
+
+    UI.resetTurnBtn.addEventListener("click", () => resetTurn());
+
+    /*****************************************************************
+     * LOGIN WIRING
+     *****************************************************************/
+    Login.pillGesture.addEventListener("click", () => { controlMode = "gesture"; refreshControlPills(); saveSettings(); });
+    Login.pillMouse.addEventListener("click", () => { controlMode = "mouse"; refreshControlPills(); saveSettings(); });
+
+    Login.loginName.addEventListener("input", () => { refreshLoginPreview(); saveSettings(); });
+    Login.loginTheme.addEventListener("change", () => { refreshLoginPreview(); saveSettings(); });
+
+    function noteLogin(txt){
+      Login.footNote.textContent = txt;
+      setTimeout(() => {
+        Login.footNote.textContent = "Note: Browsers require a user action to enable audio. Sound cues activate after you press a button here.";
+      }, 2400);
+    }
+
+    async function startGameFromLogin(){
+      selectedMode = modeById(Login.loginTheme.value);
+
+      UI.friction.value = selectedMode.defaults.friction.toFixed(3);
+      UI.maxSpeed.value = String(selectedMode.defaults.maxSpeed);
       frictionPerFrame = parseFloat(UI.friction.value);
       maxSpeed = parseFloat(UI.maxSpeed.value);
+      grassPattern = makeGrassPattern();
+      syncSettingLabels();
+      saveSettings();
 
-      // default pinch ratio tuned for mobile framing; user can adjust
-      if (isMobile){
-        UI.pinchThreshold.value = "0.36";
-        UI.smoothing.value = "0.38";
-        UI.pinchHoldMs.value = "120";
-        UI.pinchCooldownMs.value = "280";
-        syncLabels();
+      player.name = (Login.loginName.value || "").trim() || "Player 1";
+      gestureEnabled = (controlMode === "gesture");
+
+      closeLogin();
+      make18Holes();
+      showBanner("Round started — good luck", 1.2);
+      blip(660, 80, 0.05);
+      toast("Welcome to the round", 1.1);
+    }
+
+    Login.mouseStartBtn.addEventListener("click", async () => {
+      initAudio(); await resumeAudio();
+      controlMode = "mouse";
+      refreshControlPills();
+      noteLogin("Mouse mode selected. Starting round…");
+      await stopCameraPipeline();
+      await startGameFromLogin();
+    });
+
+    Login.enrollBtn.addEventListener("click", async () => {
+      initAudio(); await resumeAudio();
+      if (controlMode !== "gesture"){
+        noteLogin("Switch to Gesture mode to enroll.");
+        toast("Switch to Gesture mode to enroll", 1.4);
+        return;
       }
 
-      newCourse();
+      const ok = await startCameraPipeline();
+      if (!ok){
+        controlMode = "mouse";
+        refreshControlPills();
+        noteLogin("Camera failed. Falling back to Mouse mode.");
+        toast("Camera failed — mouse fallback", 1.6);
+        return;
+      }
+
+      setScanUI("Enroll", "Hold your login gesture steady", 0, 0);
+      toast("Enrollment: hold gesture steady", 1.2);
+
+      const t0 = performance.now();
+      const samples = [];
+      const duration = 1200;
+
+      while (performance.now() - t0 < duration){
+        if (HandState.has && HandState.lm){
+          samples.push(featureVectorFromLandmarks(HandState.lm));
+          const pct = clamp(((performance.now()-t0)/duration)*100, 0, 100);
+          setScanUI("Enroll", "Hold steady…", pct, 0);
+        } else {
+          setScanUI("Enroll", "Put your hand in frame", 0, 0);
+        }
+        await new Promise(r => setTimeout(r, 20));
+      }
+
+      if (samples.length < 18){
+        failScan("Enrollment failed: not enough hand frames");
+        return;
+      }
+
+      const n = samples[0].length;
+      const avg = new Array(n).fill(0);
+      for (const s of samples){
+        for (let i=0;i<n;i++) avg[i] += s[i];
+      }
+      for (let i=0;i<n;i++) avg[i] /= samples.length;
+
+      setEnrollment(avg);
+      refreshLoginPreview();
+      setScanUI("Enroll", "Enrollment saved", 100, 0);
+      toast("Enrollment saved", 1.4);
+      blip(740, 90, 0.05);
+    });
+
+    Login.wipeBtn.addEventListener("click", () => {
+      wipeEnrollment();
+      refreshLoginPreview();
+      toast("Enrollment wiped", 1.3);
+      blip(220, 90, 0.05);
+    });
+
+    // Login button: camera -> (optional verify) -> scan (2-click validate) -> start game
+    Login.loginBtn.addEventListener("click", async () => {
+      initAudio();
+      await resumeAudio();
+
+      if (controlMode === "mouse"){
+        await stopCameraPipeline();
+        setScanUI("Skipped", "Mouse mode — scan not applicable", 0, 0);
+        await startGameFromLogin();
+        return;
+      }
+
+      // Gesture mode
+      const ok = await startCameraPipeline();
+      if (!ok){
+        controlMode = "mouse";
+        refreshControlPills();
+        gestureEnabled = false;
+        setScanUI("Fallback", "Camera failed — switching to mouse", 0, 0);
+        noteLogin("Camera failed. Switched to Mouse mode.");
+        await stopCameraPipeline();
+        await startGameFromLogin();
+        return;
+      }
+
+      // Optional verify if enrolled
+      if (hasEnrollment()){
+        setScanUI("Verify", "Hold your enrolled login gesture steady", 0, 0);
+        toast("Verifying gesture…", 1.2);
+
+        const enroll = getEnrollment();
+        const t0 = performance.now();
+        const duration = 950;
+        const samples = [];
+
+        while (performance.now() - t0 < duration){
+          if (HandState.has && HandState.lm){
+            samples.push(featureVectorFromLandmarks(HandState.lm));
+            const pct = clamp(((performance.now()-t0)/duration)*100, 0, 100);
+            setScanUI("Verify", "Hold steady…", pct, 0);
+          } else {
+            setScanUI("Verify", "Put your hand in frame", 0, 0);
+          }
+          await new Promise(r => setTimeout(r, 20));
+        }
+
+        if (samples.length >= 16){
+          const n = samples[0].length;
+          const avg = new Array(n).fill(0);
+          for (const s of samples){
+            for (let i=0;i<n;i++) avg[i] += s[i];
+          }
+          for (let i=0;i<n;i++) avg[i] /= samples.length;
+
+          const sim = cosineSim(avg, enroll.vec);
+          if (sim < 0.92){
+            failScan("Login failed: gesture mismatch (try again)");
+            toast("Gesture mismatch — try again", 1.8);
+            blip(180, 130, 0.06);
+            return;
+          }
+          toast("Gesture verified", 1.1);
+          blip(660, 60, 0.05);
+        } else {
+          failScan("Login failed: not enough hand frames");
+          return;
+        }
+      } else {
+        noteLogin("No enrollment found. Proceeding to scan without verification.");
+      }
+
+      // Start scan with required 2 pinch-click validation
+      startScan();
+
+      // wait until scan completes or fails
+      const waitStart = performance.now();
+      const timeoutMs = 22000;
+
+      while (Scan.running && (performance.now() - waitStart) < timeoutMs){
+        await new Promise(r => setTimeout(r, 30));
+      }
+
+      if (Scan.phase !== "done"){
+        noteLogin("Scan incomplete. Starting with current settings.");
+        toast("Scan incomplete — starting anyway", 1.4);
+      }
+
+      await startGameFromLogin();
+    });
+
+    /*****************************************************************
+     * SETTINGS LABELS & MOBILE DEFAULTS
+     *****************************************************************/
+    function applyMobileDefaultsIfNeeded(){
+      if (!MOBILE) return;
+      // Make pinch easier by default on mobile if user has not tuned it yet
+      // (but do not overwrite saved settings if present)
+      const stored = localStorage.getItem(LS.settings);
+      if (!stored){
+        UI.pinchThreshold.value = "0.48"; // easier
+        UI.smoothing.value = "0.28";
+        UI.gaugeSensitivity.value = "1.35";
+      }
+    }
+
+    /*****************************************************************
+     * BOOT
+     *****************************************************************/
+    function boot(){
+      resize();
+      resizeBg();
+      applyMobileDefaultsIfNeeded();
+      syncSettingLabels();
+
+      loadSettings();
+
+      selectedMode = modeById(Login.loginTheme.value || "classic");
+      refreshControlPills();
+      refreshLoginPreview();
+
+      // initial scan screen black
+      scanCtx.fillStyle = "#000";
+      scanCtx.fillRect(0,0,Login.scanCanvas.width, Login.scanCanvas.height);
+      setBadge(false);
+      setScanUI("Idle", "Click Login + Start Scan", 0, 0);
+
+      openLogin();
+
+      grassPattern = makeGrassPattern();
+      holes = Array.from({length:18}, () => ({
+        bounds: { x: 70, y: 60, w: WORLD_W - 140, h: WORLD_H - 120 },
+        start: { x: 160, y: WORLD_H/2 },
+        cup: { x: WORLD_W - 180, y: WORLD_H/2 },
+        obstacles: [],
+        feature: null,
+        pads: [],
+        wind: { x:0, y:0 },
+        par: 3,
+      }));
+
+      updateUI();
+      render();
+
       requestAnimationFrame(tick);
     }
+
     boot();
   </script>
 </body>
