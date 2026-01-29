@@ -401,6 +401,9 @@
       gap:10px;
       position:relative;
     }
+    .fieldRow.three{
+      grid-template-columns: 1fr 1fr 1fr;
+    }
 
     .field{
       border:1px solid rgba(255,255,255,.10);
@@ -881,7 +884,7 @@
 
           <!-- Step 2 -->
           <div id="step2" style="display:none;">
-            <div class="desc">Set player count (1–4), names, and cue skins. Players alternate turns per hole.</div>
+            <div class="desc">Set player count (1–4), names, cue skins, and ball colors. Players alternate turns per hole.</div>
 
             <div class="actions" style="margin-top:10px;">
               <button id="p1Btn" class="primary">1 Player</button>
@@ -900,7 +903,7 @@
 
             <div class="calibBox" style="margin-top:10px;">
               <div class="mini">
-                <b>Classic</b>: balanced • <b>Neon Rush</b>: boost pads + glow • <b>Ice Drift</b>: lower friction • <b>Desert Storm</b>: gusty wind + more sand
+                <b>Classic</b>: balanced • <b>Neon Rush</b>: boost pads + glow • <b>Electric Carnival</b>: electric trails + wind • <b>Ice Drift</b>: lower friction • <b>Desert Storm</b>: gusty wind + more sand
               </div>
             </div>
           </div>
@@ -1020,6 +1023,7 @@
       </div>
       <div class="mini" style="margin-top:10px;">
         Ball must come to rest to shoot again. Out of bounds → <b>+1 penalty</b> and respot.
+        <br/>Windmills + tunnels add momentum; bumpers hit back harder in Electric Carnival.
         <br/>Multiplayer: players alternate turns; hole advances when everyone is holed.
       </div>
     </div>
@@ -1288,6 +1292,15 @@
       c.closePath();
     }
 
+    function closestPointOnSegment(px, py, x1, y1, x2, y2) {
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const lenSq = dx * dx + dy * dy || 1;
+      let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
+      t = clamp(t, 0, 1);
+      return { x: x1 + dx * t, y: y1 + dy * t, t };
+    }
+
     /*****************************************************************
      * AUDIO (richer SFX + simple music)
      *****************************************************************/
@@ -1391,6 +1404,9 @@
     function sfxCup() { sfxTone({ freq: 920, ms: 100, peak: 0.07, type: "triangle" }); sfxTone({ freq: 660, ms: 140, peak: 0.03, type: "sine" }); }
     function sfxPenalty() { sfxTone({ freq: 180, ms: 160, peak: 0.06, type: "sawtooth" }); }
     function sfxWin() { sfxTone({ freq: 880, ms: 120, peak: 0.06, type: "triangle" }); sfxTone({ freq: 1174.66, ms: 160, peak: 0.04, type: "sine" }); }
+    function sfxWindmill() { sfxTone({ freq: 760, ms: 80, peak: 0.05, type: "triangle" }); sfxNoise({ ms: 90, peak: 0.03, hp: 900, lp: 5200 }); }
+    function sfxTunnel() { sfxTone({ freq: 520, ms: 120, peak: 0.05, type: "sawtooth" }); sfxTone({ freq: 980, ms: 90, peak: 0.03, type: "triangle" }); }
+    function sfxZap() { sfxTone({ freq: 1020, ms: 60, peak: 0.04, type: "square" }); sfxNoise({ ms: 60, peak: 0.025, hp: 1400, lp: 6200 }); }
 
     function stopMusic() {
       for (const n of musicNodes) {
@@ -1626,6 +1642,7 @@
         out.push({
           name: `P${i + 1}`,
           cueIndex: i % CUE_SKINS.length,
+          ballSkin: i % BALL_SKINS.length,
           total: 0,
           holeStrokes: Array(18).fill(0),
           holed: Array(18).fill(false),
@@ -1644,6 +1661,7 @@
         const p = setupPlayersDraft[i] || {
           name: `P${i + 1}`,
           cueIndex: i % CUE_SKINS.length,
+          ballSkin: i % BALL_SKINS.length,
           total: 0,
           holeStrokes: Array(18).fill(0),
           holed: Array(18).fill(false),
@@ -1651,7 +1669,7 @@
         setupPlayersDraft[i] = p;
 
         const row = document.createElement("div");
-        row.className = "fieldRow";
+        row.className = "fieldRow three";
 
         const f1 = document.createElement("div");
         f1.className = "field";
@@ -1681,8 +1699,26 @@
         });
         f2.appendChild(sel);
 
+        const f3 = document.createElement("div");
+        f3.className = "field";
+        f3.innerHTML = `<label>Ball Color</label>`;
+        const ballSel = document.createElement("select");
+        for (let k = 0; k < BALL_SKINS.length; k++) {
+          const opt = document.createElement("option");
+          opt.value = String(k);
+          opt.textContent = BALL_SKINS[k].name;
+          ballSel.appendChild(opt);
+        }
+        ballSel.value = String(p.ballSkin || 0);
+        ballSel.addEventListener("change", () => {
+          p.ballSkin = parseInt(ballSel.value, 10) || 0;
+          refreshSetupPreview();
+        });
+        f3.appendChild(ballSel);
+
         row.appendChild(f1);
         row.appendChild(f2);
+        row.appendChild(f3);
         frag.appendChild(row);
       }
 
@@ -1734,7 +1770,7 @@
         Menu.nextBtn.textContent = "Next";
       } else if (setupStep === 2) {
         Menu.stepTitle.textContent = "Step 3 — Players & Cues";
-        Menu.stepDesc.textContent = "Configure player count, names, and cue skins.";
+        Menu.stepDesc.textContent = "Configure player count, names, cue skins, and ball colors.";
         Menu.backBtn.disabled = false;
         Menu.nextBtn.textContent = "Next";
       } else {
@@ -1789,6 +1825,12 @@
         mechanics: { boostPads: 2, wind: 0, ice: 0, sandBias: 0.05 }
       },
       {
+        id: "electric", name: "Electric Carnival", desc: "Electric trails, punchy bumps, and neon gusts.",
+        grassA: "#0d3a4b", grassB: "#062233", deco: "#7df9ff",
+        defaults: { friction: 0.989, maxSpeed: 1250 },
+        mechanics: { boostPads: 3, wind: 1, ice: 0, sandBias: 0.08 }
+      },
+      {
         id: "ice", name: "Ice Drift", desc: "Lower friction and livelier bounces.",
         grassA: "#1b7aa1", grassB: "#0e3f67", deco: "#cfe9ff",
         defaults: { friction: 0.993, maxSpeed: 1050 },
@@ -1807,6 +1849,14 @@
       { id: "carbon", name: "Carbon Black", shaftA: "rgba(40,40,46,.95)", shaftB: "rgba(210,210,220,.92)", head: "rgba(240,240,250,.92)", accent: "rgba(255,255,255,.18)" },
       { id: "neon", name: "Neon Gold", shaftA: "rgba(255,214,10,.90)", shaftB: "rgba(255,255,255,.92)", head: "rgba(255,214,10,.92)", accent: "rgba(255,214,10,.28)" },
       { id: "ice", name: "Ice Blue", shaftA: "rgba(160,220,255,.92)", shaftB: "rgba(255,255,255,.92)", head: "rgba(200,240,255,.92)", accent: "rgba(160,220,255,.22)" },
+    ];
+
+    const BALL_SKINS = [
+      { id: "pearl", name: "Pearl White", core: "rgba(255,255,255,.95)", glow: "rgba(255,255,255,.45)" },
+      { id: "volt", name: "Volt Yellow", core: "rgba(255,214,10,.95)", glow: "rgba(255,214,10,.55)" },
+      { id: "aurora", name: "Aurora Mint", core: "rgba(46,229,157,.95)", glow: "rgba(46,229,157,.55)" },
+      { id: "plasma", name: "Plasma Blue", core: "rgba(125,249,255,.95)", glow: "rgba(125,249,255,.55)" },
+      { id: "ember", name: "Ember Red", core: "rgba(255,90,90,.95)", glow: "rgba(255,90,90,.55)" },
     ];
 
     let selectedMode = GAME_MODES[0];
@@ -1849,6 +1899,7 @@
 
     let ball = { x: 0, y: 0, vx: 0, vy: 0 };
     let aim = { x: WORLD_W / 2, y: WORLD_H / 2 };
+    let ballCharge = 0;
 
     let cueLocked = false;
     let lockedAngle = 0;
@@ -1876,6 +1927,10 @@
       return CUE_SKINS[clamp(activePlayer().cueIndex || 0, 0, CUE_SKINS.length - 1)];
     }
 
+    function activeBallSkin() {
+      return BALL_SKINS[clamp(activePlayer().ballSkin || 0, 0, BALL_SKINS.length - 1)];
+    }
+
     function strokesThisHole() {
       const p = activePlayer();
       return p.holeStrokes[holeIndex] || 0;
@@ -1883,6 +1938,17 @@
 
     function totalStrokes() {
       return activePlayer().total || 0;
+    }
+
+    function chargeBall(amount = 0.2) {
+      ballCharge = clamp(ballCharge + amount, 0, 1);
+    }
+
+    function wallImpact(intensity = 1) {
+      sfxZap();
+      chargeBall(0.12 * intensity);
+      spawnRing(ball.x, ball.y, 18 + intensity * 6);
+      spawnSpark(ball.x, ball.y, 3 + Math.round(intensity * 2));
     }
 
     function ballInCup(h) {
@@ -1900,11 +1966,12 @@
 
         const holed = p.holed[holeIndex] ? "Holed" : "In play";
         const cue = CUE_SKINS[clamp(p.cueIndex || 0, 0, CUE_SKINS.length - 1)].name;
+        const ballSkin = BALL_SKINS[clamp(p.ballSkin || 0, 0, BALL_SKINS.length - 1)].name;
 
         row.innerHTML = `
           <div class="lhs">
             <div class="nm">${p.name}</div>
-            <div class="sub"><span class="badge">${cue}</span> <span class="badge">${holed}</span></div>
+            <div class="sub"><span class="badge">${cue}</span> <span class="badge">${ballSkin}</span> <span class="badge">${holed}</span></div>
           </div>
           <div class="rhs">
             <span class="badge">Hole: ${p.holeStrokes[holeIndex] || 0}</span>
@@ -2045,17 +2112,61 @@
         obstacles.push({ x, y, w, h, type });
       }
 
+      function findClearPoint(tries = 40) {
+        for (let k = 0; k < tries; k++) {
+          const p = {
+            x: bounds.x + 120 + rng() * (bounds.w - 240),
+            y: bounds.y + 100 + rng() * (bounds.h - 200),
+          };
+          if (len2(p.x - start.x, p.y - start.y) < 140 * 140) continue;
+          if (len2(p.x - cup.x, p.y - cup.y) < 160 * 160) continue;
+          let ok = true;
+          for (const o of obstacles) {
+            if (p.x > o.x - 40 && p.x < o.x + o.w + 40 && p.y > o.y - 40 && p.y < o.y + o.h + 40) {
+              ok = false;
+              break;
+            }
+          }
+          if (ok) return p;
+        }
+        return { x: bounds.x + bounds.w / 2, y: bounds.y + bounds.h / 2 };
+      }
+
       let feature = null;
-      const featureChance = (selectedMode.id === "classic" ? 0.55 : (selectedMode.id === "neon" ? 0.35 : 0.30));
+      const featureChance = (selectedMode.id === "classic" ? 0.62 : (selectedMode.id === "neon" ? 0.40 : 0.34));
       if (rng() < featureChance) {
-        feature = {
-          type: "spinner",
-          x: bounds.x + bounds.w * 0.52 + (rng() * 2 - 1) * 120,
-          y: bounds.y + bounds.h * 0.50 + (rng() * 2 - 1) * 90,
-          r: 34,
-          a: rng() * Math.PI * 2,
-          speed: (rng() < 0.5 ? -1 : 1) * (0.75 + rng() * 0.95),
-        };
+        const roll = rng();
+        const center = findClearPoint();
+        if (roll < 0.45) {
+          feature = {
+            type: "spinner",
+            x: center.x,
+            y: center.y,
+            r: 34,
+            a: rng() * Math.PI * 2,
+            speed: (rng() < 0.5 ? -1 : 1) * (0.75 + rng() * 0.95),
+          };
+        } else {
+          feature = {
+            type: "windmill",
+            x: center.x,
+            y: center.y,
+            r: 28,
+            bladeLen: 70,
+            bladeW: 12,
+            blades: 4,
+            a: rng() * Math.PI * 2,
+            speed: (rng() < 0.5 ? -1 : 1) * (0.85 + rng() * 1.05),
+          };
+        }
+      }
+
+      const tunnels = [];
+      const tunnelChance = (selectedMode.id === "electric" ? 0.55 : 0.32);
+      if (rng() < tunnelChance) {
+        const entry = findClearPoint();
+        const exit = findClearPoint();
+        tunnels.push({ x: entry.x, y: entry.y, r: 18, exitX: exit.x, exitY: exit.y, cooldown: 0 });
       }
 
       const pads = [];
@@ -2090,9 +2201,9 @@
 
       const dist = len(cup.x - start.x, cup.y - start.y);
       const basePar = dist < 520 ? 2 : (dist < 760 ? 3 : 4);
-      const par = clamp(basePar + (obstacleCount >= 5 ? 1 : 0) + (feature ? 1 : 0), 2, 6);
+      const par = clamp(basePar + (obstacleCount >= 5 ? 1 : 0) + (feature ? 1 : 0) + (tunnels.length ? 1 : 0), 2, 6);
 
-      return { bounds, start, cup, obstacles, feature, pads, wind, par };
+      return { bounds, start, cup, obstacles, feature, pads, wind, par, tunnels };
     }
 
     function makePlaceholderCourse() {
@@ -2105,6 +2216,7 @@
         pads: [],
         wind: { x: 0, y: 0 },
         par: 3,
+        tunnels: [],
       }));
 
       holeIndex = 0;
@@ -2115,6 +2227,7 @@
       ball.x = h0.start.x;
       ball.y = h0.start.y;
       ball.vx = 0; ball.vy = 0;
+      ballCharge = 0;
 
       aim.x = ball.x + 160;
       aim.y = ball.y;
@@ -2152,6 +2265,8 @@
       ball.x = h.start.x;
       ball.y = h.start.y;
       ball.vx = 0; ball.vy = 0;
+      ballCharge = 0;
+      ballCharge = 0;
 
       aim.x = ball.x + 160;
       aim.y = ball.y;
@@ -2238,7 +2353,9 @@
       const h = holes[holeIndex];
       const friction = Math.pow(frictionPerFrame, dt * 60);
 
-      if (h.feature && h.feature.type === "spinner") {
+      ballCharge = Math.max(0, ballCharge - dt * 0.35);
+
+      if (h.feature && (h.feature.type === "spinner" || h.feature.type === "windmill")) {
         h.feature.a += h.feature.speed * dt;
       }
 
@@ -2276,6 +2393,38 @@
         }
       }
 
+      // tunnels
+      if (h.tunnels && h.tunnels.length) {
+        for (const t of h.tunnels) {
+          t.cooldown = Math.max(0, t.cooldown - dt);
+          const dx = ball.x - t.x, dy = ball.y - t.y;
+          if (dx * dx + dy * dy <= (t.r + BALL_R) * (t.r + BALL_R)) {
+            if (t.cooldown <= 0) {
+              const sp = len(ball.vx, ball.vy);
+              const ex = t.exitX - t.x;
+              const ey = t.exitY - t.y;
+              const el = Math.max(0.0001, Math.sqrt(ex * ex + ey * ey));
+              const dirx = sp > 12 ? ball.vx / sp : (ex / el);
+              const diry = sp > 12 ? ball.vy / sp : (ey / el);
+
+              ball.x = t.exitX;
+              ball.y = t.exitY;
+              const boost = Math.max(sp, 240) * 1.08;
+              ball.vx = dirx * boost;
+              ball.vy = diry * boost;
+
+              t.cooldown = 0.9;
+              sfxTunnel();
+              chargeBall(0.35);
+              spawnRing(t.x, t.y, t.r + 10);
+              spawnRing(t.exitX, t.exitY, t.r + 16);
+              spawnTrail(t.exitX, t.exitY, t.exitX - dirx * 12, t.exitY - diry * 12);
+              shake(6, 0.12);
+            }
+          }
+        }
+      }
+
       // out-of-bounds penalty
       if (
         ball.x < h.bounds.x - 40 || ball.x > h.bounds.x + h.bounds.w + 40 ||
@@ -2287,6 +2436,7 @@
 
         ball.x = h.start.x; ball.y = h.start.y;
         ball.vx = 0; ball.vy = 0;
+        ballCharge = 0;
 
         cueLocked = false;
         showBanner("Out of bounds — +1 penalty", 1.6);
@@ -2301,10 +2451,10 @@
       const maxY = h.bounds.y + h.bounds.h - BALL_R;
 
       const wallBounce = (selectedMode.id === "ice") ? 0.92 : 0.88;
-      if (ball.x < minX) { ball.x = minX; ball.vx *= -wallBounce; shake(4, 0.08); }
-      if (ball.x > maxX) { ball.x = maxX; ball.vx *= -wallBounce; shake(4, 0.08); }
-      if (ball.y < minY) { ball.y = minY; ball.vy *= -wallBounce; shake(4, 0.08); }
-      if (ball.y > maxY) { ball.y = maxY; ball.vy *= -wallBounce; shake(4, 0.08); }
+      if (ball.x < minX) { ball.x = minX; ball.vx *= -wallBounce; shake(4, 0.08); wallImpact(1); }
+      if (ball.x > maxX) { ball.x = maxX; ball.vx *= -wallBounce; shake(4, 0.08); wallImpact(1); }
+      if (ball.y < minY) { ball.y = minY; ball.vy *= -wallBounce; shake(4, 0.08); wallImpact(1); }
+      if (ball.y > maxY) { ball.y = maxY; ball.vy *= -wallBounce; shake(4, 0.08); wallImpact(1); }
 
       // obstacles
       for (const o of h.obstacles) {
@@ -2328,6 +2478,9 @@
             ball.vy -= (k * vn) * ny;
             ball.vx *= 0.93; ball.vy *= 0.93;
             shake(5, 0.10);
+            sfxZap();
+            chargeBall(0.18);
+            spawnSpark(cx, cy, 3);
           } else if (o.type === "bumper") {
             const k = (selectedMode.id === "ice") ? 2.28 : 2.15;
             ball.vx -= (k * vn) * nx;
@@ -2337,6 +2490,7 @@
             sfxBumper();
             shake(7, 0.13);
             spawnRing(cx, cy, 22);
+            chargeBall(0.28);
           } else if (o.type === "sand") {
             ball.vx *= 0.60;
             ball.vy *= 0.60;
@@ -2368,7 +2522,50 @@
 
           ball.vx *= 0.95; ball.vy *= 0.95;
           sfxTone({ freq: 610, ms: 55, peak: 0.03, type: "triangle" });
+          chargeBall(0.22);
           shake(6, 0.12);
+        }
+      }
+
+      // windmill
+      if (h.feature && h.feature.type === "windmill") {
+        const f = h.feature;
+        const bladeCount = f.blades || 4;
+        for (let i = 0; i < bladeCount; i++) {
+          const ang = f.a + i * (Math.PI * 2 / bladeCount);
+          const ex = f.x + Math.cos(ang) * f.bladeLen;
+          const ey = f.y + Math.sin(ang) * f.bladeLen;
+          const cp = closestPointOnSegment(ball.x, ball.y, f.x, f.y, ex, ey);
+          const dx = ball.x - cp.x;
+          const dy = ball.y - cp.y;
+          const rr = BALL_R + (f.bladeW * 0.5);
+          if (dx * dx + dy * dy <= rr * rr) {
+            const d = Math.max(0.0001, Math.sqrt(dx * dx + dy * dy));
+            const nx = dx / d;
+            const ny = dy / d;
+            ball.x = cp.x + nx * (rr + 0.2);
+            ball.y = cp.y + ny * (rr + 0.2);
+
+            const vn = ball.vx * nx + ball.vy * ny;
+            const bounce = (selectedMode.id === "ice") ? 2.3 : 2.1;
+            ball.vx -= (bounce * vn) * nx;
+            ball.vy -= (bounce * vn) * ny;
+
+            const tx = -ny;
+            const ty = nx;
+            const spin = f.speed * 80;
+            ball.vx += tx * spin * dt;
+            ball.vy += ty * spin * dt;
+
+            ball.vx *= 1.04;
+            ball.vy *= 1.04;
+            sfxWindmill();
+            chargeBall(0.35);
+            spawnRing(cp.x, cp.y, 24);
+            spawnSpark(cp.x, cp.y, 5);
+            shake(8, 0.16);
+            break;
+          }
         }
       }
 
@@ -2537,6 +2734,10 @@
       const dx = x - px, dy = y - py;
       const dist = Math.max(0.0001, Math.sqrt(dx * dx + dy * dy));
       const steps = Math.min(8, Math.max(1, Math.floor(dist / 6)));
+      const skin = activeBallSkin();
+      const trailColor = (selectedMode.id === "electric" || ballCharge > 0.15)
+        ? skin.glow
+        : (selectedMode.id === "neon" ? "rgba(255,214,10,.80)" : "rgba(255,255,255,.50)");
 
       for (let i = 0; i < steps; i++) {
         const t = i / steps;
@@ -2551,7 +2752,7 @@
           size: 2 + Math.random() * 3,
           rot: 0,
           vr: 0,
-          color: (selectedMode.id === "neon") ? "rgba(255,214,10,.80)" : "rgba(255,255,255,.50)",
+          color: trailColor,
           type: "trail",
         });
       }
@@ -2638,7 +2839,7 @@
         if (FX.uiSparks > 0) {
           const alpha = FX.uiSparks * 0.18;
           fxCtx.globalAlpha = alpha;
-          fxCtx.fillStyle = (selectedMode.id === "neon") ? "rgba(255,214,10,1)" : "rgba(255,255,255,1)";
+          fxCtx.fillStyle = activeBallSkin().glow;
           fxCtx.beginPath();
           fxCtx.arc(ball.x, ball.y, 38, 0, Math.PI * 2);
           fxCtx.fill();
@@ -2693,6 +2894,41 @@
           ctx.arc(pad.x, pad.y, pad.r, 0, Math.PI * 2);
           ctx.stroke();
           ctx.restore();
+        }
+      }
+
+      // tunnels
+      if (h.tunnels && h.tunnels.length) {
+        const drawTunnel = (tx, ty, r, glow) => {
+          ctx.save();
+          ctx.globalAlpha = 0.25;
+          ctx.fillStyle = "rgba(0,0,0,.55)";
+          ctx.beginPath();
+          ctx.arc(tx + 3, ty + 4, r + 6, 0, Math.PI * 2);
+          ctx.fill();
+
+          const tg = ctx.createRadialGradient(tx - 6, ty - 6, 4, tx, ty, r + 8);
+          tg.addColorStop(0, glow);
+          tg.addColorStop(1, "rgba(0,0,0,.85)");
+          ctx.globalAlpha = 0.9;
+          ctx.fillStyle = tg;
+          ctx.beginPath();
+          ctx.arc(tx, ty, r, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.globalAlpha = 0.7;
+          ctx.strokeStyle = glow;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(tx, ty, r + 2, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        };
+
+        for (const t of h.tunnels) {
+          const glow = "rgba(125,249,255,.8)";
+          drawTunnel(t.x, t.y, t.r, glow);
+          drawTunnel(t.exitX, t.exitY, t.r + 2, glow);
         }
       }
 
@@ -2758,6 +2994,45 @@
         ctx.restore();
       }
 
+      // windmill
+      if (h.feature && h.feature.type === "windmill") {
+        const f = h.feature;
+        ctx.save();
+        ctx.beginPath();
+        ctx.fillStyle = "rgba(0,0,0,.35)";
+        ctx.arc(f.x + 5, f.y + 6, f.r + 16, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.fillStyle = "rgba(255,255,255,.10)";
+        ctx.arc(f.x, f.y, f.r + 10, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.translate(f.x, f.y);
+        ctx.rotate(f.a);
+        for (let i = 0; i < f.blades; i++) {
+          ctx.rotate((Math.PI * 2) / f.blades);
+          ctx.fillStyle = (selectedMode.id === "electric" || selectedMode.id === "neon")
+            ? "rgba(125,249,255,.28)"
+            : "rgba(255,255,255,.14)";
+          ctx.beginPath();
+          const bx = 8, by = -f.bladeW * 0.5, bw = f.bladeLen, bh = f.bladeW, br = 6;
+          ctx.moveTo(bx + br, by);
+          ctx.arcTo(bx + bw, by, bx + bw, by + bh, br);
+          ctx.arcTo(bx + bw, by + bh, bx, by + bh, br);
+          ctx.arcTo(bx, by + bh, bx, by, br);
+          ctx.arcTo(bx, by, bx + bw, by, br);
+          ctx.closePath();
+          ctx.fill();
+        }
+
+        ctx.fillStyle = "rgba(255,255,255,.85)";
+        ctx.beginPath();
+        ctx.arc(0, 0, f.r * 0.45, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
       // cup
       ctx.beginPath();
       ctx.fillStyle = "rgba(0,0,0,.45)";
@@ -2808,16 +3083,27 @@
     }
 
     function drawBall() {
+      const skin = activeBallSkin();
       // shadow
       ctx.beginPath();
       ctx.fillStyle = "rgba(0,0,0,.35)";
       ctx.ellipse(ball.x + 3, ball.y + 5, BALL_R * 1.0, BALL_R * 0.8, 0, 0, Math.PI * 2);
       ctx.fill();
 
+      if (ballCharge > 0.02 || selectedMode.id === "electric") {
+        ctx.save();
+        ctx.globalAlpha = 0.25 + ballCharge * 0.45;
+        ctx.fillStyle = skin.glow;
+        ctx.beginPath();
+        ctx.arc(ball.x, ball.y, BALL_R * (1.7 + ballCharge * 0.6), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
       // ball
       const g = ctx.createRadialGradient(ball.x - BALL_R * 0.35, ball.y - BALL_R * 0.35, BALL_R * 0.2, ball.x, ball.y, BALL_R * 1.3);
-      g.addColorStop(0, "rgba(255,255,255,.80)");
-      g.addColorStop(0.22, "rgba(255,255,255,.96)");
+      g.addColorStop(0, "rgba(255,255,255,.85)");
+      g.addColorStop(0.22, skin.core);
       g.addColorStop(0.9, "rgba(0,0,0,.35)");
       g.addColorStop(1, "rgba(0,0,0,.55)");
 
@@ -3711,6 +3997,7 @@
       players = setupPlayersDraft.map(p => ({
         name: (p.name || "").trim() || "Player",
         cueIndex: clamp(p.cueIndex || 0, 0, CUE_SKINS.length - 1),
+        ballSkin: clamp(p.ballSkin || 0, 0, BALL_SKINS.length - 1),
         total: 0,
         holeStrokes: Array(18).fill(0),
         holed: Array(18).fill(false),
