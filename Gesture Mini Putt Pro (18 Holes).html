@@ -389,7 +389,7 @@
             <div class="bar"><i id="powerBar"></i></div>
           </div>
           <div class="hint">
-            <b>Gesture:</b> Aim with index tip → <b>Pinch #1</b> locks the putter + opens power gauge → move finger <b>up/down</b> to set power → <b>Pinch #2</b> commits and shoots.
+            <b>Gesture:</b> Aim with index tip → <b>Pinch</b> locks the putter + opens power gauge → move finger <b>up/down</b> to set power → <b>Release</b> to shoot.
             <br/><b>Mouse:</b> Move to aim → click once to lock + gauge → move up/down to set → click again to shoot.
           </div>
         </div>
@@ -453,7 +453,7 @@
         <label>Pinch Threshold</label>
         <span class="mini" id="pinchVal"></span>
       </div>
-      <input id="pinchThreshold" type="range" min="0.020" max="0.070" step="0.001" value="0.040" />
+      <input id="pinchThreshold" type="range" min="0.20" max="0.70" step="0.01" value="0.40" />
 
       <div class="rowCtl">
         <label>Power Gauge Sensitivity</label>
@@ -927,6 +927,7 @@
       pinchN: 1.0,          // normalized pinch distance (smaller = tighter pinch)
       pinchDown: false,     // debounced pinch state
       pinchClick: false,    // rising-edge click
+      pinchReleased: false, // falling-edge release
       _downFrames: 0,
       _upFrames: 0,
 
@@ -1018,6 +1019,7 @@
       const now = performance.now();
 
       HandState.pinchClick = false;
+      HandState.pinchReleased = false;
       HandState.pinchN = pinchN;
 
       // debounced with hysteresis
@@ -1044,6 +1046,7 @@
             HandState.pinchDown = false;
             HandState._downFrames = 0;
             HandState._upFrames = 0;
+            HandState.pinchReleased = true;
           }
         } else {
           HandState._upFrames = 0;
@@ -1146,6 +1149,7 @@
       } else {
         // if no hand, still clear pinch click
         HandState.pinchClick = false;
+        HandState.pinchReleased = false;
         if (cameraWrap.classList.contains("show")) debugCtx.restore();
       }
     }
@@ -1384,7 +1388,7 @@
     let totalStrokes = 0;
 
     // Cue lock + power
-    // REQUIREMENT: 1st pinch locks, 2nd pinch commits/shoots
+    // REQUIREMENT: pinch locks, release shoots
     let cueLocked = false;
     let lockedAngle = 0;
 
@@ -1456,7 +1460,7 @@
         UI.statusText.textContent = "Holed out";
         UI.stateText.textContent = "NEXT";
       } else {
-        UI.statusText.textContent = cueLocked ? "Set power, pinch/click to shoot" : "Aim, pinch/click to lock";
+        UI.statusText.textContent = cueLocked ? "Set power, release pinch/click to shoot" : "Aim, pinch/click to lock";
         UI.stateText.textContent = cueLocked ? "LOCKED" : "AIM";
       }
     }
@@ -2405,9 +2409,9 @@
     /*****************************************************************
      * INPUT: GESTURE (MediaPipe Hands)
      * REQUIREMENT:
-     *   - Pinch #1 locks the cue (freeze angle)
+     *   - Pinch locks the cue (freeze angle)
      *   - While locked, index tip up/down adjusts power (no wrist)
-     *   - Pinch #2 commits and shoots
+     *   - Release to commit and shoot
      *****************************************************************/
     // smoothed index aim
     let handAimX = WORLD_W/2, handAimY = WORLD_H/2;
@@ -2440,29 +2444,30 @@
       }
 
       const pinchClick = HandState.pinchClick;
+      const pinchReleased = HandState.pinchReleased;
       HandState.pinchClick = false;
-
-      if (!pinchClick) return;
+      HandState.pinchReleased = false;
 
       const h = holes[holeIndex];
 
       if (finished){
-        make18Holes();
+        if (pinchClick || pinchReleased) make18Holes();
         return;
       }
       if (ballInCup(h) && allStopped()){
-        nextHole();
+        if (pinchClick || pinchReleased) nextHole();
         return;
       }
       if (!allStopped()) return;
 
       if (!cueLocked){
+        if (!pinchClick) return;
         cueLocked = true;
         lockedAngle = Math.atan2((aim.y - ball.y), (aim.x - ball.x));
         gaugeStartYNorm = ny;
         gaugeStartPower = power;
-        showBanner("Locked — move up/down for power, pinch again to shoot", 1.25);
-      } else {
+        showBanner("Locked — move up/down for power, release to shoot", 1.25);
+      } else if (pinchReleased) {
         strikeBall();
       }
     }
