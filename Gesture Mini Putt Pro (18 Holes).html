@@ -719,6 +719,7 @@
     ];
     function modeById(id){ return GAME_MODES.find(m => m.id === id) || GAME_MODES[0]; }
     let selectedMode = GAME_MODES[0];
+    let player = { name: "Player 1", theme: "classic", ballColor: "neon-blue", ballSkin: "classic" };
 
     const BALL_COLORS = [
       { id: "neon-blue", name: "Neon Blue", core: "#4fe7ff", rim: "#dffcff", glow: "rgba(79,231,255,.7)" },
@@ -819,9 +820,16 @@
 
     function refreshLoginPreview(){
       const nm = (Login.loginName.value || "").trim() || "Player 1";
-      applyThemeTokens(modeById(Login.loginTheme.value));
+      selectedMode = modeById(Login.loginTheme.value);
+      applyThemeTokens(selectedMode);
+      player = {
+        name: nm,
+        theme: selectedMode.id,
+        ballColor: Login.loginBallColor.value || "neon-blue",
+        ballSkin: Login.loginBallSkin.value || "classic",
+      };
       Login.prevName.textContent = nm;
-      Login.prevTheme.textContent = modeById(Login.loginTheme.value).name;
+      Login.prevTheme.textContent = selectedMode.name;
       Login.prevBallColor.textContent = ballColorById(Login.loginBallColor.value).name;
       Login.prevBallSkin.textContent = ballSkinById(Login.loginBallSkin.value).name;
       Login.prevControls.textContent = controlMode === "gesture" ? "Gesture" : "Mouse";
@@ -1488,6 +1496,7 @@
 
     function makeHole(rng){
       const theme = THEMES[Math.floor(rng() * THEMES.length)];
+      const mode = selectedMode || GAME_MODES[0];
 
       const bounds = { x: 70, y: 60, w: WORLD_W - 140, h: WORLD_H - 120 };
 
@@ -1510,6 +1519,29 @@
         const typeRoll = rng();
         const type = typeRoll < 0.60 ? "wall" : (typeRoll < 0.85 ? "bumper" : "sand");
         obstacles.push({ x, y, w, h, type });
+      }
+
+      const tunnels = [];
+      const tunnelCount = mode.mechanics?.boostPads ? mode.mechanics.boostPads : (rng() < 0.35 ? 1 : 0);
+      for (let i=0;i<tunnelCount;i++){
+        const w = 90 + rng()*120;
+        const h = 26 + rng()*40;
+        const x = bounds.x + 80 + rng()*(bounds.w - 160 - w);
+        const y = bounds.y + 70 + rng()*(bounds.h - 140 - h);
+        const angle = (rng() * Math.PI * 2);
+        tunnels.push({ x, y, w, h, angle });
+      }
+
+      const windmills = [];
+      const extraWindmills = rng() < 0.35 ? (1 + Math.floor(rng()*2)) : 0;
+      for (let i=0;i<extraWindmills;i++){
+        windmills.push({
+          x: bounds.x + 140 + rng()*(bounds.w - 280),
+          y: bounds.y + 120 + rng()*(bounds.h - 240),
+          r: 26 + rng()*18,
+          a: rng()*Math.PI*2,
+          speed: (rng()<0.5? -1 : 1) * (0.9 + rng()*1.2),
+        });
       }
 
       let feature = null;
@@ -1566,7 +1598,7 @@
       const basePar = dist < 520 ? 2 : (dist < 760 ? 3 : 4);
       const par = clamp(basePar + (obstacleCount >= 5 ? 1 : 0) + (feature ? 1 : 0), 2, 6);
 
-      return { theme, bounds, start, cup, obstacles, feature, par };
+      return { theme, bounds, start, cup, obstacles, tunnels, windmills, feature, par };
     }
 
     function make18Holes(){
@@ -2513,6 +2545,8 @@
      *****************************************************************/
     function boot(){
       resize();
+      loadSettings();
+      refreshLoginPreview();
       syncSettingLabels();
       make18Holes();
       render();
