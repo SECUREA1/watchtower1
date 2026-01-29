@@ -108,6 +108,7 @@
       background: linear-gradient(90deg, rgba(255,214,10,.75), rgba(255,214,10,.95));
       border-radius:999px; box-shadow: 0 0 16px rgba(255,214,10,.35);
     }
+
     .hint{
       max-width: 56%;
       padding:10px 12px;
@@ -193,7 +194,6 @@
       background:#04060a;
     }
 
-    /* IMPORTANT: keep video element present; hidden is fine */
     video#input_video{ display:none; }
 
     @media (max-width: 980px){
@@ -215,7 +215,7 @@
         <div class="chip"><b>Strokes</b><span id="strokeText">0</span></div>
         <div class="chip"><b>Total</b><span id="totalText">0</span></div>
         <div class="chip"><b>Angle</b><span id="angleText">0.0°</span></div>
-        <div class="chip"><b>Power</b><span id="powerText">0%</span></div>
+        <div class="chip"><b>Power</b><span id="powerText">35%</span></div>
       </div>
     </div>
 
@@ -227,13 +227,13 @@
           <div class="power">
             <div class="row">
               <div class="label" id="stateText">AIM</div>
-              <div class="val" id="powerVal">0%</div>
+              <div class="val" id="powerVal">35%</div>
             </div>
             <div class="bar"><i id="powerBar"></i></div>
           </div>
           <div class="hint">
-            <b>Flow (Gesture):</b> Aim with index tip → <b>Pinch</b> to open power gauge → move finger <b>up/down</b> to set → <b>release pinch</b> to lock power → <b>pinch again</b> to putt.
-            <br/><b>Mouse:</b> Move to aim → click to open power gauge → move up/down to set → click again to shoot.
+            <b>Gesture:</b> Aim with index tip → <b>Pinch #1</b> locks the putter + opens power gauge → move finger <b>up/down</b> to set power → <b>Pinch #2</b> commits and shoots.
+            <br/><b>Mouse:</b> Move to aim → click once to lock + gauge → move up/down to set → click again to shoot.
           </div>
         </div>
       </div>
@@ -262,12 +262,12 @@
           <div class="v" id="statusText">Ready</div>
         </div>
         <div class="kpi">
-          <div class="t">Power Mode</div>
-          <div class="v" id="powerModeText">Gauge</div>
+          <div class="t">Cue</div>
+          <div class="v" id="lockText">Free</div>
         </div>
       </div>
       <div class="mini" style="margin-top:10px;">
-        Goal: finish each hole in as few strokes as possible. Ball must come to rest to shoot again. If ball leaves bounds → penalty + respot.
+        Ball must come to rest to shoot again. If ball leaves the play box → <b>+1 penalty</b> and respot.
       </div>
     </div>
 
@@ -310,7 +310,8 @@
       </div>
 
       <div class="mini" style="margin-top:10px;">
-        Desktop/PC: the game requests camera permission immediately on load (preflight) to ensure the permission prompt opens.
+        Desktop/PC: requests camera permission on startup (preflight) to force the prompt to appear.
+        <br/>Run from <code>https://</code> or <code>http://localhost</code> (not <code>file://</code>) for reliable camera permission.
       </div>
     </div>
 
@@ -323,17 +324,17 @@
     </div>
   </aside>
 
-  <!-- IMPORTANT: autoplay+muted helps browser allow video playback once permission is granted -->
+  <!-- autoplay+muted helps browsers allow playback after permission -->
   <video id="input_video" playsinline autoplay muted></video>
 
-  <!-- MediaPipe Hands via jsDelivr -->
+  <!-- MediaPipe Hands -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 
   <script>
     /*****************************************************************
-     * WORLD / VIEWPORT
+     * VIEWPORT / CANVAS
      *****************************************************************/
     const canvas = document.getElementById("course");
     const wrap = document.getElementById("canvasWrap");
@@ -354,7 +355,7 @@
       parText: document.getElementById("parText"),
       themeText: document.getElementById("themeText"),
       statusText: document.getElementById("statusText"),
-      powerModeText: document.getElementById("powerModeText"),
+      lockText: document.getElementById("lockText"),
 
       banner: document.getElementById("banner"),
       stateText: document.getElementById("stateText"),
@@ -378,28 +379,25 @@
       gaugeSensVal: document.getElementById("gaugeSensVal"),
     };
 
-    // Logical world size (physics lives here)
     const WORLD_W = 1100;
     const WORLD_H = 550;
 
     let dpr = Math.max(1, Math.min(2.5, window.devicePixelRatio || 1));
     let view = { w: 0, h: 0, scale: 1, ox: 0, oy: 0 };
 
-    function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
-    function len2(x, y) { return x*x + y*y; }
-    function len(x, y) { return Math.sqrt(x*x + y*y); }
-    function smooth(prev, next, alpha) { return prev + alpha * (next - prev); }
+    function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
+    function len2(x, y){ return x*x + y*y; }
+    function len(x, y){ return Math.sqrt(x*x + y*y); }
+    function smooth(prev, next, alpha){ return prev + alpha * (next - prev); }
 
-    function resize() {
+    function resize(){
       dpr = Math.max(1, Math.min(2.5, window.devicePixelRatio || 1));
       const r = wrap.getBoundingClientRect();
       const pixelW = Math.max(2, Math.floor(r.width * dpr));
       const pixelH = Math.max(2, Math.floor(r.height * dpr));
-
       canvas.width = pixelW;
       canvas.height = pixelH;
 
-      // Fit world inside canvas
       const sx = pixelW / WORLD_W;
       const sy = pixelH / WORLD_H;
       view.scale = Math.min(sx, sy);
@@ -412,7 +410,14 @@
     }
     window.addEventListener("resize", resize);
 
-    function toWorldFromClient(clientX, clientY) {
+    function withWorldTransform(drawFn){
+      ctx.save();
+      ctx.setTransform(view.scale, 0, 0, view.scale, view.ox, view.oy);
+      drawFn();
+      ctx.restore();
+    }
+
+    function toWorldFromClient(clientX, clientY){
       const r = canvas.getBoundingClientRect();
       const px = (clientX - r.left) * dpr;
       const py = (clientY - r.top) * dpr;
@@ -421,63 +426,75 @@
       return { x: clamp(x, 0, WORLD_W), y: clamp(y, 0, WORLD_H) };
     }
 
-    function withWorldTransform(drawFn) {
-      ctx.save();
-      ctx.setTransform(view.scale, 0, 0, view.scale, view.ox, view.oy);
-      drawFn();
-      ctx.restore();
+    function drawRoundedRectPath(x,y,w,h,r){
+      const rr = Math.min(r, w/2, h/2);
+      ctx.beginPath();
+      ctx.moveTo(x+rr, y);
+      ctx.arcTo(x+w, y, x+w, y+h, rr);
+      ctx.arcTo(x+w, y+h, x, y+h, rr);
+      ctx.arcTo(x, y+h, x, y, rr);
+      ctx.arcTo(x, y, x+w, y, rr);
+      ctx.closePath();
     }
 
     /*****************************************************************
-     * MINI PUTT GAME MODEL
+     * MINI PUTT MODEL
      *****************************************************************/
     const BALL_R = 12;
     const HOLE_R = 15;
     const REST_EPS = 9;
     const REST_EPS2 = REST_EPS * REST_EPS;
 
-    // friction per ~60fps
     let frictionPerFrame = parseFloat(UI.friction.value);
     let maxSpeed = parseFloat(UI.maxSpeed.value);
 
-    // Course set: 18 randomized holes
     const THEMES = [
-      { name:"Garden",    grassA:"#1f8a48", grassB:"#146b30", deco:"#a8ffcf" },
-      { name:"Tiki",      grassA:"#1d8f67", grassB:"#0f6f55", deco:"#ffe08a" },
-      { name:"Candy",     grassA:"#2a8f56", grassB:"#167a35", deco:"#ffb3d9" },
-      { name:"Space",     grassA:"#1b7d4a", grassB:"#0f5c35", deco:"#9fd7ff" },
-      { name:"Pirate",    grassA:"#1d8248", grassB:"#0f5f33", deco:"#ffd5a8" },
-      { name:"Castle",    grassA:"#1c7f4b", grassB:"#0f6337", deco:"#d9d9ff" },
-      { name:"Jungle",    grassA:"#1f8a43", grassB:"#146b30", deco:"#b7ff9f" },
-      { name:"Neon",      grassA:"#198a55", grassB:"#0f6a3f", deco:"#ffd60a" },
+      { name:"Garden", grassA:"#1f8a48", grassB:"#146b30", deco:"#a8ffcf" },
+      { name:"Tiki",   grassA:"#1d8f67", grassB:"#0f6f55", deco:"#ffe08a" },
+      { name:"Candy",  grassA:"#2a8f56", grassB:"#167a35", deco:"#ffb3d9" },
+      { name:"Space",  grassA:"#1b7d4a", grassB:"#0f5c35", deco:"#9fd7ff" },
+      { name:"Pirate", grassA:"#1d8248", grassB:"#0f5f33", deco:"#ffd5a8" },
+      { name:"Castle", grassA:"#1c7f4b", grassB:"#0f6337", deco:"#d9d9ff" },
+      { name:"Jungle", grassA:"#1f8a43", grassB:"#146b30", deco:"#b7ff9f" },
+      { name:"Neon",   grassA:"#198a55", grassB:"#0f6a3f", deco:"#ffd60a" },
     ];
 
+    // 18 holes
     let holes = [];
     let holeIndex = 0;
 
-    // State
+    // Ball state
     let ball = { x: 0, y: 0, vx: 0, vy: 0 };
+
+    // Aim point (only used when not locked)
     let aim = { x: WORLD_W/2, y: WORLD_H/2 };
 
+    // Stroke scoring
     let strokesThisHole = 0;
     let totalStrokes = 0;
 
-    let outOfBoundsPenalty = 0;
+    // Cue lock + power
+    // REQUIREMENT: 1st pinch locks, 2nd pinch commits/shoots
+    let cueLocked = false;
+    let lockedAngle = 0;
+
+    // power 0..1 (selected continuously while locked)
+    let power = 0.35;
+
+    // gauge anchors for power mapping
+    let gaugeStartYNorm = 0.5;  // gesture normalized Y at lock moment
+    let gaugeStartPower = 0.35;
+
+    // Mouse gauge anchors
+    let gaugeStartWorldY = 0;
+    let gaugeStartMousePower = 0.35;
+
+    // game end
     let finished = false;
 
-    // Two-stage gesture/mouse flow:
-    // - AIM: pick direction with aim pointer
-    // - GAUGE: power gauge active (move up/down)
-    // - READY: power locked (next pinch/click shoots)
-    let phase = "AIM";
-
-    // Power gauge 0..1 (selected)
-    let power = 0.35;
-    let powerLocked = false;
-
-    // UI banner helper
+    // banner
     let bannerTimer = 0;
-    function showBanner(text, seconds=1.25) {
+    function showBanner(text, seconds=1.25){
       UI.banner.textContent = text;
       UI.banner.classList.add("show");
       bannerTimer = seconds;
@@ -491,8 +508,13 @@
       return len2(ball.vx, ball.vy) <= REST_EPS2;
     }
 
-    function angleRad(){
+    function currentAngle(){
+      if (cueLocked) return lockedAngle;
       return Math.atan2(aim.y - ball.y, aim.x - ball.x);
+    }
+
+    function ballInCup(h){
+      return len2(ball.x - h.cup.x, ball.y - h.cup.y) <= (HOLE_R*0.92)*(HOLE_R*0.92) && allStopped();
     }
 
     function updateUI(){
@@ -503,10 +525,10 @@
       UI.totalText.textContent = `${totalStrokes}`;
       UI.parText.textContent = `${h.par}`;
       UI.themeText.textContent = `${h.theme.name}`;
-      UI.powerModeText.textContent = powerLocked ? "Locked" : (phase === "GAUGE" ? "Selecting" : "Idle");
-      UI.statusText.textContent = finished ? "Finished" : (allStopped() ? (powerLocked ? "Ready to putt" : (phase === "GAUGE" ? "Set power" : "Aim")) : "Ball moving");
 
-      const ang = angleRad() * 180 / Math.PI;
+      UI.lockText.textContent = cueLocked ? "Locked" : "Free";
+
+      const ang = currentAngle() * 180 / Math.PI;
       UI.angleText.textContent = `${ang.toFixed(1)}°`;
 
       const pct = Math.round(power * 100);
@@ -514,7 +536,19 @@
       UI.powerVal.textContent = `${pct}%`;
       UI.powerBar.style.width = `${pct}%`;
 
-      UI.stateText.textContent = finished ? "DONE" : (phase === "GAUGE" ? "POWER GAUGE" : (powerLocked ? "READY" : "AIM"));
+      if (finished) {
+        UI.statusText.textContent = "Finished";
+        UI.stateText.textContent = "DONE";
+      } else if (!allStopped()) {
+        UI.statusText.textContent = "Ball moving";
+        UI.stateText.textContent = "SHOT";
+      } else if (ballInCup(h)) {
+        UI.statusText.textContent = "Holed out";
+        UI.stateText.textContent = "NEXT";
+      } else {
+        UI.statusText.textContent = cueLocked ? "Set power, pinch/click to shoot" : "Aim, pinch/click to lock";
+        UI.stateText.textContent = cueLocked ? "LOCKED" : "AIM";
+      }
     }
 
     function syncSettingLabels(){
@@ -537,8 +571,10 @@
     UI.pinchThreshold.addEventListener("input", syncSettingLabels);
     UI.gaugeSensitivity.addEventListener("input", syncSettingLabels);
 
+    /*****************************************************************
+     * RNG / HOLE GEN
+     *****************************************************************/
     function rand(seed){
-      // Deterministic PRNG (Mulberry32)
       let t = seed >>> 0;
       return function(){
         t += 0x6D2B79F5;
@@ -548,48 +584,32 @@
       };
     }
 
-    function makeHole(rng, idx){
+    function makeHole(rng){
       const theme = THEMES[Math.floor(rng() * THEMES.length)];
 
-      // Start / Hole positions
-      // Start left-ish, hole right-ish, with some variation
+      const bounds = { x: 70, y: 60, w: WORLD_W - 140, h: WORLD_H - 120 };
+
       const start = {
-        x: 160 + rng()*120,
-        y: 120 + rng()*(WORLD_H - 240),
+        x: bounds.x + 90 + rng()*120,
+        y: bounds.y + 80 + rng()*(bounds.h - 160),
       };
       const cup = {
-        x: WORLD_W - (170 + rng()*140),
-        y: 120 + rng()*(WORLD_H - 240),
+        x: bounds.x + bounds.w - (120 + rng()*160),
+        y: bounds.y + 80 + rng()*(bounds.h - 160),
       };
 
-      // Par roughly based on distance + obstacles
-      const dist = len(cup.x - start.x, cup.y - start.y);
-      const basePar = dist < 520 ? 2 : (dist < 760 ? 3 : 4);
-
-      // Boundaries (course walls) - always a rectangle
-      const bounds = {
-        x: 70, y: 60,
-        w: WORLD_W - 140,
-        h: WORLD_H - 120,
-      };
-
-      // Obstacles: mix of rectangles, bumpers, and a windmill blocker
       const obstacles = [];
       const obstacleCount = 3 + Math.floor(rng()*4); // 3..6
-
-      for (let i = 0; i < obstacleCount; i++){
+      for (let i=0;i<obstacleCount;i++){
         const w = 70 + rng()*140;
         const h = 24 + rng()*70;
         const x = bounds.x + 80 + rng()*(bounds.w - 160 - w);
         const y = bounds.y + 60 + rng()*(bounds.h - 120 - h);
-        const rot = (rng()*2 - 1) * 0.35; // slight rotation for style, physics uses AABB (simple)
         const typeRoll = rng();
         const type = typeRoll < 0.60 ? "wall" : (typeRoll < 0.85 ? "bumper" : "sand");
-
-        obstacles.push({ x, y, w, h, rot, type });
+        obstacles.push({ x, y, w, h, type });
       }
 
-      // One themed feature sometimes
       let feature = null;
       if (rng() < 0.55){
         feature = {
@@ -602,7 +622,7 @@
         };
       }
 
-      // Ensure start/hole not inside obstacles (basic nudge)
+      // Nudge start/cup away from obstacles
       function clearPoint(p){
         for (let k=0;k<60;k++){
           let ok = true;
@@ -620,26 +640,19 @@
       clearPoint(start);
       clearPoint(cup);
 
-      // Additional par factor based on obstacle density
+      const dist = len(cup.x - start.x, cup.y - start.y);
+      const basePar = dist < 520 ? 2 : (dist < 760 ? 3 : 4);
       const par = clamp(basePar + (obstacleCount >= 5 ? 1 : 0) + (feature ? 1 : 0), 2, 6);
 
-      return {
-        idx,
-        theme,
-        bounds,
-        start,
-        cup,
-        obstacles,
-        feature,
-        par,
-      };
+      return { theme, bounds, start, cup, obstacles, feature, par };
     }
 
     function make18Holes(){
       const seed = (Date.now() ^ (Math.random()*1e9)) | 0;
       const rng = rand(seed);
-      holes = Array.from({length: 18}, (_, i) => makeHole(rng, i));
+      holes = Array.from({length:18}, () => makeHole(rng));
       holeIndex = 0;
+      totalStrokes = 0;
       loadHole(0, true);
       showBanner("New 18-hole course generated", 1.4);
     }
@@ -650,19 +663,22 @@
 
       ball.x = h.start.x;
       ball.y = h.start.y;
-      ball.vx = 0;
-      ball.vy = 0;
+      ball.vx = 0; ball.vy = 0;
 
       aim.x = ball.x + 160;
       aim.y = ball.y;
 
       strokesThisHole = 0;
-      outOfBoundsPenalty = 0;
+
+      cueLocked = false;
+      lockedAngle = currentAngle();
+
+      power = 0.35;
+      gaugeStartPower = power;
+
       finished = false;
 
-      phase = "AIM";
-      powerLocked = false;
-      power = 0.35;
+      grassPattern = makeGrassPattern();
 
       showBanner(`Hole ${holeIndex + 1} — Par ${h.par} (${h.theme.name})`, 1.6);
       updateUI();
@@ -670,18 +686,17 @@
 
     function nextHole(){
       if (holeIndex >= 17){
-        showBanner(`Round complete — Total strokes: ${totalStrokes}`, 2.8);
         finished = true;
+        showBanner(`Round complete — Total strokes: ${totalStrokes}`, 2.8);
         updateUI();
         return;
       }
       loadHole(holeIndex + 1);
     }
 
-    function ballInCup(h){
-      return len2(ball.x - h.cup.x, ball.y - h.cup.y) <= (HOLE_R*0.92)*(HOLE_R*0.92) && allStopped();
-    }
-
+    /*****************************************************************
+     * PHYSICS
+     *****************************************************************/
     function applyPhysics(dt){
       const h = holes[holeIndex];
       const friction = Math.pow(frictionPerFrame, dt * 60);
@@ -697,81 +712,65 @@
       ball.vx *= friction;
       ball.vy *= friction;
 
-      // stop threshold
       if (len2(ball.vx, ball.vy) < 6){
         ball.vx = 0; ball.vy = 0;
       }
 
-      // bounds collide (course rectangle)
       const minX = h.bounds.x + BALL_R;
       const maxX = h.bounds.x + h.bounds.w - BALL_R;
       const minY = h.bounds.y + BALL_R;
       const maxY = h.bounds.y + h.bounds.h - BALL_R;
 
-      // if fully out of bounds (rare), respot with penalty
+      // out-of-bounds respot (big escape)
       if (ball.x < h.bounds.x - 40 || ball.x > h.bounds.x + h.bounds.w + 40 ||
           ball.y < h.bounds.y - 40 || ball.y > h.bounds.y + h.bounds.h + 40){
-        // penalty + respot
         totalStrokes += 1;
         strokesThisHole += 1;
-        outOfBoundsPenalty += 1;
 
         ball.x = h.start.x;
         ball.y = h.start.y;
         ball.vx = 0; ball.vy = 0;
 
-        phase = "AIM";
-        powerLocked = false;
-
+        cueLocked = false;
         showBanner("Out of bounds — +1 penalty, respotted", 1.6);
       }
 
-      // walls
+      // bounds collide
       if (ball.x < minX){ ball.x = minX; ball.vx *= -0.88; }
       if (ball.x > maxX){ ball.x = maxX; ball.vx *= -0.88; }
       if (ball.y < minY){ ball.y = minY; ball.vy *= -0.88; }
       if (ball.y > maxY){ ball.y = maxY; ball.vy *= -0.88; }
 
-      // obstacles (AABB, type-based response)
+      // obstacles (circle vs AABB)
       for (const o of h.obstacles){
-        // AABB collision with circle
         const cx = clamp(ball.x, o.x, o.x + o.w);
         const cy = clamp(ball.y, o.y, o.y + o.h);
         const dx = ball.x - cx;
         const dy = ball.y - cy;
         if (dx*dx + dy*dy <= BALL_R*BALL_R){
-          // compute normal from closest point
           const d = Math.max(0.0001, Math.sqrt(dx*dx + dy*dy));
-          const nx = dx / d;
-          const ny = dy / d;
+          const nx = dx / d, ny = dy / d;
 
-          // push out
           ball.x = cx + nx * (BALL_R + 0.2);
           ball.y = cy + ny * (BALL_R + 0.2);
 
-          // reflect velocity
           const vn = ball.vx*nx + ball.vy*ny;
 
-          // different surfaces:
           if (o.type === "wall"){
             ball.vx -= (1.85 * vn) * nx;
             ball.vy -= (1.85 * vn) * ny;
-            ball.vx *= 0.92;
-            ball.vy *= 0.92;
+            ball.vx *= 0.92; ball.vy *= 0.92;
           } else if (o.type === "bumper"){
             ball.vx -= (2.15 * vn) * nx;
             ball.vy -= (2.15 * vn) * ny;
-            ball.vx *= 1.06;
-            ball.vy *= 1.06;
+            ball.vx *= 1.06; ball.vy *= 1.06;
           } else if (o.type === "sand"){
-            // sand = heavy damping
-            ball.vx *= 0.62;
-            ball.vy *= 0.62;
+            ball.vx *= 0.62; ball.vy *= 0.62;
           }
         }
       }
 
-      // windmill feature as circular blocker with rotating blades (simple)
+      // windmill blocker
       if (h.feature && h.feature.type === "windmill"){
         const f = h.feature;
         const dx = ball.x - f.x;
@@ -785,16 +784,17 @@
           const vn = ball.vx*nx + ball.vy*ny;
           ball.vx -= (2.0 * vn) * nx;
           ball.vy -= (2.0 * vn) * ny;
-          // add tangential "blade push"
+
           const tx = -ny, ty = nx;
           const blade = Math.sin(f.a) * 180;
           ball.vx += tx * blade * dt;
           ball.vy += ty * blade * dt;
+
           ball.vx *= 0.95; ball.vy *= 0.95;
         }
       }
 
-      // Cup logic: gently pull in when close and slow
+      // cup pull-in
       const cupDx = h.cup.x - ball.x;
       const cupDy = h.cup.y - ball.y;
       const cupD2 = cupDx*cupDx + cupDy*cupDy;
@@ -810,7 +810,7 @@
         }
       }
 
-      // sink if centered enough and slow enough
+      // sink
       if (cupD2 <= (HOLE_R*0.9)*(HOLE_R*0.9) && len2(ball.vx, ball.vy) < 120*120){
         ball.vx *= 0.45;
         ball.vy *= 0.45;
@@ -831,24 +831,22 @@
       const h = holes[holeIndex];
       if (ballInCup(h)) return;
 
-      const ang = angleRad();
-      const speed = clamp(power, 0, 1) * maxSpeed;
+      const ang = currentAngle();
+      const speed = clamp(power, 0.02, 1.0) * maxSpeed;
+
       ball.vx = Math.cos(ang) * speed;
       ball.vy = Math.sin(ang) * speed;
 
       strokesThisHole += 1;
       totalStrokes += 1;
 
-      // after shot, reset flow
-      phase = "AIM";
-      powerLocked = false;
-
-      showBanner("Putt!", 0.65);
+      cueLocked = false; // after shot, unlock
+      showBanner("Putt!", 0.6);
       updateUI();
     }
 
     /*****************************************************************
-     * VISUALS (grass, obstacles, cup, putter, gauge)
+     * VISUALS
      *****************************************************************/
     let grassPattern = null;
 
@@ -862,14 +860,12 @@
       const a = h.theme?.grassA || "#1f8a48";
       const b = h.theme?.grassB || "#146b30";
 
-      // Base gradient
       const g = t.createLinearGradient(0, 0, 240, 240);
       g.addColorStop(0, a);
       g.addColorStop(1, b);
       t.fillStyle = g;
       t.fillRect(0,0,240,240);
 
-      // Speckles / blades
       t.globalAlpha = 0.18;
       for (let i=0;i<2200;i++){
         const x = Math.random()*240;
@@ -884,38 +880,24 @@
       return ctx.createPattern(tile, "repeat");
     }
 
-    function drawRoundedRect(x,y,w,h,r){
-      const rr = Math.min(r, w/2, h/2);
-      ctx.beginPath();
-      ctx.moveTo(x+rr, y);
-      ctx.arcTo(x+w, y, x+w, y+h, rr);
-      ctx.arcTo(x+w, y+h, x, y+h, rr);
-      ctx.arcTo(x, y+h, x, y, rr);
-      ctx.arcTo(x, y, x+w, y, rr);
-      ctx.closePath();
-    }
-
     function drawCourse(){
       const h = holes[holeIndex];
 
-      // background grass
       ctx.fillStyle = grassPattern || "#167a35";
       ctx.fillRect(0,0,WORLD_W,WORLD_H);
 
-      // vignette
       const vg = ctx.createRadialGradient(WORLD_W*0.5, WORLD_H*0.5, WORLD_H*0.2, WORLD_W*0.5, WORLD_H*0.5, WORLD_H*0.95);
       vg.addColorStop(0, "rgba(0,0,0,0)");
       vg.addColorStop(1, "rgba(0,0,0,.32)");
       ctx.fillStyle = vg;
       ctx.fillRect(0,0,WORLD_W,WORLD_H);
 
-      // course border
+      // border
       ctx.save();
       ctx.lineJoin = "round";
       ctx.strokeStyle = "rgba(90,60,35,.95)";
       ctx.lineWidth = 22;
       ctx.strokeRect(h.bounds.x, h.bounds.y, h.bounds.w, h.bounds.h);
-
       ctx.strokeStyle = "rgba(255,255,255,.08)";
       ctx.lineWidth = 3;
       ctx.strokeRect(h.bounds.x+2, h.bounds.y+2, h.bounds.w-4, h.bounds.h-4);
@@ -924,10 +906,9 @@
       // obstacles
       for (const o of h.obstacles){
         ctx.save();
-        // shadow
         ctx.globalAlpha = 0.35;
         ctx.fillStyle = "rgba(0,0,0,1)";
-        drawRoundedRect(o.x+4, o.y+6, o.w, o.h, 10);
+        drawRoundedRectPath(o.x+4, o.y+6, o.w, o.h, 10);
         ctx.fill();
         ctx.globalAlpha = 1;
 
@@ -939,23 +920,22 @@
         } else if (o.type === "bumper"){
           ctx.fillStyle = "rgba(255,214,10,.18)";
         } else {
-          ctx.fillStyle = "rgba(200,160,90,.18)"; // sand
+          ctx.fillStyle = "rgba(200,160,90,.18)";
         }
-
-        drawRoundedRect(o.x, o.y, o.w, o.h, 10);
+        drawRoundedRectPath(o.x, o.y, o.w, o.h, 10);
         ctx.fill();
 
         ctx.strokeStyle = "rgba(255,255,255,.10)";
         ctx.lineWidth = 2;
-        drawRoundedRect(o.x, o.y, o.w, o.h, 10);
+        drawRoundedRectPath(o.x, o.y, o.w, o.h, 10);
         ctx.stroke();
         ctx.restore();
       }
 
-      // windmill feature
+      // windmill
       if (h.feature && h.feature.type === "windmill"){
         const f = h.feature;
-        // base
+
         ctx.save();
         ctx.beginPath();
         ctx.fillStyle = "rgba(0,0,0,.35)";
@@ -967,27 +947,33 @@
         ctx.arc(f.x, f.y, f.r+10, 0, Math.PI*2);
         ctx.fill();
 
-        // blades
         ctx.translate(f.x, f.y);
         ctx.rotate(f.a);
         for (let i=0;i<4;i++){
           ctx.rotate(Math.PI/2);
-          ctx.beginPath();
+          ctx.save();
           ctx.fillStyle = "rgba(255,214,10,.20)";
-          ctx.roundRect(10, -6, 46, 12, 6);
+          ctx.beginPath();
+          // simple rounded blade
+          const bx = 10, by = -6, bw = 46, bh = 12, br = 6;
+          ctx.moveTo(bx+br, by);
+          ctx.arcTo(bx+bw, by, bx+bw, by+bh, br);
+          ctx.arcTo(bx+bw, by+bh, bx, by+bh, br);
+          ctx.arcTo(bx, by+bh, bx, by, br);
+          ctx.arcTo(bx, by, bx+bw, by, br);
+          ctx.closePath();
           ctx.fill();
+          ctx.restore();
         }
         ctx.restore();
       }
 
-      // cup (hole)
-      // outer shadow
+      // cup
       ctx.beginPath();
       ctx.fillStyle = "rgba(0,0,0,.45)";
       ctx.arc(h.cup.x+3, h.cup.y+4, HOLE_R*1.2, 0, Math.PI*2);
       ctx.fill();
 
-      // inner
       const hg = ctx.createRadialGradient(h.cup.x-4, h.cup.y-4, 4, h.cup.x, h.cup.y, HOLE_R);
       hg.addColorStop(0, "rgba(40,40,40,.95)");
       hg.addColorStop(0.6, "rgba(10,10,10,.98)");
@@ -997,14 +983,13 @@
       ctx.arc(h.cup.x, h.cup.y, HOLE_R, 0, Math.PI*2);
       ctx.fill();
 
-      // rim
       ctx.beginPath();
       ctx.strokeStyle = "rgba(255,255,255,.15)";
       ctx.lineWidth = 2;
       ctx.arc(h.cup.x, h.cup.y, HOLE_R*1.03, 0, Math.PI*2);
       ctx.stroke();
 
-      // little flag
+      // flag
       ctx.save();
       ctx.strokeStyle = "rgba(255,255,255,.55)";
       ctx.lineWidth = 2;
@@ -1023,13 +1008,11 @@
     }
 
     function drawBall(){
-      // shadow
       ctx.beginPath();
       ctx.fillStyle = "rgba(0,0,0,.35)";
       ctx.ellipse(ball.x+3, ball.y+5, BALL_R*1.0, BALL_R*0.8, 0, 0, Math.PI*2);
       ctx.fill();
 
-      // ball
       const g = ctx.createRadialGradient(ball.x - BALL_R*0.35, ball.y - BALL_R*0.35, BALL_R*0.2, ball.x, ball.y, BALL_R*1.3);
       g.addColorStop(0, "rgba(255,255,255,.80)");
       g.addColorStop(0.22, "rgba(255,255,255,.95)");
@@ -1047,45 +1030,42 @@
       ctx.arc(ball.x, ball.y, BALL_R, 0, Math.PI*2);
       ctx.stroke();
 
-      // highlight
       ctx.beginPath();
       ctx.fillStyle = "rgba(255,255,255,.30)";
       ctx.arc(ball.x - BALL_R*0.28, ball.y - BALL_R*0.28, BALL_R*0.18, 0, Math.PI*2);
       ctx.fill();
     }
 
-    function drawAimLineAndPutter(){
+    function drawAimAndPutter(){
       if (finished) return;
-      if (!allStopped()) return;
-
       const h = holes[holeIndex];
+      if (!allStopped()) return;
       if (ballInCup(h)) return;
 
-      const ang = angleRad();
+      const ang = currentAngle();
       const dirx = Math.cos(ang);
       const diry = Math.sin(ang);
 
-      // aim line
+      // Aim line
       ctx.save();
       ctx.setLineDash([10, 10]);
       ctx.lineWidth = 2;
-      ctx.strokeStyle = powerLocked ? "rgba(255,214,10,.78)" : "rgba(255,255,255,.55)";
+      ctx.strokeStyle = cueLocked ? "rgba(255,214,10,.78)" : "rgba(255,255,255,.55)";
       ctx.beginPath();
       ctx.moveTo(ball.x, ball.y);
       ctx.lineTo(ball.x + dirx*260, ball.y + diry*260);
       ctx.stroke();
       ctx.restore();
 
-      // putter stick (behind ball)
+      // Putter
       const shaftLen = 150;
-      const back = 62 + (powerLocked ? power*30 : 12);
+      const back = 62 + (cueLocked ? power*30 : 12);
 
       const sx = ball.x - dirx * back;
       const sy = ball.y - diry * back;
       const ex = sx + dirx * shaftLen;
       const ey = sy + diry * shaftLen;
 
-      // shadow
       ctx.beginPath();
       ctx.strokeStyle = "rgba(0,0,0,.35)";
       ctx.lineWidth = 10;
@@ -1094,23 +1074,22 @@
       ctx.lineTo(ex+4, ey+6);
       ctx.stroke();
 
-      // shaft gradient
-      const cueG = ctx.createLinearGradient(sx, sy, ex, ey);
-      cueG.addColorStop(0, "rgba(30,18,10,.9)");
-      cueG.addColorStop(0.55, "rgba(198,160,108,.95)");
-      cueG.addColorStop(1, "rgba(240,240,240,.95)");
+      const shaftG = ctx.createLinearGradient(sx, sy, ex, ey);
+      shaftG.addColorStop(0, "rgba(30,18,10,.9)");
+      shaftG.addColorStop(0.55, "rgba(198,160,108,.95)");
+      shaftG.addColorStop(1, "rgba(240,240,240,.95)");
 
       ctx.beginPath();
-      ctx.strokeStyle = cueG;
+      ctx.strokeStyle = shaftG;
       ctx.lineWidth = 8;
       ctx.moveTo(sx, sy);
       ctx.lineTo(ex, ey);
       ctx.stroke();
 
-      // putter head (perpendicular at front)
       const hx = ball.x - dirx*(BALL_R + 6);
       const hy = ball.y - diry*(BALL_R + 6);
       const px = -diry, py = dirx;
+
       ctx.beginPath();
       ctx.strokeStyle = "rgba(230,230,240,.95)";
       ctx.lineWidth = 10;
@@ -1118,7 +1097,6 @@
       ctx.lineTo(hx + px*16, hy + py*16);
       ctx.stroke();
 
-      // head shine
       ctx.beginPath();
       ctx.strokeStyle = "rgba(255,255,255,.22)";
       ctx.lineWidth = 2;
@@ -1128,36 +1106,31 @@
     }
 
     function drawPowerGauge(){
+      if (!cueLocked) return;
       if (finished) return;
+      const h = holes[holeIndex];
       if (!allStopped()) return;
-      if (phase !== "GAUGE") return;
+      if (ballInCup(h)) return;
 
-      // On-screen gauge on the right side of the course
       const gx = WORLD_W - 72;
       const gy = 120;
       const gh = WORLD_H - 240;
       const gw = 22;
 
-      // background track
       ctx.save();
       ctx.fillStyle = "rgba(0,0,0,.35)";
-      ctx.beginPath();
-      ctx.roundRect(gx-6, gy-6, gw+12, gh+12, 14);
+      drawRoundedRectPath(gx-6, gy-6, gw+12, gh+12, 14);
       ctx.fill();
 
       ctx.fillStyle = "rgba(255,255,255,.08)";
-      ctx.beginPath();
-      ctx.roundRect(gx, gy, gw, gh, 12);
+      drawRoundedRectPath(gx, gy, gw, gh, 12);
       ctx.fill();
 
-      // fill
       const fillH = gh * power;
       ctx.fillStyle = "rgba(255,214,10,.70)";
-      ctx.beginPath();
-      ctx.roundRect(gx, gy + (gh - fillH), gw, fillH, 12);
+      drawRoundedRectPath(gx, gy + (gh - fillH), gw, fillH, 12);
       ctx.fill();
 
-      // marker
       const my = gy + (gh - fillH);
       ctx.strokeStyle = "rgba(255,255,255,.65)";
       ctx.lineWidth = 2;
@@ -1166,13 +1139,11 @@
       ctx.lineTo(gx+gw+10, my);
       ctx.stroke();
 
-      // label
       ctx.fillStyle = "rgba(255,255,255,.85)";
       ctx.font = "900 14px ui-sans-serif, system-ui";
       ctx.fillText("POWER", gx-30, gy-18);
       ctx.font = "900 12px ui-sans-serif, system-ui";
       ctx.fillText(`${Math.round(power*100)}%`, gx-22, gy + gh + 26);
-
       ctx.restore();
     }
 
@@ -1206,7 +1177,7 @@
     function render(){
       withWorldTransform(() => {
         drawCourse();
-        drawAimLineAndPutter();
+        drawAimAndPutter();
         drawPowerGauge();
         drawBall();
         drawEndOverlay();
@@ -1215,92 +1186,82 @@
 
     /*****************************************************************
      * INPUT: MOUSE
-     * - Move aims
-     * - Click toggles gauge/ready/shoot:
-     *   AIM -> GAUGE
-     *   GAUGE -> READY (lock power)
-     *   READY -> SHOOT
+     * - move = aim (only when not locked)
+     * - click #1 = lock cue (freeze angle) + start gauge (up/down)
+     * - click #2 = shoot
      *****************************************************************/
     let gestureEnabled = true;
-    let mouseDown = false;
-    let gaugeAnchorY = null;
-    let gaugeAnchorPower = null;
 
     canvas.addEventListener("mousemove", (e) => {
       if (gestureEnabled) return;
       const w = toWorldFromClient(e.clientX, e.clientY);
-      aim.x = w.x; aim.y = w.y;
 
-      if (phase === "GAUGE" && gaugeAnchorY != null){
-        // Up = more power
+      // If locked: vertical motion adjusts power
+      if (cueLocked && allStopped()){
         const sens = parseFloat(UI.gaugeSensitivity.value);
-        const dy = (gaugeAnchorY - w.y) / 200;
-        const nextP = clamp(gaugeAnchorPower + dy * sens, 0.02, 1.00);
+        const dy = (gaugeStartWorldY - w.y) / 200; // up => +
+        const nextP = clamp(gaugeStartMousePower + dy * sens, 0.02, 1.00);
         power = smooth(power, nextP, 0.35);
+      } else {
+        // Not locked: aim follows mouse
+        aim.x = w.x; aim.y = w.y;
       }
     });
 
     canvas.addEventListener("mousedown", (e) => {
       if (gestureEnabled) return;
-      if (finished) { make18Holes(); return; }
 
       const h = holes[holeIndex];
-      if (ballInCup(h)){
+
+      if (finished){
+        make18Holes();
+        return;
+      }
+
+      if (ballInCup(h) && allStopped()){
         nextHole();
         return;
       }
 
       if (!allStopped()) return;
 
-      mouseDown = true;
+      if (!cueLocked){
+        // Click #1: lock cue
+        cueLocked = true;
+        lockedAngle = currentAngle();
 
-      if (phase === "AIM"){
-        phase = "GAUGE";
-        powerLocked = false;
         const w = toWorldFromClient(e.clientX, e.clientY);
-        gaugeAnchorY = w.y;
-        gaugeAnchorPower = power;
-        showBanner("Power gauge: move up/down to set, click to lock", 1.2);
-      } else if (phase === "GAUGE"){
-        phase = "AIM";
-        powerLocked = true;
-        gaugeAnchorY = null;
-        gaugeAnchorPower = null;
-        showBanner("Power locked — click to putt", 0.95);
+        gaugeStartWorldY = w.y;
+        gaugeStartMousePower = power;
+
+        showBanner("Locked — move up/down for power, click to shoot", 1.2);
       } else {
-        // READY (powerLocked)
+        // Click #2: shoot
         strikeBall();
       }
       updateUI();
     });
 
-    window.addEventListener("mouseup", () => {
-      if (gestureEnabled) return;
-      mouseDown = false;
-    });
-
     /*****************************************************************
      * INPUT: GESTURE (MediaPipe Hands)
-     * - Index tip controls aim
-     * - Pinch toggles:
-     *   AIM -> GAUGE (open gauge)
-     *   GAUGE -> READY (lock power)
-     *   READY -> SHOOT
-     * - In GAUGE: vertical movement of index tip sets power (no wrist)
+     * REQUIREMENT:
+     *   - Pinch #1 locks the cue (freeze angle)
+     *   - While locked, index tip up/down adjusts power (no wrist)
+     *   - Pinch #2 commits and shoots
      *****************************************************************/
     const video = document.getElementById("input_video");
     let pinch = false;
     let pinchPrev = false;
 
-    // smoothed aim point
+    // smoothed index aim
     let handAimX = WORLD_W/2, handAimY = WORLD_H/2;
 
-    // gauge anchors (use index position, not wrist)
-    let gaugeStartHandY = 0.5;
-    let gaugeStartPower = 0.35;
+    // pinch click debounce
+    let lastPinchClickAt = 0;
+    const PINCH_COOLDOWN_MS = 220;
 
     function onHandResults(results){
-      // Debug view
+      // debug
       if (cameraWrap.classList.contains("show")) {
         debugCtx.save();
         debugCtx.clearRect(0, 0, debugCanvas.width, debugCanvas.height);
@@ -1321,16 +1282,17 @@
         const thumb = lm[4];
         const indexTip = lm[8];
 
-        // Mirror X
+        // mirror X for natural
         const nx = 1 - indexTip.x;
         const ny = indexTip.y;
 
+        // smooth aim point
         const smoothA = parseFloat(UI.smoothing.value);
         handAimX = smooth(handAimX, nx * WORLD_W, smoothA);
         handAimY = smooth(handAimY, ny * WORLD_H, smoothA);
 
-        if (gestureEnabled){
-          // aim always follows index
+        // aim follows index ONLY when not locked
+        if (gestureEnabled && !cueLocked){
           aim.x = clamp(handAimX, 0, WORLD_W);
           aim.y = clamp(handAimY, 0, WORLD_H);
         }
@@ -1344,41 +1306,45 @@
         const pinchTh = parseFloat(UI.pinchThreshold.value);
         pinch = (pDist < pinchTh);
 
-        // Pinch edge: toggle flow
-        if (gestureEnabled && pinch && !pinchPrev){
-          // handle finish/cup cases with pinch
-          if (finished){
-            make18Holes();
-          } else {
-            const h = holes[holeIndex];
-            if (ballInCup(h)){
-              nextHole();
-            } else if (allStopped()){
-              if (phase === "AIM"){
-                phase = "GAUGE";
-                powerLocked = false;
-                gaugeStartHandY = ny;     // normalized Y
-                gaugeStartPower = power;
-                showBanner("Power gauge: move finger up/down, pinch to lock", 1.2);
-              } else if (phase === "GAUGE"){
-                phase = "AIM";
-                powerLocked = true;
-                showBanner("Power locked — pinch to putt", 0.95);
-              } else {
-                // READY
-                strikeBall();
-              }
-            }
-          }
-        }
-
-        // While in gauge, map index Y movement to power
-        if (gestureEnabled && phase === "GAUGE" && allStopped() && !finished){
-          // up = more power
+        // power adjust while locked (continuous, no extra pinch)
+        if (gestureEnabled && cueLocked && allStopped() && !finished){
           const sens = parseFloat(UI.gaugeSensitivity.value);
-          const dy = (gaugeStartHandY - ny); // move up => positive
+          const dy = (gaugeStartYNorm - ny); // up => +
           const nextP = clamp(gaugeStartPower + dy * 1.10 * sens, 0.02, 1.00);
           power = smooth(power, nextP, 0.28);
+        }
+
+        // pinch "click" on rising edge (with cooldown)
+        const now = performance.now();
+        const pinchClick = pinch && !pinchPrev && (now - lastPinchClickAt) > PINCH_COOLDOWN_MS;
+
+        if (gestureEnabled && pinchClick){
+          lastPinchClickAt = now;
+
+          const h = holes[holeIndex];
+
+          if (finished){
+            make18Holes();
+          } else if (ballInCup(h) && allStopped()){
+            nextHole();
+          } else if (allStopped()){
+            if (!cueLocked){
+              // Pinch #1: lock cue
+              cueLocked = true;
+
+              // Freeze angle at the moment of lock
+              lockedAngle = Math.atan2((aim.y - ball.y), (aim.x - ball.x));
+
+              // Start gauge anchor from index Y
+              gaugeStartYNorm = ny;
+              gaugeStartPower = power;
+
+              showBanner("Locked — move up/down for power, pinch again to shoot", 1.25);
+            } else {
+              // Pinch #2: shoot
+              strikeBall();
+            }
+          }
         }
       }
 
@@ -1394,8 +1360,6 @@
 
     /*****************************************************************
      * CAMERA: PC AUTO-PERMISSION REQUEST (FULL)
-     * This forces the permission prompt on desktop at startup, then
-     * hands the camera over to MediaPipe Camera().
      *****************************************************************/
     let mpHands = null;
     let mpCamera = null;
@@ -1403,7 +1367,7 @@
     async function stopMediaPipeCamera(){
       try { if (mpCamera && typeof mpCamera.stop === "function") await mpCamera.stop(); } catch {}
       mpCamera = null;
-      // Also stop any tracks currently attached to the <video>
+
       try{
         if (video && video.srcObject){
           const tracks = video.srcObject.getTracks?.() || [];
@@ -1417,13 +1381,9 @@
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
         throw new Error("getUserMedia not available");
       }
-      // Preflight triggers browser prompt immediately (desktop).
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-      // Attach briefly so some browsers consider it "in use"
       video.srcObject = stream;
-      // Ensure playback attempt (muted+autoplay set on element)
       try { await video.play(); } catch {}
-      // Stop immediately; MediaPipe Camera will request its own stream
       stream.getTracks().forEach(t => t.stop());
       video.srcObject = null;
     }
@@ -1465,14 +1425,14 @@
         if (bannerTimer <= 0) UI.banner.classList.remove("show");
       }
 
-      // physics
       if (!finished){
         applyPhysics(dt);
 
-        // if holed
+        // auto-banner when holed (only once per stop)
         const h = holes[holeIndex];
-        if (ballInCup(h) && !finished){
-          showBanner(`Holed out! ${strokesThisHole} stroke${strokesThisHole!==1?"s":""}. Pinch/click to continue.`, 1.7);
+        if (ballInCup(h) && allStopped()){
+          // keep cue unlocked on cup
+          cueLocked = false;
         }
       }
 
@@ -1488,8 +1448,7 @@
       gestureEnabled = !gestureEnabled;
       if (!gestureEnabled){
         pinch = false; pinchPrev = false;
-        phase = "AIM";
-        powerLocked = false;
+        cueLocked = false;
         showBanner("Mouse control enabled", 0.9);
       } else {
         showBanner("Gesture control enabled", 0.9);
@@ -1526,26 +1485,23 @@
     function boot(){
       resize();
       syncSettingLabels();
-
       make18Holes();
-
       render();
       requestAnimationFrame(tick);
 
-      // IMPORTANT: "requests cam on PC on startup" (full implementation)
       const mobile = isLikelyMobile();
 
-      // Desktop default: gesture ON and request permission immediately
-      // Mobile default: gesture OFF (avoids autoplay/permission issues)
+      // Desktop: gestures ON and request camera immediately
+      // Mobile: gestures OFF by default (more stable)
       gestureEnabled = !mobile;
 
       if (!mobile){
         (async () => {
           try{
             showBanner("Requesting camera permission…", 1.2);
-            await preflightCameraPermission();     // forces permission prompt now
-            await initHands();                     // then start MediaPipe camera
-            showBanner("Camera ready — gestures active", 1.0);
+            await preflightCameraPermission(); // forces permission prompt now
+            await initHands();
+            showBanner("Camera ready — pinch to play", 1.0);
           } catch (err){
             console.error(err);
             UI.modeBadge.textContent = "Gesture: ERROR";
