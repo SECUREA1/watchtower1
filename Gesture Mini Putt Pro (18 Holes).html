@@ -108,6 +108,7 @@
       opacity:.45;
       box-shadow: 0 0 12px var(--accent-glow);
       transition: opacity .12s ease, height .12s ease;
+      display:none;
     }
     .pinchViz.active .pinchLink{
       opacity:.9;
@@ -999,6 +1000,7 @@
     const PINCH_BASE_BONUS  = MOBILE ? 0.05 : 0.04;
     const PINCH_CONNECT_MARGIN = MOBILE ? 0.06 : 0.05;
     const PINCH_EASY_START_MS = 4800;
+    const PINCH_CLOSE_FACTOR = 0.5;
 
     async function startCameraPipeline(){
       if (mpCamera && mpHands) return true;
@@ -1076,10 +1078,10 @@
     }
 
     function getPinchDownThreshold(){
-      const thr = parseFloat(UI.pinchThreshold.value);
+      const thr = parseFloat(UI.pinchThreshold.value) * PINCH_CLOSE_FACTOR;
       const now = performance.now();
       const bonus = PINCH_BASE_BONUS + (now < HandState.easyStartUntil ? PINCH_EASY_BONUS : 0);
-      return clamp(thr + bonus, 0.2, 0.9);
+      return clamp(thr + bonus, 0.1, 0.9);
     }
 
     function updateDebouncedPinch(pinchN){
@@ -1127,6 +1129,27 @@
       }
     }
 
+    function lerp(a, b, t){
+      return a + (b - a) * t;
+    }
+
+    function mixColor(a, b, t){
+      const r = Math.round(lerp(a[0], b[0], t));
+      const g = Math.round(lerp(a[1], b[1], t));
+      const bch = Math.round(lerp(a[2], b[2], t));
+      return `rgb(${r}, ${g}, ${bch})`;
+    }
+
+    function pinchColor(pinchN, downThr){
+      const far = downThr * 1.9;
+      const near = downThr * 0.6;
+      const t = clamp((far - pinchN) / Math.max(0.0001, far - near), 0, 1);
+      if (t < 0.5){
+        return mixColor([235, 64, 52], [255, 165, 0], t * 2);
+      }
+      return mixColor([255, 165, 0], [60, 214, 118], (t - 0.5) * 2);
+    }
+
     function updatePinchViz(lm){
       if (!PinchViz.wrap) return;
       if (!gestureEnabled || !lm){
@@ -1150,6 +1173,7 @@
       const dist = Math.hypot(dx, dy);
       const ang = Math.atan2(dy, dx);
       const active = HandState.pinchConnect || HandState.pinchDown;
+      const hue = pinchColor(HandState.pinchN, HandState.pinchDownThreshold || getPinchDownThreshold());
 
       PinchViz.wrap.classList.add("show");
       PinchViz.wrap.classList.toggle("active", active);
@@ -1160,6 +1184,10 @@
       PinchViz.index.style.top = `${iy}px`;
       PinchViz.thumb.classList.toggle("active", active);
       PinchViz.index.classList.toggle("active", active);
+      PinchViz.thumb.style.background = hue;
+      PinchViz.index.style.background = hue;
+      PinchViz.thumb.style.boxShadow = `0 0 12px ${hue}, 0 0 20px rgba(0,0,0,.35)`;
+      PinchViz.index.style.boxShadow = `0 0 12px ${hue}, 0 0 20px rgba(0,0,0,.35)`;
 
       PinchViz.link.style.left = `${tx}px`;
       PinchViz.link.style.top = `${ty}px`;
@@ -1492,6 +1520,27 @@
       { name:"Neon",   grassA:"#198a55", grassB:"#0f6a3f", deco:"#ffd60a" },
     ];
 
+    const OBSTACLE_TYPES = {
+      wall:   { shape: "rect", behavior: "wall" },
+      bumper: { shape: "rect", behavior: "bumper" },
+      sand:   { shape: "rect", behavior: "sand" },
+      gate:   { shape: "rect", behavior: "wall" },
+      portal: { shape: "rect", behavior: "bumper" },
+      pillar: { shape: "circle", behavior: "wall" },
+      crystal:{ shape: "circle", behavior: "bumper" },
+    };
+
+    const THEMED_OBSTACLES = {
+      Garden: ["pillar", "gate", "wall"],
+      Tiki: ["gate", "bumper", "pillar"],
+      Candy: ["crystal", "gate", "bumper"],
+      Space: ["portal", "pillar", "bumper"],
+      Pirate: ["gate", "wall", "sand"],
+      Castle: ["pillar", "gate", "wall"],
+      Jungle: ["pillar", "sand", "wall"],
+      Neon: ["portal", "crystal", "bumper"],
+    };
+
     // 18 holes
     let holes = [];
     let holeIndex = 0;
@@ -1617,6 +1666,35 @@
       };
     }
 
+    function obstacleBehavior(type){
+      return OBSTACLE_TYPES[type]?.behavior || "wall";
+    }
+
+    function makeObstacle(rng, bounds, type){
+      const spec = OBSTACLE_TYPES[type] || OBSTACLE_TYPES.wall;
+      if (spec.shape === "circle"){
+        const r = 18 + rng() * 26;
+        const cx = bounds.x + 100 + rng() * (bounds.w - 200);
+        const cy = bounds.y + 90 + rng() * (bounds.h - 180);
+        return { x: cx - r, y: cy - r, w: r * 2, h: r * 2, r, type, shape: "circle" };
+      }
+      const w = 60 + rng() * 160;
+      const h = 22 + rng() * 70;
+      const x = bounds.x + 80 + rng() * (bounds.w - 160 - w);
+      const y = bounds.y + 60 + rng() * (bounds.h - 120 - h);
+      return { x, y, w, h, type, shape: "rect" };
+    }
+
+    function pickObstacleType(rng, theme){
+      const themed = THEMED_OBSTACLES[theme.name] || ["wall", "bumper", "sand"];
+      const roll = rng();
+      if (roll < 0.3) return "wall";
+      if (roll < 0.5) return "bumper";
+      if (roll < 0.65) return "sand";
+      if (roll < 0.8) return themed[Math.floor(rng() * themed.length)];
+      return roll < 0.9 ? "pillar" : "crystal";
+    }
+
     function makeHole(rng){
       const theme = THEMES[Math.floor(rng() * THEMES.length)];
       const mode = selectedMode || GAME_MODES[0];
@@ -1633,16 +1711,26 @@
       };
 
       const obstacles = [];
-      const obstacleCount = 3 + Math.floor(rng()*4); // 3..6
+      const obstacleCount = 5 + Math.floor(rng() * 5); // 5..9
       for (let i=0;i<obstacleCount;i++){
-        const w = 70 + rng()*140;
-        const h = 24 + rng()*70;
-        const x = bounds.x + 80 + rng()*(bounds.w - 160 - w);
-        const y = bounds.y + 60 + rng()*(bounds.h - 120 - h);
-        const typeRoll = rng();
-        const type = typeRoll < 0.60 ? "wall" : (typeRoll < 0.85 ? "bumper" : "sand");
-        obstacles.push({ x, y, w, h, type });
+        const type = pickObstacleType(rng, theme);
+        obstacles.push(makeObstacle(rng, bounds, type));
       }
+
+      const themedExtras = THEMED_OBSTACLES[theme.name] || [];
+      const themedCount = 2 + Math.floor(rng() * 2);
+      for (let i=0;i<themedCount;i++){
+        const type = themedExtras[Math.floor(rng() * themedExtras.length)] || "gate";
+        obstacles.push(makeObstacle(rng, bounds, type));
+      }
+
+      const sparkles = Array.from({ length: 22 + Math.floor(rng() * 14) }, () => ({
+        x: bounds.x + 40 + rng() * (bounds.w - 80),
+        y: bounds.y + 40 + rng() * (bounds.h - 80),
+        r: 1.5 + rng() * 2.6,
+        phase: rng() * Math.PI * 2,
+        speed: 0.6 + rng() * 1.4,
+      }));
 
       const tunnels = [];
       const tunnelCount = mode.mechanics?.boostPads ? mode.mechanics.boostPads : (rng() < 0.35 ? 1 : 0);
@@ -1721,7 +1809,7 @@
       const basePar = dist < 520 ? 2 : (dist < 760 ? 3 : 4);
       const par = clamp(basePar + (obstacleCount >= 5 ? 1 : 0) + (feature ? 1 : 0), 2, 6);
 
-      return { theme, bounds, start, cup, obstacles, tunnels, windmills, feature, par };
+      return { theme, bounds, start, cup, obstacles, tunnels, windmills, sparkles, feature, par };
     }
 
     function make18Holes(){
@@ -1846,32 +1934,60 @@
 
       // obstacles (circle vs AABB)
       for (const o of h.obstacles){
-        const cx = clamp(ball.x, o.x, o.x + o.w);
-        const cy = clamp(ball.y, o.y, o.y + o.h);
-        const dx = ball.x - cx;
-        const dy = ball.y - cy;
-        if (dx*dx + dy*dy <= BALL_R*BALL_R){
-          const d = Math.max(0.0001, Math.sqrt(dx*dx + dy*dy));
-          const nx = dx / d, ny = dy / d;
+        const behavior = obstacleBehavior(o.type);
+        let hit = false;
+        let nx = 0;
+        let ny = 0;
+        let cx = 0;
+        let cy = 0;
+        if (o.shape === "circle"){
+          const ox = o.x + o.r;
+          const oy = o.y + o.r;
+          const dx = ball.x - ox;
+          const dy = ball.y - oy;
+          const rr = BALL_R + o.r;
+          if (dx*dx + dy*dy <= rr*rr){
+            const d = Math.max(0.0001, Math.sqrt(dx*dx + dy*dy));
+            nx = dx / d; ny = dy / d;
+            cx = ox; cy = oy;
+            ball.x = ox + nx * (rr + 0.2);
+            ball.y = oy + ny * (rr + 0.2);
+            hit = true;
+          }
+        } else {
+          cx = clamp(ball.x, o.x, o.x + o.w);
+          cy = clamp(ball.y, o.y, o.y + o.h);
+          const dx = ball.x - cx;
+          const dy = ball.y - cy;
+          if (dx*dx + dy*dy <= BALL_R*BALL_R){
+            const d = Math.max(0.0001, Math.sqrt(dx*dx + dy*dy));
+            nx = dx / d; ny = dy / d;
+            ball.x = cx + nx * (BALL_R + 0.2);
+            ball.y = cy + ny * (BALL_R + 0.2);
+            hit = true;
+          }
+        }
 
-          ball.x = cx + nx * (BALL_R + 0.2);
-          ball.y = cy + ny * (BALL_R + 0.2);
-
+        if (hit){
           const vn = ball.vx*nx + ball.vy*ny;
           const chargeBoost = (selectedMode.id === "electric") ? (1 + ball.charge * 0.25) : 1;
           const impactPower = clamp(len(ball.vx, ball.vy) / maxSpeed, 0.2, 1);
           const impactColor = (selectedMode.id === "electric") ? "124,244,255" : "255,214,10";
 
-          if (o.type === "wall"){
+          if (behavior === "wall"){
             ball.vx -= (1.85 * vn) * nx;
             ball.vy -= (1.85 * vn) * ny;
             ball.vx *= 0.92; ball.vy *= 0.92;
-          } else if (o.type === "bumper"){
+          } else if (behavior === "bumper"){
             ball.vx -= (2.15 * vn) * nx;
             ball.vy -= (2.15 * vn) * ny;
             ball.vx *= 1.06; ball.vy *= 1.06;
-          } else if (o.type === "sand"){
+          } else if (behavior === "sand"){
             ball.vx *= 0.62; ball.vy *= 0.62;
+          }
+
+          if (behavior !== "sand" && len(ball.vx, ball.vy) > 40){
+            addImpact(cx, cy, impactPower * chargeBoost, impactColor);
           }
         }
       }
@@ -2106,6 +2222,8 @@
 
     function drawCourse(){
       const h = holes[holeIndex];
+      const now = performance.now() * 0.001;
+      const deco = h.theme.deco;
 
       ctx.fillStyle = grassPattern || "#167a35";
       ctx.fillRect(0,0,WORLD_W,WORLD_H);
@@ -2137,32 +2255,93 @@
         ctx.restore();
       }
 
+      if (h.sparkles && h.sparkles.length){
+        ctx.save();
+        h.sparkles.forEach((s, i) => {
+          const tw = 0.35 + 0.35 * Math.sin(now * s.speed + s.phase + i);
+          ctx.globalAlpha = 0.15 + tw * 0.35;
+          ctx.fillStyle = deco;
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, s.r * (1 + tw * 0.6), 0, Math.PI * 2);
+          ctx.fill();
+        });
+        ctx.restore();
+      }
+
       // obstacles
       for (const o of h.obstacles){
+        const pulse = 0.55 + 0.45 * Math.sin(now * 2 + (o.x + o.y) * 0.02);
+        const glowAlpha = 0.12 + pulse * 0.18;
+        const isBumper = obstacleBehavior(o.type) === "bumper";
+        const isSand = obstacleBehavior(o.type) === "sand";
+        const baseGlow = isBumper ? "rgba(255,214,10,.45)" : (isSand ? "rgba(200,160,90,.45)" : "rgba(140,180,255,.35)");
+
         ctx.save();
-        ctx.globalAlpha = 0.35;
-        ctx.fillStyle = "rgba(0,0,0,1)";
-        drawRoundedRectPath(o.x+4, o.y+6, o.w, o.h, 10);
-        ctx.fill();
-        ctx.globalAlpha = 1;
+        ctx.shadowColor = baseGlow;
+        ctx.shadowBlur = 16 + pulse * 10;
+        if (o.shape === "circle"){
+          const cx = o.x + o.r;
+          const cy = o.y + o.r;
+          ctx.globalAlpha = 0.35;
+          ctx.fillStyle = "rgba(0,0,0,1)";
+          ctx.beginPath();
+          ctx.arc(cx + 4, cy + 6, o.r + 2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 1;
 
-        if (o.type === "wall"){
-          const g = ctx.createLinearGradient(o.x, o.y, o.x, o.y+o.h);
-          g.addColorStop(0, "rgba(220,220,220,.22)");
-          g.addColorStop(1, "rgba(10,10,10,.25)");
+          const g = ctx.createRadialGradient(cx - o.r * 0.3, cy - o.r * 0.35, o.r * 0.3, cx, cy, o.r);
+          if (o.type === "crystal"){
+            g.addColorStop(0, `rgba(255,180,232,${0.45 + glowAlpha})`);
+            g.addColorStop(1, "rgba(120,40,160,.35)");
+          } else {
+            g.addColorStop(0, `rgba(210,230,255,${0.35 + glowAlpha})`);
+            g.addColorStop(1, "rgba(50,70,120,.35)");
+          }
           ctx.fillStyle = g;
-        } else if (o.type === "bumper"){
-          ctx.fillStyle = "rgba(255,214,10,.18)";
-        } else {
-          ctx.fillStyle = "rgba(200,160,90,.18)";
-        }
-        drawRoundedRectPath(o.x, o.y, o.w, o.h, 10);
-        ctx.fill();
+          ctx.beginPath();
+          ctx.arc(cx, cy, o.r, 0, Math.PI * 2);
+          ctx.fill();
 
-        ctx.strokeStyle = "rgba(255,255,255,.10)";
-        ctx.lineWidth = 2;
-        drawRoundedRectPath(o.x, o.y, o.w, o.h, 10);
-        ctx.stroke();
+          ctx.strokeStyle = `rgba(255,255,255,${0.12 + glowAlpha})`;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(cx, cy, o.r, 0, Math.PI * 2);
+          ctx.stroke();
+        } else {
+          ctx.globalAlpha = 0.35;
+          ctx.fillStyle = "rgba(0,0,0,1)";
+          drawRoundedRectPath(o.x+4, o.y+6, o.w, o.h, 10);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+
+          if (o.type === "wall" || o.type === "gate"){
+            const g = ctx.createLinearGradient(o.x, o.y, o.x, o.y+o.h);
+            g.addColorStop(0, "rgba(220,220,220,.22)");
+            g.addColorStop(1, "rgba(10,10,10,.25)");
+            ctx.fillStyle = g;
+          } else if (o.type === "bumper" || o.type === "portal"){
+            ctx.fillStyle = "rgba(255,214,10,.18)";
+          } else if (o.type === "sand"){
+            ctx.fillStyle = "rgba(200,160,90,.18)";
+          } else {
+            ctx.fillStyle = "rgba(160,210,255,.18)";
+          }
+          drawRoundedRectPath(o.x, o.y, o.w, o.h, 10);
+          ctx.fill();
+
+          if (o.type === "portal"){
+            ctx.globalAlpha = 0.25 + glowAlpha;
+            ctx.fillStyle = "rgba(124,244,255,.35)";
+            drawRoundedRectPath(o.x + 6, o.y + 6, o.w - 12, o.h - 12, 10);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+          }
+
+          ctx.strokeStyle = `rgba(255,255,255,${0.10 + glowAlpha})`;
+          ctx.lineWidth = 2;
+          drawRoundedRectPath(o.x, o.y, o.w, o.h, 10);
+          ctx.stroke();
+        }
         ctx.restore();
       }
 
