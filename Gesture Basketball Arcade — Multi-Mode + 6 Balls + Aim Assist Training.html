@@ -2399,6 +2399,28 @@
     requestAnimationFrame(mpLoop);
   }
 
+  async function requestCameraStream(){
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      throw new Error("Camera API unavailable (requires HTTPS/localhost).");
+    }
+
+    const candidates = [
+      { video: { facingMode: { ideal: "user" } }, audio: false },
+      { video: { facingMode: { ideal: "environment" } }, audio: false },
+      { video: true, audio: false }
+    ];
+
+    let lastErr = null;
+    for(const constraints of candidates){
+      try{
+        return await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (err){
+        lastErr = err;
+      }
+    }
+    throw lastErr || new Error("Unable to access camera.");
+  }
+
   async function startGesture(){
     if (!window.Hands) {
       setStatus("MediaPipe Hands not loaded");
@@ -2415,13 +2437,19 @@
       setStatus("Requesting camera permission…");
       setBridge("Requesting camera…");
 
-      camStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" },
-        audio: false
-      });
+      camStream = await requestCameraStream();
 
       videoEl.srcObject = camStream;
-      await videoEl.play();
+      videoEl.muted = true;
+      videoEl.setAttribute("playsinline", "");
+      videoEl.setAttribute("autoplay", "");
+      const playPromise = videoEl.play();
+      if(playPromise && playPromise.catch){
+        playPromise.catch((err)=>{
+          console.warn("Video playback blocked; continuing with camera stream.", err);
+          setStatus("Camera stream ready. Tap Start if playback is blocked.");
+        });
+      }
 
       hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
       hands.setOptions({
