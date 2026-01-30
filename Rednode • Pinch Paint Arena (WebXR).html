@@ -2121,6 +2121,25 @@
       return (typeof FilesetResolver !== "undefined") && (typeof HandLandmarker !== "undefined");
     }
 
+    async function createHandLandmarker(delegate){
+      const wasmRoot = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm";
+      const vision = await FilesetResolver.forVisionTasks(wasmRoot);
+
+      const modelUrl = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+
+      return HandLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: modelUrl,
+          delegate
+        },
+        runningMode: "VIDEO",
+        numHands: 2,
+        minHandDetectionConfidence: 0.6,
+        minHandPresenceConfidence: 0.6,
+        minTrackingConfidence: 0.5
+      });
+    }
+
     async function initHandLandmarker(force=false){
       if(handLandmarker && !force) return;
       if(!mpAvailable()){
@@ -2131,29 +2150,30 @@
 
       try{
         setStatus("Loading hand model…", "warn");
-
-        const wasmRoot = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm";
-        const vision = await FilesetResolver.forVisionTasks(wasmRoot);
-
-        const modelUrl = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
-
-        handLandmarker = await HandLandmarker.createFromOptions(vision, {
-          baseOptions: {
-            modelAssetPath: modelUrl,
-            delegate: state.settings.delegate
-          },
-          runningMode: "VIDEO",
-          numHands: 2,
-          minHandDetectionConfidence: 0.6,
-          minHandPresenceConfidence: 0.6,
-          minTrackingConfidence: 0.5
-        });
+        const requestedDelegate = state.settings.delegate;
+        handLandmarker = await createHandLandmarker(requestedDelegate);
 
         state.detectErrorShown = false;
         state.lastVideoTime = -1;
         setStatus("Ready", "ok");
       }catch(err){
         console.error(err);
+        if(state.settings.delegate === "GPU"){
+          try{
+            setStatus("GPU init failed, trying CPU…", "warn");
+            handLandmarker = await createHandLandmarker("CPU");
+            state.settings.delegate = "CPU";
+            saveSettings();
+            $("#delegate").value = "CPU";
+            state.detectErrorShown = false;
+            state.lastVideoTime = -1;
+            setStatus("Ready (CPU fallback)", "ok");
+            toast("GPU unavailable, using CPU");
+            return;
+          }catch(fallbackErr){
+            console.error(fallbackErr);
+          }
+        }
         setStatus("Failed to load hand model", "bad");
         toast("Hand tracker init failed");
         handLandmarker = null;
@@ -2212,6 +2232,18 @@
         setStatus("Requesting camera…", "warn");
         const stream = await navigator.mediaDevices.getUserMedia(constraints);
         state.video.srcObject = stream;
+        state.video.setAttribute("playsinline", "");
+        state.video.playsInline = true;
+        state.video.muted = true;
+
+        await new Promise((resolve) => {
+          if(state.video.readyState >= 1){
+            resolve();
+            return;
+          }
+          state.video.onloadedmetadata = () => resolve();
+        });
+
         await state.video.play();
 
         state.started = true;
