@@ -717,6 +717,10 @@
       // Drawing tool state
       prevIndexLeft: null,
       prevIndexRight: null,
+      pinch: {
+        left: { down: false, downAt: 0 },
+        right: { down: false, downAt: 0 }
+      },
 
       // Gameplay
       playerHealth: 100,
@@ -1417,7 +1421,7 @@
     }
 
     function processUIAndDrawing(handInfo, layout){
-      const {indexPos, isPinching, isLeft} = handInfo;
+      const {indexPos, isPinching, isPinchStart, isLeft} = handInfo;
       const W = state.view.width;
       const H = state.view.height;
 
@@ -1431,7 +1435,7 @@
       };
       let consumed = false;
 
-      const click = isPinching;
+      const click = isPinchStart;
 
       // ---- Top bar buttons ----
       if(indexPos.y < topBarH){
@@ -2049,13 +2053,13 @@
 
       function pointerInteract(pt, click){
         const layout = layoutRects(state.view.width, state.view.height);
-        const fakeHand = { indexPos: pt, isPinching: click, isLeft: false, handednessName: "Right" };
+        const fakeHand = { indexPos: pt, isPinching: click, isPinchStart: click, isLeft: false, handednessName: "Right" };
         processUIAndDrawing(fakeHand, layout);
       }
 
       function pointerPaint(pt){
         const layout = layoutRects(state.view.width, state.view.height);
-        const fakeHand = { indexPos: pt, isPinching: true, isLeft: false, handednessName: "Right" };
+        const fakeHand = { indexPos: pt, isPinching: true, isPinchStart: false, isLeft: false, handednessName: "Right" };
         processUIAndDrawing(fakeHand, layout);
       }
     }
@@ -2432,7 +2436,14 @@
           const indexRaw = pts[8];
           const wristRaw = pts[0];
 
-          const pinch = dist(thumb, indexRaw) < state.settings.pinchDistThresholdPx;
+          const pinchRaw = dist(thumb, indexRaw) < state.settings.pinchDistThresholdPx;
+          const pinchState = isLeft ? state.pinch.left : state.pinch.right;
+          const pinchStart = pinchRaw && !pinchState.down;
+          if(pinchStart){
+            pinchState.downAt = nowMs;
+          }
+          pinchState.down = pinchRaw;
+          const pinch = pinchState.down;
 
           // smoothing (alpha is inverted by "cursorSmoothing")
           const alpha = clamp(1 - state.settings.cursorSmoothing, 0.15, 1);
@@ -2471,7 +2482,7 @@
           // Use smoothed index for UI + drawing
           const idxPos = isLeft ? leftIndex : rightIndex;
           if(idxPos){
-            const handInfo = { indexPos: {x: idxPos.x, y: idxPos.y}, isPinching: pinch, isLeft, handednessName };
+            const handInfo = { indexPos: {x: idxPos.x, y: idxPos.y}, isPinching: pinch, isPinchStart: pinchStart, isLeft, handednessName };
             const r = processUIAndDrawing(handInfo, layout);
 
             // merge hover states
@@ -2491,6 +2502,8 @@
       }else{
         state.prevIndexLeft = null;
         state.prevIndexRight = null;
+        state.pinch.left.down = false;
+        state.pinch.right.down = false;
       }
 
       // Enemy target: nearest hand (preferred), else center of view
