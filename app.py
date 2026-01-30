@@ -10,6 +10,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
+from urllib.parse import quote
 from uuid import uuid4
 
 import requests
@@ -76,6 +77,7 @@ UI_GUEST_CODE = os.getenv("UI_GUEST_CODE", "")
 UI_SESSION_LOCK = threading.Lock()
 UI_SESSIONS: Dict[str, float] = {}
 LOGIN_PATHS = {"/start", "/start.html"}
+DEFAULT_GUEST_CODE = "watch tower"
 
 # -------------------------------------------------------------------------
 # Logging & FastAPI app
@@ -144,7 +146,7 @@ async def enforce_ui_login(request: Request, call_next):
         if Path(path).suffix and Path(path).suffix != ".html":
             return await call_next(request)
         if not is_ui_authenticated(request):
-            return RedirectResponse(url="/start.html", status_code=302)
+            return RedirectResponse(url=build_login_redirect_url(request), status_code=302)
     return await call_next(request)
 
 
@@ -319,17 +321,26 @@ def is_ui_authenticated(request: Request) -> bool:
     return True
 
 
+def _normalize_code(value: str) -> str:
+    return " ".join((value or "").strip().lower().split())
+
+
+def _effective_guest_code() -> str:
+    return UI_GUEST_CODE.strip() or DEFAULT_GUEST_CODE
+
+
 def _login_allowed(token: str, guest_code: str, wallet: str) -> bool:
     candidate = token or wallet or ""
+    normalized_guest = _normalize_code(guest_code)
+    if normalized_guest and normalized_guest == _normalize_code(_effective_guest_code()):
+        return True
     if UI_ACCESS_TOKENS or UI_GUEST_CODE or ADMIN_TOKEN:
         if UI_ACCESS_TOKENS and candidate in UI_ACCESS_TOKENS:
             return True
         if ADMIN_TOKEN and candidate == ADMIN_TOKEN:
             return True
-        if UI_GUEST_CODE and guest_code and guest_code == UI_GUEST_CODE:
-            return True
         return False
-    return bool(candidate or guest_code)
+    return bool(candidate)
 
 
 def _create_ui_session() -> str:
@@ -379,6 +390,54 @@ CHAINES_PATHS = {
     "/CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll/index.html",
 }
 LIVE_PATHS = {"/live", "/live/", "/live/index.html"}
+
+
+def _login_routes_for_html(path: Path, base: Path) -> List[str]:
+    try:
+        rel = path.relative_to(base)
+    except ValueError:
+        return []
+    web_path = "/" + str(rel).replace(os.sep, "/")
+    routes = {web_path}
+    if web_path.endswith(".html"):
+        base_path = web_path[:-5]
+        if base_path:
+            routes.add(base_path)
+    if web_path.endswith("index.html"):
+        base_dir = web_path[: -len("index.html")]
+        routes.add(base_dir or "/")
+        if base_dir and not base_dir.endswith("/"):
+            routes.add(f"{base_dir}/")
+    return sorted(routes)
+
+
+def build_login_session_pages() -> List[str]:
+    pages = set()
+    for base in SERVE_ROOTS:
+        if not base.exists():
+            continue
+        for html in base.rglob("*.html"):
+            pages.update(_login_routes_for_html(html, base))
+    pages.update(LOGIN_PATHS)
+    pages.update(HOME_PATHS)
+    pages.update(SECURE_PATHS)
+    pages.update(REDNODE_PATHS)
+    pages.update(DASHBOARD_PATHS)
+    pages.update(CHAINES_PATHS)
+    pages.update(LIVE_PATHS)
+    pages.update(HTML_ALIASES.keys())
+    pages.add("/")
+    return sorted(pages)
+
+
+LOGIN_SESSION_PAGES = build_login_session_pages()
+
+
+def build_login_redirect_url(request: Request) -> str:
+    path = request.url.path
+    if request.url.query:
+        path = f"{path}?{request.url.query}"
+    return f"/start.html?next={quote(path, safe='/?:&=')}"
 
 
 def _resolve_path(relative: str) -> Optional[Path]:
@@ -919,8 +978,23 @@ async def ui_session_status(request: Request) -> JSONResponse:
         session_id = request.cookies.get(AUTH_COOKIE_NAME, "")
         with UI_SESSION_LOCK:
             expires_at = UI_SESSIONS.get(session_id)
-        return JSONResponse({"ok": True, "authenticated": True, "expires_at": expires_at})
-    return JSONResponse({"ok": True, "authenticated": False})
+        return JSONResponse(
+            {
+                "ok": True,
+                "authenticated": True,
+                "expires_at": expires_at,
+                "pages": LOGIN_SESSION_PAGES,
+                "page_count": len(LOGIN_SESSION_PAGES),
+            }
+        )
+    return JSONResponse(
+        {
+            "ok": True,
+            "authenticated": False,
+            "pages": LOGIN_SESSION_PAGES,
+            "page_count": len(LOGIN_SESSION_PAGES),
+        }
+    )
 
 
 @app.post("/api/login")
@@ -937,7 +1011,6 @@ async def ui_login(payload: LoginPayload, request: Request) -> JSONResponse:
     response.set_cookie(
         AUTH_COOKIE_NAME,
         session_id,
-        max_age=UI_SESSION_TTL_SECONDS,
         httponly=True,
         samesite="lax",
         secure=request.url.scheme == "https",
@@ -992,7 +1065,7 @@ async def serve_frontend(full_path: str, request: Request):
         raise HTTPException(status_code=404, detail="Not found")
 
     if url_path not in LOGIN_PATHS and not is_ui_authenticated(request):
-        return RedirectResponse(url="/start.html", status_code=302)
+        return RedirectResponse(url=build_login_redirect_url(request), status_code=302)
 
     # Prefer a modern landing page
     if url_path in {"/", "/index.html"}:
