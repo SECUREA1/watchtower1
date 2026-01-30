@@ -1844,7 +1844,6 @@ function selectMode(m){
   pickCursor.classList.toggle('selected', m==='cursor');
   gesturePanel.style.display = (m==='gesture') ? 'block' : 'none';
   cursorPanel.style.display = (m==='cursor') ? 'block' : 'none';
-  if (m !== 'gesture') startupScanReady = false;
   updateAuthProfilePill();
   loginBtn.disabled = !hasProfileForMode(m);
 }
@@ -2017,7 +2016,6 @@ resetAuth.addEventListener('click', ()=>{
   saveCfg();
   syncControls();
   updateAuthProfilePill();
-  startupScanReady = false;
   loginBtn.disabled = true;
   authStatusPill.textContent = 'Status: Locked';
   authStatusPill.className = 'pillMini';
@@ -2484,7 +2482,6 @@ let countdownT = 0;
 let rangeT = 0;
 let neutralSamples = [];
 let maxDelta = 0;
-let startupScanReady = false;
 
 function showStartup(show){
   startup.style.display = show ? 'flex' : 'none';
@@ -2496,7 +2493,6 @@ function showStartup(show){
 }
 function beginStartupScan(){
   if (controllerMode !== 'gesture') return;
-  startupScanReady = false;
   startupActive = true;
   startupPhase = 'wait';
   stableT = 0;
@@ -2612,9 +2608,6 @@ function updateStartup(dt){
     if (rangeT <= 0){
       startupActive = false;
       showStartup(false);
-      startupScanReady = true;
-      authStatusPill.textContent = 'Status: Scan complete — ready to enter';
-      authStatusPill.className = 'pillMini ok';
       flashMessage(`Startup scan complete. Neutral locked. Observed micro delta ~${Math.round(maxDelta)}px.`);
     }
   }
@@ -2783,19 +2776,8 @@ loginBtn.addEventListener('click', async ()=>{
   localStorage.setItem(MODE_KEY, controllerMode);
 
   let ok = false;
-  let usedScan = false;
-  if (controllerMode === 'gesture'){
-    if (!hasProfileForMode('gesture') && startupScanReady){
-      ok = true;
-      usedScan = true;
-      authStatusPill.textContent = 'Status: Scan verified';
-      authStatusPill.className = 'pillMini ok';
-    } else {
-      ok = await doLoginGesture();
-    }
-  } else {
-    ok = await doLoginCursor();
-  }
+  if (controllerMode === 'gesture') ok = await doLoginGesture();
+  else ok = await doLoginCursor();
 
   if (ok){
     isLoggedIn = true;
@@ -2804,7 +2786,6 @@ loginBtn.addEventListener('click', async ()=>{
     overlay.style.display = 'none';
     authStatusPill.textContent = 'Status: Unlocked';
     authStatusPill.className = 'pillMini ok';
-    startupScanReady = false;
 
     if (controllerMode === 'gesture'){
       // recenter + steady smoothing on first login
@@ -2812,7 +2793,7 @@ loginBtn.addEventListener('click', async ()=>{
       armStartupSmoothing(2600);
 
       gestureCursorEl.style.display = 'block';
-      flashMessage(usedScan ? 'Unlocked via startup scan. Gesture cursor active — pinch to click.' : 'Unlocked. Gesture cursor active — pinch to click.');
+      flashMessage('Unlocked. Gesture cursor active — pinch to click.');
       playSFX('win');
     } else {
       gestureCursorEl.style.display = 'none';
@@ -2830,8 +2811,7 @@ loginBtn.addEventListener('click', async ()=>{
 
 /* keep login button state up to date */
 function refreshAuthUI(){
-  const canScanUnlock = controllerMode === 'gesture' && startupScanReady;
-  loginBtn.disabled = !controllerMode || (!hasProfileForMode(controllerMode) && !canScanUnlock);
+  loginBtn.disabled = !controllerMode || !hasProfileForMode(controllerMode);
   updateAuthProfilePill();
   requestAnimationFrame(refreshAuthUI);
 }
