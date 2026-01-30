@@ -795,6 +795,35 @@
       return avg < state.settings.fistClosedThresholdPx;
     }
 
+    function handScalePx(lmsPx){
+      const wrist = lmsPx[0];
+      const mcp = lmsPx[9] || lmsPx[5] || lmsPx[0];
+      return Math.max(1, dist(wrist, mcp));
+    }
+
+    function updatePinchState(thumb, indexTip, lmsPx, pinchState, nowMs){
+      const rawDist = dist(thumb, indexTip);
+      const scale = handScalePx(lmsPx);
+      const pinchOn = state.settings.pinchDistThresholdPx / scale;
+      const pinchOff = pinchOn * 1.35;
+      const ratio = rawDist / scale;
+      const wasDown = pinchState.down;
+      const down = wasDown ? (ratio < pinchOff) : (ratio < pinchOn);
+
+      if (!wasDown && down){
+        pinchState.downAt = nowMs;
+      }
+
+      pinchState.down = down;
+      pinchState.ratio = ratio;
+      pinchState.raw = rawDist;
+      pinchState.scale = scale;
+      pinchState.on = pinchOn;
+      pinchState.off = pinchOff;
+
+      return { pinch: down, pinchStart: down && !wasDown, ratio };
+    }
+
     function smoothPoint(prev, next, alpha){
       if(!next) return prev;
       if(!prev) return {x: next.x, y: next.y};
@@ -1365,7 +1394,7 @@
     }
 
     // draw visible per-hand cursors
-    function drawHandCursors(ctx, leftIdx, rightIdx, leftPinch, rightPinch){
+    function drawHandCursors(ctx, leftIdx, rightIdx, leftPinch, rightPinch, leftThumb, rightThumb){
       const s = state.settings.uiScale;
       const r = 16*s;
       const ring = 3*s;
@@ -1389,15 +1418,31 @@
 
         ctx.globalAlpha = 0.95;
         ctx.fillStyle = "rgba(0,0,0,0.65)";
-        drawRoundedRect(ctx, pt.x + 18*s, pt.y - 14*s, 34*s, 22*s, 8*s);
+        drawRoundedRect(ctx, pt.x + 18*s, pt.y - 14*s, 54*s, 22*s, 8*s);
         ctx.fill();
         ctx.fillStyle = "rgba(255,255,255,0.92)";
         ctx.font = `${Math.floor(12*s)}px ${getComputedStyle(document.body).fontFamily}`;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText(label, pt.x + 35*s, pt.y - 3*s);
+        ctx.fillText(pinching ? `${label} PINCH` : label, pt.x + 45*s, pt.y - 3*s);
         ctx.restore();
       }
+
+      function pinchLine(idx, thumb, color, pinching){
+        if(!idx || !thumb) return;
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.globalAlpha = pinching ? 0.85 : 0.45;
+        ctx.lineWidth = 2*s;
+        ctx.beginPath();
+        ctx.moveTo(idx.x, idx.y);
+        ctx.lineTo(thumb.x, thumb.y);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      pinchLine(leftIdx, leftThumb, "rgba(61,165,255,0.85)", leftPinch);
+      pinchLine(rightIdx, rightThumb, "rgba(255,45,45,0.85)", rightPinch);
 
       cursor(leftIdx, "L", "rgba(61,165,255,0.95)", "rgba(61,165,255,0.65)", leftPinch);
       cursor(rightIdx, "R", "rgba(255,45,45,0.95)", "rgba(255,45,45,0.65)", rightPinch);
@@ -2429,6 +2474,7 @@
       let leftIndex = null, rightIndex = null;
       let leftPinch = false, rightPinch = false;
       let leftWrist = null, rightWrist = null;
+      let leftThumb = null, rightThumb = null;
 
       const handsForCombat = [];
 
@@ -2451,14 +2497,10 @@
           const indexRaw = pts[8];
           const wristRaw = pts[0];
 
-          const pinchRaw = dist(thumb, indexRaw) < state.settings.pinchDistThresholdPx;
           const pinchState = isLeft ? state.pinch.left : state.pinch.right;
-          const pinchStart = pinchRaw && !pinchState.down;
-          if(pinchStart){
-            pinchState.downAt = nowMs;
-          }
-          pinchState.down = pinchRaw;
-          const pinch = pinchState.down;
+          const pinchInfo = updatePinchState(thumb, indexRaw, pts, pinchState, nowMs);
+          const pinch = pinchInfo.pinch;
+          const pinchStart = pinchInfo.pinchStart;
 
           // smoothing (alpha is inverted by "cursorSmoothing")
           const alpha = clamp(1 - state.settings.cursorSmoothing, 0.15, 1);
@@ -2469,12 +2511,14 @@
             leftIndex = state.smooth.leftIndex;
             leftWrist = state.smooth.leftWrist;
             leftPinch = pinch;
+            leftThumb = thumb;
           }else{
             state.smooth.rightIndex = smoothPoint(state.smooth.rightIndex, indexRaw, alpha);
             state.smooth.rightWrist = smoothPoint(state.smooth.rightWrist, wristRaw, alpha);
             rightIndex = state.smooth.rightIndex;
             rightWrist = state.smooth.rightWrist;
             rightPinch = pinch;
+            rightThumb = thumb;
           }
 
           // fist closed shield (uses raw full hand structure; feels better)
@@ -2519,6 +2563,8 @@
         state.prevIndexRight = null;
         state.pinch.left.down = false;
         state.pinch.right.down = false;
+        state.pinch.left.ratio = null;
+        state.pinch.right.ratio = null;
       }
 
       // Enemy target: nearest hand (preferred), else center of view
@@ -2548,7 +2594,8 @@
             const handednessName = normalizeHandednessName(handed.categoryName || handed.displayName || "Right");
             const thumb = pts[4];
             const index = pts[8];
-            const pinch = dist(thumb,index) < state.settings.pinchDistThresholdPx;
+            const pinchState = handednessName === "Left" ? state.pinch.left : state.pinch.right;
+            const pinch = updatePinchState(thumb, index, pts, pinchState, nowMs).pinch;
             const idxPos = {x:index.x,y:index.y};
 
             if(!state.grab.grabbing){
@@ -2633,7 +2680,7 @@
       drawBars(ctx, layout, { left: state.shieldEnergyLeft, right: state.shieldEnergyRight });
 
       // ---- Draw visible hand cursors ----
-      drawHandCursors(ctx, leftIndex, rightIndex, leftPinch, rightPinch);
+      drawHandCursors(ctx, leftIndex, rightIndex, leftPinch, rightPinch, leftThumb, rightThumb);
 
       // ---- Draw debug landmarks ----
       if(state.settings.showLandmarks && handsPx.length){
@@ -2653,7 +2700,9 @@
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
       const hc = (lmList) ? lmList.length : 0;
-      ctx.fillText(`FPS: ${state.fps.value}  Hands: ${hc}  Tool: ${toolLabel()}  ${state.ar.inAR ? "AR" : ""}`, 26*s, 90*s);
+      const leftPinchText = leftPinch ? "PINCH" : "open";
+      const rightPinchText = rightPinch ? "PINCH" : "open";
+      ctx.fillText(`FPS: ${state.fps.value}  Hands: ${hc}  L:${leftPinchText} R:${rightPinchText}  Tool: ${toolLabel()}  ${state.ar.inAR ? "AR" : ""}`, 26*s, 90*s);
       ctx.restore();
 
       requestAnimationFrame(loop);
