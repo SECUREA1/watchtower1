@@ -4,13 +4,11 @@ import json
 import logging
 import os
 import random
-import secrets
 import threading
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
-from urllib.parse import quote
 from uuid import uuid4
 
 import requests
@@ -71,13 +69,6 @@ GITHUB_PR_FLOW = os.getenv("GITHUB_PR_FLOW", "0").lower() in {"1", "true", "yes"
 INDEX_LOCK = threading.Lock()
 
 AUTH_COOKIE_NAME = "watchtower_access"
-UI_SESSION_TTL_SECONDS = int(os.getenv("UI_SESSION_TTL_SECONDS", str(60 * 60 * 12)))
-UI_ACCESS_TOKENS = [token.strip() for token in os.getenv("UI_ACCESS_TOKENS", "").split(",") if token.strip()]
-UI_GUEST_CODE = os.getenv("UI_GUEST_CODE", "")
-UI_SESSION_LOCK = threading.Lock()
-UI_SESSIONS: Dict[str, float] = {}
-LOGIN_PATHS = {"/start", "/start.html"}
-DEFAULT_GUEST_CODE = "watchtower"
 
 # -------------------------------------------------------------------------
 # Logging & FastAPI app
@@ -134,20 +125,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-@app.middleware("http")
-async def enforce_ui_login(request: Request, call_next):
-    path = request.url.path
-    if request.method in {"GET", "HEAD"}:
-        if path in LOGIN_PATHS or path.startswith("/api") or path in {"/health", "/healthz"}:
-            return await call_next(request)
-        if path.startswith("/static") and Path(path).suffix != ".html":
-            return await call_next(request)
-        if Path(path).suffix and Path(path).suffix != ".html":
-            return await call_next(request)
-        if not is_ui_authenticated(request):
-            return RedirectResponse(url=build_login_redirect_url(request), status_code=302)
-    return await call_next(request)
 
 
 @app.middleware("http")
@@ -206,12 +183,6 @@ class LogsPayload(BaseModel):
     logs: List[dict] = Field(default_factory=list)
     source_device_id: Optional[str] = None
     captured_at: Optional[str] = None
-
-
-class LoginPayload(BaseModel):
-    token: Optional[str] = None
-    guest_code: Optional[str] = None
-    wallet: Optional[str] = None
 
 # -------------------------------------------------------------------------
 # Filesystem helpers
@@ -308,47 +279,9 @@ def validate_upload(content_type: str, data: bytes) -> None:
 
 def is_ui_authenticated(request: Request) -> bool:
     token_cookie = request.cookies.get(AUTH_COOKIE_NAME, "")
-    if not token_cookie:
-        return False
-    now = time.time()
-    with UI_SESSION_LOCK:
-        expires_at = UI_SESSIONS.get(token_cookie)
-        if not expires_at:
-            return False
-        if expires_at <= now:
-            UI_SESSIONS.pop(token_cookie, None)
-            return False
-    return True
-
-
-def _normalize_code(value: str) -> str:
-    return " ".join((value or "").strip().lower().split())
-
-
-def _effective_guest_code() -> str:
-    return UI_GUEST_CODE.strip() or DEFAULT_GUEST_CODE
-
-
-def _login_allowed(token: str, guest_code: str, wallet: str) -> bool:
-    candidate = token or wallet or ""
-    normalized_guest = _normalize_code(guest_code)
-    if normalized_guest:
-        return normalized_guest == _normalize_code(_effective_guest_code())
-    if UI_ACCESS_TOKENS or UI_GUEST_CODE or ADMIN_TOKEN:
-        if UI_ACCESS_TOKENS and candidate in UI_ACCESS_TOKENS:
-            return True
-        if ADMIN_TOKEN and candidate == ADMIN_TOKEN:
-            return True
-        return False
-    return bool(candidate)
-
-
-def _create_ui_session() -> str:
-    session_id = secrets.token_urlsafe(32)
-    expires_at = time.time() + UI_SESSION_TTL_SECONDS
-    with UI_SESSION_LOCK:
-        UI_SESSIONS[session_id] = expires_at
-    return session_id
+    if token_cookie:
+        return True
+    return False
 
 
 # -------------------------------------------------------------------------
@@ -363,7 +296,15 @@ HTML_ALIASES = {
     "/node-eye": "RedNode — Node Eye Console.html",
     "/abyss": "RedNode.ai — Abyss Pilot (Submarine Viewport HUD).html",
     "/redar": "RedAR + IonEye — Multi-Cam + Face_Object + Sentinel + WebXR.html",
+    "/drone-dig": "DRONE DIG + SCOOP — DUAL HAND ISO CONTROLS.html",
+    "/gesture-sim": "Rednode Excavation — Gesture Controlled Sim.html",
+    "/sentinel-side": "Rednode Sentinel — Drone Dig + Pile + Boom Side View.html",
+    "/sentinel-side-full": "Rednode Sentinel — Drone Dig + Pile + Boom Side View (Hands Full Control).html",
+    "/excavator-job": "Excavator Job Site — Gesture Driven.html",
+    "/excavator-trainer": "Excavator — Terrain Map + Hand-Training Startup Calibration + Micro-Movement Tuner.html",
+    "/locked-views": "RedNode — Locked Views Excavator (2-Hand ISO Controls + Sensitivity Tuners).html",
     "/indoor-ops": "RedNode Dashboard — Indoor Ops · Sentinel · Demo.html",
+    "/dadda": "dadda - Copy - Copy.html",
     "/market": "market.html",
     "/rednode-dashboard-demo": "RedNode Dashboard — Full Demo.html",
     "/ar-dashboard": "RedNode Dashboard — Full Demo.html",
@@ -390,54 +331,6 @@ CHAINES_PATHS = {
     "/CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll/index.html",
 }
 LIVE_PATHS = {"/live", "/live/", "/live/index.html"}
-
-
-def _login_routes_for_html(path: Path, base: Path) -> List[str]:
-    try:
-        rel = path.relative_to(base)
-    except ValueError:
-        return []
-    web_path = "/" + str(rel).replace(os.sep, "/")
-    routes = {web_path}
-    if web_path.endswith(".html"):
-        base_path = web_path[:-5]
-        if base_path:
-            routes.add(base_path)
-    if web_path.endswith("index.html"):
-        base_dir = web_path[: -len("index.html")]
-        routes.add(base_dir or "/")
-        if base_dir and not base_dir.endswith("/"):
-            routes.add(f"{base_dir}/")
-    return sorted(routes)
-
-
-def build_login_session_pages() -> List[str]:
-    pages = set()
-    for base in SERVE_ROOTS:
-        if not base.exists():
-            continue
-        for html in base.rglob("*.html"):
-            pages.update(_login_routes_for_html(html, base))
-    pages.update(LOGIN_PATHS)
-    pages.update(HOME_PATHS)
-    pages.update(SECURE_PATHS)
-    pages.update(REDNODE_PATHS)
-    pages.update(DASHBOARD_PATHS)
-    pages.update(CHAINES_PATHS)
-    pages.update(LIVE_PATHS)
-    pages.update(HTML_ALIASES.keys())
-    pages.add("/")
-    return sorted(pages)
-
-
-LOGIN_SESSION_PAGES = build_login_session_pages()
-
-
-def build_login_redirect_url(request: Request) -> str:
-    path = request.url.path
-    if request.url.query:
-        path = f"{path}?{request.url.query}"
-    return f"/start.html?next={quote(path, safe='/?:&=')}"
 
 
 def _resolve_path(relative: str) -> Optional[Path]:
@@ -971,64 +864,6 @@ async def add_logs(payload: LogsPayload, request: Request):
             handle.write(json.dumps(entry) + "\n")
     return {"ok": True, "count": len(payload.logs), "path": str(log_path.relative_to(DATA_DIR))}
 
-
-@app.get("/api/session")
-async def ui_session_status(request: Request) -> JSONResponse:
-    if is_ui_authenticated(request):
-        session_id = request.cookies.get(AUTH_COOKIE_NAME, "")
-        with UI_SESSION_LOCK:
-            expires_at = UI_SESSIONS.get(session_id)
-        return JSONResponse(
-            {
-                "ok": True,
-                "authenticated": True,
-                "expires_at": expires_at,
-                "pages": LOGIN_SESSION_PAGES,
-                "page_count": len(LOGIN_SESSION_PAGES),
-            }
-        )
-    return JSONResponse(
-        {
-            "ok": True,
-            "authenticated": False,
-            "pages": LOGIN_SESSION_PAGES,
-            "page_count": len(LOGIN_SESSION_PAGES),
-        }
-    )
-
-
-@app.post("/api/login")
-async def ui_login(payload: LoginPayload, request: Request) -> JSONResponse:
-    token = (payload.token or "").strip()
-    guest_code = (payload.guest_code or "").strip()
-    wallet = (payload.wallet or "").strip()
-    if not (token or guest_code or wallet):
-        raise HTTPException(status_code=400, detail="Access token or code required.")
-    if not _login_allowed(token, guest_code, wallet):
-        raise HTTPException(status_code=401, detail="Unauthorized.")
-    session_id = _create_ui_session()
-    response = JSONResponse({"ok": True, "authenticated": True})
-    response.set_cookie(
-        AUTH_COOKIE_NAME,
-        session_id,
-        httponly=True,
-        samesite="lax",
-        secure=request.url.scheme == "https",
-        path="/",
-    )
-    return response
-
-
-@app.post("/api/logout")
-async def ui_logout(request: Request) -> JSONResponse:
-    session_id = request.cookies.get(AUTH_COOKIE_NAME, "")
-    if session_id:
-        with UI_SESSION_LOCK:
-            UI_SESSIONS.pop(session_id, None)
-    response = JSONResponse({"ok": True})
-    response.delete_cookie(AUTH_COOKIE_NAME, path="/")
-    return response
-
 @app.get("/healthz")
 async def healthz():
     return {"ok": True}
@@ -1064,15 +899,15 @@ async def serve_frontend(full_path: str, request: Request):
     if request.method not in {"GET", "HEAD"}:
         raise HTTPException(status_code=404, detail="Not found")
 
-    if url_path not in LOGIN_PATHS and not is_ui_authenticated(request):
-        return RedirectResponse(url=build_login_redirect_url(request), status_code=302)
+    if url_path not in {"/", "/index.html", "/start", "/start.html"} and not is_ui_authenticated(request):
+        return RedirectResponse(url="/start.html", status_code=302)
 
     # Prefer a modern landing page
     if url_path in {"/", "/index.html"}:
         if serve_file("start.html"):
             return RedirectResponse(url="/start.html", status_code=302)
 
-    if url_path in LOGIN_PATHS:
+    if url_path in {"/start", "/start.html"}:
         response = serve_file("start.html")
         if response:
             return response
