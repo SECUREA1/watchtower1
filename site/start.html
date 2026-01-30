@@ -982,6 +982,74 @@
       box-shadow: inset 0 6px 18px rgba(0, 0, 0, 0.45);
     }
 
+    .gate-form input[readonly] {
+      background: rgba(8, 0, 16, 0.35);
+      color: #e4d2aa;
+      cursor: not-allowed;
+    }
+
+    .gate-chain {
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+      margin-top: 0.6rem;
+      padding: 0.75rem;
+      border-radius: 12px;
+      border: 1px solid rgba(245, 198, 90, 0.2);
+      background: rgba(10, 7, 4, 0.45);
+    }
+
+    .gate-chain label {
+      color: #f6e9c5;
+      font-size: 0.88rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .gate-chain-options {
+      display: grid;
+      gap: 0.5rem;
+    }
+
+    .gate-chain-option {
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+      padding: 0.55rem 0.65rem;
+      border-radius: 10px;
+      border: 1px solid rgba(245, 198, 90, 0.15);
+      background: rgba(12, 9, 6, 0.55);
+      color: #f6e9c5;
+      font-size: 0.95rem;
+    }
+
+    .gate-chain-option input {
+      accent-color: #f5c65a;
+    }
+
+    .gate-contract {
+      font-size: 0.85rem;
+      color: rgba(246, 233, 197, 0.8);
+      line-height: 1.4;
+    }
+
+    .gate-contract span {
+      display: inline-block;
+      margin-top: 0.2rem;
+      font-family: "JetBrains Mono", "Fira Code", monospace;
+      color: #f5c65a;
+      word-break: break-all;
+    }
+
+    .gate-wallet-status {
+      font-size: 0.9rem;
+      color: #d7ffe1;
+      padding: 0.45rem 0.6rem;
+      border-radius: 8px;
+      border: 1px solid rgba(94, 255, 175, 0.2);
+      background: rgba(8, 14, 10, 0.5);
+    }
+
     .gate-actions {
       display: flex;
       flex-wrap: wrap;
@@ -1386,7 +1454,30 @@
         <label for="gate-token">Access token</label>
         <input id="gate-token" name="gate-token" placeholder="Paste your Watchtower access token" autocomplete="off" />
         <label for="gate-wallet">Wallet / Node ID</label>
-        <input id="gate-wallet" name="gate-wallet" placeholder="0x or node-handle" autocomplete="off" />
+        <input id="gate-wallet" name="gate-wallet" placeholder="Connect a wallet to autofill" autocomplete="off" readonly />
+        <div class="gate-chain" aria-live="polite">
+          <label>Choose a verification chain</label>
+          <div class="gate-chain-options">
+            <label class="gate-chain-option">
+              <input type="radio" name="gate-chain" value="ethereum" />
+              Ethereum (MetaMask)
+            </label>
+            <label class="gate-chain-option">
+              <input type="radio" name="gate-chain" value="solana" />
+              Solana (Phantom)
+            </label>
+            <label class="gate-chain-option">
+              <input type="radio" name="gate-chain" value="cardano" />
+              Cardano (Lace)
+            </label>
+          </div>
+          <div class="gate-contract">
+            Required contract address
+            <span id="gate-contract">REPLACE_WITH_CONTRACT_ADDRESS</span>
+          </div>
+          <button id="gate-connect" type="button" class="ghost-btn">Connect wallet</button>
+          <div class="gate-wallet-status" id="gate-wallet-status">No wallet connected yet.</div>
+        </div>
         <button id="gate-guest-toggle" type="button" class="ghost-btn" aria-expanded="false" aria-controls="gate-guest-wrap">I have an access code</button>
         <div id="gate-guest-wrap" class="gate-guest" hidden>
           <label for="gate-guest">Guest access code</label>
@@ -2076,6 +2167,10 @@
       const acceptBtn = document.getElementById('gate-accept');
       const clearBtn = document.getElementById('gate-clear');
       const manageBtn = document.getElementById('gate-manage');
+      const chainRadios = Array.from(document.querySelectorAll('input[name="gate-chain"]'));
+      const contractLabel = document.getElementById('gate-contract');
+      const connectBtn = document.getElementById('gate-connect');
+      const walletStatus = document.getElementById('gate-wallet-status');
 
       const ACCESS_KEY = 'watchtower_access_token';
       const SESSION_KEY = 'session_user';
@@ -2084,8 +2179,26 @@
       const CURRENCY_KEY = 'mixer_current_currency';
       const GUEST_SESSION_KEY = 'watchtower_guest_access';
       const GUEST_CODE = 'boots';
+      const REQUIRED_CONTRACTS = {
+        ethereum: 'REPLACE_WITH_CONTRACT_ADDRESS',
+        solana: 'REPLACE_WITH_CONTRACT_ADDRESS',
+        cardano: 'REPLACE_WITH_CONTRACT_ADDRESS'
+      };
+      const CHAIN_LABELS = {
+        ethereum: 'Ethereum',
+        solana: 'Solana',
+        cardano: 'Cardano'
+      };
+      const CHAIN_CURRENCY = {
+        ethereum: 'ETH',
+        solana: 'SOL',
+        cardano: 'ADA'
+      };
 
       let guestUnlocked = false;
+      let connectedWallet = '';
+      let selectedChain = '';
+      let walletVerified = false;
 
       const setContext = (token, wallet, isGuest = false) => {
         const ctx = (window.APP_CONTEXT = window.APP_CONTEXT || {});
@@ -2103,6 +2216,32 @@
         gateStatus.style.color = success ? '#d7ffe1' : '#f6e9c5';
       };
 
+      const updateWalletStatus = (text, success = true) => {
+        if (!walletStatus) return;
+        walletStatus.textContent = text;
+        walletStatus.style.borderColor = success ? 'rgba(94, 255, 175, 0.35)' : 'rgba(245, 120, 90, 0.4)';
+        walletStatus.style.color = success ? '#d7ffe1' : '#ffd6c7';
+      };
+
+      const normalizeContract = (value) => (value || '').trim();
+
+      const getSelectedChain = () => {
+        const selected = chainRadios.find((radio) => radio.checked);
+        return selected ? selected.value : '';
+      };
+
+      const updateContractLabel = () => {
+        if (!contractLabel) return;
+        selectedChain = getSelectedChain();
+        const contract = normalizeContract(REQUIRED_CONTRACTS[selectedChain] || '');
+        contractLabel.textContent = contract || 'REPLACE_WITH_CONTRACT_ADDRESS';
+      };
+
+      const isContractConfigured = (chain) => {
+        const contract = normalizeContract(REQUIRED_CONTRACTS[chain] || '');
+        return contract && !contract.includes('REPLACE_WITH');
+      };
+
       const persist = (token, wallet, { guest = false } = {}) => {
         setContext(token, wallet, guest);
         try {
@@ -2112,8 +2251,13 @@
           if (wallet) localStorage.setItem(WALLET_KEY, wallet);
           else localStorage.removeItem(WALLET_KEY);
 
-          localStorage.setItem(CHAIN_KEY, 'RedChain');
-          localStorage.setItem(CURRENCY_KEY, 'RED');
+          if (selectedChain) {
+            localStorage.setItem(CHAIN_KEY, CHAIN_LABELS[selectedChain] || selectedChain);
+            localStorage.setItem(CURRENCY_KEY, CHAIN_CURRENCY[selectedChain] || '');
+          } else {
+            localStorage.removeItem(CHAIN_KEY);
+            localStorage.removeItem(CURRENCY_KEY);
+          }
 
           if (token || wallet || guest) {
             localStorage.setItem(SESSION_KEY, JSON.stringify({ username: wallet || 'guest', accessToken: token || '' }));
@@ -2138,24 +2282,33 @@
 
       const lock = () => {
         guestUnlocked = false;
+        walletVerified = false;
         if (gate) gate.style.display = 'grid';
         document.body.classList.add('gate-locked');
         manageBtn.style.display = 'none';
         sessionStorage.removeItem(GUEST_SESSION_KEY);
         updateStatus('Token required to proceed');
+        updateWalletStatus('No wallet connected yet.', true);
       };
 
       const hydrate = () => {
         let storedToken = '';
         let storedWallet = '';
+        let storedChain = '';
         try {
           storedToken = localStorage.getItem(ACCESS_KEY) || '';
           storedWallet = localStorage.getItem(WALLET_KEY) || '';
+          storedChain = localStorage.getItem(CHAIN_KEY) || '';
         } catch {}
 
         guestUnlocked = false;
         if (tokenInput) tokenInput.value = storedToken;
         if (walletInput) walletInput.value = storedWallet;
+        if (storedChain) {
+          const chainMatch = chainRadios.find((radio) => CHAIN_LABELS[radio.value] === storedChain);
+          if (chainMatch) chainMatch.checked = true;
+        }
+        updateContractLabel();
 
         lock();
 
@@ -2171,7 +2324,135 @@
           gate.style.display = 'grid';
           gate.scrollIntoView({ behavior: 'smooth' });
         }
-        updateStatus('Token or wallet required to continue.');
+        updateStatus('Wallet verification required to continue.');
+      };
+
+      const formatWallet = (value) => {
+        if (!value) return '';
+        if (value.length <= 12) return value;
+        return `${value.slice(0, 6)}…${value.slice(-4)}`;
+      };
+
+      const requireContract = (chain) => {
+        if (!isContractConfigured(chain)) {
+          updateWalletStatus('Missing contract address. Add it before verifying wallets.', false);
+          return false;
+        }
+        return true;
+      };
+
+      const verifyEthereumBalance = async (address) => {
+        if (!requireContract('ethereum')) return false;
+        if (!window.ethereum?.request) {
+          updateWalletStatus('MetaMask not available in this browser.', false);
+          return false;
+        }
+        const contract = normalizeContract(REQUIRED_CONTRACTS.ethereum);
+        const paddedAddress = address.replace(/^0x/, '').padStart(64, '0');
+        const data = `0x70a08231${paddedAddress}`;
+        try {
+          const balanceHex = await window.ethereum.request({
+            method: 'eth_call',
+            params: [{ to: contract, data }, 'latest']
+          });
+          const balance = BigInt(balanceHex || '0x0');
+          if (balance > 0n) {
+            updateWalletStatus('MetaMask verified. Token balance detected.', true);
+            return true;
+          }
+          updateWalletStatus('MetaMask connected but no token balance found for this contract.', false);
+          return false;
+        } catch (err) {
+          console.warn('MetaMask token check failed', err);
+          updateWalletStatus('MetaMask connected, but token verification failed.', false);
+          return false;
+        }
+      };
+
+      const verifySignature = async (walletType, signFn) => {
+        if (!requireContract(selectedChain)) return false;
+        try {
+          const contract = normalizeContract(REQUIRED_CONTRACTS[selectedChain]);
+          const message = new TextEncoder().encode(`Watchtower verification for ${contract}`);
+          await signFn(message);
+          updateWalletStatus(`${walletType} connected. Signature verified.`, true);
+          return true;
+        } catch (err) {
+          console.warn('Signature verification failed', err);
+          updateWalletStatus(`${walletType} connected, but signature verification failed.`, false);
+          return false;
+        }
+      };
+
+      const connectMetaMask = async () => {
+        if (!window.ethereum?.request) {
+          updateWalletStatus('MetaMask not detected. Please install or enable it.', false);
+          return;
+        }
+        try {
+          const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+          connectedWallet = accounts?.[0] || '';
+          walletInput.value = connectedWallet;
+          walletVerified = await verifyEthereumBalance(connectedWallet);
+          updateStatus(`Connected MetaMask wallet ${formatWallet(connectedWallet)}`, walletVerified);
+        } catch (err) {
+          console.warn('MetaMask connection failed', err);
+          updateWalletStatus('MetaMask connection cancelled.', false);
+        }
+      };
+
+      const connectPhantom = async () => {
+        const provider = window.solana;
+        if (!provider?.isPhantom) {
+          updateWalletStatus('Phantom not detected. Please install or enable it.', false);
+          return;
+        }
+        try {
+          const response = await provider.connect();
+          connectedWallet = response?.publicKey?.toString?.() || '';
+          walletInput.value = connectedWallet;
+          walletVerified = await verifySignature('Phantom', (message) => provider.signMessage(message, 'utf8'));
+          updateStatus(`Connected Phantom wallet ${formatWallet(connectedWallet)}`, walletVerified);
+        } catch (err) {
+          console.warn('Phantom connection failed', err);
+          updateWalletStatus('Phantom connection cancelled.', false);
+        }
+      };
+
+      const connectLace = async () => {
+        const lace = window.cardano?.lace;
+        if (!lace?.enable) {
+          updateWalletStatus('Lace wallet not detected. Please install or enable it.', false);
+          return;
+        }
+        try {
+          const api = await lace.enable();
+          const addresses = (await api.getUsedAddresses?.()) || [];
+          connectedWallet = addresses[0] || '';
+          walletInput.value = connectedWallet || 'Lace connected';
+          const signFn = async (message) => {
+            if (!api.signData) throw new Error('signData unavailable');
+            if (!addresses[0]) throw new Error('No address available');
+            return api.signData(addresses[0], message);
+          };
+          walletVerified = await verifySignature('Lace', signFn);
+          updateStatus('Connected Lace wallet', walletVerified);
+        } catch (err) {
+          console.warn('Lace connection failed', err);
+          updateWalletStatus('Lace connection cancelled.', false);
+        }
+      };
+
+      const connectWallet = async () => {
+        selectedChain = getSelectedChain();
+        walletVerified = false;
+        if (!selectedChain) {
+          updateWalletStatus('Select a blockchain to connect first.', false);
+          return;
+        }
+        if (selectedChain === 'ethereum') await connectMetaMask();
+        if (selectedChain === 'solana') await connectPhantom();
+        if (selectedChain === 'cardano') await connectLace();
       };
 
       const bindPress = (el, handler) => {
@@ -2201,6 +2482,22 @@
         const token = tokenInput.value.trim();
         const wallet = walletInput.value.trim();
         const guestCode = guestInput?.value.trim() || '';
+        selectedChain = getSelectedChain();
+
+        if (!selectedChain) {
+          updateStatus('Select a blockchain before unlocking.');
+          return;
+        }
+
+        if (!isContractConfigured(selectedChain)) {
+          updateStatus('Contract address missing. Update it to continue.');
+          return;
+        }
+
+        if (!wallet || !walletVerified) {
+          updateStatus('Connect and verify a wallet before unlocking.');
+          return;
+        }
 
         if (token || wallet) {
           unlock(token, wallet);
@@ -2208,11 +2505,11 @@
         }
 
         if (hasGuestCode(guestCode)) {
-          unlock('', 'guest', { guest: true });
+          updateStatus('Guest access requires blockchain verification.');
           return;
         }
 
-        updateStatus('Token required unless you verify with wallet or access code');
+        updateStatus('Wallet verification required to proceed.');
       });
 
       bindPress(clearBtn, () => {
@@ -2220,11 +2517,19 @@
           localStorage.removeItem(ACCESS_KEY);
           localStorage.removeItem(WALLET_KEY);
           localStorage.removeItem(SESSION_KEY);
+          localStorage.removeItem(CHAIN_KEY);
+          localStorage.removeItem(CURRENCY_KEY);
           sessionStorage.removeItem(GUEST_SESSION_KEY);
         } catch {}
         tokenInput.value = '';
         walletInput.value = '';
         if (guestInput) guestInput.value = '';
+        chainRadios.forEach((radio) => {
+          radio.checked = false;
+        });
+        updateContractLabel();
+        connectedWallet = '';
+        walletVerified = false;
         lock();
       });
 
@@ -2235,6 +2540,21 @@
         const wrap = document.getElementById('gate-guest-wrap');
         if (wrap) wrap.hidden = expanded;
         if (!expanded) guestInput.focus();
+      });
+
+      chainRadios.forEach((radio) => {
+        radio.addEventListener('change', () => {
+          selectedChain = getSelectedChain();
+          walletVerified = false;
+          connectedWallet = '';
+          walletInput.value = '';
+          updateContractLabel();
+          updateWalletStatus('Select a wallet to connect.', true);
+        });
+      });
+
+      bindPress(connectBtn, () => {
+        connectWallet();
       });
 
       bindPress(manageBtn, () => {
