@@ -307,26 +307,52 @@
     minTrackingConfidence: 0.7
   });
 
+  let latestPose = null;
   pose.onResults((res) => {
-    if(!res.poseLandmarks){
-      setStatus("No body detected");
-      last = null;
-      return;
-    }
+    latestPose = res;
+  });
 
+  function resetOverlay(){
+    torso.setAttribute("d", "");
+    torsoShade.setAttribute("d", "");
+    Object.values(paths).forEach(([a, b]) => {
+      a.setAttribute("d", "");
+      b.setAttribute("d", "");
+    });
+    Object.values(mus).forEach((el) => el.setAttribute("opacity", "0"));
+    bonesPath.setAttribute("d", "");
+    dotsG.innerHTML = "";
+  }
+
+  function draw(){
     // UI toggles
     video.style.opacity = showVideoEl.checked ? "1" : "0";
     skeletonG.style.opacity = showSkeletonEl.checked ? "1" : "0";
 
+    // UI toggles
     const opacity = Number(meshOpacityEl.value)/100;
     torso.setAttribute("opacity", opacity);
     torsoShade.setAttribute("opacity", opacity*0.95);
     document.getElementById("limbs").setAttribute("opacity", opacity);
     document.getElementById("muscles").setAttribute("opacity", opacity);
 
+    const poseLmRaw = latestPose?.poseLandmarks || null;
+    if(!poseLmRaw){
+      setStatus("No body detected");
+      last = null;
+      resetOverlay();
+      return;
+    }
+
+    const now = performance.now();
+    draw._t ??= now;
+    const dt = now - draw._t;
+    draw._t = now;
+    const fps = dt > 0 ? (1000/dt) : 0;
+
     // smoothing: alpha = how fast we move toward new
     const alpha = 1 - (Number(smoothEl.value)/100);
-    const lm = smoothLandmarks(res.poseLandmarks, last, alpha);
+    const lm = smoothLandmarks(poseLmRaw, last, alpha);
     last = lm;
 
     // points
@@ -463,8 +489,27 @@
       }
     }
 
-    setStatus(`Running • scale ${(scale*100).toFixed(0)}% • thickness ${(T).toFixed(0)}px`);
-  });
+    setStatus(`cam=${W}x${H} • pose=${lm.length} • ${fps.toFixed(1)}fps • scale ${(scale*100).toFixed(0)}% • thickness ${(T).toFixed(0)}px`);
+  }
+
+  async function waitVideoReady() {
+    for (let i=0;i<200;i++){
+      if (video.videoWidth && video.videoHeight) return true;
+      await new Promise(r=>setTimeout(r,25));
+    }
+    return false;
+  }
+
+  let running = true;
+  async function pump(){
+    while(running){
+      if(video.readyState >= 2){
+        await pose.send({ image: video });
+        draw();
+      }
+      await new Promise(r=>requestAnimationFrame(r));
+    }
+  }
 
   async function startCamera() {
     setStatus("Requesting camera permission…");
@@ -476,11 +521,11 @@
 
     video.srcObject = stream;
 
-    await new Promise((resolve) => {
-      video.onloadedmetadata = () => resolve();
-    });
-
-    await video.play().catch(() => { /* some browsers need user gesture; still try */ });
+    const ok = await waitVideoReady();
+    if(!ok){
+      setStatus("Camera readyState timeout (try local server + permissions)");
+      return;
+    }
 
     // Use real video dimensions for correct overlay scaling
     W = video.videoWidth || 1280;
@@ -489,27 +534,12 @@
 
     setStatus(`Camera OK • ${W}x${H} • loading model…`);
 
-    // Prefer MediaPipe Camera helper if available
-    if (typeof Camera !== "undefined") {
-      const cam = new Camera(video, {
-        width: W,
-        height: H,
-        onFrame: async () => {
-          await pose.send({ image: video });
-        }
-      });
-      cam.start();
-      setStatus("Running (Camera helper)");
-      return;
+    for(let i=0;i<4;i++){
+      await pose.send({ image: video });
     }
 
-    // Fallback loop
-    setStatus("Running (fallback loop)");
-    const loop = async () => {
-      await pose.send({ image: video });
-      requestAnimationFrame(loop);
-    };
-    loop();
+    setStatus("Running…");
+    pump();
   }
 
   // Start
