@@ -332,8 +332,11 @@ def _effective_guest_code() -> str:
 def _login_allowed(token: str, guest_code: str, wallet: str) -> bool:
     candidate = token or wallet or ""
     normalized_guest = _normalize_code(guest_code)
-    if normalized_guest and normalized_guest == _normalize_code(_effective_guest_code()):
-        return True
+    if normalized_guest:
+        if normalized_guest == _normalize_code(_effective_guest_code()):
+            return True
+        if not (UI_ACCESS_TOKENS or UI_GUEST_CODE or ADMIN_TOKEN):
+            return True
     if UI_ACCESS_TOKENS or UI_GUEST_CODE or ADMIN_TOKEN:
         if UI_ACCESS_TOKENS and candidate in UI_ACCESS_TOKENS:
             return True
