@@ -75,6 +75,7 @@ UI_ACCESS_TOKENS = [token.strip() for token in os.getenv("UI_ACCESS_TOKENS", "")
 UI_GUEST_CODE = os.getenv("UI_GUEST_CODE", "")
 UI_SESSION_LOCK = threading.Lock()
 UI_SESSIONS: Dict[str, float] = {}
+LOGIN_PATHS = {"/start", "/start.html"}
 
 # -------------------------------------------------------------------------
 # Logging & FastAPI app
@@ -131,6 +132,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def enforce_ui_login(request: Request, call_next):
+    path = request.url.path
+    if request.method in {"GET", "HEAD"}:
+        if path in LOGIN_PATHS or path.startswith("/api") or path in {"/health", "/healthz"}:
+            return await call_next(request)
+        if path.startswith("/static") and Path(path).suffix != ".html":
+            return await call_next(request)
+        if Path(path).suffix and Path(path).suffix != ".html":
+            return await call_next(request)
+        if not is_ui_authenticated(request):
+            return RedirectResponse(url="/start.html", status_code=302)
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -366,7 +381,6 @@ HOME_PATHS = {"/home", "/home.html"}
 SECURE_PATHS = {"/secure", "/secure/", "/secure.html"}
 REDNODE_PATHS = {"/rednode", "/rednode.html"}
 DASHBOARD_PATHS = {"/dashboard", "/dashboard.html", "/dashboard1", "/dashboard1.html"}
-LOGIN_PATHS = {"/start", "/start.html"}
 CHAINES_PATHS = {
     "/CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll",
     "/CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll/",
