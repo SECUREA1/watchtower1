@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
   <title>Rednode • Pinch Paint Arena (WebXR)</title>
 
-  <!-- MediaPipe Tasks Vision bundle (HandLandmarker) via jsDelivr CDN -->
+  <!-- MediaPipe Hands -->
   <!-- IMPORTANT: use HTTPS or http://localhost (not file://) or the camera/model/wasm may be blocked -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 
   <style>
     :root{
@@ -131,6 +131,85 @@
       z-index:30;
     }
     #overlay.hidden{ display:none; }
+
+    /* Hand scan overlay */
+    #handScan{
+      position:absolute;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      z-index:25;
+      background: radial-gradient(circle at 40% 30%, rgba(61,165,255,.12), rgba(255,45,45,.10), rgba(0,0,0,.78) 65%);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      opacity:0;
+      pointer-events:none;
+      transition: opacity .2s ease;
+    }
+    #handScan.show{
+      opacity:1;
+      pointer-events:auto;
+    }
+    .handScanBox{
+      width:min(640px, 92vw);
+      border-radius:16px;
+      border:1px solid var(--rn-stroke);
+      background: rgba(8,10,18,.75);
+      box-shadow: var(--rn-shadow);
+      padding:16px;
+      display:grid;
+      gap:12px;
+    }
+    .handScanHeader{
+      display:flex;
+      align-items:baseline;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .handScanTitle{
+      font-weight:800;
+      letter-spacing:.7px;
+      color:#ffd27a;
+      font-size:14px;
+    }
+    .handScanSub{
+      font-size:12px;
+      color:var(--rn-muted);
+      font-weight:700;
+    }
+    .scanStage{
+      position:relative;
+      height:280px;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.14);
+      background: radial-gradient(circle at 50% 35%, rgba(61,165,255,.10), rgba(255,45,45,.08), rgba(0,0,0,.60));
+      overflow:hidden;
+    }
+    .scanRect{
+      position:absolute;
+      left:35%;
+      top:18%;
+      width:30%;
+      height:58%;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.25);
+      box-shadow: inset 0 0 0 1px rgba(61,165,255,.15);
+    }
+    .scanProgress{
+      height:10px;
+      border-radius:999px;
+      background: rgba(255,255,255,.08);
+      overflow:hidden;
+      border:1px solid rgba(255,255,255,.12);
+    }
+    .scanProgress span{
+      display:block;
+      height:100%;
+      width:0%;
+      background: linear-gradient(90deg, rgba(61,165,255,.8), rgba(255,45,45,.85));
+      transition: width .12s ease;
+    }
 
     .card{
       width:min(720px, 96vw);
@@ -414,12 +493,25 @@
             If you just double-click the file and it opens as <code>file://</code>, most browsers will block the camera.
           </p>
           <p class="hint">
-            This build includes compatibility for both MediaPipe Tasks output shapes:
-            <code>handednesses</code> or <code>handedness</code>.
+            This build uses the same MediaPipe Hands logic as the 80s Synthwave Basketball experience.
           </p>
           <p class="hint">
             Shortcuts: <b>Ctrl/⌘+Z</b> Undo, <b>Ctrl/⌘+Y</b> Redo, <b>S</b> Save, <b>C</b> Clear.
           </p>
+        </div>
+      </div>
+
+      <!-- Hand scan overlay -->
+      <div id="handScan" aria-live="polite">
+        <div class="handScanBox">
+          <div class="handScanHeader">
+            <div class="handScanTitle">Hand Scan</div>
+            <div class="handScanSub" id="handScanStatus">Place your hand inside the scan box</div>
+          </div>
+          <div class="scanStage">
+            <div class="scanRect"></div>
+          </div>
+          <div class="scanProgress"><span id="handScanProgress"></span></div>
         </div>
       </div>
 
@@ -441,8 +533,20 @@
             <div class="panel">
               <h3>Tracking</h3>
               <div class="control">
-                <label>Pinch threshold (px)</label>
-                <input type="range" id="pinchThresh" min="10" max="120" step="1">
+                <label>Pinch close ratio</label>
+                <input type="range" id="pinchCloseRatio" min="0.15" max="0.75" step="0.01">
+              </div>
+              <div class="control">
+                <label>Pinch open ratio</label>
+                <input type="range" id="pinchOpenRatio" min="0.20" max="0.95" step="0.01">
+              </div>
+              <div class="control">
+                <label>Pinch smoothing</label>
+                <input type="range" id="pinchSmoothAlpha" min="0.05" max="0.95" step="0.01">
+              </div>
+              <div class="control">
+                <label>Pinch release grace (frames)</label>
+                <input type="range" id="pinchReleaseGrace" min="0" max="12" step="1">
               </div>
               <div class="control">
                 <label>Fist threshold (px)</label>
@@ -470,15 +574,8 @@
                   <option value="0">Off</option>
                 </select>
               </div>
-              <div class="control">
-                <label>Delegate</label>
-                <select id="delegate">
-                  <option value="GPU">GPU (faster if supported)</option>
-                  <option value="CPU">CPU (safer)</option>
-                </select>
-              </div>
               <div class="hint">
-                If tracking is laggy, increase detect interval or switch delegate to CPU.
+                Pinch logic matches the Camera Basketball 80s Synthwave build.
               </div>
             </div>
 
@@ -585,7 +682,7 @@
   <script>
     // ===============================
     // Rednode Pinch Paint Arena
-    // MediaPipe Tasks Vision + WebRTC + Canvas2D
+    // MediaPipe Hands (Basketball 80s Synthwave logic) + WebRTC + Canvas2D
     // ===============================
 
     // ---------- DOM helpers ----------
@@ -603,13 +700,15 @@
     // ---------- Defaults ----------
     const DEFAULTS = {
       // Tracking
-      pinchDistThresholdPx: 40,
+      pinchCloseRatio: 0.38,
+      pinchOpenRatio: 0.52,
+      pinchSmoothAlpha: 0.35,
+      pinchReleaseGraceFrames: 3,
       fistClosedThresholdPx: 60,
       detectIntervalMs: 0,
       cursorSmoothing: 0.35, // 0=no smoothing, 0.85=heavy smoothing
       showLandmarks: true,
       mirrorView: true,
-      delegate: "GPU",
 
       // HUD & gameplay
       uiScale: 1.0,
@@ -718,8 +817,8 @@
       prevIndexLeft: null,
       prevIndexRight: null,
       pinch: {
-        left: { down: false, downAt: 0 },
-        right: { down: false, downAt: 0 }
+        left: { down: false, downAt: 0, smooth: null, grace: 0, ratio: null },
+        right: { down: false, downAt: 0, smooth: null, grace: 0, ratio: null }
       },
 
       // Gameplay
@@ -732,11 +831,15 @@
 
       // runtime
       lastFrameMs: performance.now(),
-      lastDetectMs: 0,
-      lastResults: null,
-      lastVideoTime: -1,
-      detectErrorShown: false,
       fps: { frames: 0, lastMs: performance.now(), value: 0 },
+
+      scan: {
+        active: false,
+        progress: 0,
+        stableMs: 0,
+        lastPalm: null,
+        requiredMs: 1000
+      },
 
       // background image
       bgImage: null,
@@ -802,26 +905,111 @@
     }
 
     function updatePinchState(thumb, indexTip, lmsPx, pinchState, nowMs){
-      const rawDist = dist(thumb, indexTip);
-      const scale = handScalePx(lmsPx);
-      const pinchOn = state.settings.pinchDistThresholdPx / scale;
-      const pinchOff = pinchOn * 1.35;
-      const ratio = rawDist / scale;
+      const palmW = Math.max(1e-6, dist(lmsPx[5], lmsPx[17]));
+      const rawRatio = dist(thumb, indexTip) / palmW;
+
+      const a = state.settings.pinchSmoothAlpha;
+      const smooth = (pinchState.smooth === null || pinchState.smooth === undefined)
+        ? rawRatio
+        : pinchState.smooth * (1 - a) + rawRatio * a;
+      pinchState.smooth = smooth;
+
       const wasDown = pinchState.down;
-      const down = wasDown ? (ratio < pinchOff) : (ratio < pinchOn);
+      let down = wasDown;
+
+      if (!wasDown){
+        if (smooth < state.settings.pinchCloseRatio) down = true;
+      }else{
+        if (smooth > state.settings.pinchOpenRatio){
+          let g = pinchState.grace ?? 0;
+          if (g <= 0) g = state.settings.pinchReleaseGraceFrames;
+          g -= 1;
+          pinchState.grace = Math.max(0, g);
+          if (pinchState.grace === 0) down = false;
+        }else{
+          pinchState.grace = 0;
+        }
+      }
 
       if (!wasDown && down){
         pinchState.downAt = nowMs;
       }
 
       pinchState.down = down;
-      pinchState.ratio = ratio;
-      pinchState.raw = rawDist;
-      pinchState.scale = scale;
-      pinchState.on = pinchOn;
-      pinchState.off = pinchOff;
+      pinchState.ratio = smooth;
 
-      return { pinch: down, pinchStart: down && !wasDown, ratio };
+      return { pinch: down, pinchStart: down && !wasDown, ratio: smooth };
+    }
+
+    function updateHandScan(results, dtMs, W, H){
+      if(!state.scan.active) return;
+
+      const scanEl = $("#handScan");
+      const statusEl = $("#handScanStatus");
+      const progressEl = $("#handScanProgress");
+
+      if(!results || !results.landmarks || !results.landmarks.length){
+        state.scan.stableMs = 0;
+        state.scan.progress = 0;
+        state.scan.lastPalm = null;
+        progressEl.style.width = "0%";
+        statusEl.textContent = "Place your hand inside the scan box";
+        return;
+      }
+
+      let bestPalm = null;
+      let bestPalmW = 0;
+
+      for(const lms of results.landmarks){
+        const pts = toPxLandmarks(lms, W, H);
+        const wrist = pts[0];
+        const midMcp = pts[9] || pts[0];
+        const palm = { x: (wrist.x + midMcp.x) * 0.5, y: (wrist.y + midMcp.y) * 0.5 };
+        const palmW = Math.max(1e-6, dist(pts[5], pts[17]));
+
+        if(palmW > bestPalmW){
+          bestPalmW = palmW;
+          bestPalm = palm;
+        }
+      }
+
+      if(!bestPalm){
+        state.scan.stableMs = 0;
+        state.scan.progress = 0;
+        progressEl.style.width = "0%";
+        statusEl.textContent = "Place your hand inside the scan box";
+        return;
+      }
+
+      const inBox =
+        bestPalm.x > W * 0.35 && bestPalm.x < W * 0.65 &&
+        bestPalm.y > H * 0.18 && bestPalm.y < H * 0.76;
+
+      if(!inBox){
+        state.scan.stableMs = 0;
+        state.scan.progress = 0;
+        state.scan.lastPalm = bestPalm;
+        progressEl.style.width = "0%";
+        statusEl.textContent = "Center your hand in the scan box";
+        return;
+      }
+
+      const move = state.scan.lastPalm ? dist(bestPalm, state.scan.lastPalm) : 0;
+      if(move < 12){
+        state.scan.stableMs += dtMs;
+      }else{
+        state.scan.stableMs = Math.max(0, state.scan.stableMs - dtMs * 0.5);
+      }
+
+      state.scan.lastPalm = bestPalm;
+      state.scan.progress = clamp(state.scan.stableMs / state.scan.requiredMs, 0, 1);
+      progressEl.style.width = `${Math.round(state.scan.progress * 100)}%`;
+      statusEl.textContent = state.scan.progress >= 1 ? "Scan complete" : "Hold steady...";
+
+      if(state.scan.progress >= 1){
+        state.scan.active = false;
+        scanEl.classList.remove("show");
+      }
     }
 
     function smoothPoint(prev, next, alpha){
@@ -1930,13 +2118,15 @@
     }
 
     function syncSettingsToUI(){
-      $("#pinchThresh").value = state.settings.pinchDistThresholdPx;
+      $("#pinchCloseRatio").value = state.settings.pinchCloseRatio;
+      $("#pinchOpenRatio").value = state.settings.pinchOpenRatio;
+      $("#pinchSmoothAlpha").value = state.settings.pinchSmoothAlpha;
+      $("#pinchReleaseGrace").value = state.settings.pinchReleaseGraceFrames;
       $("#fistThresh").value = state.settings.fistClosedThresholdPx;
       $("#detectInterval").value = state.settings.detectIntervalMs;
       $("#cursorSmoothing").value = state.settings.cursorSmoothing;
       $("#showLandmarks").value = state.settings.showLandmarks ? "1" : "0";
       $("#mirrorView").value = state.settings.mirrorView ? "1" : "0";
-      $("#delegate").value = state.settings.delegate;
 
       $("#uiScale").value = state.settings.uiScale;
       $("#uiOpacity").value = state.settings.uiOpacity;
@@ -1964,8 +2154,21 @@
           saveSettings();
         });
       };
+      const bindPinchRange = (id, key) => {
+        $(id).addEventListener("input", () => {
+          state.settings[key] = parseFloat($(id).value);
+          if(state.settings.pinchOpenRatio <= state.settings.pinchCloseRatio + 0.02){
+            state.settings.pinchOpenRatio = state.settings.pinchCloseRatio + 0.02;
+            $("#pinchOpenRatio").value = state.settings.pinchOpenRatio.toFixed(2);
+          }
+          saveSettings();
+        });
+      };
 
-      bindRange("#pinchThresh", "pinchDistThresholdPx");
+      bindPinchRange("#pinchCloseRatio", "pinchCloseRatio");
+      bindPinchRange("#pinchOpenRatio", "pinchOpenRatio");
+      bindRange("#pinchSmoothAlpha", "pinchSmoothAlpha");
+      bindRange("#pinchReleaseGrace", "pinchReleaseGraceFrames");
       bindRange("#fistThresh", "fistClosedThresholdPx");
       bindRange("#detectInterval", "detectIntervalMs");
       bindRange("#cursorSmoothing", "cursorSmoothing");
@@ -1984,15 +2187,6 @@
       $("#mirrorView").addEventListener("change", () => {
         state.settings.mirrorView = $("#mirrorView").value === "1";
         saveSettings();
-      });
-      $("#delegate").addEventListener("change", async () => {
-        state.settings.delegate = $("#delegate").value;
-        saveSettings();
-        if(state.started){
-          toast("Reinitializing hand tracker…");
-          await initHandLandmarker(true);
-          toast("Hand tracker ready");
-        }
       });
 
       $("#enemyMode").addEventListener("change", () => {
@@ -2033,9 +2227,6 @@
         saveSettings();
         syncSettingsToUI();
         toast("Defaults restored");
-        if(state.started){
-          await initHandLandmarker(true);
-        }
       });
     }
 
@@ -2215,107 +2406,88 @@
       session.requestAnimationFrame(onXRFrame);
     }
 
-    // ---------- MediaPipe Tasks: HandLandmarker ----------
-    let handLandmarker = null;
+    // ---------- MediaPipe Hands (Basketball logic) ----------
+    let mpHands = null;
+    let cameraRunning = false;
+    let processingFrame = false;
+    let latestResults = null;
+    let sendLoopActive = false;
 
     function mpAvailable(){
-      return (typeof FilesetResolver !== "undefined") && (typeof HandLandmarker !== "undefined");
+      return (typeof Hands !== "undefined");
     }
 
-    async function createHandLandmarker(delegate){
-      const wasmRoot = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm";
-      const vision = await FilesetResolver.forVisionTasks(wasmRoot);
-
-      const modelUrl = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
-
-      return HandLandmarker.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath: modelUrl,
-          delegate
-        },
-        runningMode: "VIDEO",
-        numHands: 2,
-        minHandDetectionConfidence: 0.4,
-        minHandPresenceConfidence: 0.4,
-        minTrackingConfidence: 0.4
-      });
-    }
-
-    async function initHandLandmarker(force=false){
-      if(handLandmarker && !force) return;
-      if(!mpAvailable()){
-        setStatus("MediaPipe bundle not loaded", "bad");
-        toast("MediaPipe tasks-vision bundle missing");
+    function normalizeHandsResults(results){
+      if(!results || !results.multiHandLandmarks || !results.multiHandLandmarks.length){
+        latestResults = null;
         return;
       }
 
-      try{
-        setStatus("Loading hand model…", "warn");
-        const requestedDelegate = state.settings.delegate;
-        handLandmarker = await createHandLandmarker(requestedDelegate);
+      const lms = results.multiHandLandmarks.slice(0,2).map((lm) =>
+        lm.map((p) => ({ x: p.x, y: p.y, z: p.z }))
+      );
 
-        state.detectErrorShown = false;
-        state.lastVideoTime = -1;
-        setStatus("Ready", "ok");
-      }catch(err){
-        console.error(err);
-        if(state.settings.delegate === "GPU"){
-          try{
-            setStatus("GPU init failed, trying CPU…", "warn");
-            handLandmarker = await createHandLandmarker("CPU");
-            state.settings.delegate = "CPU";
-            saveSettings();
-            $("#delegate").value = "CPU";
-            state.detectErrorShown = false;
-            state.lastVideoTime = -1;
-            setStatus("Ready (CPU fallback)", "ok");
-            toast("GPU unavailable, using CPU");
-            return;
-          }catch(fallbackErr){
-            console.error(fallbackErr);
-          }
-        }
-        setStatus("Failed to load hand model", "bad");
-        toast("Hand tracker init failed");
-        handLandmarker = null;
+      const handed = (results.multiHandedness || []).slice(0, lms.length).map((h) => {
+        const entry = (h && h[0]) ? h[0] : { label: "Right", score: 0.5 };
+        return [{
+          categoryName: entry.label || entry.categoryName || entry.displayName || "Right",
+          score: entry.score ?? 0.5
+        }];
+      });
+
+      while(handed.length < lms.length){
+        handed.push([{ categoryName: "Right", score: 0.5 }]);
       }
+
+      latestResults = { landmarks: lms, handednesses: handed };
     }
 
-    // Compatibility wrapper for detectForVideo signature differences
-    function detectHands(nowMs){
-      if(!handLandmarker) return state.lastResults;
-
-      const interval = state.settings.detectIntervalMs;
-      if(interval !== 0 && (nowMs - state.lastDetectMs) < interval){
-        return state.lastResults;
+    async function initHands(){
+      if(mpHands) return;
+      if(!mpAvailable()){
+        setStatus("MediaPipe bundle not loaded", "bad");
+        toast("MediaPipe Hands bundle missing");
+        return;
       }
 
-      const ct = state.video.currentTime || 0;
-      if(interval === 0 && ct === state.lastVideoTime){
-        return state.lastResults;
-      }
+      mpHands = new Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+      });
+      mpHands.setOptions({
+        maxNumHands: 2,
+        modelComplexity: 0,
+        minDetectionConfidence: 0.7,
+        minTrackingConfidence: 0.7
+      });
+      mpHands.onResults(normalizeHandsResults);
+    }
 
-      try{
-        let res = null;
-        if(handLandmarker.detectForVideo.length >= 2){
-          res = handLandmarker.detectForVideo(state.video, nowMs);
-        }else{
-          res = handLandmarker.detectForVideo(state.video);
+    function startHandTrackingLoop(){
+      if(sendLoopActive) return;
+      sendLoopActive = true;
+      let lastSend = 0;
+
+      const tick = async (t) => {
+        if(!cameraRunning){
+          sendLoopActive = false;
+          return;
         }
-
-        state.lastResults = res;
-        state.lastDetectMs = nowMs;
-        state.lastVideoTime = ct;
-        return res;
-      }catch(err){
-        console.warn("Hand detect error", err);
-        if(!state.detectErrorShown){
-          state.detectErrorShown = true;
-          setStatus("Hand detect error (see console)", "bad");
-          toast("Hand tracking error: open DevTools console");
+        if(state.video.readyState >= 2 && mpHands && !processingFrame){
+          const interval = state.settings.detectIntervalMs;
+          if(interval === 0 || (t - lastSend) >= interval){
+            processingFrame = true;
+            try{
+              await mpHands.send({ image: state.video });
+            }catch(err){
+              console.warn("Hand detect error", err);
+            }
+            processingFrame = false;
+            lastSend = t;
+          }
         }
-        return state.lastResults;
-      }
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
     }
 
     // ---------- Camera ----------
@@ -2348,17 +2520,27 @@
         await state.video.play();
 
         state.started = true;
+        cameraRunning = true;
         resizeCanvases();
         setStatus("Camera ready", "ok");
         $("#overlay").classList.add("hidden");
+        state.scan.active = true;
+        state.scan.progress = 0;
+        state.scan.stableMs = 0;
+        state.scan.lastPalm = null;
+        $("#handScan").classList.add("show");
+        $("#handScanProgress").style.width = "0%";
+        $("#handScanStatus").textContent = "Place your hand inside the scan box";
 
-        await initHandLandmarker(true);
+        await initHands();
+        startHandTrackingLoop();
 
         state.lastFrameMs = performance.now();
         requestAnimationFrame(loop);
 
       }catch(err){
         console.error(err);
+        cameraRunning = false;
         setStatus("Camera blocked", "bad");
         toast("Camera permission denied / unavailable");
       }
@@ -2453,10 +2635,8 @@
       }
 
       // ---- Hand detection ----
-      let results = null;
-      if(state.video.readyState >= 2 && handLandmarker){
-        results = detectHands(nowMs);
-      }
+      const results = latestResults;
+      updateHandScan(results, dtMs, W, H);
 
       const hover = { tool:false, undo:false, redo:false, clear:false, save:false, grab:false, settings:false, enemy:false };
 
@@ -2478,7 +2658,7 @@
 
       const handsForCombat = [];
 
-      // Robust output shape for MediaPipe Tasks: handednesses vs handedness
+      // Robust output shape for MediaPipe Hands: handednesses vs handedness
       const handedList = results ? (results.handednesses || results.handedness || null) : null;
       const lmList = results ? (results.landmarks || null) : null;
 
@@ -2565,6 +2745,10 @@
         state.pinch.right.down = false;
         state.pinch.left.ratio = null;
         state.pinch.right.ratio = null;
+        state.pinch.left.smooth = null;
+        state.pinch.right.smooth = null;
+        state.pinch.left.grace = 0;
+        state.pinch.right.grace = 0;
       }
 
       // Enemy target: nearest hand (preferred), else center of view
