@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Pose + Face Skin (SVG) • Pro Debug</title>
+
+  <style>
+    html,body{height:100%;margin:0;background:#000;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    #app{position:relative;width:100%;height:100%}
+    video{
+      position:absolute;inset:0;width:100%;height:100%;
+      object-fit:cover; transform:scaleX(-1);
+      background:#000;
+    }
+    svg{
+      position:absolute;inset:0;width:100%;height:100%;
+      transform:scaleX(-1);
+      pointer-events:none;
+    }
+
+    #hud{
+      position:absolute;left:16px;top:16px;
+      width:min(980px,calc(100% - 32px));
+      background:rgba(255,255,255,0.08);
+      border:1px solid rgba(255,255,255,0.12);
+      border-radius:14px; padding:14px;
+      backdrop-filter:blur(10px);
+      box-shadow:0 12px 30px rgba(0,0,0,.45);
+      color:rgba(255,255,255,.92);
+      pointer-events:auto;
+      user-select:none;
+    }
+    #row1{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+    #title{font-size:14px;font-weight:900;margin:0}
+    #status{font-size:12px;opacity:.86}
+
+    .grid{display:grid;grid-template-columns:1fr auto;gap:10px 12px;margin-top:12px;align-items:center}
+    label{font-size:12px;opacity:.85}
+    input[type="range"]{width:280px}
+    .toggles{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+    .toggle{display:inline-flex;gap:8px;align-items:center;padding:8px 10px;border-radius:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.10)}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+    .warn{margin-top:10px;font-size:12px;opacity:.80;line-height:1.35}
+    .warn code{background:rgba(255,255,255,.08);padding:2px 6px;border-radius:8px}
+  </style>
+
+  <!-- MediaPipe (latest compatible) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+</head>
+
+<body>
+<div id="app">
+  <video id="video" autoplay playsinline muted></video>
+
+  <svg id="overlay" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice">
+    <defs>
+      <!-- Body shading -->
+      <radialGradient id="bodyGrad" gradientUnits="userSpaceOnUse">
+        <stop offset="0%" stop-color="rgba(255,255,255,0.18)"/>
+        <stop offset="55%" stop-color="rgba(255,255,255,0.05)"/>
+        <stop offset="100%" stop-color="rgba(0,0,0,0.35)"/>
+      </radialGradient>
+
+      <linearGradient id="limbGrad" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="rgba(255,255,255,0.16)"/>
+        <stop offset="60%" stop-color="rgba(255,255,255,0.05)"/>
+        <stop offset="100%" stop-color="rgba(0,0,0,0.32)"/>
+      </linearGradient>
+
+      <!-- Face shading -->
+      <radialGradient id="faceGrad" gradientUnits="userSpaceOnUse">
+        <stop offset="0%" stop-color="rgba(255,255,255,0.16)"/>
+        <stop offset="70%" stop-color="rgba(255,255,255,0.06)"/>
+        <stop offset="100%" stop-color="rgba(0,0,0,0.35)"/>
+      </radialGradient>
+
+      <filter id="shadow" x="-40%" y="-40%" width="180%" height="180%">
+        <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#000" flood-opacity="0.55"/>
+      </filter>
+    </defs>
+
+    <!-- BODY SKIN -->
+    <g id="body" filter="url(#shadow)">
+      <path id="bodySil" fill="rgba(255,255,255,0.08)"></path>
+      <path id="bodyShade" fill="url(#bodyGrad)" opacity="0.92"></path>
+
+      <!-- limb shells -->
+      <path id="armL" fill="rgba(255,255,255,0.08)"></path><path id="armLShade" fill="url(#limbGrad)" opacity="0.92"></path>
+      <path id="armR" fill="rgba(255,255,255,0.08)"></path><path id="armRShade" fill="url(#limbGrad)" opacity="0.92"></path>
+      <path id="legL" fill="rgba(255,255,255,0.08)"></path><path id="legLShade" fill="url(#limbGrad)" opacity="0.92"></path>
+      <path id="legR" fill="rgba(255,255,255,0.08)"></path><path id="legRShade" fill="url(#limbGrad)" opacity="0.92"></path>
+      <path id="footL" fill="rgba(255,255,255,0.10)"></path><path id="footLShade" fill="url(#limbGrad)" opacity="0.92"></path>
+      <path id="footR" fill="rgba(255,255,255,0.10)"></path><path id="footRShade" fill="url(#limbGrad)" opacity="0.92"></path>
+    </g>
+
+    <!-- FACE SKIN -->
+    <g id="face" filter="url(#shadow)">
+      <path id="faceOval" fill="rgba(255,255,255,0.08)"></path>
+      <path id="faceShade" fill="url(#faceGrad)" opacity="0.92"></path>
+
+      <circle id="eyeL" r="6" fill="rgba(0,0,0,0.85)"></circle>
+      <circle id="eyeR" r="6" fill="rgba(0,0,0,0.85)"></circle>
+      <path id="mouth" fill="none" stroke="rgba(0,0,0,0.85)" stroke-width="4" stroke-linecap="round"></path>
+    </g>
+
+    <!-- DEBUG -->
+    <g id="debug" opacity="0">
+      <path id="bones" fill="none" stroke="rgba(0,255,180,0.9)" stroke-width="3" stroke-linecap="round"></path>
+      <g id="dots"></g>
+    </g>
+  </svg>
+
+  <div id="hud">
+    <div id="row1">
+      <div id="title">Pose + Face “Skinning” (SVG) • Pro Debug</div>
+      <div id="status" class="mono">Booting…</div>
+    </div>
+
+    <div class="grid">
+      <label for="opacity">Skin opacity</label>
+      <input id="opacity" type="range" min="0" max="100" value="86"/>
+
+      <label for="thick">Body thickness</label>
+      <input id="thick" type="range" min="10" max="110" value="54"/>
+
+      <label for="smooth">Smoothing</label>
+      <input id="smooth" type="range" min="0" max="95" value="78"/>
+    </div>
+
+    <div class="toggles">
+      <label class="toggle"><input id="showVideo" type="checkbox" checked> Show video</label>
+      <label class="toggle"><input id="showDebug" type="checkbox"> Debug landmarks</label>
+    </div>
+
+    <div class="warn">
+      If it still shows <span class="mono">pose=0 face=0</span>:
+      open DevTools Console (F12) and look for a 404 on model assets or blocked camera permissions.
+      Use a local server: <code>python -m http.server 8000</code> then open <code>http://localhost:8000</code>.
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  // DOM
+  const video = document.getElementById("video");
+  const svg = document.getElementById("overlay");
+  const statusEl = document.getElementById("status");
+
+  const opacityEl = document.getElementById("opacity");
+  const thickEl = document.getElementById("thick");
+  const smoothEl = document.getElementById("smooth");
+  const showVideoEl = document.getElementById("showVideo");
+  const showDebugEl = document.getElementById("showDebug");
+
+  const bodySil = document.getElementById("bodySil");
+  const bodyShade = document.getElementById("bodyShade");
+  const armL = document.getElementById("armL");
+  const armLShade = document.getElementById("armLShade");
+  const armR = document.getElementById("armR");
+  const armRShade = document.getElementById("armRShade");
+  const legL = document.getElementById("legL");
+  const legLShade = document.getElementById("legLShade");
+  const legR = document.getElementById("legR");
+  const legRShade = document.getElementById("legRShade");
+  const footL = document.getElementById("footL");
+  const footLShade = document.getElementById("footLShade");
+  const footR = document.getElementById("footR");
+  const footRShade = document.getElementById("footRShade");
+
+  const bodyGrad = document.getElementById("bodyGrad");
+  const limbGrad = document.getElementById("limbGrad");
+  const faceGrad = document.getElementById("faceGrad");
+
+  const faceOval = document.getElementById("faceOval");
+  const faceShade = document.getElementById("faceShade");
+  const eyeL = document.getElementById("eyeL");
+  const eyeR = document.getElementById("eyeR");
+  const mouth = document.getElementById("mouth");
+
+  const debugG = document.getElementById("debug");
+  const bones = document.getElementById("bones");
+  const dotsG = document.getElementById("dots");
+
+  // Utils
+  const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+  const lerp = (a,b,t)=>a+(b-a)*t;
+  const dist = (a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+
+  let W=1280, H=720;
+
+  // ---- Robust video readiness ----
+  async function waitVideoReady() {
+    for (let i=0;i<200;i++){
+      if (video.videoWidth && video.videoHeight) return true;
+      await new Promise(r=>setTimeout(r,25));
+    }
+    return false;
+  }
+
+  // ---- Smoothing ----
+  let lastPose=null, lastFace=null;
+  function smoothLm(curr, prev, alpha){
+    if(!curr) return null;
+    if(!prev) return curr;
+    const out=new Array(curr.length);
+    for(let i=0;i<curr.length;i++){
+      out[i]={x:lerp(prev[i].x,curr[i].x,alpha),
+              y:lerp(prev[i].y,curr[i].y,alpha),
+              z:lerp(prev[i].z??0,curr[i].z??0,alpha),
+              visibility:lerp(prev[i].visibility??1,curr[i].visibility??1,alpha)};
+    }
+    return out;
+  }
+
+  function P(lm,i){
+    const p=lm[i];
+    return {x:p.x*W,y:p.y*H,v:p.visibility??1};
+  }
+  function pathFrom(pts){
+    if(!pts||pts.length<3) return "";
+    let d=`M ${pts[0].x.toFixed(2)} ${pts[0].y.toFixed(2)}`;
+    for(let i=1;i<pts.length;i++) d+=` L ${pts[i].x.toFixed(2)} ${pts[i].y.toFixed(2)}`;
+    return d+" Z";
+  }
+  function quad(a,b,tA,tB){
+    const vx=b.x-a.x, vy=b.y-a.y;
+    const len=Math.hypot(vx,vy)||1;
+    const nx=-vy/len, ny=vx/len;
+    return [
+      {x:a.x+nx*tA,y:a.y+ny*tA},
+      {x:b.x+nx*tB,y:b.y+ny*tB},
+      {x:b.x-nx*tB,y:b.y-ny*tB},
+      {x:a.x-nx*tA,y:a.y-ny*tA}
+    ];
+  }
+  function setDualPath(elA, elB, pts){
+    const d=pathFrom(pts);
+    elA.setAttribute("d",d);
+    elB.setAttribute("d",d);
+  }
+
+  // ---- Pose indices ----
+  const IDX={
+    nose:0,
+    lShoulder:11,rShoulder:12,
+    lElbow:13,rElbow:14,
+    lWrist:15,rWrist:16,
+    lHip:23,rHip:24,
+    lKnee:25,rKnee:26,
+    lAnkle:27,rAnkle:28,
+    lHeel:29,rHeel:30,
+    lFoot:31,rFoot:32
+  };
+
+  const CONN=[
+    [IDX.lShoulder,IDX.rShoulder],
+    [IDX.lShoulder,IDX.lElbow],[IDX.lElbow,IDX.lWrist],
+    [IDX.rShoulder,IDX.rElbow],[IDX.rElbow,IDX.rWrist],
+    [IDX.lShoulder,IDX.lHip],[IDX.rShoulder,IDX.rHip],
+    [IDX.lHip,IDX.rHip],
+    [IDX.lHip,IDX.lKnee],[IDX.lKnee,IDX.lAnkle],
+    [IDX.rHip,IDX.rKnee],[IDX.rKnee,IDX.rAnkle],
+    [IDX.lAnkle,IDX.lHeel],[IDX.lHeel,IDX.lFoot],
+    [IDX.rAnkle,IDX.rHeel],[IDX.rHeel,IDX.rFoot],
+  ];
+
+  // ---- Face oval indices ----
+  const FACE_OVAL = [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103];
+
+  // ---- MediaPipe Models ----
+  const pose = new Pose({
+    locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`
+  });
+  pose.setOptions({
+    modelComplexity: 2,
+    smoothLandmarks: false,
+    enableSegmentation: false,
+    minDetectionConfidence: 0.65,
+    minTrackingConfidence: 0.65
+  });
+
+  const face = new FaceMesh({
+    locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`
+  });
+  face.setOptions({
+    maxNumFaces: 1,
+    refineLandmarks: true,
+    minDetectionConfidence: 0.65,
+    minTrackingConfidence: 0.65
+  });
+
+  let latestPose=null;
+  let latestFace=null;
+
+  pose.onResults(r => { latestPose = r; });
+  face.onResults(r => { latestFace = r; });
+
+  // ---- Drawing ----
+  function draw() {
+    // UI
+    const op = Number(opacityEl.value)/100;
+    const thickBase = Number(thickEl.value);
+    const alpha = 1 - (Number(smoothEl.value)/100);
+
+    video.style.opacity = showVideoEl.checked ? "1" : "0";
+    debugG.style.opacity = showDebugEl.checked ? "1" : "0";
+
+    document.getElementById("body").setAttribute("opacity", op);
+    document.getElementById("face").setAttribute("opacity", op);
+
+    const poseLmRaw = latestPose?.poseLandmarks || null;
+    const faceLmRaw = latestFace?.multiFaceLandmarks?.[0] || null;
+
+    const poseLm = smoothLm(poseLmRaw, lastPose, alpha);
+    const faceLm = smoothLm(faceLmRaw, lastFace, alpha);
+    lastPose = poseLm;
+    lastFace = faceLm;
+
+    const poseCount = poseLm ? poseLm.length : 0;
+    const faceCount = faceLm ? faceLm.length : 0;
+
+    // Status + FPS-ish
+    const now = performance.now();
+    draw._t ??= now;
+    const dt = now - draw._t;
+    draw._t = now;
+    const fps = dt > 0 ? (1000/dt) : 0;
+
+    statusEl.textContent = `cam=${W}x${H} • pose=${poseCount} face=${faceCount} • ${fps.toFixed(1)}fps`;
+
+    // Nothing to draw
+    if(!poseLm && !faceLm) return;
+
+    // Anchors for gradients
+    const centerX = W*0.5, centerY=H*0.5;
+
+    bodyGrad.setAttribute("cx", centerX);
+    bodyGrad.setAttribute("cy", centerY);
+    bodyGrad.setAttribute("r", Math.max(W,H)*0.6);
+
+    limbGrad.setAttribute("x1", 0);
+    limbGrad.setAttribute("y1", centerY - H*0.3);
+    limbGrad.setAttribute("x2", 0);
+    limbGrad.setAttribute("y2", centerY + H*0.5);
+
+    faceGrad.setAttribute("cx", centerX);
+    faceGrad.setAttribute("cy", centerY - H*0.15);
+    faceGrad.setAttribute("r", Math.max(W,H)*0.35);
+
+    // --- BODY SKIN (pose) ---
+    if (poseLm) {
+      const LS=P(poseLm,IDX.lShoulder), RS=P(poseLm,IDX.rShoulder);
+      const LH=P(poseLm,IDX.lHip), RH=P(poseLm,IDX.rHip);
+      const LE=P(poseLm,IDX.lElbow),  RE=P(poseLm,IDX.rElbow);
+      const LW=P(poseLm,IDX.lWrist),  RW=P(poseLm,IDX.rWrist);
+      const LK=P(poseLm,IDX.lKnee),   RK=P(poseLm,IDX.rKnee);
+      const LA=P(poseLm,IDX.lAnkle),  RA=P(poseLm,IDX.rAnkle);
+      const LHeel=P(poseLm,IDX.lHeel), RHeel=P(poseLm,IDX.rHeel);
+      const LFoot=P(poseLm,IDX.lFoot), RFoot=P(poseLm,IDX.rFoot);
+
+      const shoulderW = dist(LS,RS);
+      const hipW = dist(LH,RH);
+      const scale = clamp(((shoulderW+hipW)/2)/320, 0.55, 2.0);
+      const T = thickBase * scale;
+
+      // Full body silhouette shell (simple but solid):
+      // shoulders -> right side -> hips -> left side
+      const waistPinch = 0.12;
+      const midL = { x: lerp(LS.x, LH.x, 0.55), y: lerp(LS.y, LH.y, 0.55) };
+      const midR = { x: lerp(RS.x, RH.x, 0.55), y: lerp(RS.y, RH.y, 0.55) };
+      const cx = (LS.x+RS.x+LH.x+RH.x)/4;
+
+      const silPts = [
+        {x: LS.x, y: LS.y},
+        {x: RS.x, y: RS.y},
+        {x: RH.x, y: RH.y},
+        {x: lerp(midR.x, cx, waistPinch), y: midR.y},
+        {x: lerp(midL.x, cx, waistPinch), y: midL.y},
+        {x: LH.x, y: LH.y},
+      ];
+      const silD = pathFrom(silPts);
+      bodySil.setAttribute("d", silD);
+      bodyShade.setAttribute("d", silD);
+
+      // Limb shells (combine upper+lower into one for each limb for a “skinned” look)
+      const armLpts = [
+        ...quad(LS, LE, T*0.55, T*0.42),
+        ...quad(LE, LW, T*0.40, T*0.28).slice(1,3) // blend end
+      ];
+      setDualPath(armL, armLShade, armLpts);
+
+      const armRpts = [
+        ...quad(RS, RE, T*0.55, T*0.42),
+        ...quad(RE, RW, T*0.40, T*0.28).slice(1,3)
+      ];
+      setDualPath(armR, armRShade, armRpts);
+
+      const legLpts = [
+        ...quad(LH, LK, T*0.72, T*0.56),
+        ...quad(LK, LA, T*0.56, T*0.44).slice(1,3)
+      ];
+      setDualPath(legL, legLShade, legLpts);
+
+      const legRpts = [
+        ...quad(RH, RK, T*0.72, T*0.56),
+        ...quad(RK, RA, T*0.56, T*0.44).slice(1,3)
+      ];
+      setDualPath(legR, legRShade, legRpts);
+
+      // Feet pads
+      function footPoly(A, Heel, Toe){
+        const vx = Toe.x - A.x, vy = Toe.y - A.y;
+        const len = Math.hypot(vx,vy)||1;
+        const nx = -vy/len, ny = vx/len;
+        const pad = T*0.26;
+
+        const Aout = {x:A.x+nx*pad, y:A.y+ny*pad};
+        const Ain  = {x:A.x-nx*pad, y:A.y-ny*pad};
+        const Hout = {x:Heel.x+nx*pad*0.8, y:Heel.y+ny*pad*0.8};
+        const Hin  = {x:Heel.x-nx*pad*0.6, y:Heel.y-ny*pad*0.6};
+        const Tout = {x:Toe.x+nx*pad*1.2, y:Toe.y+ny*pad*1.2};
+        const Tin  = {x:Toe.x-nx*pad*0.7, y:Toe.y-ny*pad*0.7};
+        return [Aout,Hout,Tout,Tin,Hin,Ain];
+      }
+      setDualPath(footL, footLShade, footPoly(LA, LHeel, LFoot));
+      setDualPath(footR, footRShade, footPoly(RA, RHeel, RFoot));
+
+      // Debug bones/dots
+      if(showDebugEl.checked){
+        let d="";
+        for(const [a,b] of CONN){
+          const A=P(poseLm,a), B=P(poseLm,b);
+          d += `M ${A.x.toFixed(2)} ${A.y.toFixed(2)} L ${B.x.toFixed(2)} ${B.y.toFixed(2)} `;
+        }
+        bones.setAttribute("d", d);
+        dotsG.innerHTML="";
+        for(let i=0;i<poseLm.length;i++){
+          const p=P(poseLm,i);
+          if(p.v < 0.35) continue;
+          const c=document.createElementNS("http://www.w3.org/2000/svg","circle");
+          c.setAttribute("cx", p.x);
+          c.setAttribute("cy", p.y);
+          c.setAttribute("r", 2.2);
+          c.setAttribute("fill","rgba(0,255,180,0.9)");
+          dotsG.appendChild(c);
+        }
+      }
+    }
+
+    // --- FACE SKIN (face mesh oval) ---
+    if(faceLm){
+      const pts = FACE_OVAL.map(i => ({x: faceLm[i].x*W, y: faceLm[i].y*H}));
+      const d = pathFrom(pts);
+      faceOval.setAttribute("d", d);
+      faceShade.setAttribute("d", d);
+
+      // eyes
+      const EL = faceLm[159], ER = faceLm[386];
+      eyeL.setAttribute("cx", EL.x*W);
+      eyeL.setAttribute("cy", EL.y*H);
+      eyeR.setAttribute("cx", ER.x*W);
+      eyeR.setAttribute("cy", ER.y*H);
+
+      // mouth curve
+      const ML = faceLm[61], MR = faceLm[291];
+      const centerX = (ML.x + MR.x) * 0.5 * W;
+      const centerY = ((ML.y + MR.y) * 0.5 * H) + 12;
+      mouth.setAttribute("d",
+        `M ${ML.x*W} ${ML.y*H} Q ${centerX} ${centerY} ${MR.x*W} ${MR.y*H}`
+      );
+    }
+  }
+
+  // ---- Frame pump (robust) ----
+  let running=true;
+  async function pump() {
+    while(running){
+      if(video.readyState >= 2){
+        // Send same frame to both models
+        await pose.send({image: video});
+        await face.send({image: video});
+        draw();
+      }
+      await new Promise(r=>requestAnimationFrame(r));
+    }
+  }
+
+  async function start(){
+    statusEl.textContent = "Requesting camera…";
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video:{facingMode:"user", width:{ideal:1280}, height:{ideal:720}},
+      audio:false
+    });
+    video.srcObject = stream;
+
+    const ok = await waitVideoReady();
+    if(!ok){
+      statusEl.textContent = "Camera readyState timeout (try local server + permissions)";
+      return;
+    }
+
+    W = video.videoWidth || 1280;
+    H = video.videoHeight || 720;
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+
+    statusEl.textContent = `Camera OK ${W}x${H} • Loading models…`;
+
+    // Warmup frames (gives models time to initialize)
+    for(let i=0;i<5;i++){
+      await pose.send({image: video});
+      await face.send({image: video});
+    }
+
+    statusEl.textContent = "Running…";
+    pump();
+  }
+
+  start().catch(err=>{
+    console.error(err);
+    statusEl.textContent = `ERROR: ${(err?.name||"")}: ${(err?.message||String(err))}`;
+  });
+
+})();
+</script>
+</body>
+</html>
