@@ -1503,7 +1503,6 @@
      *****************************************************************/
     const BALL_R = 12;
     const HOLE_R = 15;
-    const TUNNEL_HOLE_R = 18;
     const REST_EPS = 9;
     const REST_EPS2 = REST_EPS * REST_EPS;
 
@@ -1548,9 +1547,6 @@
 
     // Ball state
     let ball = { x: 0, y: 0, vx: 0, vy: 0 };
-    let lastSafePos = { x: 0, y: 0 };
-    let waterPenaltyTimer = 0;
-    let warpCooldown = 0;
 
     // Aim point (only used when not locked)
     let aim = { x: WORLD_W/2, y: WORLD_H/2 };
@@ -1670,21 +1666,6 @@
       };
     }
 
-    function pointInRect(p, r, pad=0){
-      return p.x > r.x + pad && p.x < r.x + r.w - pad && p.y > r.y + pad && p.y < r.y + r.h - pad;
-    }
-
-    function pickArea(rng, areas){
-      return areas[Math.floor(rng() * areas.length)];
-    }
-
-    function randomPointInArea(rng, area, pad=40){
-      return {
-        x: area.x + pad + rng() * (area.w - pad * 2),
-        y: area.y + pad + rng() * (area.h - pad * 2),
-      };
-    }
-
     function obstacleBehavior(type){
       return OBSTACLE_TYPES[type]?.behavior || "wall";
     }
@@ -1719,59 +1700,28 @@
       const mode = selectedMode || GAME_MODES[0];
 
       const bounds = { x: 70, y: 60, w: WORLD_W - 140, h: WORLD_H - 120 };
-      const islandMode = rng() < 0.7;
 
-      const islands = [];
-      let water = null;
-      if (islandMode){
-        const gapW = 120 + rng() * 140;
-        const islandPad = 26 + rng() * 18;
-        const islandW = (bounds.w - gapW) / 2 - islandPad;
-        const islandH = bounds.h - 90;
-        const islandY = bounds.y + 45;
-
-        const left = {
-          x: bounds.x + islandPad,
-          y: islandY,
-          w: islandW,
-          h: islandH,
-        };
-        const right = {
-          x: bounds.x + bounds.w - islandPad - islandW,
-          y: islandY,
-          w: islandW,
-          h: islandH,
-        };
-        islands.push(left, right);
-        water = {
-          x: left.x + left.w + 10,
-          y: bounds.y + 24,
-          w: right.x - (left.x + left.w) - 20,
-          h: bounds.h - 48,
-        };
-      }
-
-      const playAreas = islandMode ? islands : [bounds];
-      const startArea = islandMode ? islands[0] : bounds;
-      const cupArea = islandMode ? islands[1] : bounds;
-
-      const start = randomPointInArea(rng, startArea, 50);
-      const cup = randomPointInArea(rng, cupArea, 60);
+      const start = {
+        x: bounds.x + 90 + rng()*120,
+        y: bounds.y + 80 + rng()*(bounds.h - 160),
+      };
+      const cup = {
+        x: bounds.x + bounds.w - (120 + rng()*160),
+        y: bounds.y + 80 + rng()*(bounds.h - 160),
+      };
 
       const obstacles = [];
       const obstacleCount = 5 + Math.floor(rng() * 5); // 5..9
       for (let i=0;i<obstacleCount;i++){
         const type = pickObstacleType(rng, theme);
-        const area = pickArea(rng, playAreas);
-        obstacles.push(makeObstacle(rng, area, type));
+        obstacles.push(makeObstacle(rng, bounds, type));
       }
 
       const themedExtras = THEMED_OBSTACLES[theme.name] || [];
       const themedCount = 2 + Math.floor(rng() * 2);
       for (let i=0;i<themedCount;i++){
         const type = themedExtras[Math.floor(rng() * themedExtras.length)] || "gate";
-        const area = pickArea(rng, playAreas);
-        obstacles.push(makeObstacle(rng, area, type));
+        obstacles.push(makeObstacle(rng, bounds, type));
       }
 
       const sparkles = Array.from({ length: 22 + Math.floor(rng() * 14) }, () => ({
@@ -1787,22 +1737,10 @@
       for (let i=0;i<tunnelCount;i++){
         const w = 90 + rng()*120;
         const h = 26 + rng()*40;
-        const area = pickArea(rng, playAreas);
-        const x = area.x + 50 + rng()*(area.w - 100 - w);
-        const y = area.y + 40 + rng()*(area.h - 80 - h);
+        const x = bounds.x + 80 + rng()*(bounds.w - 160 - w);
+        const y = bounds.y + 70 + rng()*(bounds.h - 140 - h);
         const angle = (rng() * Math.PI * 2);
         tunnels.push({ x, y, w, h, angle });
-      }
-
-      const tunnelHoles = [];
-      if (islandMode && rng() < 0.9){
-        const entry = randomPointInArea(rng, islands[0], 70);
-        const exit = randomPointInArea(rng, islands[1], 70);
-        tunnelHoles.push({
-          entry,
-          exit,
-          angle: Math.atan2(exit.y - entry.y, exit.x - entry.x),
-        });
       }
 
       const windmills = [];
@@ -1851,16 +1789,6 @@
               }
             }
           }
-          if (ok && tunnelHoles.length){
-            for (const th of tunnelHoles){
-              if (len2(p.x - th.entry.x, p.y - th.entry.y) < 50*50 || len2(p.x - th.exit.x, p.y - th.exit.y) < 50*50){
-                ok = false;
-                p.x += 20;
-                p.y += 12;
-                break;
-              }
-            }
-          }
           if (ok && windmills.length){
             for (const w of windmills){
               if (len2(p.x - w.x, p.y - w.y) < (w.r + 40)*(w.r + 40)){
@@ -1881,7 +1809,7 @@
       const basePar = dist < 520 ? 2 : (dist < 760 ? 3 : 4);
       const par = clamp(basePar + (obstacleCount >= 5 ? 1 : 0) + (feature ? 1 : 0), 2, 6);
 
-      return { theme, bounds, start, cup, obstacles, tunnels, tunnelHoles, islands, water, windmills, sparkles, feature, par, islandMode };
+      return { theme, bounds, start, cup, obstacles, tunnels, windmills, sparkles, feature, par };
     }
 
     function make18Holes(){
@@ -1901,10 +1829,6 @@
       ball.x = h.start.x;
       ball.y = h.start.y;
       ball.vx = 0; ball.vy = 0; ball.charge = 0;
-      lastSafePos.x = ball.x;
-      lastSafePos.y = ball.y;
-      waterPenaltyTimer = 0;
-      warpCooldown = 0;
 
       aim.x = ball.x + 160;
       aim.y = ball.y;
@@ -1940,16 +1864,6 @@
     /*****************************************************************
      * PHYSICS
      *****************************************************************/
-    function onIsland(h, pos, pad=0){
-      if (!h.islands || !h.islands.length) return true;
-      return h.islands.some(island => pointInRect(pos, island, -pad));
-    }
-
-    function inWater(h, pos){
-      if (!h.water) return false;
-      return pointInRect(pos, h.water, 0) && !onIsland(h, pos, 0);
-    }
-
     function applyPhysics(dt){
       const h = holes[holeIndex];
       const friction = Math.pow(frictionPerFrame, dt * 60);
@@ -1974,10 +1888,6 @@
         ball.vx = 0; ball.vy = 0;
       }
 
-      if (warpCooldown > 0){
-        warpCooldown = Math.max(0, warpCooldown - dt);
-      }
-
       if (h.tunnels && h.tunnels.length){
         for (const t of h.tunnels){
           if (ball.x > t.x && ball.x < t.x + t.w && ball.y > t.y && ball.y < t.y + t.h){
@@ -1991,23 +1901,6 @@
               ball.vy += diry * 80 * dt;
               ball.charge = clamp(ball.charge + 0.35 * dt, 0, 1);
             }
-          }
-        }
-      }
-
-      if (h.tunnelHoles && h.tunnelHoles.length && warpCooldown === 0){
-        for (const th of h.tunnelHoles){
-          const dx = ball.x - th.entry.x;
-          const dy = ball.y - th.entry.y;
-          if (dx*dx + dy*dy <= TUNNEL_HOLE_R * TUNNEL_HOLE_R){
-            const speed = Math.max(140, len(ball.vx, ball.vy));
-            ball.x = th.exit.x + Math.cos(th.angle) * 28;
-            ball.y = th.exit.y + Math.sin(th.angle) * 28;
-            ball.vx = Math.cos(th.angle) * speed;
-            ball.vy = Math.sin(th.angle) * speed;
-            warpCooldown = 0.8;
-            showBanner("Tunnel hole transfer!", 0.8);
-            break;
           }
         }
       }
@@ -2152,25 +2045,6 @@
         }
       }
 
-      const pos = { x: ball.x, y: ball.y };
-      if (onIsland(h, pos, 0)){
-        lastSafePos.x = ball.x;
-        lastSafePos.y = ball.y;
-        waterPenaltyTimer = Math.max(0, waterPenaltyTimer - dt);
-      } else if (inWater(h, pos)){
-        ball.vx *= 0.88;
-        ball.vy *= 0.88;
-        if (waterPenaltyTimer <= 0 && len2(ball.vx, ball.vy) < 80*80){
-          ball.x = lastSafePos.x;
-          ball.y = lastSafePos.y;
-          ball.vx = 0; ball.vy = 0; ball.charge = 0;
-          totalStrokes += 1;
-          strokesThisHole += 1;
-          waterPenaltyTimer = 1.2;
-          showBanner("Splash! +1 stroke, back to safe island", 1.4);
-        }
-      }
-
       updateBallCharge(dt);
       updateTrail();
       updateFx(dt);
@@ -2204,44 +2078,6 @@
     let grassPattern = null;
     const ballTrail = [];
     const impactBursts = [];
-    const ISLAND_DECOS = [
-      { id: "neon-triangle", path: "M 0 -18 L 16 14 L -16 14 Z" },
-      { id: "sun-arc", path: "M -18 6 A 18 18 0 0 0 18 6 L 18 14 L -18 14 Z" },
-      { id: "palm", path: "M -6 18 Q -2 -4 0 -18 Q 2 -4 6 18 Z M -24 -6 Q -8 -18 0 -20 Q 10 -18 24 -6 Q 6 -10 0 -10 Q -6 -10 -24 -6 Z" },
-      { id: "grid-star", path: "M 0 -18 L 4 -4 L 18 0 L 4 4 L 0 18 L -4 4 L -18 0 L -4 -4 Z" },
-    ];
-
-    function drawSvgDeco(path, x, y, scale, fill, glow){
-      ctx.save();
-      ctx.translate(x, y);
-      ctx.scale(scale, scale);
-      ctx.shadowColor = glow;
-      ctx.shadowBlur = 14;
-      ctx.fillStyle = fill;
-      ctx.fill(new Path2D(path));
-      ctx.restore();
-    }
-
-    function drawIslandDecor(island, accent){
-      const count = 3;
-      for (let i=0;i<count;i++){
-        const deco = ISLAND_DECOS[(i + island.x) % ISLAND_DECOS.length];
-        const x = island.x + island.w * (0.25 + 0.5 * (i / (count - 1 || 1)));
-        const y = island.y + island.h * (0.25 + 0.25 * (i % 2));
-        const scale = 1.4 + (i % 2) * 0.4;
-        const fill = i % 2 ? "rgba(255,94,247,.7)" : "rgba(124,244,255,.75)";
-        const glow = i % 2 ? "rgba(255,94,247,.6)" : "rgba(124,244,255,.6)";
-        drawSvgDeco(deco.path, x, y, scale, fill, glow);
-      }
-
-      ctx.save();
-      ctx.strokeStyle = accent;
-      ctx.globalAlpha = 0.35;
-      ctx.lineWidth = 2;
-      ctx.setLineDash([10, 10]);
-      ctx.strokeRect(island.x + 18, island.y + 18, island.w - 36, island.h - 36);
-      ctx.restore();
-    }
 
     function makeGrassPattern(){
       const tile = document.createElement("canvas");
@@ -2392,47 +2228,6 @@
       ctx.fillStyle = grassPattern || "#167a35";
       ctx.fillRect(0,0,WORLD_W,WORLD_H);
 
-      if (h.islandMode && h.water){
-        const wg = ctx.createLinearGradient(h.bounds.x, h.bounds.y, h.bounds.x + h.bounds.w, h.bounds.y + h.bounds.h);
-        wg.addColorStop(0, "rgba(6,28,60,.95)");
-        wg.addColorStop(1, "rgba(18,58,110,.95)");
-        ctx.fillStyle = wg;
-        ctx.fillRect(h.bounds.x, h.bounds.y, h.bounds.w, h.bounds.h);
-
-        ctx.save();
-        ctx.globalAlpha = 0.25;
-        ctx.strokeStyle = "rgba(124,244,255,.5)";
-        ctx.lineWidth = 2;
-        for (let i=0;i<6;i++){
-          const y = h.water.y + (i / 5) * h.water.h;
-          ctx.beginPath();
-          ctx.moveTo(h.water.x + 10, y);
-          ctx.lineTo(h.water.x + h.water.w - 10, y + Math.sin(now * 2 + i) * 12);
-          ctx.stroke();
-        }
-        ctx.restore();
-
-        if (h.islands && h.islands.length){
-          h.islands.forEach((island) => {
-            ctx.save();
-            drawRoundedRectPath(island.x, island.y, island.w, island.h, 18);
-            ctx.clip();
-            ctx.fillStyle = grassPattern || "#167a35";
-            ctx.fillRect(island.x, island.y, island.w, island.h);
-            ctx.restore();
-
-            ctx.save();
-            ctx.strokeStyle = "rgba(255,255,255,.2)";
-            ctx.lineWidth = 3;
-            drawRoundedRectPath(island.x, island.y, island.w, island.h, 18);
-            ctx.stroke();
-            ctx.restore();
-
-            drawIslandDecor(island, deco);
-          });
-        }
-      }
-
       const vg = ctx.createRadialGradient(WORLD_W*0.5, WORLD_H*0.5, WORLD_H*0.2, WORLD_W*0.5, WORLD_H*0.5, WORLD_H*0.95);
       vg.addColorStop(0, "rgba(0,0,0,0)");
       vg.addColorStop(1, "rgba(0,0,0,.32)");
@@ -2576,42 +2371,6 @@
           ctx.fillStyle = electric ? "rgba(200,255,255,.9)" : "rgba(255,255,255,.5)";
           drawRoundedRectPath(-t.w/2 + 6, -4, t.w - 12, 8, 8);
           ctx.fill();
-          ctx.restore();
-        });
-      }
-
-      if (h.tunnelHoles && h.tunnelHoles.length){
-        h.tunnelHoles.forEach((th, i) => {
-          const pulse = 0.6 + 0.4 * Math.sin(now * 2.2 + i);
-          const ringGlow = `rgba(255,94,247,${0.35 + pulse * 0.35})`;
-          ctx.save();
-          ctx.shadowColor = ringGlow;
-          ctx.shadowBlur = 16;
-          ctx.lineWidth = 4;
-          ctx.strokeStyle = ringGlow;
-          ctx.beginPath();
-          ctx.arc(th.entry.x, th.entry.y, TUNNEL_HOLE_R, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.restore();
-
-          ctx.save();
-          ctx.shadowColor = "rgba(124,244,255,.55)";
-          ctx.shadowBlur = 18;
-          ctx.lineWidth = 4;
-          ctx.strokeStyle = `rgba(124,244,255,${0.35 + pulse * 0.35})`;
-          ctx.beginPath();
-          ctx.arc(th.exit.x, th.exit.y, TUNNEL_HOLE_R, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.restore();
-
-          ctx.save();
-          ctx.strokeStyle = "rgba(255,255,255,.35)";
-          ctx.setLineDash([6, 10]);
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.moveTo(th.entry.x, th.entry.y);
-          ctx.lineTo(th.exit.x, th.exit.y);
-          ctx.stroke();
           ctx.restore();
         });
       }
