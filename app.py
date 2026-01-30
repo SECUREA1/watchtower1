@@ -68,6 +68,8 @@ GITHUB_PR_FLOW = os.getenv("GITHUB_PR_FLOW", "0").lower() in {"1", "true", "yes"
 
 INDEX_LOCK = threading.Lock()
 
+AUTH_COOKIE_NAME = "watchtower_access"
+
 # -------------------------------------------------------------------------
 # Logging & FastAPI app
 # -------------------------------------------------------------------------
@@ -273,6 +275,13 @@ def validate_upload(content_type: str, data: bytes) -> None:
         raise HTTPException(status_code=415, detail="Unsupported image type.")
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="Upload exceeds size limit.")
+
+
+def is_ui_authenticated(request: Request) -> bool:
+    token_cookie = request.cookies.get(AUTH_COOKIE_NAME, "")
+    if token_cookie:
+        return True
+    return False
 
 
 # -------------------------------------------------------------------------
@@ -889,6 +898,9 @@ async def serve_frontend(full_path: str, request: Request):
     url_path = request.url.path
     if request.method not in {"GET", "HEAD"}:
         raise HTTPException(status_code=404, detail="Not found")
+
+    if url_path not in {"/", "/index.html", "/start", "/start.html"} and not is_ui_authenticated(request):
+        return RedirectResponse(url="/start.html", status_code=302)
 
     # Prefer a modern landing page
     if url_path in {"/", "/index.html"}:
