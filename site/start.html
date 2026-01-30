@@ -2212,7 +2212,8 @@
       const CHAIN_KEY = 'mixer_current_chain';
       const CURRENCY_KEY = 'mixer_current_currency';
       const GUEST_SESSION_KEY = 'watchtower_guest_access';
-      const GUEST_CODE = 'watchtower';
+      const GUEST_CODE = 'watch tower';
+      const SESSION_PAGES_KEY = 'watchtower_session_pages';
       const REQUIRED_CONTRACTS = {
         ethereum: 'REPLACE_WITH_CONTRACT_ADDRESS',
         solana: 'REPLACE_WITH_CONTRACT_ADDRESS',
@@ -2241,11 +2242,12 @@
         ctx.accessToken = token || '';
       };
 
+      const normalizeCode = (value) => (value || '').toLowerCase().replace(/\s+/g, ' ').trim();
+
       const hasGuestCode = (code) => {
-        const normalized = (code || '').trim();
+        const normalized = normalizeCode(code);
         if (!normalized) return false;
-        if (normalized.toLowerCase() === GUEST_CODE) return true;
-        return true;
+        return normalized === normalizeCode(GUEST_CODE);
       };
 
       const updateStatus = (text, success = false) => {
@@ -2293,7 +2295,11 @@
         try {
           const response = await fetch('/api/session');
           if (!response.ok) return { authenticated: false };
-          return await response.json();
+          const data = await response.json();
+          if (Array.isArray(data?.pages)) {
+            sessionStorage.setItem(SESSION_PAGES_KEY, JSON.stringify(data.pages));
+          }
+          return data;
         } catch {
           return { authenticated: false };
         }
@@ -2353,19 +2359,64 @@
         updateStatus(statusLabel, true);
       };
 
-      const unlock = async (token, wallet, { guest = false, guestCode = '', skipServer = false } = {}) => {
-        if (!skipServer) {
-          try {
-            await requestLogin({ token, wallet, guestCode });
-          } catch (err) {
-            updateStatus(err?.message || 'Access verification failed.');
-            return;
-          }
+      const getAllowedPages = () => {
+        try {
+          const stored = sessionStorage.getItem(SESSION_PAGES_KEY);
+          return stored ? JSON.parse(stored) : [];
+        } catch {
+          return [];
+        }
+      };
+
+      const normalizePath = (value) => {
+        if (!value) return '/';
+        return value.replace(/\/+$/, '') || '/';
+      };
+
+      const getNextTarget = () => {
+        const params = new URLSearchParams(window.location.search);
+        const next = params.get('next');
+        if (!next) return '';
+        try {
+          return decodeURIComponent(next);
+        } catch {
+          return next;
+        }
+      };
+
+      const isAllowedPath = (path) => {
+        if (!path.startsWith('/') || path.startsWith('//')) return false;
+        const allowed = getAllowedPages();
+        if (!allowed.length) return true;
+        const normalized = normalizePath(path);
+        return (
+          allowed.includes(path) ||
+          allowed.includes(normalized) ||
+          allowed.includes(`${normalized}.html`)
+        );
+      };
+
+      const returnToRequestedPage = () => {
+        const target = getNextTarget();
+        if (!target) return false;
+        const url = new URL(target, window.location.origin);
+        if (!isAllowedPath(url.pathname)) return false;
+        window.location.assign(`${url.pathname}${url.search}${url.hash}`);
+        return true;
+      };
+
+      const unlock = async (token, wallet, { guest = false, guestCode = '' } = {}) => {
+        try {
+          await requestLogin({ token, wallet, guestCode });
+        } catch (err) {
+          updateStatus(err?.message || 'Access verification failed.');
+          return;
         }
         guestUnlocked = guest;
         persist(token, wallet, { guest });
         const statusLabel = guest ? 'Guest access granted' : wallet ? `Access unlocked for ${wallet}` : 'Access unlocked with token';
         applyUnlockedState(statusLabel);
+        returnToRequestedPage();
       };
 
       const lock = () => {
@@ -2383,6 +2434,7 @@
         const session = await fetchSession();
         if (session?.authenticated) {
           applyUnlockedState('Access already verified.');
+          returnToRequestedPage();
           return true;
         }
         return false;
@@ -2586,7 +2638,7 @@
         selectedChain = getSelectedChain();
 
         if (hasGuestCode(guestCode)) {
-          await unlock('', '', { guest: true, guestCode, skipServer: true });
+          await unlock('', '', { guest: true, guestCode });
           return;
         }
 
