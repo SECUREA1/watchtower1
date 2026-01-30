@@ -386,6 +386,13 @@
     .auth-actions .btn{flex:1;min-width:180px}
     .auth-messages{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
     .auth-messages span{flex:1}
+    .wallet-status{font-weight:800}
+    .wallet-status.ok{color:var(--ok)}
+    .wallet-status.bad{color:var(--bad)}
+
+    body.locked main > section:not(#loginCard){display:none}
+    body.locked .navbtn{pointer-events:none;opacity:.55}
+    body.locked #settingsBtn{pointer-events:none;opacity:.55}
 
     @media (max-width:1100px){
       .app{grid-template-columns:1fr}
@@ -501,6 +508,13 @@
             <div class="c12 auth-actions">
               <button id="loginBtn" class="btn btn-primary" style="width:100%">Login with password</button>
             </div>
+            <div class="c12">
+              <label>Secret Access Password</label>
+              <input id="secretPassword" type="password" placeholder="Enter the secret access phrase"/>
+            </div>
+            <div class="c12 auth-actions">
+              <button id="secretLoginBtn" class="btn btn-ghost" style="width:100%">Unlock with secret</button>
+            </div>
           </div>
           <div>
             <label>Access Token (JWT)</label>
@@ -511,6 +525,42 @@
           </div>
           <div class="auth-messages">
             <span id="loginMsg" class="muted"></span>
+          </div>
+        </div>
+
+        <div class="auth-panel">
+          <div class="row" style="align-items:flex-start">
+            <div>
+              <h3>Wallet Validator</h3>
+              <p class="auth-note">Open a wallet, verify the selected contract, and auto-unlock if the network exists.</p>
+            </div>
+            <span class="pill ok" aria-hidden="true">Wallets</span>
+          </div>
+          <div class="grid12" style="margin:0">
+            <div class="c6">
+              <label>Network</label>
+              <select id="walletChain">
+                <option value="ethereum">Ethereum</option>
+                <option value="polygon">Polygon</option>
+                <option value="solana">Solana</option>
+                <option value="cardano">Cardano</option>
+              </select>
+            </div>
+            <div class="c6">
+              <label>Contract</label>
+              <input id="walletContract" type="text" placeholder="0x… / addr… / base58"/>
+            </div>
+            <div class="c12">
+              <label>Wallet status</label>
+              <div id="walletStatus" class="wallet-status">No wallet detected yet.</div>
+            </div>
+            <div class="c12 auth-actions">
+              <button id="walletLoginBtn" class="btn btn-primary" style="width:100%">Open wallet + verify</button>
+              <button id="walletDisconnectBtn" class="btn btn-ghost" style="width:100%">Clear wallet session</button>
+            </div>
+          </div>
+          <div class="auth-messages">
+            <span id="walletMsg" class="muted"></span>
           </div>
         </div>
       </div>
@@ -1176,6 +1226,9 @@ const state = {
   token: localStorage.getItem("rn_token") || "",
   email: localStorage.getItem("rn_email") || "",
   apiBase: (localStorage.getItem("rn_api_base") || "").trim().replace(/\/$/, ""),
+  walletChain: localStorage.getItem("rn_wallet_chain") || "ethereum",
+  walletContract: localStorage.getItem("rn_wallet_contract") || "",
+  walletAccount: localStorage.getItem("rn_wallet_account") || "",
 
   assets: [],
   robots: [],
@@ -1636,11 +1689,13 @@ function setAuthUI(){
     authPill.textContent = "Logged in";
     $("loginCard").classList.add("hidden");
     logoutBtn.classList.remove("hidden");
+    document.body.classList.remove("locked");
   }else{
     authPill.className = "pill warn";
     authPill.textContent = "Not logged in";
     $("loginCard").classList.remove("hidden");
     logoutBtn.classList.add("hidden");
+    document.body.classList.add("locked");
   }
 }
 
@@ -2316,6 +2371,191 @@ async function consoleSend(){
 }
 
 /* ---------- Login / logout / settings ---------- */
+const SECRET_ACCESS_PASSWORD = "tightass";
+
+function setWalletStatus(message, ok = null){
+  const status = $("walletStatus");
+  status.textContent = message;
+  status.classList.remove("ok", "bad");
+  if(ok === true) status.classList.add("ok");
+  if(ok === false) status.classList.add("bad");
+}
+
+function detectWallet(chain){
+  if(chain === "ethereum" || chain === "polygon"){
+    if(window.ethereum?.request){
+      const name = window.ethereum.isMetaMask ? "MetaMask" : "EVM wallet";
+      return { available:true, name };
+    }
+    return { available:false, name:"No EVM wallet detected" };
+  }
+  if(chain === "solana"){
+    if(window.solana?.connect){
+      const name = window.solana.isPhantom ? "Phantom" : "Solana wallet";
+      return { available:true, name };
+    }
+    return { available:false, name:"No Solana wallet detected" };
+  }
+  if(chain === "cardano"){
+    const cardano = window.cardano;
+    if(!cardano) return { available:false, name:"No Cardano wallet detected" };
+    const known = ["nami","eternl","flint","typhon","lace","yoroi"];
+    const match = known.find(key => cardano[key]?.enable);
+    if(match) return { available:true, name:`${match} wallet` };
+    const any = Object.values(cardano).find(entry => entry?.enable);
+    if(any) return { available:true, name:"Cardano wallet" };
+    return { available:false, name:"No Cardano wallet detected" };
+  }
+  return { available:false, name:"Unsupported network" };
+}
+
+function validateContractInput(chain, contract){
+  const trimmed = contract.trim();
+  if(!trimmed) return "contract required";
+  if(chain === "ethereum" || chain === "polygon"){
+    return /^0x[a-fA-F0-9]{40}$/.test(trimmed) ? "" : "expected 0x contract address";
+  }
+  if(chain === "solana"){
+    return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(trimmed) ? "" : "expected Solana base58 address";
+  }
+  if(chain === "cardano"){
+    return /^(addr1|addr_test1|stake1)[0-9a-z]{20,}$/i.test(trimmed) ? "" : "expected Cardano address";
+  }
+  return "unsupported network";
+}
+
+async function connectEvmWallet(chain){
+  if(!window.ethereum?.request) throw new Error("EVM wallet not detected");
+  const targetChainId = chain === "polygon" ? "0x89" : "0x1";
+  const accounts = await window.ethereum.request({ method:"eth_requestAccounts" });
+  if(!accounts?.length) throw new Error("No EVM accounts found");
+  let chainId = await window.ethereum.request({ method:"eth_chainId" });
+  if(chainId !== targetChainId){
+    try{
+      await window.ethereum.request({
+        method:"wallet_switchEthereumChain",
+        params:[{ chainId: targetChainId }],
+      });
+      chainId = await window.ethereum.request({ method:"eth_chainId" });
+    }catch(error){
+      throw new Error("Wrong network selected");
+    }
+  }
+  if(chainId !== targetChainId) throw new Error("Wrong network selected");
+  return { account: accounts[0], chainId };
+}
+
+async function connectSolanaWallet(){
+  const provider = window.solana;
+  if(!provider?.connect) throw new Error("Solana wallet not detected");
+  const res = await provider.connect();
+  const account = provider.publicKey?.toString() || res?.publicKey?.toString();
+  if(!account) throw new Error("Solana wallet connected but no public key");
+  return { account };
+}
+
+function resolveCardanoProvider(){
+  const cardano = window.cardano;
+  if(!cardano) return null;
+  const known = ["nami","eternl","flint","typhon","lace","yoroi"];
+  const match = known.find(key => cardano[key]?.enable);
+  if(match) return { name:match, api:cardano[match] };
+  const entry = Object.entries(cardano).find(([, value]) => value?.enable);
+  if(entry) return { name:entry[0], api:entry[1] };
+  return null;
+}
+
+async function connectCardanoWallet(){
+  const provider = resolveCardanoProvider();
+  if(!provider?.api?.enable) throw new Error("Cardano wallet not detected");
+  const wallet = await provider.api.enable();
+  let account = "";
+  if(wallet?.getUsedAddresses){
+    const used = await wallet.getUsedAddresses();
+    if(used?.length) account = used[0];
+  }
+  return { account: account || provider.name, walletName: provider.name };
+}
+
+async function walletLogin(){
+  $("walletMsg").textContent = "";
+  try{
+    const chain = $("walletChain").value;
+    const contract = $("walletContract").value.trim();
+    const contractError = validateContractInput(chain, contract);
+    if(contractError) throw new Error(contractError);
+
+    let walletData = null;
+    if(chain === "ethereum" || chain === "polygon"){
+      walletData = await connectEvmWallet(chain);
+    }else if(chain === "solana"){
+      walletData = await connectSolanaWallet();
+    }else if(chain === "cardano"){
+      walletData = await connectCardanoWallet();
+    }else{
+      throw new Error("Unsupported network");
+    }
+
+    state.walletChain = chain;
+    state.walletContract = contract;
+    state.walletAccount = walletData.account || "";
+
+    localStorage.setItem("rn_wallet_chain", chain);
+    localStorage.setItem("rn_wallet_contract", contract);
+    localStorage.setItem("rn_wallet_account", state.walletAccount);
+
+    state.token = `wallet:${chain}:${state.walletAccount || "connected"}`;
+    localStorage.setItem("rn_token", state.token);
+
+    $("tokenInput").value = state.token;
+    $("walletMsg").textContent = `Wallet verified on ${chain}. Access granted.`;
+    setWalletStatus(`Connected: ${state.walletAccount || "wallet verified"}`, true);
+    setAuthUI();
+    await refreshAll();
+  }catch(e){
+    $("walletMsg").textContent = "Wallet validation failed: " + (e.message || String(e));
+    setWalletStatus("Wallet validation failed.", false);
+  }
+}
+
+function clearWalletSession(){
+  state.walletAccount = "";
+  localStorage.removeItem("rn_wallet_account");
+  $("walletMsg").textContent = "Wallet session cleared.";
+  setWalletStatus("Wallet session cleared.", null);
+  if(state.token.startsWith("wallet:")){
+    logout();
+  }
+}
+
+function secretLogin(){
+  $("loginMsg").textContent = "";
+  const secret = $("secretPassword").value;
+  if(secret !== SECRET_ACCESS_PASSWORD){
+    $("loginMsg").textContent = "Secret access denied.";
+    return;
+  }
+  state.token = "secret:verified";
+  localStorage.setItem("rn_token", state.token);
+  $("tokenInput").value = state.token;
+  $("loginMsg").textContent = "Secret access granted.";
+  setAuthUI();
+  refreshAll().catch(()=>{});
+}
+
+function updateWalletAvailability(){
+  const chain = $("walletChain").value;
+  const info = detectWallet(chain);
+  if(info.available){
+    setWalletStatus(`${info.name} detected for ${chain}.`, true);
+  }else{
+    setWalletStatus(`${info.name}.`, false);
+  }
+  if(state.walletAccount){
+    setWalletStatus(`Connected: ${state.walletAccount}`, true);
+  }
+}
+
 async function login(){
   $("loginMsg").textContent = "";
   try{
@@ -2734,13 +2974,27 @@ async function init(){
   $("baseMsg").textContent = state.apiBase ? `Saved API Base: ${state.apiBase}` : "Saved API Base: (same origin)";
   if(state.email) $("email").value = state.email;
   if(state.token) $("tokenInput").value = state.token;
+  $("walletChain").value = state.walletChain;
+  $("walletContract").value = state.walletContract;
 
   setAuthUI();
 
   $("saveBaseBtn").addEventListener("click", saveBaseFromLogin);
   $("loginBtn").addEventListener("click", login);
   $("verifyTokenBtn").addEventListener("click", verifyToken);
+  $("secretLoginBtn").addEventListener("click", secretLogin);
+  $("walletLoginBtn").addEventListener("click", walletLogin);
+  $("walletDisconnectBtn").addEventListener("click", clearWalletSession);
   $("logoutBtn").addEventListener("click", logout);
+  $("walletChain").addEventListener("change", ()=>{
+    state.walletChain = $("walletChain").value;
+    localStorage.setItem("rn_wallet_chain", state.walletChain);
+    updateWalletAvailability();
+  });
+  $("walletContract").addEventListener("input", ()=>{
+    state.walletContract = $("walletContract").value;
+    localStorage.setItem("rn_wallet_contract", state.walletContract);
+  });
 
   $("settingsBtn").addEventListener("click", openSettings);
   $("closeSettingsBtn").addEventListener("click", closeSettings);
@@ -2799,6 +3053,7 @@ async function init(){
   });
 
   window.addEventListener("resize", ()=> drawNodeGraph());
+  updateWalletAvailability();
 
   if(state.token){
     setAuthUI();
