@@ -1,0 +1,1539 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Excavator • Hand Startup Training + Micro Tuner + Ammo Blast Assist</title>
+  <style>
+    :root{
+      --bg:#0b0f16;
+      --panel:rgba(18,24,38,0.92);
+      --panel2:rgba(18,24,38,0.78);
+      --stroke:rgba(255,255,255,0.10);
+      --text:rgba(235,242,255,0.92);
+      --muted:rgba(235,242,255,0.62);
+      --good:rgba(104, 255, 190, 0.90);
+      --warn:rgba(255, 210, 90, 0.92);
+      --bad:rgba(255, 96, 120, 0.92);
+      --accent:rgba(120, 170, 255, 0.92);
+    }
+    html,body{height:100%; margin:0; background:var(--bg); color:var(--text); font-family: ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial; overflow:hidden;}
+    #wrap{position:relative; width:100%; height:100%;}
+    canvas{display:block; width:100%; height:100%;}
+
+    /* HUD */
+    .hud{
+      position:absolute; left:14px; top:14px; display:flex; gap:10px; z-index:5; pointer-events:none;
+    }
+    .hudBlock{
+      background:var(--panel2);
+      border:1px solid var(--stroke);
+      border-radius:14px;
+      padding:10px 12px;
+      min-width:210px;
+      box-shadow:0 10px 26px rgba(0,0,0,0.25);
+    }
+    .hudTitle{font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:var(--muted); margin-bottom:8px;}
+    .hudRow{display:flex; justify-content:space-between; gap:12px; font-size:13px; margin:4px 0;}
+    .k{color:var(--muted)}
+    .v{color:var(--text)}
+    #hudNote{margin-top:8px; font-size:12px; color:rgba(235,242,255,0.70)}
+
+    .hudRight{
+      position:absolute; right:14px; top:14px; display:flex; gap:10px; z-index:5; pointer-events:none;
+    }
+
+    /* Pills */
+    .pill{
+      display:inline-flex; align-items:center; justify-content:center;
+      padding:4px 8px; border-radius:999px;
+      border:1px solid var(--stroke);
+      background:rgba(255,255,255,0.06);
+      color:rgba(235,242,255,0.80);
+      font-size:11px; letter-spacing:0.02em;
+      margin-right:8px;
+      min-width:86px;
+    }
+    .pill.on{ background:rgba(104,255,190,0.12); border-color:rgba(104,255,190,0.20); color:rgba(180,255,225,0.95);}
+    .pill.warn{ background:rgba(255,210,90,0.12); border-color:rgba(255,210,90,0.22); color:rgba(255,230,160,0.96);}
+    .pill.bad{ background:rgba(255,96,120,0.12); border-color:rgba(255,96,120,0.22); color:rgba(255,170,185,0.96);}
+
+    /* Actions panel */
+    .actPanel{
+      position:absolute; left:14px; bottom:14px;
+      background:var(--panel2);
+      border:1px solid var(--stroke);
+      border-radius:16px;
+      padding:10px 12px;
+      z-index:5;
+      width:290px;
+      box-shadow:0 10px 26px rgba(0,0,0,0.25);
+      pointer-events:none;
+    }
+    .actTitle{font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:var(--muted); margin-bottom:8px;}
+    .actRow{display:flex; align-items:center; justify-content:space-between; margin:6px 0; font-size:13px;}
+    .val{color:rgba(235,242,255,0.90)}
+
+    /* Buttons (overlay/tuner) */
+    .btn{
+      user-select:none;
+      display:inline-flex; align-items:center; justify-content:center;
+      border-radius:12px;
+      padding:10px 12px;
+      border:1px solid var(--stroke);
+      background:rgba(255,255,255,0.08);
+      color:var(--text);
+      font-weight:600;
+      cursor:pointer;
+      transition:transform 0.08s ease, background 0.15s ease;
+    }
+    .btn:hover{background:rgba(255,255,255,0.10)}
+    .btn:active{transform:translateY(1px)}
+    .btn.primary{background:rgba(120,170,255,0.14); border-color:rgba(120,170,255,0.26)}
+    .btn.primary:hover{background:rgba(120,170,255,0.18)}
+    .btn.danger{background:rgba(255,96,120,0.12); border-color:rgba(255,96,120,0.22)}
+    .btn.small{padding:8px 10px; border-radius:10px; font-size:12px;}
+
+    /* Start overlay */
+    #startOverlay{
+      position:absolute; inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:radial-gradient(1200px 600px at 50% 30%, rgba(120,170,255,0.10), rgba(0,0,0,0.70));
+      z-index:20;
+    }
+    .card{
+      width:min(980px, calc(100% - 28px));
+      background:var(--panel);
+      border:1px solid var(--stroke);
+      border-radius:18px;
+      box-shadow:0 20px 60px rgba(0,0,0,0.45);
+      overflow:hidden;
+    }
+    .cardHeader{
+      padding:14px 16px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      border-bottom:1px solid var(--stroke);
+      gap:12px;
+    }
+    .cardHeader h1{margin:0; font-size:15px; letter-spacing:0.06em; text-transform:uppercase; color:rgba(235,242,255,0.86)}
+    .cardBody{
+      padding:14px 16px 16px;
+      display:grid;
+      grid-template-columns: 1.2fr 1.1fr;
+      gap:12px;
+    }
+    .tile{
+      background:rgba(255,255,255,0.05);
+      border:1px solid rgba(255,255,255,0.08);
+      border-radius:16px;
+      padding:12px;
+    }
+    .tile b{color:rgba(235,242,255,0.92)}
+    .hint{font-size:12px; color:rgba(235,242,255,0.68); margin-top:10px; line-height:1.35}
+    .bar{height:10px; border-radius:999px; background:rgba(255,255,255,0.07); overflow:hidden; border:1px solid rgba(255,255,255,0.10)}
+    #trainBar{height:100%; width:0%; background:linear-gradient(90deg, rgba(120,170,255,0.85), rgba(104,255,190,0.80));}
+
+    /* Tuner panel */
+    #tunerBtn{
+      position:absolute; right:14px; bottom:14px; z-index:8;
+      pointer-events:auto;
+    }
+    #tuner{
+      position:absolute; right:14px; bottom:64px;
+      width:360px;
+      max-height:calc(100% - 92px);
+      overflow:auto;
+      background:var(--panel);
+      border:1px solid var(--stroke);
+      border-radius:18px;
+      box-shadow:0 20px 60px rgba(0,0,0,0.45);
+      z-index:8;
+      display:none;
+      pointer-events:auto;
+    }
+    .tHead{
+      position:sticky; top:0; z-index:2;
+      background:rgba(18,24,38,0.96);
+      border-bottom:1px solid var(--stroke);
+      padding:12px 14px;
+      display:flex; justify-content:space-between; align-items:center;
+    }
+    .tHead .tTitle{font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:rgba(235,242,255,0.78)}
+    .tBody{padding:12px 14px 14px;}
+    .sectionTitle{
+      margin-top:12px;
+      font-size:11px;
+      letter-spacing:0.14em;
+      text-transform:uppercase;
+      color:rgba(235,242,255,0.58);
+    }
+    .row{display:flex; align-items:center; justify-content:space-between; gap:12px; margin:10px 0;}
+    .row label{font-size:12px; color:rgba(235,242,255,0.78); flex:1;}
+    .ctrl{display:flex; align-items:center; gap:10px;}
+    input[type="range"]{width:170px;}
+    .num{
+      min-width:54px;
+      text-align:right;
+      font-variant-numeric: tabular-nums;
+      color:rgba(235,242,255,0.86);
+      font-size:12px;
+    }
+    .miniBtn{
+      padding:8px 10px; border-radius:12px;
+      border:1px solid var(--stroke);
+      background:rgba(255,255,255,0.08);
+      cursor:pointer;
+      user-select:none;
+      font-size:12px;
+      font-weight:700;
+      color:rgba(235,242,255,0.90);
+      transition:transform 0.08s ease, background 0.15s ease;
+    }
+    .miniBtn:hover{background:rgba(255,255,255,0.10)}
+    .miniBtn:active{transform:translateY(1px)}
+    .miniBtn.on{background:rgba(104,255,190,0.12); border-color:rgba(104,255,190,0.22)}
+    .invWrap{display:flex; align-items:center; gap:6px; font-size:12px; color:rgba(235,242,255,0.80)}
+    .toast{
+      position:absolute; left:50%; top:14px; transform:translateX(-50%);
+      background:rgba(18,24,38,0.95);
+      border:1px solid rgba(255,255,255,0.10);
+      border-radius:999px;
+      padding:10px 14px;
+      font-size:12px;
+      color:rgba(235,242,255,0.88);
+      z-index:30;
+      display:none;
+      pointer-events:none;
+      box-shadow:0 20px 60px rgba(0,0,0,0.45);
+      white-space:nowrap;
+    }
+
+    /* hidden video */
+    #video{position:absolute; width:1px; height:1px; left:-10px; top:-10px; opacity:0;}
+  </style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="1280" height="720"></canvas>
+  <video id="video" playsinline></video>
+
+  <div class="toast" id="toast"></div>
+
+  <div class="hud">
+    <div class="hudBlock">
+      <div class="hudTitle">Tracker</div>
+      <div class="hudRow"><span class="k">Status</span><span class="v" id="startStatus">idle</span></div>
+      <div class="hudRow"><span class="k">Left</span><span class="v" id="hudLeft">—</span></div>
+      <div class="hudRow"><span class="k">Right</span><span class="v" id="hudRight">—</span></div>
+      <div class="hudRow"><span class="k">Mode</span><span class="v" id="hudMode">—</span></div>
+      <div id="hudNote">Press <b>T</b> for tuner • <b>B</b> toggle blast • <b>N</b> reload</div>
+    </div>
+
+    <div class="hudBlock">
+      <div class="hudTitle">Machine</div>
+      <div class="hudRow"><span class="k">Base</span><span class="v" id="hudBase">—</span></div>
+      <div class="hudRow"><span class="k">Yaw</span><span class="v" id="hudYaw">—</span></div>
+      <div class="hudRow"><span class="k">Reach</span><span class="v" id="hudReach">—</span></div>
+      <div class="hudRow"><span class="k">Bucket</span><span class="v" id="hudBucket">—</span></div>
+      <div class="hudRow"><span class="k">Ammo</span><span class="v" id="hudAmmo">—</span></div>
+    </div>
+  </div>
+
+  <div class="hudRight">
+    <div class="hudBlock" style="min-width:240px;">
+      <div class="hudTitle">Dig target</div>
+      <div class="hudRow"><span class="k">Tile</span><span class="v" id="hudTile">—</span></div>
+      <div class="hudRow"><span class="k">HP</span><span class="v" id="hudHP">—</span></div>
+      <div class="hudRow"><span class="k">Blast</span><span class="v" id="hudBlast">—</span></div>
+    </div>
+  </div>
+
+  <div class="actPanel" id="actPanel">
+    <div class="actTitle">Activation</div>
+    <div class="actRow"><div><span id="pillLpin" class="pill">L Pinch</span></div><div id="valLpin" class="val">—</div></div>
+    <div class="actRow"><div><span id="pillRpin" class="pill">R Pinch</span></div><div id="valRpin" class="val">—</div></div>
+    <div class="actRow"><div><span id="pillThumb" class="pill">Thumbs Up</span></div><div id="valThumb" class="val">—</div></div>
+    <div class="actRow"><div><span id="pillTracks" class="pill">Tracks</span></div><div id="valTracks" class="val">—</div></div>
+    <div class="actRow"><div><span id="pillAmmo" class="pill">Blast Assist</span></div><div id="valAmmo" class="val">—</div></div>
+  </div>
+
+  <div id="tunerBtn" class="btn small primary">Tuner (T)</div>
+
+  <div id="tuner">
+    <div class="tHead">
+      <div class="tTitle">Tuner</div>
+      <div class="btn small" id="tClose">Close</div>
+    </div>
+    <div class="tBody" id="tunerBody">
+      <div class="sectionTitle">GENERAL AXIS TUNING</div>
+      <div class="row">
+        <label>Deadzone</label>
+        <div class="ctrl">
+          <input id="deadzone" type="range" min="0.00" max="0.40" step="0.01" value="0.10">
+          <div class="num" id="deadzoneV">0.10</div>
+        </div>
+      </div>
+      <div class="row">
+        <label>Expo (curve)</label>
+        <div class="ctrl">
+          <input id="expo" type="range" min="1.00" max="2.60" step="0.05" value="1.65">
+          <div class="num" id="expoV">1.65</div>
+        </div>
+      </div>
+      <div class="row">
+        <label>Smoothing tau (sec)</label>
+        <div class="ctrl">
+          <input id="tau" type="range" min="0.03" max="0.35" step="0.01" value="0.12">
+          <div class="num" id="tauV">0.12</div>
+        </div>
+      </div>
+      <div class="row">
+        <label>Axis scale</label>
+        <div class="ctrl">
+          <input id="scale" type="range" min="0.40" max="2.50" step="0.05" value="1.20">
+          <div class="num" id="scaleV">1.20</div>
+        </div>
+      </div>
+      <div class="row">
+        <label>Invert X / Y</label>
+        <div class="ctrl">
+          <label class="invWrap"><input id="invX" type="checkbox">X</label>
+          <label class="invWrap"><input id="invY" type="checkbox">Y</label>
+        </div>
+      </div>
+
+      <div class="sectionTitle">DRIVE + ARM SPEED</div>
+      <div class="row">
+        <label>Drive speed</label>
+        <div class="ctrl">
+          <input id="driveSpeed" type="range" min="1.0" max="8.0" step="0.1" value="4.2">
+          <div class="num" id="driveSpeedV">4.2</div>
+        </div>
+      </div>
+      <div class="row">
+        <label>Turn speed</label>
+        <div class="ctrl">
+          <input id="turnSpeed" type="range" min="0.8" max="6.0" step="0.1" value="3.0">
+          <div class="num" id="turnSpeedV">3.0</div>
+        </div>
+      </div>
+      <div class="row">
+        <label>Reach speed</label>
+        <div class="ctrl">
+          <input id="reachSpeed" type="range" min="1.0" max="10.0" step="0.1" value="4.8">
+          <div class="num" id="reachSpeedV">4.8</div>
+        </div>
+      </div>
+
+      <div class="sectionTitle">DETECTION</div>
+      <div class="row">
+        <label>Pinch threshold</label>
+        <div class="ctrl">
+          <input id="pinchThresh" type="range" min="0.20" max="0.70" step="0.01" value="0.42">
+          <div class="num" id="pinchThreshV">0.42</div>
+        </div>
+      </div>
+      <div class="row">
+        <label>Thumbs-up hold (sec)</label>
+        <div class="ctrl">
+          <input id="thumbHold" type="range" min="0.8" max="3.0" step="0.1" value="2.0">
+          <div class="num" id="thumbHoldV">2.0</div>
+        </div>
+      </div>
+
+      <div class="sectionTitle">MICRO MOVEMENT (RAW STAGE)</div>
+      <div class="row">
+        <label>Enable micro tuning</label>
+        <div class="ctrl">
+          <label class="invWrap"><input id="microEnabled" type="checkbox" checked>on</label>
+        </div>
+      </div>
+      <div class="row">
+        <label>Micro gain</label>
+        <div class="ctrl">
+          <input id="microGain" type="range" min="1.00" max="3.00" step="0.05" value="1.80">
+          <div class="num" id="microGainV">1.80</div>
+        </div>
+      </div>
+      <div class="row">
+        <label>Micro range</label>
+        <div class="ctrl">
+          <input id="microRange" type="range" min="0.05" max="0.45" step="0.01" value="0.22">
+          <div class="num" id="microRangeV">0.22</div>
+        </div>
+      </div>
+      <div class="row">
+        <label>Raw smoothing tau (sec)</label>
+        <div class="ctrl">
+          <input id="microTau" type="range" min="0.02" max="0.20" step="0.01" value="0.08">
+          <div class="num" id="microTauV">0.08</div>
+        </div>
+      </div>
+      <div class="row">
+        <label>Recalibrate hands (neutral)</label>
+        <div class="ctrl">
+          <div class="miniBtn" id="btnRecalTuner">Recalibrate</div>
+        </div>
+      </div>
+
+      <div class="sectionTitle">TOOLS + AMMO (BLAST ASSIST)</div>
+      <div class="row">
+        <label>Blast assist (uses ammo)</label>
+        <div class="ctrl">
+          <div class="miniBtn on" id="btnBlastToggle">Blast: ON</div>
+          <div class="miniBtn" id="btnAmmoReload">Reload +30</div>
+        </div>
+      </div>
+      <div class="row">
+        <label>Ammo per dig tick</label>
+        <div class="ctrl">
+          <input id="ammoPerTick" type="range" min="0" max="3" step="1" value="1">
+          <div class="num" id="ammoPerTickV">1</div>
+        </div>
+      </div>
+      <div class="row">
+        <label>Blast power (extra damage)</label>
+        <div class="ctrl">
+          <input id="blastPower" type="range" min="0" max="2" step="1" value="1">
+          <div class="num" id="blastPowerV">1</div>
+        </div>
+      </div>
+
+      <div class="sectionTitle">HELP</div>
+      <div class="hint">
+        <b>Controls</b><br/>
+        • Startup runs hand training first (neutral calibration).<br/>
+        • Arm mode: <b>Left hand</b> drives (forward/back + turn), <b>Right hand</b> sets reach + arm yaw.<br/>
+        • Pinch (right hand) digs at bucket tip.<br/>
+        • Hold 👍 for 2s toggles <b>TRACKS override</b> (drive-only on right hand).<br/>
+        • <b>B</b> toggles Blast Assist, <b>N</b> reload ammo.
+      </div>
+    </div>
+  </div>
+
+  <div id="startOverlay">
+    <div class="card">
+      <div class="cardHeader">
+        <h1>Excavator • Hand Training Startup + Micro Tuner + Ammo</h1>
+        <div style="display:flex; gap:10px; align-items:center;">
+          <div id="startHint" style="color:rgba(235,242,255,0.70); font-size:12px;">Camera + Holistic required</div>
+          <div class="btn primary" id="btnStart">START</div>
+        </div>
+      </div>
+
+      <div class="cardBody">
+        <div class="tile">
+          <b>Hand training (startup)</b><br/>
+          After camera starts, hold both hands in a comfortable “neutral” position for ~1.2s.
+          This calibrates center offsets so micro-movements stop jittering and drift.
+
+          <div id="trainStep" style="margin-top:10px;color:rgba(255,235,170,0.92)">Step: waiting…</div>
+          <div id="trainDetail" style="margin-top:6px;color:rgba(220,220,235,0.72)">Click START to begin.</div>
+          <div class="bar" style="margin-top:10px;"><div id="trainBar"></div></div>
+
+          <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap;">
+            <div class="btn small" id="btnRecal">Recalibrate</div>
+            <span style="color:rgba(220,220,235,0.70);font-size:11px;align-self:center;">
+              Tip: keep shoulders visible for best span normalization.
+            </span>
+          </div>
+        </div>
+
+        <div class="tile">
+          <b>Micro movement tuner (startup)</b><br/>
+          Amplifies small movements (without making big movements crazy) and adds a raw smoothing stage.
+          <div class="row" style="margin-top:10px;">
+            <label>Enable micro tuning</label>
+            <div class="ctrl">
+              <label class="invWrap"><input id="microEnabledStart" type="checkbox" checked>on</label>
+            </div>
+          </div>
+          <div class="row">
+            <label>Micro gain (small-motion boost)</label>
+            <div class="ctrl">
+              <input id="microGainStart" type="range" min="1.00" max="3.00" step="0.05" value="1.80">
+              <div class="num" id="microGainStartV">1.80</div>
+            </div>
+          </div>
+          <div class="row">
+            <label>Micro range (zone boosted)</label>
+            <div class="ctrl">
+              <input id="microRangeStart" type="range" min="0.05" max="0.45" step="0.01" value="0.22">
+              <div class="num" id="microRangeStartV">0.22</div>
+            </div>
+          </div>
+          <div class="row">
+            <label>Raw smoothing tau (sec)</label>
+            <div class="ctrl">
+              <input id="microTauStart" type="range" min="0.02" max="0.20" step="0.01" value="0.08">
+              <div class="num" id="microTauStartV">0.08</div>
+            </div>
+          </div>
+
+          <div class="hint">
+            This runs <b>before</b> your per-axis tuning (deadzone/expo/tau/scale).
+          </div>
+        </div>
+
+        <div class="tile">
+          <b>Ammo matters now</b><br/>
+          Enable <b>Blast Assist</b>. Digging consumes ammo to dig faster + apply extra damage per tick.
+          Reload with tuner or <b>N</b>.
+          <div class="hint" style="margin-top:8px;">
+            Tip: set Ammo per tick = 0 to keep Blast OFF without changing the toggle.
+          </div>
+        </div>
+
+        <div class="tile">
+          <b>TRACKS override</b><br/>
+          Hold 👍 for <b>2.0s</b> → tracks-only driving overrides arm until toggled off.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MediaPipe -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js"></script>
+
+<script>
+/* ============================================================
+   Utilities
+============================================================ */
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const lerp=(a,b,t)=>a+(b-a)*t;
+function emaAlpha(dt,tau){ // tau seconds
+  tau = Math.max(1e-4, tau);
+  return 1 - Math.exp(-dt / tau);
+}
+function fmt(n, d=2){ return (+n).toFixed(d); }
+function radToDeg(r){ return r*180/Math.PI; }
+function degToRad(d){ return d*Math.PI/180; }
+function wrapPi(a){
+  while(a> Math.PI) a-=Math.PI*2;
+  while(a<-Math.PI) a+=Math.PI*2;
+  return a;
+}
+function lsGet(key, fallback){
+  try{ const raw=localStorage.getItem(key); return raw? JSON.parse(raw) : fallback; }
+  catch(e){ return fallback; }
+}
+function lsSet(key, obj){
+  try{ localStorage.setItem(key, JSON.stringify(obj)); }catch(e){}
+}
+
+/* ============================================================
+   DOM
+============================================================ */
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+const video = document.getElementById("video");
+const startOverlay = document.getElementById("startOverlay");
+const btnStart = document.getElementById("btnStart");
+const btnRecal = document.getElementById("btnRecal");
+const startHint = document.getElementById("startHint");
+const startStatus = document.getElementById("startStatus");
+const toast = document.getElementById("toast");
+
+const hudLeft = document.getElementById("hudLeft");
+const hudRight = document.getElementById("hudRight");
+const hudMode = document.getElementById("hudMode");
+const hudNote = document.getElementById("hudNote");
+
+const hudBase = document.getElementById("hudBase");
+const hudYaw = document.getElementById("hudYaw");
+const hudReach = document.getElementById("hudReach");
+const hudBucket = document.getElementById("hudBucket");
+const hudAmmo = document.getElementById("hudAmmo");
+const hudTile = document.getElementById("hudTile");
+const hudHP = document.getElementById("hudHP");
+const hudBlast = document.getElementById("hudBlast");
+
+const pillLpin = document.getElementById("pillLpin");
+const pillRpin = document.getElementById("pillRpin");
+const pillThumb = document.getElementById("pillThumb");
+const pillTracks = document.getElementById("pillTracks");
+const pillAmmo = document.getElementById("pillAmmo");
+const valLpin = document.getElementById("valLpin");
+const valRpin = document.getElementById("valRpin");
+const valThumb = document.getElementById("valThumb");
+const valTracks = document.getElementById("valTracks");
+const valAmmo = document.getElementById("valAmmo");
+
+const trainStep   = document.getElementById("trainStep");
+const trainDetail = document.getElementById("trainDetail");
+const trainBar    = document.getElementById("trainBar");
+
+const tunerBtn = document.getElementById("tunerBtn");
+const tuner = document.getElementById("tuner");
+const tClose = document.getElementById("tClose");
+
+const UI = {
+  deadzone: document.getElementById("deadzone"),
+  deadzoneV: document.getElementById("deadzoneV"),
+  expo: document.getElementById("expo"),
+  expoV: document.getElementById("expoV"),
+  tau: document.getElementById("tau"),
+  tauV: document.getElementById("tauV"),
+  scale: document.getElementById("scale"),
+  scaleV: document.getElementById("scaleV"),
+  invX: document.getElementById("invX"),
+  invY: document.getElementById("invY"),
+
+  driveSpeed: document.getElementById("driveSpeed"),
+  driveSpeedV: document.getElementById("driveSpeedV"),
+  turnSpeed: document.getElementById("turnSpeed"),
+  turnSpeedV: document.getElementById("turnSpeedV"),
+  reachSpeed: document.getElementById("reachSpeed"),
+  reachSpeedV: document.getElementById("reachSpeedV"),
+
+  pinchThresh: document.getElementById("pinchThresh"),
+  pinchThreshV: document.getElementById("pinchThreshV"),
+  thumbHold: document.getElementById("thumbHold"),
+  thumbHoldV: document.getElementById("thumbHoldV"),
+};
+
+const microUI = {
+  start: {
+    enabled: document.getElementById("microEnabledStart"),
+    gain:    document.getElementById("microGainStart"),
+    range:   document.getElementById("microRangeStart"),
+    tau:     document.getElementById("microTauStart"),
+    gainV:   document.getElementById("microGainStartV"),
+    rangeV:  document.getElementById("microRangeStartV"),
+    tauV:    document.getElementById("microTauStartV"),
+  },
+  tuner: {
+    enabled: document.getElementById("microEnabled"),
+    gain:    document.getElementById("microGain"),
+    range:   document.getElementById("microRange"),
+    tau:     document.getElementById("microTau"),
+    gainV:   document.getElementById("microGainV"),
+    rangeV:  document.getElementById("microRangeV"),
+    tauV:    document.getElementById("microTauV"),
+    btnRecal: document.getElementById("btnRecalTuner"),
+  }
+};
+
+const toolUI = {
+  blastBtn: document.getElementById("btnBlastToggle"),
+  reloadBtn:document.getElementById("btnAmmoReload"),
+  ammoPer:  document.getElementById("ammoPerTick"),
+  ammoPerV: document.getElementById("ammoPerTickV"),
+  pow:      document.getElementById("blastPower"),
+  powV:     document.getElementById("blastPowerV"),
+};
+
+function showToast(msg, sec=1.4){
+  toast.textContent = msg;
+  toast.style.display = "block";
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(()=> toast.style.display="none", sec*1000);
+}
+
+/* ============================================================
+   Settings
+============================================================ */
+const LS_AXIS = "excav_axis_v1";
+const LS_MICRO = "excav_micro_v1";
+const LS_NEUTRAL = "excav_neutral_v1";
+const LS_TOOLS = "excav_tools_v1";
+
+const axis = Object.assign({
+  deadzone: 0.10,
+  expo: 1.65,
+  tau: 0.12,
+  scale: 1.20,
+  invX: false,
+  invY: false,
+  driveSpeed: 4.2,
+  turnSpeed: 3.0,
+  reachSpeed: 4.8,
+  pinchThresh: 0.42,
+  thumbHold: 2.0,
+}, lsGet(LS_AXIS, {}) || {});
+
+const micro = Object.assign(
+  { enabled:true, gain:1.80, range:0.22, tau:0.08 },
+  lsGet(LS_MICRO, {}) || {}
+);
+
+const neutral = Object.assign(
+  { lx:0, ly:0, rx:0, ry:0 },
+  lsGet(LS_NEUTRAL, {}) || {}
+);
+
+const tools = Object.assign(
+  { ammo: 90, ammoMax: 120, blastOn:true, ammoPerTick:1, blastPower:1, tickBoost:1.35 },
+  lsGet(LS_TOOLS, {}) || {}
+);
+
+function syncAxisUI(){
+  UI.deadzone.value = axis.deadzone; UI.deadzoneV.textContent = fmt(axis.deadzone,2);
+  UI.expo.value = axis.expo; UI.expoV.textContent = fmt(axis.expo,2);
+  UI.tau.value = axis.tau; UI.tauV.textContent = fmt(axis.tau,2);
+  UI.scale.value = axis.scale; UI.scaleV.textContent = fmt(axis.scale,2);
+  UI.invX.checked = !!axis.invX;
+  UI.invY.checked = !!axis.invY;
+
+  UI.driveSpeed.value = axis.driveSpeed; UI.driveSpeedV.textContent = fmt(axis.driveSpeed,1);
+  UI.turnSpeed.value = axis.turnSpeed; UI.turnSpeedV.textContent = fmt(axis.turnSpeed,1);
+  UI.reachSpeed.value = axis.reachSpeed; UI.reachSpeedV.textContent = fmt(axis.reachSpeed,1);
+
+  UI.pinchThresh.value = axis.pinchThresh; UI.pinchThreshV.textContent = fmt(axis.pinchThresh,2);
+  UI.thumbHold.value = axis.thumbHold; UI.thumbHoldV.textContent = fmt(axis.thumbHold,1);
+}
+function saveAxis(){
+  axis.deadzone = +UI.deadzone.value;
+  axis.expo = +UI.expo.value;
+  axis.tau = +UI.tau.value;
+  axis.scale = +UI.scale.value;
+  axis.invX = UI.invX.checked;
+  axis.invY = UI.invY.checked;
+
+  axis.driveSpeed = +UI.driveSpeed.value;
+  axis.turnSpeed = +UI.turnSpeed.value;
+  axis.reachSpeed = +UI.reachSpeed.value;
+
+  axis.pinchThresh = +UI.pinchThresh.value;
+  axis.thumbHold = +UI.thumbHold.value;
+
+  lsSet(LS_AXIS, axis);
+  syncAxisUI();
+}
+[UI.deadzone,UI.expo,UI.tau,UI.scale,UI.driveSpeed,UI.turnSpeed,UI.reachSpeed,UI.pinchThresh,UI.thumbHold,UI.invX,UI.invY]
+  .forEach(el=> el.addEventListener("input", saveAxis));
+syncAxisUI();
+
+function syncMicroLabels(){
+  microUI.start.gainV.textContent  = micro.gain.toFixed(2);
+  microUI.start.rangeV.textContent = micro.range.toFixed(2);
+  microUI.start.tauV.textContent   = micro.tau.toFixed(2);
+  microUI.tuner.gainV.textContent  = micro.gain.toFixed(2);
+  microUI.tuner.rangeV.textContent = micro.range.toFixed(2);
+  microUI.tuner.tauV.textContent   = micro.tau.toFixed(2);
+}
+function syncMicroUIFromState(){
+  microUI.start.enabled.checked = !!micro.enabled;
+  microUI.start.gain.value = micro.gain;
+  microUI.start.range.value = micro.range;
+  microUI.start.tau.value = micro.tau;
+
+  microUI.tuner.enabled.checked = !!micro.enabled;
+  microUI.tuner.gain.value = micro.gain;
+  microUI.tuner.range.value = micro.range;
+  microUI.tuner.tau.value = micro.tau;
+  syncMicroLabels();
+}
+function writeMicroFromUI(){
+  // read from whichever sliders changed
+  micro.enabled = microUI.start.enabled.checked || microUI.tuner.enabled.checked;
+  // choose latest values from start panel (they mirror anyway)
+  micro.gain  = +microUI.start.gain.value;
+  micro.range = +microUI.start.range.value;
+  micro.tau   = +microUI.start.tau.value;
+
+  micro.gain  = clamp(micro.gain, 1.00, 3.00);
+  micro.range = clamp(micro.range, 0.05, 0.45);
+  micro.tau   = clamp(micro.tau, 0.02, 0.20);
+
+  // mirror to tuner sliders too
+  microUI.tuner.enabled.checked = microUI.start.enabled.checked;
+  microUI.tuner.gain.value = micro.gain;
+  microUI.tuner.range.value = micro.range;
+  microUI.tuner.tau.value = micro.tau;
+
+  lsSet(LS_MICRO, micro);
+  syncMicroUIFromState();
+}
+[
+  microUI.start.enabled, microUI.start.gain, microUI.start.range, microUI.start.tau,
+  microUI.tuner.enabled, microUI.tuner.gain, microUI.tuner.range, microUI.tuner.tau
+].forEach(el=> el.addEventListener("input", writeMicroFromUI));
+syncMicroUIFromState();
+
+function clampAmmo(){
+  tools.ammo = clamp(tools.ammo, 0, tools.ammoMax);
+}
+function addAmmo(n){
+  tools.ammo = clamp(tools.ammo + n, 0, tools.ammoMax);
+  lsSet(LS_TOOLS, tools);
+}
+function syncToolsUI(){
+  toolUI.ammoPer.value = tools.ammoPerTick;
+  toolUI.pow.value = tools.blastPower;
+  toolUI.ammoPerV.textContent = String(Math.round(tools.ammoPerTick));
+  toolUI.powV.textContent = String(Math.round(tools.blastPower));
+  toolUI.blastBtn.classList.toggle("on", !!tools.blastOn);
+  toolUI.blastBtn.textContent = tools.blastOn ? "Blast: ON" : "Blast: OFF";
+}
+toolUI.ammoPer.addEventListener("input", ()=>{
+  tools.ammoPerTick = +toolUI.ammoPer.value;
+  lsSet(LS_TOOLS, tools);
+  syncToolsUI();
+});
+toolUI.pow.addEventListener("input", ()=>{
+  tools.blastPower = +toolUI.pow.value;
+  lsSet(LS_TOOLS, tools);
+  syncToolsUI();
+});
+toolUI.blastBtn.addEventListener("click", ()=>{
+  tools.blastOn = !tools.blastOn;
+  lsSet(LS_TOOLS, tools);
+  syncToolsUI();
+  showToast(tools.blastOn ? "Blast Assist enabled." : "Blast Assist disabled.", 1.2);
+});
+toolUI.reloadBtn.addEventListener("click", ()=>{
+  addAmmo(30);
+  showToast("Reloaded +30 ammo.", 1.2);
+});
+syncToolsUI();
+
+/* ============================================================
+   Tuner open/close
+============================================================ */
+function setTuner(open){
+  tuner.style.display = open ? "block" : "none";
+}
+tunerBtn.addEventListener("click", ()=> setTuner(tuner.style.display !== "block"));
+tClose.addEventListener("click", ()=> setTuner(false));
+window.addEventListener("keydown", (e)=>{
+  if (e.code === "KeyT") setTuner(tuner.style.display !== "block");
+  if (e.code === "KeyB"){
+    tools.blastOn = !tools.blastOn;
+    lsSet(LS_TOOLS, tools);
+    syncToolsUI();
+    showToast(tools.blastOn ? "Blast Assist enabled." : "Blast Assist disabled.", 1.2);
+  }
+  if (e.code === "KeyN"){
+    addAmmo(30);
+    showToast("Reloaded +30 ammo.", 1.2);
+  }
+});
+
+/* ============================================================
+   World / Excavator
+============================================================ */
+const TILE = 18;
+const WORLD_W = 160;
+const WORLD_H = 120;
+
+const T_EMPTY = 0;
+const T_GRASS = 1;
+const T_SOIL  = 2;
+const T_SAND  = 3;
+const T_ROCK  = 4;
+
+function tileName(t){
+  return t===T_EMPTY?"Empty":t===T_GRASS?"Grass":t===T_SOIL?"Soil":t===T_SAND?"Sand":"Rock";
+}
+function hpMaxAtType(t){
+  if (t===T_SOIL) return 14;
+  if (t===T_SAND) return 10;
+  if (t===T_ROCK) return 26;
+  return 999;
+}
+function digFactorFor(t){
+  if (t===T_SOIL) return 1.0;
+  if (t===T_SAND) return 0.85;
+  if (t===T_ROCK) return 1.65;
+  return 999;
+}
+function isDiggable(t){
+  return t===T_SOIL || t===T_SAND || t===T_ROCK;
+}
+
+const world = new Uint8Array(WORLD_W*WORLD_H);
+const hp = new Int16Array(WORLD_W*WORLD_H);
+function idx(x,y){ return y*WORLD_W + x; }
+function inb(x,y){ return x>=0 && y>=0 && x<WORLD_W && y<WORLD_H; }
+
+function setTile(x,y,t){
+  if(!inb(x,y)) return;
+  world[idx(x,y)] = t;
+  const max = hpMaxAtType(t);
+  hp[idx(x,y)] = max>=999 ? 999 : max;
+}
+function getTile(x,y){ return inb(x,y) ? world[idx(x,y)] : T_ROCK; }
+function getHP(x,y){ return inb(x,y) ? hp[idx(x,y)] : 999; }
+function setHP(x,y,val){ if(inb(x,y)) hp[idx(x,y)] = val; }
+
+function genWorld(){
+  for(let y=0;y<WORLD_H;y++){
+    for(let x=0;x<WORLD_W;x++){
+      // gentle noise-ish mix
+      const r = Math.random();
+      let t = T_SOIL;
+      if (r < 0.10) t = T_GRASS;
+      else if (r < 0.30) t = T_SAND;
+      else if (r < 0.38) t = T_ROCK;
+      else t = T_SOIL;
+      setTile(x,y,t);
+    }
+  }
+  // clear a spawn pad
+  for(let y=56;y<64;y++){
+    for(let x=76;x<84;x++){
+      setTile(x,y,T_GRASS);
+    }
+  }
+}
+genWorld();
+
+const piles = [];
+function addPile(x,y,amount){
+  piles.push({x,y,a:amount,life:1.0});
+}
+function updatePiles(dt){
+  for (const p of piles){
+    p.life = Math.max(0, p.life - dt*0.10);
+  }
+  while(piles.length && piles[0].life<=0) piles.shift();
+}
+
+const excav = {
+  x: 80, y: 60, // tile coords (float)
+  yaw: 0,       // radians
+  armYaw: 0,    // radians relative to base
+  reach: 3.8,   // tiles
+};
+
+function bucketTip(){
+  const a = excav.yaw + excav.armYaw;
+  const bx = excav.x + Math.cos(a)*excav.reach;
+  const by = excav.y + Math.sin(a)*excav.reach;
+  return {bx,by,a};
+}
+
+/* Digging */
+let digAccum = 0;
+const DIG_TICK_BASE = 0.12; // seconds per tick (before factor)
+let digPulse = 0;
+
+function spawnSoilBurst(px,py, dirx,diry, intensity, tileType){
+  // visual-only piles; we make a few piles around target
+  const t = tileType;
+  const baseAmt = (t===T_ROCK?0.35 : t===T_SAND?0.50 : 0.60) * intensity;
+  for(let i=0;i<3;i++){
+    const ox = (Math.random()-0.5)*1.6 + dirx*0.8;
+    const oy = (Math.random()-0.5)*1.6 + diry*0.8;
+    addPile(clamp(Math.floor(px+ox),0,WORLD_W-1), clamp(Math.floor(py+oy),0,WORLD_H-1), baseAmt*(0.6+Math.random()*0.6));
+  }
+}
+
+function digHit(tx,ty,t, assist){
+  if (!isDiggable(t)) return;
+  const cur = getHP(tx,ty);
+  const max = hpMaxAtType(t);
+  if (cur<=0 || max>=999) return;
+
+  let dmg = 1;
+  if (assist && tools.blastOn && tools.ammoPerTick > 0 && tools.ammo >= tools.ammoPerTick){
+    tools.ammo = Math.max(0, tools.ammo - tools.ammoPerTick);
+    dmg += (tools.blastPower||0);
+    lsSet(LS_TOOLS, tools);
+  }
+
+  setHP(tx,ty, cur - dmg);
+  digPulse = 0.18;
+
+  // break tile -> empty
+  if (getHP(tx,ty) <= 0){
+    setTile(tx,ty,T_EMPTY);
+  }
+
+  const tip = bucketTip();
+  const dirX = Math.cos(tip.a), dirY = Math.sin(tip.a);
+  const intensityBase = clamp(1 - (cur / Math.max(1, max)), 0.12, 1.0);
+  const intensity = intensityBase * (assist ? 1.35 : 1.0);
+  spawnSoilBurst(tip.bx, tip.by, dirX, dirY, intensity, t);
+}
+
+function updateDig(dt, digging){
+  if (!digging){
+    digAccum = 0;
+    return;
+  }
+  const tip = bucketTip();
+  const tx = Math.floor(tip.bx);
+  const ty = Math.floor(tip.by);
+  const t = getTile(tx,ty);
+  if (!isDiggable(t)){
+    digAccum = 0;
+    return;
+  }
+
+  const factor = digFactorFor(t);
+  let tick = DIG_TICK_BASE * factor;
+
+  const assist = tools.blastOn && tools.ammoPerTick>0 && tools.ammo >= tools.ammoPerTick;
+  if (assist) tick = tick / (tools.tickBoost || 1.35);
+
+  digAccum += dt;
+  while(digAccum >= tick){
+    digAccum -= tick;
+    digHit(tx,ty,t, assist);
+  }
+}
+
+/* ============================================================
+   Tracker (MediaPipe Holistic)
+============================================================ */
+let holistic = null;
+let camera = null;
+let started = false;
+let ready = false; // becomes true after training completes
+let lastResults = null;
+
+const rawLP = { lx:0, ly:0, rx:0, ry:0 }; // raw low-pass BEFORE neutral
+function filterRaw(axisName, v, dt){
+  const a = emaAlpha(dt, micro.tau);
+  rawLP[axisName] = lerp(rawLP[axisName], v, a);
+  return rawLP[axisName];
+}
+
+function microShape(v){
+  if (!micro.enabled) return clamp(v, -1, 1);
+  const r = clamp(micro.range, 0.05, 0.95);
+  const g = clamp(micro.gain,  1.00, 5.00);
+
+  const a = Math.abs(v);
+  if (a <= r) return clamp(v * g, -1, 1);
+  const t = clamp((a - r) / Math.max(1e-6, (1 - r)), 0, 1);
+  const boosted = v * g;
+  return clamp(lerp(boosted, v, t), -1, 1);
+}
+
+const tunedLP = { lx:0, ly:0, rx:0, ry:0 }; // post-axis tuning smoothing
+function axisTune(name, v, dt, isX){
+  // invert
+  if (isX && axis.invX) v = -v;
+  if (!isX && axis.invY) v = -v;
+
+  // deadzone
+  const dz = axis.deadzone;
+  const a = Math.abs(v);
+  if (a < dz) v = 0;
+  else {
+    const s = (a - dz) / Math.max(1e-6, (1 - dz));
+    v = Math.sign(v) * Math.pow(s, axis.expo);
+  }
+
+  v = clamp(v * axis.scale, -1, 1);
+
+  // smoothing
+  const k = emaAlpha(dt, axis.tau);
+  tunedLP[name] = lerp(tunedLP[name], v, k);
+  return tunedLP[name];
+}
+
+/* Hand feature extraction */
+function handSpan(hand){
+  // distance between index_mcp (5) and pinky_mcp (17)
+  const i = hand[5], p = hand[17];
+  const dx = i.x - p.x, dy = i.y - p.y;
+  return Math.max(1e-3, Math.hypot(dx,dy));
+}
+
+function normHandSignal(which, results){
+  const hand = (which==="left") ? results.leftHandLandmarks : results.rightHandLandmarks;
+  if (!hand) return {ok:false, dx:0, dy:0, source:"none", pinch:false, thumbs:false};
+
+  // wrist as origin
+  const w = hand[0];
+  const mid = hand[9]; // middle_mcp
+  const span = handSpan(hand);
+
+  // raw axis: relative mid_mcp from wrist (normalized by span)
+  let dx = (mid.x - w.x) / span;
+  let dy = (mid.y - w.y) / span;
+
+  dx = clamp(dx, -1.2, 1.2);
+  dy = clamp(dy, -1.2, 1.2);
+
+  // pinch: thumb_tip (4) to index_tip (8)
+  const th = hand[4], it = hand[8];
+  const pinchDist = Math.hypot(th.x-it.x, th.y-it.y) / span;
+  const pinch = pinchDist < axis.pinchThresh;
+
+  // thumbs up heuristic:
+  // thumb tip above thumb ip + other finger tips below their pips (curled)
+  const thumbTip = hand[4], thumbIp = hand[3];
+  const idxTip = hand[8], idxPip = hand[6];
+  const midTip = hand[12], midPip = hand[10];
+  const ringTip= hand[16], ringPip= hand[14];
+  const pinTip = hand[20], pinPip = hand[18];
+  const thumbUp = (thumbTip.y < thumbIp.y) &&
+                  (idxTip.y > idxPip.y) &&
+                  (midTip.y > midPip.y) &&
+                  (ringTip.y > ringPip.y) &&
+                  (pinTip.y > pinPip.y);
+
+  return {ok:true, dx, dy, source:"hand", pinch, thumbs:thumbUp};
+}
+
+/* ============================================================
+   Hand Training (Neutral Cal)
+============================================================ */
+const TRAIN = { state:"idle", warm:0, good:0, last:null, samples:[] };
+
+function startHandTraining(){
+  if (!started) return;
+  ready = false;
+  TRAIN.state="warmup";
+  TRAIN.warm=0; TRAIN.good=0; TRAIN.last=null; TRAIN.samples.length=0;
+
+  trainStep.textContent = "Step: warming up tracker…";
+  trainDetail.textContent = "Keep shoulders + hands visible. Training starts in ~0.8s.";
+  trainBar.style.width="0%";
+
+  startOverlay.style.display = "flex";
+  showToast("Training will run before controls go live.", 1.4);
+}
+
+function updateHandTraining(dt, pack){
+  if (!started || ready) return;
+
+  if (TRAIN.state==="warmup"){
+    TRAIN.warm += dt;
+    const pct = clamp(TRAIN.warm/0.8, 0, 1);
+    trainBar.style.width = `${(pct*30).toFixed(0)}%`;
+    if (TRAIN.warm >= 0.8){
+      TRAIN.state="hold";
+      TRAIN.good=0;
+      TRAIN.last=null;
+      TRAIN.samples.length=0;
+      trainStep.textContent = "Step: hold BOTH hands in neutral (steady)";
+      trainDetail.textContent = "Hold steady for ~1.2s to lock center offsets.";
+    }
+    return;
+  }
+
+  const ok = pack.okL && pack.okR;
+  if (!ok){
+    TRAIN.good = Math.max(0, TRAIN.good - dt*1.8);
+    trainDetail.textContent = "Need both hands detected. Bring both hands into frame.";
+    trainBar.style.width = `${(30 + clamp(TRAIN.good/1.2,0,1)*70).toFixed(0)}%`;
+    return;
+  }
+
+  const cur = { lx:pack.lx, ly:pack.ly, rx:pack.rx, ry:pack.ry };
+  const last = TRAIN.last;
+  TRAIN.last = cur;
+
+  const move = last ? Math.max(
+    Math.abs(cur.lx-last.lx),
+    Math.abs(cur.ly-last.ly),
+    Math.abs(cur.rx-last.rx),
+    Math.abs(cur.ry-last.ry)
+  ) : 0;
+
+  if (move < 0.040){
+    TRAIN.good += dt;
+    TRAIN.samples.push(cur);
+    trainDetail.textContent =
+      `L:${pack.leftSource} R:${pack.rightSource} — steady ${TRAIN.good.toFixed(2)} / 1.20s`;
+  } else {
+    TRAIN.good = Math.max(0, TRAIN.good - dt*2.2);
+    trainDetail.textContent = "Movement detected — hold steadier…";
+  }
+
+  const pct = clamp(TRAIN.good/1.20, 0, 1);
+  trainBar.style.width = `${(30 + pct*70).toFixed(0)}%`;
+
+  if (TRAIN.good >= 1.20 && TRAIN.samples.length >= 12){
+    let slx=0,sly=0,srx=0,sry=0;
+    for (const s of TRAIN.samples){ slx+=s.lx; sly+=s.ly; srx+=s.rx; sry+=s.ry; }
+    neutral.lx = slx / TRAIN.samples.length;
+    neutral.ly = sly / TRAIN.samples.length;
+    neutral.rx = srx / TRAIN.samples.length;
+    neutral.ry = sry / TRAIN.samples.length;
+    lsSet(LS_NEUTRAL, neutral);
+
+    ready = true;
+    startOverlay.style.display = "none";
+    hudNote.innerHTML = "Trained ✅  Hold 👍 2s for TRACKS  • Micro tuner available • <b>T</b> tuner";
+    showToast("Training complete — controls live.", 1.5);
+  }
+}
+
+btnRecal.addEventListener("click", startHandTraining);
+microUI.tuner.btnRecal.addEventListener("click", startHandTraining);
+
+/* ============================================================
+   Control State
+============================================================ */
+const rawAxes = { lx:0, ly:0, rx:0, ry:0 };
+const tuned = { lx:0, ly:0, rx:0, ry:0 };
+const pinch = { left:false, right:false };
+let leftStatus = "—";
+let rightStatus = "—";
+
+let tracksOverride = false;
+let thumbsHold = 0;
+
+function updateThumbsMode(dt, L, R){
+  if (!ready){
+    thumbsHold = 0;
+    return {thumbs:false};
+  }
+  // thumbs-up on either hand triggers hold (use stronger of the two)
+  const thumbs = (L && L.thumbs) || (R && R.thumbs);
+  if (thumbs){
+    thumbsHold += dt;
+    if (thumbsHold >= axis.thumbHold){
+      thumbsHold = 0;
+      tracksOverride = !tracksOverride;
+      showToast(tracksOverride ? "TRACKS override ON" : "TRACKS override OFF", 1.2);
+    }
+  } else {
+    thumbsHold = Math.max(0, thumbsHold - dt*2.2);
+  }
+  return {thumbs};
+}
+
+/* ============================================================
+   MediaPipe init / start
+============================================================ */
+async function initHolistic(){
+  holistic = new Holistic.Holistic({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`
+  });
+  holistic.setOptions({
+    modelComplexity: 1,
+    smoothLandmarks: true,
+    refineFaceLandmarks: false,
+    minDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.5
+  });
+  holistic.onResults((res)=>{ lastResults = res; });
+}
+
+async function startCamera(){
+  if (started) return;
+  if (!holistic) await initHolistic();
+
+  startStatus.textContent = "starting…";
+  startHint.textContent = "Requesting camera…";
+
+  camera = new Camera(video, {
+    onFrame: async ()=> {
+      await holistic.send({image: video});
+    },
+    width: 640,
+    height: 480
+  });
+
+  try{
+    await camera.start();
+    started = true;
+    ready = false;
+    startStatus.textContent = "running ✅ (training…)";
+    btnStart.textContent = "STARTED ✅";
+    startHint.textContent = "Training required before controls live";
+    hudMode.textContent = "TRAINING";
+    hudNote.textContent = "Tracker running — complete hand training to enable controls";
+    startHandTraining();
+  }catch(err){
+    console.error(err);
+    startStatus.textContent = "camera error";
+    startHint.textContent = "Camera permission denied or unavailable.";
+    showToast("Camera error — check permissions / HTTPS.", 2.0);
+  }
+}
+
+btnStart.addEventListener("click", startCamera);
+
+/* ============================================================
+   Rendering
+============================================================ */
+function resize(){
+  const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  const w = window.innerWidth, h = window.innerHeight;
+  canvas.width = Math.floor(w * dpr);
+  canvas.height = Math.floor(h * dpr);
+  canvas.style.width = w+"px";
+  canvas.style.height = h+"px";
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+window.addEventListener("resize", resize);
+resize();
+
+function drawWorld(){
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+
+  const viewTilesX = Math.floor(w / TILE);
+  const viewTilesY = Math.floor(h / TILE);
+
+  const cx = excav.x;
+  const cy = excav.y;
+
+  const x0 = Math.floor(cx - viewTilesX/2);
+  const y0 = Math.floor(cy - viewTilesY/2);
+
+  // background
+  ctx.fillStyle = "#070b12";
+  ctx.fillRect(0,0,w,h);
+
+  // tiles
+  for(let vy=0;vy<=viewTilesY;vy++){
+    for(let vx=0;vx<=viewTilesX;vx++){
+      const tx = x0 + vx;
+      const ty = y0 + vy;
+      const t = getTile(tx,ty);
+
+      let col = "rgba(255,255,255,0.02)";
+      if (t===T_GRASS) col = "rgba(90,170,110,0.30)";
+      else if (t===T_SOIL) col = "rgba(140,100,70,0.34)";
+      else if (t===T_SAND) col = "rgba(190,165,95,0.32)";
+      else if (t===T_ROCK) col = "rgba(120,125,140,0.30)";
+      else if (t===T_EMPTY) col = "rgba(10,12,18,0.30)";
+
+      const px = vx*TILE;
+      const py = vy*TILE;
+
+      ctx.fillStyle = col;
+      ctx.fillRect(px,py,TILE,TILE);
+
+      // slight grid
+      ctx.strokeStyle = "rgba(255,255,255,0.03)";
+      ctx.strokeRect(px+0.5,py+0.5,TILE-1,TILE-1);
+
+      // hp shading for diggable
+      if (isDiggable(t)){
+        const cur = getHP(tx,ty);
+        const max = hpMaxAtType(t);
+        const dmg = 1 - clamp(cur/Math.max(1,max), 0, 1);
+        if (dmg > 0.02){
+          ctx.fillStyle = `rgba(0,0,0,${0.18*dmg})`;
+          ctx.fillRect(px,py,TILE,TILE);
+        }
+      }
+    }
+  }
+
+  // piles
+  for(const p of piles){
+    const sx = (p.x - x0 + 0.5) * TILE;
+    const sy = (p.y - y0 + 0.5) * TILE;
+    ctx.beginPath();
+    ctx.fillStyle = `rgba(220,220,235,${0.10*p.a*p.life})`;
+    ctx.arc(sx,sy, TILE*(0.35 + 0.6*p.a), 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  // excavator base
+  const ex = (excav.x - x0) * TILE;
+  const ey = (excav.y - y0) * TILE;
+  ctx.save();
+  ctx.translate(ex,ey);
+  ctx.rotate(excav.yaw);
+  ctx.fillStyle = "rgba(120,170,255,0.14)";
+  ctx.strokeStyle = "rgba(120,170,255,0.26)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.roundRect(-TILE*0.9,-TILE*0.6, TILE*1.8, TILE*1.2, 10);
+  ctx.fill();
+  ctx.stroke();
+
+  // forward marker
+  ctx.strokeStyle = "rgba(255,255,255,0.28)";
+  ctx.beginPath();
+  ctx.moveTo(0,0);
+  ctx.lineTo(TILE*1.15,0);
+  ctx.stroke();
+  ctx.restore();
+
+  // arm line to bucket
+  const tip = bucketTip();
+  const bx = (tip.bx - x0) * TILE;
+  const by = (tip.by - y0) * TILE;
+  ctx.strokeStyle = tracksOverride ? "rgba(255,210,90,0.25)" : "rgba(104,255,190,0.25)";
+  ctx.lineWidth = 5;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(ex,ey);
+  ctx.lineTo(bx,by);
+  ctx.stroke();
+
+  // bucket
+  ctx.fillStyle = "rgba(255,255,255,0.18)";
+  ctx.strokeStyle = "rgba(255,255,255,0.28)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(bx,by, TILE*0.40, 0, Math.PI*2);
+  ctx.fill();
+  ctx.stroke();
+
+  // dig pulse ring
+  if (digPulse > 0){
+    const s = clamp(digPulse/0.18, 0, 1);
+    ctx.strokeStyle = `rgba(255,210,90,${0.35*s})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(bx,by, TILE*(0.55 + (1-s)*0.9), 0, Math.PI*2);
+    ctx.stroke();
+  }
+}
+
+/* ============================================================
+   Main loop
+============================================================ */
+let lastT = performance.now();
+
+function tick(now){
+  const dt = clamp((now - lastT) / 1000, 0, 0.05);
+  lastT = now;
+
+  // decay pulse
+  digPulse = Math.max(0, digPulse - dt);
+
+  // tracker -> axes
+  let L=null, R=null;
+  if (started && lastResults){
+    L = normHandSignal("left", lastResults);
+    R = normHandSignal("right", lastResults);
+
+    // raw pre-filter
+    const flx = L.ok ? filterRaw("lx", L.dx, dt) : 0;
+    const fly = L.ok ? filterRaw("ly", L.dy, dt) : 0;
+    const frx = R.ok ? filterRaw("rx", R.dx, dt) : 0;
+    const fry = R.ok ? filterRaw("ry", R.dy, dt) : 0;
+
+    // training updates
+    updateHandTraining(dt, {
+      okL: L.ok, okR: R.ok,
+      lx: flx, ly: fly, rx: frx, ry: fry,
+      leftSource: L.source, rightSource: R.source
+    });
+
+    if (ready){
+      // apply neutral + micro
+      rawAxes.lx = microShape(flx - neutral.lx);
+      rawAxes.ly = microShape(fly - neutral.ly);
+      rawAxes.rx = microShape(frx - neutral.rx);
+      rawAxes.ry = microShape(fry - neutral.ry);
+
+      // axis tune
+      tuned.lx = axisTune("lx", rawAxes.lx, dt, true);
+      tuned.ly = axisTune("ly", rawAxes.ly, dt, false);
+      tuned.rx = axisTune("rx", rawAxes.rx, dt, true);
+      tuned.ry = axisTune("ry", rawAxes.ry, dt, false);
+
+      pinch.left  = !!L.pinch;
+      pinch.right = !!R.pinch;
+
+      leftStatus = L.ok ? "hand" : "—";
+      rightStatus = R.ok ? "hand" : "—";
+    } else {
+      // not ready: keep neutral state stable; no controls
+      tuned.lx = tuned.ly = tuned.rx = tuned.ry = 0;
+      pinch.left = pinch.right = false;
+      leftStatus  = L.ok ? "TRAIN" : "TRAIN";
+      rightStatus = R.ok ? "TRAIN" : "TRAIN";
+    }
+
+    // thumbs mode
+    const th = updateThumbsMode(dt, L, R);
+
+    // UI pills
+    const lp = !!pinch.left, rp = !!pinch.right;
+    pillLpin.classList.toggle("on", lp);
+    pillRpin.classList.toggle("on", rp);
+    valLpin.textContent = lp ? "ON" : "off";
+    valRpin.textContent = rp ? "ON" : "off";
+
+    pillThumb.classList.toggle("on", th.thumbs);
+    valThumb.textContent = th.thumbs ? `holding ${thumbsHold.toFixed(1)}s` : "off";
+
+    pillTracks.classList.toggle("on", tracksOverride);
+    valTracks.textContent = tracksOverride ? "OVERRIDE" : "arm+drive";
+
+  } else {
+    tuned.lx=tuned.ly=tuned.rx=tuned.ry=0;
+    pinch.left=pinch.right=false;
+  }
+
+  // AMMO HUD / panel pill
+  clampAmmo();
+  const assistOn = tools.blastOn && tools.ammoPerTick>0 && tools.ammo>0;
+  pillAmmo.classList.toggle("on", assistOn);
+  pillAmmo.classList.toggle("warn", tools.blastOn && tools.ammo <= Math.max(5, tools.ammoPerTick*3));
+  valAmmo.textContent = `${Math.round(tools.ammo)} / ${tools.ammoMax}`;
+
+  // Apply controls
+  if (ready){
+    if (tracksOverride){
+      // Tracks override uses RIGHT hand only
+      const forward = clamp(-tuned.ry, -1, 1);
+      const turn = clamp(tuned.rx, -1, 1);
+      excav.yaw = wrapPi(excav.yaw + turn * axis.turnSpeed * dt);
+      excav.x += Math.cos(excav.yaw) * forward * axis.driveSpeed * dt;
+      excav.y += Math.sin(excav.yaw) * forward * axis.driveSpeed * dt;
+    } else {
+      // Arm+drive
+      const forward = clamp(-tuned.ly, -1, 1);
+      const turn = clamp(tuned.lx, -1, 1);
+      excav.yaw = wrapPi(excav.yaw + turn * axis.turnSpeed * dt);
+      excav.x += Math.cos(excav.yaw) * forward * axis.driveSpeed * dt;
+      excav.y += Math.sin(excav.yaw) * forward * axis.driveSpeed * dt;
+
+      // Right hand = arm yaw + reach
+      excav.armYaw = wrapPi(excav.armYaw + tuned.rx * 2.2 * dt);
+      excav.reach = clamp(excav.reach + (-tuned.ry) * axis.reachSpeed * dt, 2.0, 8.5);
+    }
+
+    // clamp inside world
+    excav.x = clamp(excav.x, 2, WORLD_W-3);
+    excav.y = clamp(excav.y, 2, WORLD_H-3);
+  }
+
+  // digging is right pinch only (clean)
+  const digging = ready && pinch.right;
+  updateDig(dt, digging);
+
+  // target HUD
+  const tip = bucketTip();
+  const tx = Math.floor(tip.bx);
+  const ty = Math.floor(tip.by);
+  const t = getTile(tx,ty);
+  const cur = getHP(tx,ty);
+  const max = hpMaxAtType(t);
+  const assist = tools.blastOn && tools.ammoPerTick>0 && tools.ammo >= tools.ammoPerTick;
+
+  hudTile.textContent = `${tileName(t)} @ ${tx},${ty}`;
+  hudHP.textContent = (max>=999) ? "—" : `${Math.max(0,cur)} / ${max}`;
+  hudBlast.textContent = tools.blastOn ? (assist ? "ON (consuming)" : "ON (no ammo)") : "OFF";
+
+  // HUD texts
+  hudLeft.textContent = leftStatus;
+  hudRight.textContent = rightStatus;
+  hudMode.textContent = (!started) ? "IDLE" : (ready ? (tracksOverride ? "TRACKS" : "ARM") : "TRAINING");
+
+  hudBase.textContent = `${excav.x.toFixed(2)}, ${excav.y.toFixed(2)}`;
+  hudYaw.textContent = `${radToDeg(excav.yaw).toFixed(1)}°`;
+  hudReach.textContent = `${excav.reach.toFixed(2)} tiles`;
+  hudBucket.textContent = `${tip.bx.toFixed(2)}, ${tip.by.toFixed(2)}`;
+  hudAmmo.textContent = `${Math.round(tools.ammo)} / ${tools.ammoMax}`;
+
+  startStatus.textContent = !started ? "idle" : (ready ? "running ✅" : "running ✅ (training…)");
+
+  // update piles
+  updatePiles(dt);
+
+  // draw
+  drawWorld();
+
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>
