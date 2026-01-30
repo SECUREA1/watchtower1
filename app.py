@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import random
+import secrets
 import threading
 import time
 from datetime import datetime
@@ -69,6 +70,11 @@ GITHUB_PR_FLOW = os.getenv("GITHUB_PR_FLOW", "0").lower() in {"1", "true", "yes"
 INDEX_LOCK = threading.Lock()
 
 AUTH_COOKIE_NAME = "watchtower_access"
+UI_SESSION_TTL_SECONDS = int(os.getenv("UI_SESSION_TTL_SECONDS", str(60 * 60 * 12)))
+UI_ACCESS_TOKENS = [token.strip() for token in os.getenv("UI_ACCESS_TOKENS", "").split(",") if token.strip()]
+UI_GUEST_CODE = os.getenv("UI_GUEST_CODE", "")
+UI_SESSION_LOCK = threading.Lock()
+UI_SESSIONS: Dict[str, float] = {}
 
 # -------------------------------------------------------------------------
 # Logging & FastAPI app
@@ -184,6 +190,12 @@ class LogsPayload(BaseModel):
     source_device_id: Optional[str] = None
     captured_at: Optional[str] = None
 
+
+class LoginPayload(BaseModel):
+    token: Optional[str] = None
+    guest_code: Optional[str] = None
+    wallet: Optional[str] = None
+
 # -------------------------------------------------------------------------
 # Filesystem helpers
 # -------------------------------------------------------------------------
@@ -279,9 +291,38 @@ def validate_upload(content_type: str, data: bytes) -> None:
 
 def is_ui_authenticated(request: Request) -> bool:
     token_cookie = request.cookies.get(AUTH_COOKIE_NAME, "")
-    if token_cookie:
-        return True
-    return False
+    if not token_cookie:
+        return False
+    now = time.time()
+    with UI_SESSION_LOCK:
+        expires_at = UI_SESSIONS.get(token_cookie)
+        if not expires_at:
+            return False
+        if expires_at <= now:
+            UI_SESSIONS.pop(token_cookie, None)
+            return False
+    return True
+
+
+def _login_allowed(token: str, guest_code: str, wallet: str) -> bool:
+    candidate = token or wallet or ""
+    if UI_ACCESS_TOKENS or UI_GUEST_CODE or ADMIN_TOKEN:
+        if UI_ACCESS_TOKENS and candidate in UI_ACCESS_TOKENS:
+            return True
+        if ADMIN_TOKEN and candidate == ADMIN_TOKEN:
+            return True
+        if UI_GUEST_CODE and guest_code and guest_code == UI_GUEST_CODE:
+            return True
+        return False
+    return bool(candidate or guest_code)
+
+
+def _create_ui_session() -> str:
+    session_id = secrets.token_urlsafe(32)
+    expires_at = time.time() + UI_SESSION_TTL_SECONDS
+    with UI_SESSION_LOCK:
+        UI_SESSIONS[session_id] = expires_at
+    return session_id
 
 
 # -------------------------------------------------------------------------
@@ -325,6 +366,7 @@ HOME_PATHS = {"/home", "/home.html"}
 SECURE_PATHS = {"/secure", "/secure/", "/secure.html"}
 REDNODE_PATHS = {"/rednode", "/rednode.html"}
 DASHBOARD_PATHS = {"/dashboard", "/dashboard.html", "/dashboard1", "/dashboard1.html"}
+LOGIN_PATHS = {"/start", "/start.html"}
 CHAINES_PATHS = {
     "/CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll",
     "/CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll/",
@@ -864,6 +906,50 @@ async def add_logs(payload: LogsPayload, request: Request):
             handle.write(json.dumps(entry) + "\n")
     return {"ok": True, "count": len(payload.logs), "path": str(log_path.relative_to(DATA_DIR))}
 
+
+@app.get("/api/session")
+async def ui_session_status(request: Request) -> JSONResponse:
+    if is_ui_authenticated(request):
+        session_id = request.cookies.get(AUTH_COOKIE_NAME, "")
+        with UI_SESSION_LOCK:
+            expires_at = UI_SESSIONS.get(session_id)
+        return JSONResponse({"ok": True, "authenticated": True, "expires_at": expires_at})
+    return JSONResponse({"ok": True, "authenticated": False})
+
+
+@app.post("/api/login")
+async def ui_login(payload: LoginPayload, request: Request) -> JSONResponse:
+    token = (payload.token or "").strip()
+    guest_code = (payload.guest_code or "").strip()
+    wallet = (payload.wallet or "").strip()
+    if not (token or guest_code or wallet):
+        raise HTTPException(status_code=400, detail="Access token or code required.")
+    if not _login_allowed(token, guest_code, wallet):
+        raise HTTPException(status_code=401, detail="Unauthorized.")
+    session_id = _create_ui_session()
+    response = JSONResponse({"ok": True, "authenticated": True})
+    response.set_cookie(
+        AUTH_COOKIE_NAME,
+        session_id,
+        max_age=UI_SESSION_TTL_SECONDS,
+        httponly=True,
+        samesite="lax",
+        secure=request.url.scheme == "https",
+        path="/",
+    )
+    return response
+
+
+@app.post("/api/logout")
+async def ui_logout(request: Request) -> JSONResponse:
+    session_id = request.cookies.get(AUTH_COOKIE_NAME, "")
+    if session_id:
+        with UI_SESSION_LOCK:
+            UI_SESSIONS.pop(session_id, None)
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(AUTH_COOKIE_NAME, path="/")
+    return response
+
 @app.get("/healthz")
 async def healthz():
     return {"ok": True}
@@ -899,7 +985,7 @@ async def serve_frontend(full_path: str, request: Request):
     if request.method not in {"GET", "HEAD"}:
         raise HTTPException(status_code=404, detail="Not found")
 
-    if url_path not in {"/", "/index.html", "/start", "/start.html"} and not is_ui_authenticated(request):
+    if url_path not in LOGIN_PATHS and not is_ui_authenticated(request):
         return RedirectResponse(url="/start.html", status_code=302)
 
     # Prefer a modern landing page
@@ -907,7 +993,7 @@ async def serve_frontend(full_path: str, request: Request):
         if serve_file("start.html"):
             return RedirectResponse(url="/start.html", status_code=302)
 
-    if url_path in {"/start", "/start.html"}:
+    if url_path in LOGIN_PATHS:
         response = serve_file("start.html")
         if response:
             return response

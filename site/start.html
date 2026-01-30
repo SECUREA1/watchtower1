@@ -2178,8 +2178,6 @@
       const CHAIN_KEY = 'mixer_current_chain';
       const CURRENCY_KEY = 'mixer_current_currency';
       const GUEST_SESSION_KEY = 'watchtower_guest_access';
-      const AUTH_COOKIE = 'watchtower_access';
-      const AUTH_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
       const GUEST_CODE = 'tightass';
       const REQUIRED_CONTRACTS = {
         ethereum: 'REPLACE_WITH_CONTRACT_ADDRESS',
@@ -2225,13 +2223,41 @@
         walletStatus.style.color = success ? '#d7ffe1' : '#ffd6c7';
       };
 
-      const setAuthCookie = (value) => {
-        if (!value) return;
-        document.cookie = `${AUTH_COOKIE}=${encodeURIComponent(value)}; Max-Age=${AUTH_COOKIE_MAX_AGE}; Path=/; SameSite=Lax`;
+      const requestLogin = async ({ token, guestCode, wallet }) => {
+        const response = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            token: token || '',
+            guest_code: guestCode || '',
+            wallet: wallet || ''
+          })
+        });
+        if (!response.ok) {
+          let detail = 'Unable to verify access.';
+          try {
+            const data = await response.json();
+            detail = data?.detail || detail;
+          } catch {}
+          throw new Error(detail);
+        }
+        return response.json();
       };
 
-      const clearAuthCookie = () => {
-        document.cookie = `${AUTH_COOKIE}=; Max-Age=0; Path=/; SameSite=Lax`;
+      const requestLogout = async () => {
+        try {
+          await fetch('/api/logout', { method: 'POST' });
+        } catch {}
+      };
+
+      const fetchSession = async () => {
+        try {
+          const response = await fetch('/api/session');
+          if (!response.ok) return { authenticated: false };
+          return await response.json();
+        } catch {
+          return { authenticated: false };
+        }
       };
 
       const normalizeContract = (value) => (value || '').trim();
@@ -2281,15 +2307,24 @@
         }
       };
 
-      const unlock = (token, wallet, { guest = false } = {}) => {
-        guestUnlocked = guest;
-        persist(token, wallet, { guest });
-        setAuthCookie(token || wallet || (guest ? 'guest' : ''));
+      const applyUnlockedState = (statusLabel) => {
         if (gate) gate.style.display = 'none';
         document.body.classList.remove('gate-locked');
         manageBtn.style.display = 'block';
-        const statusLabel = guest ? 'Guest access granted' : wallet ? `Access unlocked for ${wallet}` : 'Access unlocked with token';
         updateStatus(statusLabel, true);
+      };
+
+      const unlock = async (token, wallet, { guest = false, guestCode = '' } = {}) => {
+        try {
+          await requestLogin({ token, wallet, guestCode });
+        } catch (err) {
+          updateStatus(err?.message || 'Access verification failed.');
+          return;
+        }
+        guestUnlocked = guest;
+        persist(token, wallet, { guest });
+        const statusLabel = guest ? 'Guest access granted' : wallet ? `Access unlocked for ${wallet}` : 'Access unlocked with token';
+        applyUnlockedState(statusLabel);
       };
 
       const lock = () => {
@@ -2301,6 +2336,15 @@
         sessionStorage.removeItem(GUEST_SESSION_KEY);
         updateStatus('Token required to proceed');
         updateWalletStatus('No wallet connected yet.', true);
+      };
+
+      const syncSessionState = async () => {
+        const session = await fetchSession();
+        if (session?.authenticated) {
+          applyUnlockedState('Access already verified.');
+          return true;
+        }
+        return false;
       };
 
       const hydrate = () => {
@@ -2323,6 +2367,8 @@
         updateContractLabel();
 
         lock();
+
+        syncSessionState();
 
         if (storedToken || storedWallet) {
           updateStatus('Stored credentials found. Confirm token or wallet to unlock.');
@@ -2470,34 +2516,36 @@
       const bindPress = (el, handler) => {
         if (!el) return;
         let armed = false;
-        const run = () => {
+        const run = async () => {
+          if (armed) return;
           armed = true;
-          handler();
-          setTimeout(() => (armed = false), 420);
+          try {
+            await handler();
+          } finally {
+            setTimeout(() => (armed = false), 420);
+          }
         };
         el.addEventListener('click', () => {
-          if (armed) return;
-          handler();
+          void run();
         });
         el.addEventListener(
           'touchstart',
           (ev) => {
             ev.preventDefault();
-            if (armed) return;
-            run();
+            void run();
           },
           { passive: false }
         );
       };
 
-      bindPress(acceptBtn, () => {
+      bindPress(acceptBtn, async () => {
         const token = tokenInput.value.trim();
         const wallet = walletInput.value.trim();
         const guestCode = guestInput?.value.trim() || '';
         selectedChain = getSelectedChain();
 
         if (hasGuestCode(guestCode)) {
-          unlock('', '', { guest: true });
+          await unlock('', '', { guest: true, guestCode });
           return;
         }
 
@@ -2517,14 +2565,14 @@
         }
 
         if (token || wallet) {
-          unlock(token, wallet);
+          await unlock(token, wallet);
           return;
         }
 
         updateStatus('Wallet verification required to proceed.');
       });
 
-      bindPress(clearBtn, () => {
+      bindPress(clearBtn, async () => {
         try {
           localStorage.removeItem(ACCESS_KEY);
           localStorage.removeItem(WALLET_KEY);
@@ -2533,7 +2581,7 @@
           localStorage.removeItem(CURRENCY_KEY);
           sessionStorage.removeItem(GUEST_SESSION_KEY);
         } catch {}
-        clearAuthCookie();
+        await requestLogout();
         tokenInput.value = '';
         walletInput.value = '';
         if (guestInput) guestInput.value = '';
