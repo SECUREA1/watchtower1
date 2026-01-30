@@ -304,7 +304,7 @@ HTML_ALIASES = {
     "/excavator-trainer": "Excavator — Terrain Map + Hand-Training Startup Calibration + Micro-Movement Tuner.html",
     "/locked-views": "RedNode — Locked Views Excavator (2-Hand ISO Controls + Sensitivity Tuners).html",
     "/indoor-ops": "RedNode Dashboard — Indoor Ops · Sentinel · Demo.html",
-    "/dadda": "dadda - Copy - Copy.html",
+    "/excavator dash": "dadda - Copy - Copy.html",
     "/market": "market.html",
     "/rednode-dashboard-demo": "RedNode Dashboard — Full Demo.html",
     "/ar-dashboard": "RedNode Dashboard — Full Demo.html",
