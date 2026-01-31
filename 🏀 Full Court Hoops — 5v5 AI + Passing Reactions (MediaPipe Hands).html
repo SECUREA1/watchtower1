@@ -1,0 +1,1968 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>🏀 Full Court Hoops — 5v5 AI + Passing Reactions (MediaPipe Hands)</title>
+  <style>
+    html, body { margin:0; height:100%; background:#06070b; overflow:hidden; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    canvas { display:block; }
+
+    #hud{
+      position:absolute; top:14px; left:14px; z-index:10;
+      width: 560px; max-width: calc(100vw - 28px);
+      background: rgba(10,12,18,.72);
+      border: 1px solid rgba(255,255,255,.10);
+      backdrop-filter: blur(10px);
+      border-radius: 14px; padding: 12px;
+      box-shadow: 0 10px 40px rgba(0,0,0,.45);
+      color: rgba(255,255,255,.92);
+    }
+    #hud h1 { margin:0 0 8px; font-size: 14px; font-weight: 800; letter-spacing:.4px; }
+    .row { display:flex; gap:10px; align-items:center; margin: 7px 0; }
+    .row label { flex: 1 1 auto; font-size: 12px; opacity: .85; }
+    .row input[type="range"] { width: 100%; }
+    .btnrow { display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; }
+    button{
+      appearance:none; border: 1px solid rgba(255,255,255,.16);
+      background: rgba(255,255,255,.08);
+      color: rgba(255,255,255,.92);
+      padding: 8px 10px;
+      border-radius: 12px;
+      cursor: pointer;
+      font-weight: 700;
+      flex:1;
+      min-width: 120px;
+    }
+    button:hover { background: rgba(255,255,255,.12); }
+    button.primary { background: rgba(120,180,255,.18); border-color: rgba(120,180,255,.30); }
+    button.primary:hover { background: rgba(120,180,255,.24); }
+
+    #stats{
+      margin-top:10px; padding-top:10px;
+      border-top: 1px solid rgba(255,255,255,.10);
+      font-size: 12px; line-height: 1.35;
+      color: rgba(255,255,255,.88);
+    }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New"; }
+
+    #rightStack{
+      position:absolute; right:14px; top:14px; z-index:10;
+      display:flex; flex-direction:column; gap:12px;
+      width: 290px; max-width: calc(100vw - 28px);
+    }
+    #camPanel{
+      background: rgba(10,12,18,.72);
+      border: 1px solid rgba(255,255,255,.10);
+      backdrop-filter: blur(10px);
+      border-radius: 14px; padding: 10px;
+      box-shadow: 0 10px 40px rgba(0,0,0,.45);
+      color: rgba(255,255,255,.92);
+      user-select: none;
+    }
+    #camPanel h2 { margin:0 0 8px; font-size: 12px; letter-spacing:.3px; opacity:.9; }
+    #camWrap{
+      width: 100%;
+      border-radius: 12px;
+      overflow:hidden;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.04);
+      position: relative;
+      aspect-ratio: 4 / 3;
+    }
+    #video{
+      position:absolute; inset:0;
+      width:100%; height:100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+      opacity: 0.92;
+    }
+    #overlay{
+      position:absolute; inset:0;
+      width:100%; height:100%;
+      transform: scaleX(-1);
+      pointer-events:none;
+    }
+    #statusLine { margin-top: 8px; font-size: 12px; opacity: .86; }
+
+    #bottomHint{
+      position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(10,12,18,.55);
+      border: 1px solid rgba(255,255,255,.10);
+      color: rgba(255,255,255,.78);
+      font-size: 12px;
+      z-index: 10;
+      backdrop-filter: blur(10px);
+      pointer-events: none;
+      white-space: nowrap;
+      text-align:center;
+    }
+
+    #reticle{
+      position:absolute;
+      left:50%; top:50%;
+      transform: translate(-50%,-50%);
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      border: 2px solid rgba(255,255,255,.55);
+      box-shadow: 0 0 0 2px rgba(0,0,0,.25);
+      z-index: 9;
+      pointer-events:none;
+    }
+    #reticle:before, #reticle:after{
+      content:"";
+      position:absolute;
+      left:50%; top:50%;
+      transform: translate(-50%,-50%);
+      background: rgba(255,255,255,.55);
+    }
+    #reticle:before{ width: 2px; height: 26px; }
+    #reticle:after{ width: 26px; height: 2px; }
+    #reticle.hidden{ opacity: 0; }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <h1>🏀 Full Court Hoops — 5v5 AI + Passing Reactions</h1>
+
+    <div class="row">
+      <label>Throw sensitivity <span class="mono" id="relLabel">0.12</span></label>
+      <input id="releaseVel" type="range" min="0.02" max="0.35" step="0.005" value="0.12"/>
+    </div>
+
+    <div class="row">
+      <label>Throw gain <span class="mono" id="tossLabel">1.25</span></label>
+      <input id="tossGain" type="range" min="0.4" max="2.5" step="0.01" value="1.25"/>
+    </div>
+
+    <div class="row">
+      <label>Depth gain <span class="mono" id="depthLabel">1.00</span></label>
+      <input id="depthGain" type="range" min="0.0" max="2.0" step="0.01" value="1.00"/>
+    </div>
+
+    <div class="row">
+      <label>Gravity <span class="mono" id="gLabel">-9.81</span></label>
+      <input id="gravity" type="range" min="-16" max="-4" step="0.1" value="-9.81"/>
+    </div>
+
+    <div class="row">
+      <label>Fist lock grace (ms) <span class="mono" id="gripLabel">160</span></label>
+      <input id="gripGrace" type="range" min="60" max="420" step="5" value="160"/>
+    </div>
+
+    <div class="row">
+      <label>AI difficulty <span class="mono" id="diffLabel">1.0</span></label>
+      <input id="difficulty" type="range" min="0.6" max="2.2" step="0.05" value="1.0"/>
+    </div>
+
+    <div class="btnrow">
+      <button class="primary" id="startCamBtn">Start Camera</button>
+      <button id="resetPlayBtn">Reset Play</button>
+      <button id="resetScoreBtn">Reset Score</button>
+    </div>
+
+    <div class="btnrow">
+      <button id="slowBtn">Slow: OFF</button>
+      <button id="camBtn">View: FP</button>
+      <button id="flipBtn">Poss: HOME</button>
+    </div>
+
+    <div id="stats">
+      <div>
+        <b>HOME</b> <span class="mono" id="homeScore">0</span>
+        &nbsp; — &nbsp;
+        <b>AWAY</b> <span class="mono" id="awayScore">0</span>
+        &nbsp; <span style="opacity:.85">|</span> &nbsp;
+        <b>Poss:</b> <span class="mono" id="possTeam">HOME</span>
+        &nbsp; <span style="opacity:.85">|</span> &nbsp;
+        <b>Shot Clock:</b> <span class="mono" id="clock">24.0</span> <span class="mono" id="clockMax">/24</span>
+      </div>
+
+      <div style="margin-top:6px">
+        <b>Your ball:</b> <span class="mono" id="yourBall">NO</span>
+        &nbsp; <b>Last:</b> <span class="mono" id="last">—</span>
+      </div>
+
+      <div style="margin-top:6px">
+        <b>Hand:</b> <span class="mono" id="handRead">—</span><br/>
+        <b>Intent:</b> <span class="mono" id="intentRead">—</span><br/>
+        <b>Ball:</b> <span class="mono" id="ballRead">—</span>
+      </div>
+
+      <div style="margin-top:8px; opacity:.85">
+        <span class="mono">Controls:</span>
+        <b>Open</b> = move/dribble • <b>Fist</b> = stop + protect/lock • <b>Open from fist</b> = throw.
+        <b>Pinky up</b> at release = <b>PASS</b> to best teammate in your aim.
+      </div>
+    </div>
+  </div>
+
+  <div id="rightStack">
+    <div id="camPanel">
+      <h2>Camera (MediaPipe Hands)</h2>
+      <div id="camWrap">
+        <video id="video" playsinline muted></video>
+        <canvas id="overlay"></canvas>
+      </div>
+      <div id="statusLine" class="mono">Status: camera OFF</div>
+    </div>
+  </div>
+
+  <div id="reticle"></div>
+
+  <div id="bottomHint">
+    Walk into a ground ball to auto-pickup. Passes are caught/intercepted by AI. Defenders steal more if you dribble without a fist.
+  </div>
+
+  <!-- Three.js -->
+  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+
+  <!-- MediaPipe Hands -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+
+  <script>
+    // ============================================================
+    // Helpers
+    // ============================================================
+    const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+    const lerp  = (a,b,t)=>a+(b-a)*t;
+    const mx = x => (1 - x);
+
+    function chanceFromRate(ratePerSec, dt){
+      return 1 - Math.exp(-ratePerSec * dt);
+    }
+
+    function distPointToSegment(p, a, b){
+      const ab = b.clone().sub(a);
+      const t = clamp(p.clone().sub(a).dot(ab) / (ab.dot(ab) || 1), 0, 1);
+      const proj = a.clone().add(ab.multiplyScalar(t));
+      return p.distanceTo(proj);
+    }
+
+    function ballisticVelocity(from, to, gAbs, time){
+      const dx = to.x - from.x;
+      const dz = to.z - from.z;
+      const dy = to.y - from.y;
+      const vx = dx / time;
+      const vz = dz / time;
+      const vy = (dy + 0.5 * gAbs * time * time) / time;
+      return new THREE.Vector3(vx, vy, vz);
+    }
+
+    // ============================================================
+    // UI
+    // ============================================================
+    const el = id => document.getElementById(id);
+
+    const releaseVelEl = el('releaseVel');
+    const tossGainEl   = el('tossGain');
+    const depthGainEl  = el('depthGain');
+    const gravityEl    = el('gravity');
+    const gripGraceEl  = el('gripGrace');
+    const difficultyEl = el('difficulty');
+
+    const relLabel  = el('relLabel');
+    const tossLabel = el('tossLabel');
+    const depthLabel= el('depthLabel');
+    const gLabel    = el('gLabel');
+    const gripLabel = el('gripLabel');
+    const diffLabel = el('diffLabel');
+
+    const startCamBtn   = el('startCamBtn');
+    const resetPlayBtn  = el('resetPlayBtn');
+    const resetScoreBtn = el('resetScoreBtn');
+    const slowBtn       = el('slowBtn');
+    const camBtn        = el('camBtn');
+    const flipBtn       = el('flipBtn');
+
+    const statusLine = el('statusLine');
+    const homeScoreEl = el('homeScore');
+    const awayScoreEl = el('awayScore');
+    const possTeamEl  = el('possTeam');
+    const clockEl     = el('clock');
+    const clockMaxEl  = el('clockMax');
+    const yourBallEl  = el('yourBall');
+    const lastEl      = el('last');
+    const handReadEl  = el('handRead');
+    const intentReadEl= el('intentRead');
+    const ballReadEl  = el('ballRead');
+    const reticleEl   = el('reticle');
+
+    function syncHud(){
+      relLabel.textContent   = Number(releaseVelEl.value).toFixed(2);
+      tossLabel.textContent  = Number(tossGainEl.value).toFixed(2);
+      depthLabel.textContent = Number(depthGainEl.value).toFixed(2);
+      gLabel.textContent     = Number(gravityEl.value).toFixed(2);
+      gripLabel.textContent  = String(Math.round(Number(gripGraceEl.value)));
+      diffLabel.textContent  = Number(difficultyEl.value).toFixed(1);
+    }
+    [releaseVelEl, tossGainEl, depthGainEl, gravityEl, gripGraceEl, difficultyEl].forEach(x=>x.addEventListener('input', syncHud));
+    syncHud();
+
+    // ============================================================
+    // THREE.JS Scene + Court
+    // ============================================================
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.Fog(0x06070b, 10, 100);
+
+    const renderer = new THREE.WebGLRenderer({ antialias:true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    document.body.appendChild(renderer.domElement);
+
+    const camera = new THREE.PerspectiveCamera(62, innerWidth/innerHeight, 0.05, 300);
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+    const key = new THREE.DirectionalLight(0xffffff, 1.05);
+    key.position.set(8,14,10);
+    scene.add(key);
+    const rimLight = new THREE.DirectionalLight(0x9bd0ff, 0.28);
+    rimLight.position.set(-12,8,-16);
+    scene.add(rimLight);
+
+    // Full court bounds (rough)
+    const courtW = 15;
+    const courtL = 28;
+    const xMin = -courtW/2, xMax = courtW/2;
+
+    const zMin = -14.5;           // back line
+    const zMax = zMin + courtL;   // opposite back line
+    const zMid = (zMin + zMax) / 2;
+
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(courtW, courtL),
+      new THREE.MeshStandardMaterial({ color: 0x6b4b2a, roughness: 0.92 })
+    );
+    floor.rotation.x = -Math.PI/2;
+    floor.position.set(0, 0, zMid);
+    scene.add(floor);
+
+    const pad = new THREE.Mesh(
+      new THREE.PlaneGeometry(70, 70),
+      new THREE.MeshStandardMaterial({ color: 0x0b0e14, roughness: 1.0 })
+    );
+    pad.rotation.x = -Math.PI/2;
+    pad.position.y = -0.001;
+    scene.add(pad);
+
+    function addLine(points, color=0xffffff, y=0.01){
+      const pts = points.map(p => new THREE.Vector3(p.x, y, p.z));
+      const geo = new THREE.BufferGeometry().setFromPoints(pts);
+      const mat = new THREE.LineBasicMaterial({ color, transparent:true, opacity:0.9 });
+      const line = new THREE.Line(geo, mat);
+      scene.add(line);
+      return line;
+    }
+
+    // Outer boundary
+    addLine([{x:xMin,z:zMin},{x:xMax,z:zMin},{x:xMax,z:zMax},{x:xMin,z:zMax},{x:xMin,z:zMin}]);
+    // Mid line + center circle
+    addLine([{x:xMin,z:zMid},{x:xMax,z:zMid}]);
+    {
+      const r = 1.8, pts=[];
+      for (let i=0;i<=64;i++){
+        const t = (i/64)*Math.PI*2;
+        pts.push({x:Math.cos(t)*r, z:zMid + Math.sin(t)*r});
+      }
+      addLine(pts);
+    }
+
+    // ============================================================
+    // Hoops (two ends)
+    // ============================================================
+    const rimY = 3.05;
+    const rimR = 0.23;
+
+    function createHoop(zPos){
+      const g = new THREE.Group();
+
+      const board = new THREE.Mesh(
+        new THREE.BoxGeometry(1.8, 1.05, 0.07),
+        new THREE.MeshStandardMaterial({ color: 0xe6e6e6, roughness: 0.6 })
+      );
+      board.position.set(0, 3.35, zPos - 0.55);
+      g.add(board);
+
+      const pole = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.08, 0.10, 4.2, 18),
+        new THREE.MeshStandardMaterial({ color: 0x22262e, roughness: 0.8 })
+      );
+      pole.position.set(0, 2.1, zPos - 1.55);
+      g.add(pole);
+
+      const rimMesh = new THREE.Mesh(
+        new THREE.TorusGeometry(rimR, 0.02, 10, 48),
+        new THREE.MeshStandardMaterial({ color: 0xff6a3d, roughness: 0.35, metalness: 0.3 })
+      );
+      rimMesh.rotation.x = Math.PI/2;
+      rimMesh.position.set(0, rimY, zPos);
+      g.add(rimMesh);
+
+      // simple net
+      {
+        const net = new THREE.Group();
+        const netH = 0.45;
+        const ring = 16;
+        for (let i=0;i<ring;i++){
+          const a = (i/ring)*Math.PI*2;
+          const x = Math.cos(a)*rimR;
+          const z = zPos + Math.sin(a)*rimR;
+          const geo = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(x, rimY, z),
+            new THREE.Vector3(x*0.55, rimY - netH, zPos + (Math.sin(a)*rimR)*0.55)
+          ]);
+          net.add(new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xffffff, transparent:true, opacity:0.55 })));
+        }
+        g.add(net);
+      }
+
+      g.userData = { zPos, board, pole, rimMesh };
+      return g;
+    }
+
+    const hoopA = createHoop(zMin + 2.2); // HOME scores here when HOME has possession
+    const hoopB = createHoop(zMax - 2.2); // AWAY scores here when AWAY has possession
+    scene.add(hoopA);
+    scene.add(hoopB);
+
+    // ============================================================
+    // Player meshes
+    // ============================================================
+    function makePlayerMesh(color){
+      const group = new THREE.Group();
+      const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.75 });
+      const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.70, 6, 12), mat);
+      body.position.y = 0.92;
+      group.add(body);
+
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.19, 16, 12), mat);
+      head.position.y = 1.62;
+      group.add(head);
+
+      // small “floor shadow” ring
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.18, 0.30, 26),
+        new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 1.0, transparent:true, opacity:0.18, side: THREE.DoubleSide })
+      );
+      ring.rotation.x = -Math.PI/2;
+      ring.position.y = 0.01;
+      group.add(ring);
+
+      group.userData = { body, head, ring };
+      return group;
+    }
+
+    // Pass target indicator (hover ring)
+    const passMarker = new THREE.Mesh(
+      new THREE.TorusGeometry(0.42, 0.03, 10, 28),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, transparent:true, opacity:0.55, roughness: 0.5 })
+    );
+    passMarker.rotation.x = Math.PI/2;
+    passMarker.visible = false;
+    scene.add(passMarker);
+
+    // ============================================================
+    // Teams
+    // ============================================================
+    const TEAM = { HOME: "HOME", AWAY: "AWAY" };
+
+    const user = {
+      id: "YOU",
+      team: TEAM.HOME,
+      isUser: true,
+      group: makePlayerMesh(0xffffff),
+      pos: new THREE.Vector3(0,0,zMid+5.2),
+      vel: new THREE.Vector3(0,0,0),
+      speed: 8.6
+    };
+    scene.add(user.group);
+
+    function makeAI(id, team, color){
+      const ai = {
+        id, team, isUser:false, ai:true,
+        group: makePlayerMesh(color),
+        pos: new THREE.Vector3(0,0,0),
+        vel: new THREE.Vector3(0,0,0),
+        target: new THREE.Vector3(0,0,0),
+        role: "WING",
+        markId: null,
+        state: "IDLE", // IDLE | OFF_SPOT | DRIVE | RECEIVE | HOLD | SHOOT | PASS | DEFEND
+        thinkT: 0,
+        holdT: 0,
+        dribblePhase: Math.random()*10,
+        protect: false
+      };
+      scene.add(ai.group);
+      return ai;
+    }
+
+    const homeAI = [
+      makeAI("H1", TEAM.HOME, 0x79b7ff),
+      makeAI("H2", TEAM.HOME, 0x79b7ff),
+      makeAI("H3", TEAM.HOME, 0x79b7ff),
+      makeAI("H4", TEAM.HOME, 0x79b7ff),
+    ];
+
+    const awayAI = [
+      makeAI("A1", TEAM.AWAY, 0xff6b6b),
+      makeAI("A2", TEAM.AWAY, 0xff6b6b),
+      makeAI("A3", TEAM.AWAY, 0xff6b6b),
+      makeAI("A4", TEAM.AWAY, 0xff6b6b),
+      makeAI("A5", TEAM.AWAY, 0xff6b6b),
+    ];
+
+    const allPlayers = [user, ...homeAI, ...awayAI];
+
+    function getPlayerById(id){
+      return allPlayers.find(p => p.id === id) || null;
+    }
+
+    function clampToCourt(v){
+      v.x = clamp(v.x, xMin+0.7, xMax-0.7);
+      v.z = clamp(v.z, zMin+0.9, zMax-0.9);
+      return v;
+    }
+
+    // ============================================================
+    // Game state
+    // ============================================================
+    const GAME = {
+      slow: false,
+      possTeam: TEAM.HOME,
+      homeScore: 0,
+      awayScore: 0,
+      shotClock: 24.0,
+      difficulty: 1.0
+    };
+
+    function shotClockMax(){
+      // keep it stable; you can later scale by difficulty if you want
+      return 24.0;
+    }
+    function resetShotClock(){ GAME.shotClock = shotClockMax(); }
+
+    function updateUI(){
+      homeScoreEl.textContent = String(GAME.homeScore);
+      awayScoreEl.textContent = String(GAME.awayScore);
+      possTeamEl.textContent = GAME.possTeam;
+      clockEl.textContent = GAME.shotClock.toFixed(1);
+      clockMaxEl.textContent = `/${shotClockMax().toFixed(0)}`;
+      yourBallEl.textContent = (ball.held && ball.heldBy === "YOU") ? "YES" : "NO";
+    }
+
+    // ============================================================
+    // Formations / Play setup
+    // ============================================================
+    function offensiveHoopForTeam(team){
+      return (team === TEAM.HOME) ? hoopA : hoopB;
+    }
+    function defensiveHoopForTeam(team){
+      return (team === TEAM.HOME) ? hoopB : hoopA;
+    }
+
+    function formationSpotsForHoop(hoopGroup){
+      const zH = hoopGroup.userData.zPos;
+      const dirZ = (zH < zMid) ? -1 : +1; // hoopA is - side, hoopB is + side
+      // top is toward midcourt
+      const topZ = zH - dirZ * 6.2;
+      const wingZ = zH - dirZ * 5.1;
+      const cornerZ = zH - dirZ * 2.4;
+      const dunkZ = zH - dirZ * 1.6;
+
+      const spots = {
+        PG: new THREE.Vector3(0,0,topZ),
+        W1: new THREE.Vector3(-3.4,0,wingZ),
+        W2: new THREE.Vector3( 3.4,0,wingZ),
+        C1: new THREE.Vector3(-5.5,0,cornerZ),
+        C2: new THREE.Vector3( 5.5,0,cornerZ),
+        C:  new THREE.Vector3(0,0,dunkZ),
+      };
+      // keep inside bounds
+      Object.values(spots).forEach(clampToCourt);
+      return spots;
+    }
+
+    function assignRolesAndSpots(){
+      const offHoop = offensiveHoopForTeam(GAME.possTeam);
+      const defHoop = defensiveHoopForTeam(GAME.possTeam);
+
+      const offSpots = formationSpotsForHoop(offHoop);
+      const defSpots = formationSpotsForHoop(offHoop); // defend around same hoop
+
+      // offense team list (includes user if HOME and has possession)
+      const offense = allPlayers.filter(p => p.team === GAME.possTeam);
+      const defense = allPlayers.filter(p => p.team !== GAME.possTeam);
+
+      // Decide ballhandler:
+      const ballHandlerId = (GAME.possTeam === TEAM.HOME) ? "YOU" : "A1";
+
+      // Place offense
+      // User/PG at top; others in wings/corners/center
+      const offenseOrder = offense.slice().sort((a,b)=>{
+        if (a.id === ballHandlerId) return -1;
+        if (b.id === ballHandlerId) return  1;
+        return a.id.localeCompare(b.id);
+      });
+
+      const offTargets = [offSpots.PG, offSpots.W1, offSpots.W2, offSpots.C1, offSpots.C2].slice(0, offenseOrder.length);
+
+      offenseOrder.forEach((p, i)=>{
+        const t = offTargets[i] ? offTargets[i].clone() : offSpots.C.clone();
+        p.pos.copy(t);
+        p.vel.set(0,0,0);
+        p.group.position.set(p.pos.x, 0, p.pos.z);
+        if (!p.isUser){
+          p.state = (p.id === ballHandlerId) ? "HOLD" : "OFF_SPOT";
+          p.target.copy(t);
+        }
+      });
+
+      // Place defense roughly mirrored in front
+      defense.forEach((p, i)=>{
+        // match each defender to an offense target
+        const mark = offenseOrder[i % offenseOrder.length];
+        p.markId = mark.id;
+
+        const markPos = mark.pos.clone();
+        const hoopPos = new THREE.Vector3(offHoop.position.x, 0, offHoop.userData.zPos);
+
+        // position between offense and hoop with slight offset
+        const mid = markPos.clone().lerp(hoopPos, 0.42);
+        mid.x += (i%2===0? -0.6 : 0.6);
+        clampToCourt(mid);
+
+        p.pos.copy(mid);
+        p.vel.set(0,0,0);
+        p.group.position.set(p.pos.x, 0, p.pos.z);
+
+        if (!p.isUser){
+          p.state = "DEFEND";
+          p.target.copy(mid);
+        }
+      });
+
+      // Set ball possession
+      giveBallTo(ballHandlerId, "INBOUND");
+      resetShotClock();
+      lastEl.textContent = `${GAME.possTeam} inbound`;
+    }
+
+    // ============================================================
+    // Ball + physics
+    // ============================================================
+    const ballRadius = 0.12;
+    const ballMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(ballRadius, 28, 20),
+      new THREE.MeshStandardMaterial({ color: 0xf28c28, roughness: 0.55 })
+    );
+    scene.add(ballMesh);
+
+    const ball = {
+      held: false,
+      heldBy: null,        // "YOU" | playerId | null
+      locked: false,       // user fist lock or AI lock
+      thrown: false,
+      shotActive: false,
+      scoredThisShot: false,
+      pos: new THREE.Vector3(0, ballRadius, zMid),
+      vel: new THREE.Vector3(0,0,0),
+      prevPos: new THREE.Vector3(0, ballRadius, zMid),
+      intent: "NONE",      // NONE | PASS | SHOT
+      targetId: null,      // intended receiver for PASS
+      shooterTeam: null,   // team that launched SHOT
+      targetHoop: null,    // hoop group to score into
+      throwCooldown: 0
+    };
+
+    function setBallPosition(v){
+      ball.pos.copy(v);
+      ballMesh.position.copy(ball.pos);
+      ball.prevPos.copy(ball.pos);
+    }
+
+    function giveBallTo(playerId, why=""){
+      const p = getPlayerById(playerId);
+      if (!p) return;
+
+      ball.held = true;
+      ball.heldBy = playerId;
+      ball.locked = false;
+      ball.thrown = false;
+      ball.shotActive = false;
+      ball.scoredThisShot = false;
+      ball.intent = "NONE";
+      ball.targetId = null;
+      ball.shooterTeam = null;
+      ball.targetHoop = null;
+      ball.vel.set(0,0,0);
+      ball.throwCooldown = 0.15;
+
+      // hold at player "hand"
+      const hold = p.pos.clone().add(new THREE.Vector3(0, 1.15, 0));
+      setBallPosition(hold);
+
+      passMarker.visible = false;
+
+      if (why) lastEl.textContent = `${why}`;
+      updateUI();
+    }
+
+    function dropBallAt(v, why=""){
+      ball.held = false;
+      ball.heldBy = null;
+      ball.locked = false;
+      ball.thrown = false;
+      ball.shotActive = false;
+      ball.scoredThisShot = false;
+      ball.intent = "NONE";
+      ball.targetId = null;
+      ball.shooterTeam = null;
+      ball.targetHoop = null;
+      ball.vel.set(0,0,0);
+      setBallPosition(v.clone().setY(ballRadius));
+      passMarker.visible = false;
+      if (why) lastEl.textContent = why;
+      updateUI();
+    }
+
+    function forceTurnover(newPossTeam, reason){
+      lastEl.textContent = `TURNOVER: ${reason}`;
+      GAME.possTeam = newPossTeam;
+      flipBtn.textContent = `Poss: ${GAME.possTeam}`;
+      assignRolesAndSpots();
+    }
+
+    // Rim/backboard collision approximations per hoop
+    function collideRim(hoopGroup){
+      const zH = hoopGroup.userData.zPos;
+      const dx = ball.pos.x - hoopGroup.position.x;
+      const dz = ball.pos.z - zH;
+      const d = Math.hypot(dx, dz);
+
+      const tube = 0.03 + ballRadius;
+      const yClose = Math.abs(ball.pos.y - rimY) < (tube * 1.3);
+      if (!yClose) return;
+
+      if (Math.abs(d - rimR) < tube){
+        const nx = dx / (d || 1);
+        const nz = dz / (d || 1);
+        const v = ball.vel;
+        const vn = v.x*nx + v.z*nz;
+        if (vn < 0) {
+          v.x -= 1.7 * vn * nx;
+          v.z -= 1.7 * vn * nz;
+          v.y *= 0.92;
+          v.y += 0.35;
+        }
+        const push = (tube - Math.abs(d - rimR)) * 0.55;
+        ball.pos.x += nx * push;
+        ball.pos.z += nz * push;
+      }
+    }
+
+    function collideBackboard(hoopGroup){
+      const zH = hoopGroup.userData.zPos;
+      const boardZ = zH - 0.55 + 0.04;
+      // approximate "front face" based on which side hoop is on
+      // If hoop is on -z side, front face is at slightly larger z, else slightly smaller z
+      const dirZ = (zH < zMid) ? +1 : -1;
+      const planeZ = boardZ + dirZ * 0.02;
+
+      const crossed = (dirZ > 0)
+        ? (ball.prevPos.z < planeZ && ball.pos.z >= planeZ)
+        : (ball.prevPos.z > planeZ && ball.pos.z <= planeZ);
+
+      if (!crossed) return;
+
+      const halfW = 0.9, halfH = 0.52;
+      const bx = ball.pos.x - hoopGroup.position.x;
+      const by = ball.pos.y - 3.35;
+
+      if (Math.abs(bx) <= halfW && Math.abs(by) <= halfH){
+        // reflect z
+        ball.vel.z *= -0.75;
+        ball.vel.x *= 0.9;
+        ball.vel.y *= 0.85;
+        ball.pos.z = planeZ + dirZ * 0.03;
+      }
+    }
+
+    function checkScore(){
+      if (!ball.shotActive || ball.scoredThisShot || !ball.targetHoop) return;
+
+      const hoop = ball.targetHoop;
+      const zH = hoop.userData.zPos;
+
+      const prevY = ball.prevPos.y;
+      const currY = ball.pos.y;
+
+      const dx = ball.pos.x - hoop.position.x;
+      const dz = ball.pos.z - zH;
+      const inside = (Math.hypot(dx, dz) < (rimR - ballRadius*0.25));
+      const nearHoop = Math.abs(ball.pos.z - zH) < (rimR * 1.8);
+
+      if (prevY > rimY && currY <= rimY && inside && nearHoop){
+        ball.scoredThisShot = true;
+
+        if (ball.shooterTeam === TEAM.HOME){
+          GAME.homeScore += 2;
+        } else if (ball.shooterTeam === TEAM.AWAY){
+          GAME.awayScore += 2;
+        }
+
+        lastEl.textContent = `BUCKET ✅ (${ball.shooterTeam})`;
+        updateUI();
+
+        // possession flips after score
+        const next = (ball.shooterTeam === TEAM.HOME) ? TEAM.AWAY : TEAM.HOME;
+        GAME.possTeam = next;
+        flipBtn.textContent = `Poss: ${GAME.possTeam}`;
+        assignRolesAndSpots();
+      }
+    }
+
+    function stepPhysics(dt){
+      ball.prevPos.copy(ball.pos);
+
+      const g = Number(gravityEl.value);
+      ball.vel.y += g * dt;
+
+      // light drag
+      ball.vel.multiplyScalar(1 - clamp(dt*0.18, 0, 0.06));
+      ball.pos.addScaledVector(ball.vel, dt);
+
+      // floor
+      if (ball.pos.y < ballRadius){
+        ball.pos.y = ballRadius;
+        if (ball.vel.y < 0) ball.vel.y *= -0.62;
+        ball.vel.x *= 0.86;
+        ball.vel.z *= 0.86;
+      }
+
+      // collide with both hoops (cheap)
+      collideBackboard(hoopA); collideRim(hoopA);
+      collideBackboard(hoopB); collideRim(hoopB);
+
+      checkScore();
+
+      // out of bounds
+      const out =
+        (ball.pos.x < xMin-2 || ball.pos.x > xMax+2 || ball.pos.z < zMin-2 || ball.pos.z > zMax+2 || ball.pos.y < -3);
+      if (out){
+        // turnover to opposite
+        const next = (GAME.possTeam === TEAM.HOME) ? TEAM.AWAY : TEAM.HOME;
+        forceTurnover(next, "OUT OF BOUNDS");
+        return;
+      }
+
+      ballMesh.position.copy(ball.pos);
+    }
+
+    // ============================================================
+    // Hand tracking (MediaPipe)
+    // ============================================================
+    const video = el('video');
+    const overlay = el('overlay');
+    const octx = overlay.getContext('2d');
+
+    let cam = null;
+    let hands = null;
+    let cameraRunning = false;
+
+    function fingerUp(lm, tipIdx, pipIdx){
+      return (lm[tipIdx].y + 0.01) < lm[pipIdx].y;
+    }
+
+    const handState = {
+      present:false,
+      indexUp:false, middleUp:false, ringUp:false, pinkyUp:false,
+      openRaw:false,
+      fistRaw:false,
+      fist:false,
+      prevFist:false,
+      fistOpenT:0,
+      tip:{x:0.5,y:0.5,z:0},
+      wrist:{x:0.5,y:0.5,z:0},
+      moveTarget: new THREE.Vector3(0,0,zMid+5.2),
+      aimMarker: new THREE.Vector3(0,1.6,zMid),
+      prevAimMarker:null,
+      vel: new THREE.Vector3(0,0,0),
+      speed:0,
+      depthRaw:0,
+      lastT:0
+    };
+
+    function drawLandmarksOnOverlay(results){
+      octx.clearRect(0,0,overlay.width, overlay.height);
+      if (!results.multiHandLandmarks || !results.multiHandLandmarks.length) return;
+      for (const lm of results.multiHandLandmarks){
+        drawConnectors(octx, lm, HAND_CONNECTIONS, { color: '#5df', lineWidth: 2 });
+        drawLandmarks(octx, lm, { color: '#f55', lineWidth: 1, radius: 2 });
+      }
+    }
+
+    function computeDepth(wrist){
+      const depthGain = Number(depthGainEl.value);
+      const dzRaw = clamp((-wrist.z) * 3.0, 0, 1.2);
+      handState.depthRaw = dzRaw;
+      return dzRaw * depthGain;
+    }
+
+    function mapMoveToCourt(wrist){
+      // wrist controls movement target
+      const x = lerp(xMin + 0.8, xMax - 0.8, mx(wrist.x));
+      const z = lerp(zMin + 1.2, zMax - 1.2, wrist.y);
+      return new THREE.Vector3(x, 0, z);
+    }
+
+    function mapAimMarker(tip, wrist){
+      const dx = (mx(tip.x) - mx(wrist.x));
+      const dy = (wrist.y - tip.y);
+      const depth = computeDepth(wrist);
+
+      const side = clamp(dx * 10.0, -2.5, 2.5);
+      const up   = clamp(dy * 7.0, -0.6, 2.4);
+
+      // aim forward based on where your team is attacking (possession)
+      const targetHoop = offensiveHoopForTeam(GAME.possTeam);
+      const hoopPos = new THREE.Vector3(targetHoop.position.x, 0, targetHoop.userData.zPos);
+
+      const forward = hoopPos.clone().sub(user.pos.clone().setY(0)).setY(0).normalize();
+      const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0,1,0)).normalize();
+
+      const marker = user.pos.clone().add(new THREE.Vector3(0, 1.55, 0));
+      marker.add(right.clone().multiplyScalar(clamp(side * 0.22, -0.7, 0.7)));
+      marker.y += clamp(up * 0.28, -0.12, 0.75);
+      marker.add(forward.clone().multiplyScalar(2.0 + depth * 2.2));
+
+      marker.x = clamp(marker.x, xMin+0.7, xMax-0.7);
+      marker.z = clamp(marker.z, zMin+1.0, zMax-1.0);
+      marker.y = clamp(marker.y, 0.9, 5.4);
+      return marker;
+    }
+
+    async function startCamera(){
+      if (cameraRunning) return;
+      statusLine.textContent = "Status: requesting camera…";
+
+      const resizeOverlay = ()=>{
+        overlay.width = overlay.clientWidth;
+        overlay.height = overlay.clientHeight;
+      };
+      resizeOverlay();
+      new ResizeObserver(resizeOverlay).observe(el('camWrap'));
+
+      hands = new Hands({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+      hands.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.7,
+        minTrackingConfidence: 0.7
+      });
+
+      hands.onResults((results)=>{
+        drawLandmarksOnOverlay(results);
+
+        const now = performance.now()/1000;
+
+        if (!results.multiHandLandmarks || !results.multiHandLandmarks.length){
+          handState.present = false;
+          handReadEl.textContent = "—";
+          statusLine.textContent = "Status: no hand detected";
+          return;
+        }
+
+        const lm = results.multiHandLandmarks[0];
+        handState.present = true;
+
+        const tip = lm[8];
+        const wrist = lm[0];
+        handState.tip = {x:tip.x,y:tip.y,z:tip.z};
+        handState.wrist = {x:wrist.x,y:wrist.y,z:wrist.z};
+
+        handState.indexUp  = fingerUp(lm, 8, 6);
+        handState.middleUp = fingerUp(lm,12,10);
+        handState.ringUp   = fingerUp(lm,16,14);
+        handState.pinkyUp  = fingerUp(lm,20,18);
+
+        handState.openRaw = handState.indexUp && handState.middleUp && handState.ringUp && handState.pinkyUp;
+        handState.fistRaw = (!handState.indexUp && !handState.middleUp && !handState.ringUp && !handState.pinkyUp);
+
+        const dt = handState.lastT ? (now - handState.lastT) : 0;
+        handState.lastT = now;
+
+        const grace = Number(gripGraceEl.value)/1000;
+        handState.prevFist = handState.fist;
+
+        if (handState.fistRaw){
+          handState.fist = true;
+          handState.fistOpenT = 0;
+        } else {
+          if (handState.fist){
+            handState.fistOpenT += (dt || 0);
+            if (handState.fistOpenT > grace){
+              handState.fist = false;
+            }
+          } else {
+            handState.fist = false;
+          }
+        }
+
+        handState.moveTarget.copy(mapMoveToCourt(wrist));
+
+        const aimM = mapAimMarker(tip, wrist);
+        if (dt > 0.0005 && handState.prevAimMarker){
+          handState.vel.copy(aimM).sub(handState.prevAimMarker).divideScalar(dt);
+          handState.speed = handState.vel.length();
+        } else {
+          handState.vel.set(0,0,0);
+          handState.speed = 0;
+        }
+        handState.prevAimMarker = aimM.clone();
+        handState.aimMarker.copy(aimM);
+
+        statusLine.textContent = `Status: ${handState.fist ? "FIST (protect/lock)" : handState.openRaw ? "OPEN (move/dribble)" : "RELAX"} • v=${handState.speed.toFixed(2)}`;
+
+        handReadEl.textContent =
+          `open=${handState.openRaw?"YES":"NO"} fist=${handState.fist?"YES":"NO"} pinky=${handState.pinkyUp?"UP":"—"} v=${handState.speed.toFixed(2)} depth=${handState.depthRaw.toFixed(2)}`;
+      });
+
+      video.autoplay = true;
+      video.playsInline = true;
+      video.muted = true;
+
+      cam = new Camera(video, {
+        onFrame: async () => { await hands.send({ image: video }); },
+        width: 640,
+        height: 480
+      });
+
+      try{
+        await cam.start();
+        cameraRunning = true;
+        statusLine.textContent = "Status: camera ON (show your hand)";
+      } catch (err){
+        statusLine.textContent = "Status: camera ERROR (permission / http / device)";
+        console.error(err);
+      }
+    }
+
+    // ============================================================
+    // User movement
+    // ============================================================
+    let prevUserPos = user.pos.clone();
+
+    function updateUser(dt){
+      prevUserPos.copy(user.pos);
+
+      if (!handState.present) return;
+      if (ball.throwCooldown > 0) return;
+
+      // stop movement if fist is on
+      if (handState.fist) return;
+
+      // move only with open hand
+      if (!handState.openRaw) return;
+
+      const target = clampToCourt(handState.moveTarget.clone());
+      const to = target.clone().sub(user.pos);
+      const d = Math.hypot(to.x, to.z);
+      if (d > 0.01){
+        const step = Math.min(d, user.speed * dt);
+        to.multiplyScalar(step / (d || 1));
+        user.pos.x += to.x;
+        user.pos.z += to.z;
+      }
+    }
+
+    // ============================================================
+    // Dribble + lock holding
+    // ============================================================
+    function carryBallDribble(holder, dt, phaseKey){
+      const dv = holder.pos.clone().sub(phaseKey.prevPos);
+      const moveSpeed = dt > 0 ? (Math.hypot(dv.x, dv.z) / dt) : 0;
+
+      // dribble intensity based on movement
+      if (moveSpeed > 0.35) phaseKey.phase += dt * (7.0 + moveSpeed * 0.85);
+      else phaseKey.phase += dt * 2.8;
+
+      const bounce = Math.pow(Math.abs(Math.sin(phaseKey.phase)), 0.55);
+      const minY = ballRadius + 0.02;
+      const handHeight = 1.12;
+      const y = (moveSpeed > 0.35) ? lerp(minY, handHeight, bounce) : (handHeight - 0.06 + 0.04*Math.sin(phaseKey.phase*1.2));
+
+      // offset slightly based on hoop direction (cosmetic)
+      const offHoop = offensiveHoopForTeam(holder.team);
+      const hoopPos = new THREE.Vector3(offHoop.position.x, 0, offHoop.userData.zPos);
+      const forward = hoopPos.clone().sub(holder.pos.clone().setY(0)).setY(0).normalize();
+      const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0,1,0)).normalize();
+
+      const carryPos = holder.pos.clone()
+        .add(new THREE.Vector3(0, y, 0))
+        .add(right.clone().multiplyScalar(0.26))
+        .add(forward.clone().multiplyScalar(0.22));
+
+      ball.pos.lerp(carryPos, 1 - Math.pow(0.001, dt));
+      ballMesh.position.copy(ball.pos);
+    }
+
+    function carryBallLocked(holder, dt){
+      const offHoop = offensiveHoopForTeam(holder.team);
+      const hoopPos = new THREE.Vector3(offHoop.position.x, rimY, offHoop.userData.zPos);
+      const forward = hoopPos.clone().sub(holder.pos.clone().setY(0)).setY(0).normalize();
+      const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0,1,0)).normalize();
+
+      // user uses hand aim, AI uses forward
+      let holdPos = holder.pos.clone().add(new THREE.Vector3(0, 1.25, 0)).add(forward.clone().multiplyScalar(0.45));
+
+      if (holder.id === "YOU"){
+        const offset = handState.aimMarker.clone().sub(holder.pos.clone().add(new THREE.Vector3(0,1.25,0)));
+        holdPos.add(right.clone().multiplyScalar(clamp(offset.x*0.22, -0.55, 0.55)));
+        holdPos.add(new THREE.Vector3(0, clamp(offset.y*0.28, -0.12, 0.65), 0));
+        holdPos.add(forward.clone().multiplyScalar(clamp(offset.z*0.12, -0.25, 0.55)));
+      } else {
+        // AI slight chest bob
+        holdPos.y += 0.05*Math.sin(performance.now()/1000*5.0 + holder.pos.x);
+      }
+
+      ball.pos.lerp(holdPos, 1 - Math.pow(0.001, dt));
+      ballMesh.position.copy(ball.pos);
+    }
+
+    // ============================================================
+    // Passing target selection + interception
+    // ============================================================
+    function chooseBestPassTarget(){
+      // pick teammate closest to your aim direction, and not you
+      const teammates = allPlayers.filter(p => p.team === user.team && p.id !== "YOU");
+      if (!teammates.length) return null;
+
+      const origin = user.pos.clone().add(new THREE.Vector3(0, 1.55, 0));
+      const aim = handState.aimMarker.clone();
+      const dir = aim.clone().sub(origin).normalize();
+
+      let best = null;
+      let bestScore = -1e9;
+
+      for (const t of teammates){
+        const to = t.pos.clone().add(new THREE.Vector3(0,1.1,0)).sub(origin);
+        const dist = to.length();
+        const nd = to.normalize();
+        const align = nd.dot(dir); // [-1..1]
+        const close = clamp(1 - dist/18, 0, 1);
+        // prefer aligned + closer
+        let score = align * 1.8 + close * 0.8;
+
+        // reduce if pass lane is heavily contested (simple)
+        const receiver = t.pos.clone().add(new THREE.Vector3(0,1.1,0));
+        const lanePenalty = laneContestPenalty(origin, receiver, user.team);
+        score -= lanePenalty * 1.0;
+
+        if (score > bestScore){
+          bestScore = score;
+          best = t;
+        }
+      }
+      return best;
+    }
+
+    function laneContestPenalty(from, to, passerTeam){
+      // any opponent near segment increases penalty
+      const opps = allPlayers.filter(p => p.team !== passerTeam);
+      let penalty = 0;
+      for (const o of opps){
+        const p = o.pos.clone().add(new THREE.Vector3(0,1.1,0));
+        const d = distPointToSegment(p, from, to);
+        if (d < 0.7) penalty += (0.7 - d) / 0.7;
+      }
+      return clamp(penalty, 0, 2.0);
+    }
+
+    // ============================================================
+    // Throw (user + AI)
+    // ============================================================
+    function throwBall(fromPos, toPos, intent, shooterTeam, targetId=null){
+      const relSens = Number(releaseVelEl.value);
+      const tossGain = Number(tossGainEl.value);
+      const gAbs = Math.abs(Number(gravityEl.value));
+
+      // base time from distance
+      const dist = fromPos.distanceTo(toPos);
+      let time = clamp(dist / (12.0 * tossGain), 0.35, 1.05);
+
+      // user speed adds power
+      const speed = (shooterTeam === TEAM.HOME && ball.heldBy === "YOU") ? handState.speed : 1.2;
+      const power01 = clamp((speed - relSens) / 4.0, 0, 1);
+      time *= lerp(1.05, 0.80, power01);
+
+      // arc based on intent
+      const arc = (intent === "SHOT") ? 0.25 : 0.12;
+      const target = toPos.clone();
+      target.y += arc + clamp(handState.depthRaw * 0.15, 0, 0.35);
+
+      let v = ballisticVelocity(fromPos, target, gAbs, time);
+
+      // english
+      const english = handState.vel.clone().multiplyScalar(0.18 * tossGain);
+      english.x = clamp(english.x, -3.2, 3.2);
+      english.y = clamp(english.y, -1.2, 3.2);
+      english.z = clamp(english.z, -3.2, 3.2);
+      if (ball.heldBy === "YOU") v.add(english);
+
+      // set ball state
+      ball.held = false;
+      ball.heldBy = null;
+      ball.locked = false;
+      ball.thrown = true;
+      ball.intent = intent;
+      ball.targetId = targetId;
+      ball.shooterTeam = (intent === "SHOT") ? shooterTeam : null;
+      ball.targetHoop = (intent === "SHOT") ? offensiveHoopForTeam(shooterTeam) : null;
+      ball.shotActive = (intent === "SHOT");
+      ball.scoredThisShot = false;
+      ball.vel.copy(v);
+      ball.throwCooldown = 0.25;
+
+      if (intent === "PASS" && targetId){
+        passMarker.visible = true;
+        const t = getPlayerById(targetId);
+        if (t) passMarker.position.set(t.pos.x, 0.04, t.pos.z);
+      } else {
+        passMarker.visible = false;
+      }
+    }
+
+    function userReleaseThrow(){
+      if (!ball.held || ball.heldBy !== "YOU") return;
+      const relSens = Number(releaseVelEl.value);
+      if (handState.speed < relSens){
+        lastEl.textContent = "NO THROW (soft)";
+        return;
+      }
+
+      const from = ball.pos.clone();
+
+      if (handState.pinkyUp){
+        const tgt = chooseBestPassTarget();
+        if (!tgt){
+          lastEl.textContent = "PASS: no teammate";
+          return;
+        }
+        const to = tgt.pos.clone().add(new THREE.Vector3(0, 1.15, 0));
+        throwBall(from, to, "PASS", user.team, tgt.id);
+        lastEl.textContent = `PASS ➜ ${tgt.id}`;
+        intentReadEl.textContent = "PASS";
+      } else {
+        const hoop = offensiveHoopForTeam(user.team);
+        const to = new THREE.Vector3(hoop.position.x, rimY + 0.18, hoop.userData.zPos);
+        throwBall(from, to, "SHOT", user.team, null);
+        lastEl.textContent = "SHOT 🎯";
+        intentReadEl.textContent = "SHOT";
+      }
+    }
+
+    // ============================================================
+    // Catch / Intercept / Rebound logic
+    // ============================================================
+    function catchPoint(p){
+      return p.pos.clone().add(new THREE.Vector3(0, 1.15, 0));
+    }
+
+    function tryCatchForPlayer(p){
+      if (ball.held) return false;
+
+      const cp = catchPoint(p);
+      const d = cp.distanceTo(ball.pos);
+      const fast = ball.vel.length() > 22;
+
+      // Allow catching passes easier than shots
+      const isPass = (ball.intent === "PASS");
+      const isShot = (ball.intent === "SHOT");
+
+      const catchRadius = isPass ? 0.65 : 0.52;
+      const canCatch = (!fast) && (d < catchRadius) && (ball.pos.y < 2.4 || isPass);
+
+      if (!canCatch) return false;
+
+      // PASS rules:
+      if (isPass){
+        // Anyone can intercept, but intended target has priority
+        if (ball.targetId && p.id === ball.targetId){
+          giveBallTo(p.id, `PASS COMPLETE ✅ (${p.id})`);
+          // AI receiver reacts
+          const ai = getPlayerById(p.id);
+          if (ai && ai.ai){ ai.state = "HOLD"; ai.holdT = 0; }
+          return true;
+        } else {
+          // interception: if opponent and near, or if teammate and very near
+          const intended = ball.targetId ? getPlayerById(ball.targetId) : null;
+          const intendedDist = intended ? catchPoint(intended).distanceTo(ball.pos) : 999;
+
+          // if intended is quite close, let intended get it instead
+          if (intended && intendedDist < 0.55 && p.team === intended.team) return false;
+
+          giveBallTo(p.id, `INTERCEPTED 🛑 (${p.id})`);
+          // change possession team
+          GAME.possTeam = p.team;
+          flipBtn.textContent = `Poss: ${GAME.possTeam}`;
+          resetShotClock();
+          updateUI();
+
+          // re-assign roles so both sides react to new possession
+          // (keep players where they are; just states/marks update quickly)
+          softReassignAfterChange();
+
+          return true;
+        }
+      }
+
+      // SHOT rules: treat as rebound/catch if low enough
+      if (isShot && ball.pos.y < 1.8){
+        giveBallTo(p.id, `REBOUND 🏀 (${p.id})`);
+        GAME.possTeam = p.team;
+        flipBtn.textContent = `Poss: ${GAME.possTeam}`;
+        resetShotClock();
+        updateUI();
+        softReassignAfterChange();
+        return true;
+      }
+
+      return false;
+    }
+
+    function autoPickupGroundBall(){
+      if (ball.held) return;
+
+      const onGround = ball.pos.y <= (ballRadius + 0.02);
+      const slowEnough = ball.vel.length() < 1.8;
+      if (!onGround || !slowEnough) return;
+
+      // nearest player gets it
+      let best = null, bestD = 1e9;
+      for (const p of allPlayers){
+        const d = p.pos.distanceTo(ball.pos);
+        if (d < bestD){ bestD = d; best = p; }
+      }
+      if (best && bestD < 0.78){
+        giveBallTo(best.id, `PICKUP ✅ (${best.id})`);
+        GAME.possTeam = best.team;
+        flipBtn.textContent = `Poss: ${GAME.possTeam}`;
+        resetShotClock();
+        updateUI();
+        softReassignAfterChange();
+      }
+    }
+
+    // ============================================================
+    // AI: positioning + decisions + pass/shot reactions
+    // ============================================================
+    function moveToward(ai, dt, speed){
+      const to = ai.target.clone().sub(ai.pos);
+      const d = Math.hypot(to.x, to.z);
+      if (d > 0.01){
+        const step = Math.min(d, speed * dt);
+        to.multiplyScalar(step / (d || 1));
+        ai.pos.x += to.x;
+        ai.pos.z += to.z;
+      }
+      clampToCourt(ai.pos);
+    }
+
+    function separationForce(ai, neighbors, strength=0.9){
+      const force = new THREE.Vector3(0,0,0);
+      for (const n of neighbors){
+        if (n.id === ai.id) continue;
+        const d = ai.pos.distanceTo(n.pos);
+        if (d < 1.05){
+          const away = ai.pos.clone().sub(n.pos);
+          away.y = 0;
+          away.multiplyScalar((1.05 - d) / (d || 1));
+          force.add(away);
+        }
+      }
+      force.multiplyScalar(strength);
+      return force;
+    }
+
+    function softReassignAfterChange(){
+      // keep positions; update defender marks and offense spot targets loosely
+      const offHoop = offensiveHoopForTeam(GAME.possTeam);
+      const spots = formationSpotsForHoop(offHoop);
+
+      const offense = allPlayers.filter(p => p.team === GAME.possTeam);
+      const defense = allPlayers.filter(p => p.team !== GAME.possTeam);
+
+      // ball handler
+      const handlerId = (GAME.possTeam === TEAM.HOME) ? "YOU" : "A1";
+
+      // offense spot assignment for AI only
+      const offAI = offense.filter(p => p.ai);
+      const offTargets = [spots.W1, spots.W2, spots.C1, spots.C2, spots.C].slice(0, offAI.length);
+      offAI.forEach((p, i)=>{
+        p.target.copy(offTargets[i] ? offTargets[i] : spots.C);
+        p.state = (p.id === handlerId && ball.heldBy === handlerId) ? "HOLD" : "OFF_SPOT";
+      });
+
+      // defenders mark nearest offense
+      defense.filter(p=>p.ai).forEach((d)=>{
+        let best=null, bestDist=1e9;
+        for (const o of offense){
+          const dd = d.pos.distanceTo(o.pos);
+          if (dd < bestDist){ bestDist=dd; best=o; }
+        }
+        d.markId = best ? best.id : handlerId;
+        d.state = "DEFEND";
+      });
+    }
+
+    function aiChooseOpenTeammate(ballHolder){
+      const mates = allPlayers.filter(p => p.team === ballHolder.team && p.id !== ballHolder.id);
+      const opps  = allPlayers.filter(p => p.team !== ballHolder.team);
+
+      let best=null, bestScore=-1e9;
+      for (const m of mates){
+        // openness: distance to nearest defender
+        let nearest=1e9;
+        for (const o of opps){
+          const d = o.pos.distanceTo(m.pos);
+          if (d < nearest) nearest = d;
+        }
+        const open = clamp((nearest - 0.8) / 2.2, 0, 1);
+
+        // lane contest
+        const from = catchPoint(ballHolder);
+        const to = m.pos.clone().add(new THREE.Vector3(0,1.1,0));
+        const contest = laneContestPenalty(from, to, ballHolder.team);
+
+        // prefer user a bit (feels good)
+        const bonus = (m.id === "YOU") ? 0.25 : 0;
+
+        const score = open * 1.2 - contest * 0.85 + bonus;
+        if (score > bestScore){
+          bestScore = score;
+          best = m;
+        }
+      }
+
+      // require at least some openness
+      return (bestScore > 0.12) ? best : null;
+    }
+
+    function aiShouldShoot(ballHolder){
+      const offHoop = offensiveHoopForTeam(ballHolder.team);
+      const rim = new THREE.Vector3(offHoop.position.x, rimY, offHoop.userData.zPos);
+      const d = rim.distanceTo(ballHolder.pos.clone().add(new THREE.Vector3(0,1.2,0)));
+
+      // defenders nearby reduce shooting
+      const opps = allPlayers.filter(p => p.team !== ballHolder.team);
+      let nearest=1e9;
+      for (const o of opps){
+        const dd = o.pos.distanceTo(ballHolder.pos);
+        if (dd < nearest) nearest=dd;
+      }
+
+      const diff = Number(difficultyEl.value);
+      const inRange = d < (8.5 / diff + 4.5); // harder diff = shorter range
+      const open = nearest > (1.5 + 0.25*diff);
+
+      // also shoot if clock is low
+      const hurry = GAME.shotClock < 3.0;
+
+      return (inRange && open) || hurry;
+    }
+
+    function aiShoot(ballHolder){
+      const hoop = offensiveHoopForTeam(ballHolder.team);
+      const to = new THREE.Vector3(hoop.position.x, rimY + 0.18, hoop.userData.zPos);
+
+      const from = ball.pos.clone();
+      // AI "english" low
+      const savedVel = handState.vel.clone();
+      handState.vel.set(0,0,0);
+      throwBall(from, to, "SHOT", ballHolder.team, null);
+      handState.vel.copy(savedVel);
+
+      lastEl.textContent = `AI SHOT (${ballHolder.id})`;
+      intentReadEl.textContent = "SHOT";
+    }
+
+    function aiPass(ballHolder, receiver){
+      const from = ball.pos.clone();
+      const to = receiver.pos.clone().add(new THREE.Vector3(0, 1.15, 0));
+
+      const savedVel = handState.vel.clone();
+      handState.vel.set(0,0,0);
+      throwBall(from, to, "PASS", ballHolder.team, receiver.id);
+      handState.vel.copy(savedVel);
+
+      lastEl.textContent = `AI PASS ${ballHolder.id} ➜ ${receiver.id}`;
+      intentReadEl.textContent = "PASS";
+
+      // receiver reacts: go receive
+      const r = getPlayerById(receiver.id);
+      if (r && r.ai){
+        r.state = "RECEIVE";
+        r.holdT = 0;
+      }
+
+      passMarker.visible = true;
+      passMarker.position.set(receiver.pos.x, 0.04, receiver.pos.z);
+    }
+
+    function updateAI(dt){
+      const diff = Number(difficultyEl.value);
+
+      const offenseTeam = GAME.possTeam;
+      const defenseTeam = (offenseTeam === TEAM.HOME) ? TEAM.AWAY : TEAM.HOME;
+
+      const offenseHoop = offensiveHoopForTeam(offenseTeam);
+      const hoopPos0 = new THREE.Vector3(offenseHoop.position.x, 0, offenseHoop.userData.zPos);
+
+      // update AI positions and behaviors
+      for (const ai of [...homeAI, ...awayAI]){
+        // skip if user
+        if (!ai.ai) continue;
+
+        ai.thinkT += dt;
+
+        // separation
+        const neighbors = allPlayers.filter(p => p.team === ai.team);
+        const sep = separationForce(ai, neighbors, 0.55);
+        ai.pos.addScaledVector(sep, dt);
+        clampToCourt(ai.pos);
+
+        // if AI holds ball, drive/decide
+        const holdsBall = (ball.held && ball.heldBy === ai.id);
+
+        // RECEIVE state: move toward intended catch area
+        if (!holdsBall && ai.state === "RECEIVE" && ball.intent === "PASS" && ball.targetId === ai.id){
+          const cp = ai.pos.clone().add(new THREE.Vector3(0,0,0));
+          // drift slightly toward ball x/z
+          const t = ball.pos.clone().setY(0);
+          ai.target.copy(t);
+          moveToward(ai, dt, 6.6 * diff);
+        }
+
+        // DEFEND behavior
+        if (ai.team === defenseTeam){
+          const mark = getPlayerById(ai.markId) || getPlayerById((offenseTeam===TEAM.HOME)?"YOU":"A1");
+          const markPos = mark ? mark.pos.clone() : user.pos.clone();
+
+          // defend between mark and hoop
+          const mid = markPos.clone().lerp(hoopPos0, 0.44);
+          mid.x += 0.25*Math.sin(performance.now()/1000*2.0 + ai.pos.z);
+          clampToCourt(mid);
+          ai.target.copy(mid);
+
+          // closer if mark has ball
+          if (ball.held && mark && ball.heldBy === mark.id){
+            ai.target.lerp(markPos, 0.22);
+          }
+
+          moveToward(ai, dt, 7.2 * diff);
+        }
+
+        // OFFENSE behavior
+        if (ai.team === offenseTeam){
+          if (!holdsBall){
+            // mostly go to spot
+            if (ai.state === "OFF_SPOT" || ai.state === "IDLE"){
+              moveToward(ai, dt, 6.6 * diff);
+            } else if (ai.state === "RECEIVE"){
+              // handled above
+              moveToward(ai, dt, 6.8 * diff);
+            } else {
+              moveToward(ai, dt, 6.4 * diff);
+            }
+          } else {
+            // ball handler AI decisions
+            ai.holdT += dt;
+
+            // protect if defender close
+            const opps = allPlayers.filter(p => p.team !== ai.team);
+            let nearest=1e9, nearestOpp=null;
+            for (const o of opps){
+              const d = o.pos.distanceTo(ai.pos);
+              if (d < nearest){ nearest = d; nearestOpp = o; }
+            }
+            ai.protect = nearest < (1.05 + 0.15*diff);
+
+            // drive target toward hoop
+            const driveDir = hoopPos0.clone().sub(ai.pos).setY(0).normalize();
+            const driveT = ai.pos.clone().add(driveDir.multiplyScalar(2.4 + 0.6*Math.sin(performance.now()/1000 + ai.pos.x)));
+            clampToCourt(driveT);
+
+            // decision cadence
+            if (ai.thinkT > 0.25){
+              ai.thinkT = 0;
+
+              if (aiShouldShoot(ai)){
+                ai.state = "SHOOT";
+                ai.holdT = 0;
+              } else {
+                const openMate = aiChooseOpenTeammate(ai);
+                if (openMate && Math.random() < (0.60 / diff)){
+                  ai.state = "PASS";
+                  ai.target.copy(ai.pos);
+                  ai.passTarget = openMate.id;
+                } else {
+                  ai.state = "DRIVE";
+                  ai.target.copy(driveT);
+                }
+              }
+            }
+
+            // execute state
+            if (ai.state === "DRIVE"){
+              ai.target.copy(driveT);
+              moveToward(ai, dt, 6.9 * diff);
+            } else if (ai.state === "PASS"){
+              // short windup then pass
+              ai.holdT += dt;
+              if (ai.holdT > 0.22){
+                const receiver = getPlayerById(ai.passTarget);
+                if (receiver) aiPass(ai, receiver);
+                ai.state = "OFF_SPOT";
+                ai.holdT = 0;
+              }
+            } else if (ai.state === "SHOOT"){
+              ai.holdT += dt;
+              if (ai.holdT > 0.30){
+                aiShoot(ai);
+                ai.state = "OFF_SPOT";
+                ai.holdT = 0;
+              }
+            }
+          }
+        }
+
+        // update mesh transform
+        ai.group.position.set(ai.pos.x, 0, ai.pos.z);
+      }
+    }
+
+    // ============================================================
+    // Steals (team defense near ballhandler)
+    // ============================================================
+    function updateSteals(dt){
+      if (!ball.held || !ball.heldBy) return;
+
+      const holder = getPlayerById(ball.heldBy);
+      if (!holder) return;
+
+      const opps = allPlayers.filter(p => p.team !== holder.team);
+      const diff = Number(difficultyEl.value);
+
+      // user protection: fist reduces steal probability a lot
+      const userProtect = (holder.id === "YOU") ? handState.fist : (holder.ai ? holder.protect : false);
+
+      for (const o of opps){
+        const d = o.pos.distanceTo(holder.pos);
+        if (d < 0.95){
+          const baseRate = userProtect ? (0.35 / diff) : (1.05 * diff);
+          const movingBoost = (holder.id === "YOU" && handState.openRaw) ? 1.25 : 1.0;
+          const p = chanceFromRate(baseRate * movingBoost, dt);
+
+          if (Math.random() < p){
+            // steal -> possession flips to opponent team; stealer becomes handler
+            lastEl.textContent = `STOLEN 🟥 (${o.id})`;
+            GAME.possTeam = o.team;
+            flipBtn.textContent = `Poss: ${GAME.possTeam}`;
+            resetShotClock();
+            giveBallTo(o.id, "STEAL");
+            softReassignAfterChange();
+            return;
+          }
+        }
+      }
+    }
+
+    // ============================================================
+    // User throwing trigger (fist -> open)
+    // ============================================================
+    function handleUserThrowTrigger(){
+      if (!ball.held || ball.heldBy !== "YOU") return;
+
+      const wasLocked = ball.locked;
+      ball.locked = !!handState.fist;
+
+      // release event: fist -> open triggers throw (only if it was locked)
+      const openingNow = (handState.indexUp || handState.middleUp || handState.ringUp || handState.pinkyUp);
+      if (handState.prevFist && !handState.fist && wasLocked && openingNow){
+        userReleaseThrow();
+      }
+    }
+
+    // ============================================================
+    // Shot clock
+    // ============================================================
+    function updateShotClock(dt){
+      // run clock when possession team has control, including while ball is in the air on a shot or pass
+      // simple rule: if possTeam is set, the clock runs unless we just reset play.
+      GAME.shotClock = Math.max(0, GAME.shotClock - dt);
+      if (GAME.shotClock <= 0){
+        // turnover to other team
+        const next = (GAME.possTeam === TEAM.HOME) ? TEAM.AWAY : TEAM.HOME;
+        forceTurnover(next, "SHOT CLOCK");
+      }
+    }
+
+    // ============================================================
+    // Camera modes (FP / 3P / RIM)
+    // ============================================================
+    const CAM = { FP:0, TP:1, RIM:2 };
+    let camMode = CAM.FP;
+
+    function setCamMode(m){
+      camMode = m;
+      camBtn.textContent = `View: ${m===CAM.FP?"FP":m===CAM.TP?"3P":"RIM"}`;
+    }
+
+    function getLookTarget(){
+      // If user has locked ball, look toward offensive hoop; else look at ball or nearest threat
+      const offHoop = offensiveHoopForTeam(GAME.possTeam);
+      const hoopPos = new THREE.Vector3(offHoop.position.x, rimY, offHoop.userData.zPos);
+
+      if (ball.held && ball.heldBy === "YOU" && ball.locked){
+        return handState.pinkyUp
+          ? chooseBestPassTarget()?.pos.clone().add(new THREE.Vector3(0,1.1,0)) || hoopPos
+          : hoopPos;
+      }
+
+      // if ball held by someone else, track them
+      if (ball.held && ball.heldBy){
+        const h = getPlayerById(ball.heldBy);
+        if (h) return h.pos.clone().add(new THREE.Vector3(0,1.4,0));
+      }
+
+      // if ball in air, look at ball
+      if (!ball.held) return ball.pos.clone();
+
+      return hoopPos;
+    }
+
+    function updateCamera(dt){
+      const head = user.pos.clone().add(new THREE.Vector3(0, 1.68, 0));
+      const target = getLookTarget();
+
+      const forward = target.clone().sub(head).normalize();
+
+      if (camMode === CAM.FP){
+        user.group.visible = false;
+        reticleEl.classList.remove('hidden');
+
+        const camPos = head.clone().add(forward.clone().multiplyScalar(0.05));
+        camera.position.lerp(camPos, 1 - Math.pow(0.001, dt));
+
+        const look = head.clone().add(forward.clone().multiplyScalar(10.0)).add(new THREE.Vector3(0, 0.05, 0));
+        camera.lookAt(look);
+      } else if (camMode === CAM.TP){
+        user.group.visible = true;
+        reticleEl.classList.add('hidden');
+
+        const desired = head.clone()
+          .add(forward.clone().multiplyScalar(-8.2))
+          .add(new THREE.Vector3(0, 2.1, 0));
+
+        camera.position.lerp(desired, 1 - Math.pow(0.001, dt));
+        camera.lookAt(head.clone().add(forward.clone().multiplyScalar(6.0)));
+      } else {
+        user.group.visible = true;
+        reticleEl.classList.add('hidden');
+
+        // rim cam points at whichever hoop offense is attacking
+        const offHoop = offensiveHoopForTeam(GAME.possTeam);
+        const hoopPos = new THREE.Vector3(offHoop.position.x, rimY, offHoop.userData.zPos);
+        const desired = hoopPos.clone().add(new THREE.Vector3(0, 1.2, (offHoop.userData.zPos < zMid) ? 4.2 : -4.2));
+        camera.position.lerp(desired, 1 - Math.pow(0.001, dt));
+        camera.lookAt(hoopPos);
+      }
+    }
+
+    // ============================================================
+    // Main loop
+    // ============================================================
+    const clock = new THREE.Clock();
+    const userDribble = { phase: 0, prevPos: user.pos.clone() };
+    const aiDribblePhase = new Map(); // id -> {phase, prevPos}
+
+    function animate(){
+      requestAnimationFrame(animate);
+
+      const dtRaw = clock.getDelta();
+      const dt = clamp(dtRaw, 0, 0.033) * (GAME.slow ? 0.35 : 1.0);
+
+      GAME.difficulty = Number(difficultyEl.value);
+
+      if (ball.throwCooldown > 0) ball.throwCooldown = Math.max(0, ball.throwCooldown - dt);
+
+      // user movement
+      updateUser(dt);
+      user.group.position.set(user.pos.x, 0, user.pos.z);
+
+      // shot clock
+      updateShotClock(dt);
+
+      // steals
+      updateSteals(dt);
+
+      // AI updates
+      updateAI(dt);
+
+      // Ball in air physics
+      if (!ball.held && (ball.thrown || ball.shotActive || ball.intent !== "NONE")){
+        stepPhysics(dt);
+
+        // AI catches / intercepts while in flight
+        for (const p of allPlayers){
+          if (tryCatchForPlayer(p)) break;
+        }
+
+        // keep marker over intended receiver if pass is active
+        if (ball.intent === "PASS" && ball.targetId){
+          const t = getPlayerById(ball.targetId);
+          if (t){
+            passMarker.visible = true;
+            passMarker.position.set(t.pos.x, 0.04, t.pos.z);
+          } else {
+            passMarker.visible = false;
+          }
+        } else {
+          passMarker.visible = false;
+        }
+      }
+
+      // Ground pickup (rebounds, loose balls)
+      autoPickupGroundBall();
+
+      // If ball held, attach to holder (dribble or lock)
+      if (ball.held && ball.heldBy){
+        const holder = getPlayerById(ball.heldBy);
+        if (holder){
+          if (holder.id === "YOU"){
+            // user lock based on fist
+            handleUserThrowTrigger();
+
+            const wasLocked = ball.locked;
+            ball.locked = !!handState.fist;
+
+            // hold behavior
+            if (ball.locked){
+              carryBallLocked(holder, dt);
+              // show pass marker on best target while locked + pinky up
+              const tgt = handState.pinkyUp ? chooseBestPassTarget() : null;
+              if (tgt){
+                passMarker.visible = true;
+                passMarker.position.set(tgt.pos.x, 0.04, tgt.pos.z);
+                intentReadEl.textContent = "PASS";
+              } else {
+                passMarker.visible = false;
+                intentReadEl.textContent = ball.locked ? "SHOT" : "—";
+              }
+            } else {
+              userDribble.prevPos.copy(prevUserPos);
+              carryBallDribble(holder, dt, userDribble);
+              passMarker.visible = false;
+              intentReadEl.textContent = "—";
+            }
+          } else {
+            // AI holding
+            if (!aiDribblePhase.has(holder.id)){
+              aiDribblePhase.set(holder.id, { phase: Math.random()*10, prevPos: holder.pos.clone() });
+            }
+            const ph = aiDribblePhase.get(holder.id);
+            ph.prevPos.copy(holder.pos);
+
+            // AI "locks" briefly when about to pass/shoot (state-based)
+            const ai = holder;
+            const doLock = (ai.ai && (ai.state === "PASS" || ai.state === "SHOOT" || ai.protect));
+            ball.locked = doLock;
+
+            if (doLock){
+              carryBallLocked(holder, dt);
+            } else {
+              carryBallDribble(holder, dt, ph);
+            }
+          }
+        }
+      }
+
+      // Ball readout
+      ballReadEl.textContent =
+        `held=${ball.held ? (ball.heldBy||"YES") : "NO"} intent=${ball.intent} v=${ball.vel.length().toFixed(2)}`;
+
+      // danger clock effect
+      if (GAME.shotClock <= 5.0){
+        clockEl.style.textShadow = "0 0 10px rgba(255,120,120,.55)";
+      } else {
+        clockEl.style.textShadow = "none";
+      }
+
+      // update camera + UI
+      updateCamera(dt);
+      updateUI();
+
+      renderer.render(scene, camera);
+    }
+
+    // ============================================================
+    // Buttons
+    // ============================================================
+    startCamBtn.addEventListener('click', startCamera);
+
+    resetPlayBtn.addEventListener('click', ()=>{
+      assignRolesAndSpots();
+      resetShotClock();
+      lastEl.textContent = "RESET PLAY";
+    });
+
+    resetScoreBtn.addEventListener('click', ()=>{
+      GAME.homeScore = 0;
+      GAME.awayScore = 0;
+      lastEl.textContent = "RESET SCORE";
+      assignRolesAndSpots();
+    });
+
+    slowBtn.addEventListener('click', ()=>{
+      GAME.slow = !GAME.slow;
+      slowBtn.textContent = `Slow: ${GAME.slow ? "ON" : "OFF"}`;
+    });
+
+    camBtn.addEventListener('click', ()=>{
+      setCamMode((camMode + 1) % 3);
+    });
+
+    flipBtn.addEventListener('click', ()=>{
+      GAME.possTeam = (GAME.possTeam === TEAM.HOME) ? TEAM.AWAY : TEAM.HOME;
+      flipBtn.textContent = `Poss: ${GAME.possTeam}`;
+      assignRolesAndSpots();
+    });
+
+    // ============================================================
+    // Init
+    // ============================================================
+    function init(){
+      setCamMode(CAM.FP);
+      assignRolesAndSpots();
+      resetShotClock();
+      updateUI();
+      // camera needs https or localhost:
+      // python -m http.server 8000  -> http://localhost:8000
+    }
+
+    init();
+    animate();
+
+    addEventListener('resize', ()=>{
+      camera.aspect = innerWidth/innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+  </script>
+</body>
+</html>

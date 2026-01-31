@@ -1,0 +1,1410 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>🏀 First-Person Hoops — Dribble + Steal Defender + Shot Clock (MediaPipe Hands)</title>
+  <style>
+    html, body { margin:0; height:100%; background:#06070b; overflow:hidden; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    canvas { display:block; }
+
+    #hud{
+      position:absolute; top:14px; left:14px; z-index:10;
+      width: 500px; max-width: calc(100vw - 28px);
+      background: rgba(10,12,18,.72);
+      border: 1px solid rgba(255,255,255,.10);
+      backdrop-filter: blur(10px);
+      border-radius: 14px; padding: 12px;
+      box-shadow: 0 10px 40px rgba(0,0,0,.45);
+      color: rgba(255,255,255,.92);
+    }
+    #hud h1 { margin:0 0 8px; font-size: 14px; font-weight: 800; letter-spacing:.4px; }
+    .row { display:flex; gap:10px; align-items:center; margin: 7px 0; }
+    .row label { flex: 1 1 auto; font-size: 12px; opacity: .85; }
+    .row input[type="range"] { width: 100%; }
+    .btnrow { display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; }
+    button{
+      appearance:none; border: 1px solid rgba(255,255,255,.16);
+      background: rgba(255,255,255,.08);
+      color: rgba(255,255,255,.92);
+      padding: 8px 10px;
+      border-radius: 12px;
+      cursor: pointer;
+      font-weight: 700;
+      flex:1;
+      min-width: 120px;
+    }
+    button:hover { background: rgba(255,255,255,.12); }
+    button.primary { background: rgba(120,180,255,.18); border-color: rgba(120,180,255,.30); }
+    button.primary:hover { background: rgba(120,180,255,.24); }
+
+    #stats{
+      margin-top:10px; padding-top:10px;
+      border-top: 1px solid rgba(255,255,255,.10);
+      font-size: 12px; line-height: 1.35;
+      color: rgba(255,255,255,.88);
+    }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New"; }
+
+    #rightStack{
+      position:absolute; right:14px; top:14px; z-index:10;
+      display:flex; flex-direction:column; gap:12px;
+      width: 290px; max-width: calc(100vw - 28px);
+    }
+    #camPanel{
+      background: rgba(10,12,18,.72);
+      border: 1px solid rgba(255,255,255,.10);
+      backdrop-filter: blur(10px);
+      border-radius: 14px; padding: 10px;
+      box-shadow: 0 10px 40px rgba(0,0,0,.45);
+      color: rgba(255,255,255,.92);
+      user-select: none;
+    }
+    #camPanel h2 { margin:0 0 8px; font-size: 12px; letter-spacing:.3px; opacity:.9; }
+    #camWrap{
+      width: 100%;
+      border-radius: 12px;
+      overflow:hidden;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.04);
+      position: relative;
+      aspect-ratio: 4 / 3;
+    }
+    #video{
+      position:absolute; inset:0;
+      width:100%; height:100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+      opacity: 0.92;
+    }
+    #overlay{
+      position:absolute; inset:0;
+      width:100%; height:100%;
+      transform: scaleX(-1);
+      pointer-events:none;
+    }
+    #statusLine { margin-top: 8px; font-size: 12px; opacity: .86; }
+
+    #bottomHint{
+      position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(10,12,18,.55);
+      border: 1px solid rgba(255,255,255,.10);
+      color: rgba(255,255,255,.78);
+      font-size: 12px;
+      z-index: 10;
+      backdrop-filter: blur(10px);
+      pointer-events: none;
+      white-space: nowrap;
+      text-align:center;
+    }
+
+    #reticle{
+      position:absolute;
+      left:50%; top:50%;
+      transform: translate(-50%,-50%);
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      border: 2px solid rgba(255,255,255,.55);
+      box-shadow: 0 0 0 2px rgba(0,0,0,.25);
+      z-index: 9;
+      pointer-events:none;
+    }
+    #reticle:before, #reticle:after{
+      content:"";
+      position:absolute;
+      left:50%; top:50%;
+      transform: translate(-50%,-50%);
+      background: rgba(255,255,255,.55);
+    }
+    #reticle:before{ width: 2px; height: 26px; }
+    #reticle:after{ width: 26px; height: 2px; }
+    #reticle.hidden{ opacity: 0; }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <h1>🏀 First-Person Hoops — Dribble + Steal Defender + Shot Clock</h1>
+
+    <div class="row">
+      <label>Throw sensitivity <span class="mono" id="relLabel">0.12</span></label>
+      <input id="releaseVel" type="range" min="0.02" max="0.35" step="0.005" value="0.12"/>
+    </div>
+
+    <div class="row">
+      <label>Throw gain <span class="mono" id="tossLabel">1.25</span></label>
+      <input id="tossGain" type="range" min="0.4" max="2.5" step="0.01" value="1.25"/>
+    </div>
+
+    <div class="row">
+      <label>Depth gain <span class="mono" id="depthLabel">1.00</span></label>
+      <input id="depthGain" type="range" min="0.0" max="2.0" step="0.01" value="1.00"/>
+    </div>
+
+    <div class="row">
+      <label>Gravity <span class="mono" id="gLabel">-9.81</span></label>
+      <input id="gravity" type="range" min="-16" max="-4" step="0.1" value="-9.81"/>
+    </div>
+
+    <div class="row">
+      <label>Fist lock grace (ms) <span class="mono" id="gripLabel">160</span></label>
+      <input id="gripGrace" type="range" min="60" max="420" step="5" value="160"/>
+    </div>
+
+    <div class="btnrow">
+      <button class="primary" id="startCamBtn">Start Camera</button>
+      <button id="resetBallBtn">Reset Ball</button>
+      <button id="resetScoreBtn">Reset Score</button>
+    </div>
+
+    <div class="btnrow">
+      <button id="slowBtn">Slow: OFF</button>
+      <button id="camBtn">View: FP</button>
+      <button id="levelBtn">Level +1</button>
+    </div>
+
+    <div id="stats">
+      <div>
+        <b>Level:</b> <span class="mono" id="lvl">1</span> &nbsp;
+        <b>Score:</b> <span class="mono" id="score">0</span> &nbsp;
+        <b>Shots:</b> <span class="mono" id="shots">0</span> &nbsp;
+        <b>Hit%:</b> <span class="mono" id="pct">0%</span>
+      </div>
+      <div style="margin-top:6px">
+        <b>Shot Clock:</b> <span class="mono" id="clock">24.0</span> &nbsp; <span class="mono" id="clockMax">/24</span>
+        &nbsp; <b>Turnovers:</b> <span class="mono" id="tos">0</span> &nbsp; <b>Steals:</b> <span class="mono" id="stl">0</span>
+      </div>
+      <div style="margin-top:6px">
+        <b>Hand:</b> <span class="mono" id="handRead">—</span><br/>
+        <b>Mode:</b> <span class="mono" id="modeRead">—</span> &nbsp; <b>Possession:</b> <span class="mono" id="posRead">YOU</span><br/>
+        <b>Last:</b> <span class="mono" id="last">—</span><br/>
+        <b>Ball:</b> <span class="mono" id="ballRead">—</span>
+      </div>
+      <div style="margin-top:8px; opacity:.85">
+        <span class="mono">Controls:</span>
+        <b>Open hand</b> = move (dribble) • <b>Fist</b> = stop + protect/lock • <b>Open from fist</b> = throw.
+        At release: <b>pinky up = PASS</b>, otherwise <b>SHOT</b>.
+      </div>
+    </div>
+  </div>
+
+  <div id="rightStack">
+    <div id="camPanel">
+      <h2>Camera (MediaPipe Hands)</h2>
+      <div id="camWrap">
+        <video id="video" playsinline muted></video>
+        <canvas id="overlay"></canvas>
+      </div>
+      <div id="statusLine" class="mono">Status: camera OFF</div>
+    </div>
+  </div>
+
+  <div id="reticle"></div>
+
+  <div id="bottomHint">
+    Walk into the ball on the ground to auto-pickup. Open hand = move/dribble. Fist = stop + protect. Open from fist = throw. Pinky up = pass.
+  </div>
+
+  <!-- Three.js -->
+  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+
+  <!-- MediaPipe Hands -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+
+  <script>
+    // ============================================================
+    // Helpers
+    // ============================================================
+    const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+    const lerp  = (a,b,t)=>a+(b-a)*t;
+    const mx = x => (1 - x);
+
+    function chanceFromRate(ratePerSec, dt){
+      // probability of at least one event in dt for Poisson process
+      return 1 - Math.exp(-ratePerSec * dt);
+    }
+
+    // ============================================================
+    // UI
+    // ============================================================
+    const el = id => document.getElementById(id);
+
+    const releaseVelEl = el('releaseVel');
+    const tossGainEl   = el('tossGain');
+    const depthGainEl  = el('depthGain');
+    const gravityEl    = el('gravity');
+    const gripGraceEl  = el('gripGrace');
+
+    const relLabel  = el('relLabel');
+    const tossLabel = el('tossLabel');
+    const depthLabel= el('depthLabel');
+    const gLabel    = el('gLabel');
+    const gripLabel = el('gripLabel');
+
+    const startCamBtn   = el('startCamBtn');
+    const resetBallBtn  = el('resetBallBtn');
+    const resetScoreBtn = el('resetScoreBtn');
+    const slowBtn       = el('slowBtn');
+    const camBtn        = el('camBtn');
+    const levelBtn      = el('levelBtn');
+
+    const statusLine = el('statusLine');
+    const scoreEl = el('score');
+    const shotsEl = el('shots');
+    const pctEl = el('pct');
+    const lastEl = el('last');
+    const handReadEl = el('handRead');
+    const ballReadEl = el('ballRead');
+    const modeReadEl = el('modeRead');
+    const posReadEl  = el('posRead');
+    const lvlEl      = el('lvl');
+    const reticleEl  = el('reticle');
+
+    const clockEl    = el('clock');
+    const clockMaxEl = el('clockMax');
+    const tosEl      = el('tos');
+    const stlEl      = el('stl');
+
+    function syncHud(){
+      relLabel.textContent   = Number(releaseVelEl.value).toFixed(2);
+      tossLabel.textContent  = Number(tossGainEl.value).toFixed(2);
+      depthLabel.textContent = Number(depthGainEl.value).toFixed(2);
+      gLabel.textContent     = Number(gravityEl.value).toFixed(2);
+      gripLabel.textContent  = String(Math.round(Number(gripGraceEl.value)));
+    }
+    [releaseVelEl, tossGainEl, depthGainEl, gravityEl, gripGraceEl].forEach(x=>x.addEventListener('input', syncHud));
+    syncHud();
+
+    // ============================================================
+    // THREE.JS Scene
+    // ============================================================
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.Fog(0x06070b, 10, 90);
+
+    const renderer = new THREE.WebGLRenderer({ antialias:true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    document.body.appendChild(renderer.domElement);
+
+    const camera = new THREE.PerspectiveCamera(62, innerWidth/innerHeight, 0.05, 260);
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+    const key = new THREE.DirectionalLight(0xffffff, 1.08);
+    key.position.set(8,14,10);
+    scene.add(key);
+    const rimLight = new THREE.DirectionalLight(0x9bd0ff, 0.28);
+    rimLight.position.set(-12,8,-16);
+    scene.add(rimLight);
+
+    // Court bounds
+    const courtW = 15;
+    const courtL = 28;
+    const hoopBaseZ = -12;
+    const zMin = hoopBaseZ - 2.5;
+    const zMax = zMin + courtL;
+    const xMin = -courtW/2, xMax = courtW/2;
+
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(courtW, courtL),
+      new THREE.MeshStandardMaterial({ color: 0x6b4b2a, roughness: 0.92 })
+    );
+    floor.rotation.x = -Math.PI/2;
+    floor.position.set(0, 0, (zMin+zMax)/2);
+    scene.add(floor);
+
+    const pad = new THREE.Mesh(
+      new THREE.PlaneGeometry(70, 70),
+      new THREE.MeshStandardMaterial({ color: 0x0b0e14, roughness: 1.0 })
+    );
+    pad.rotation.x = -Math.PI/2;
+    pad.position.y = -0.001;
+    scene.add(pad);
+
+    function addLine(points, color=0xffffff, y=0.01){
+      const pts = points.map(p => new THREE.Vector3(p.x, y, p.z));
+      const geo = new THREE.BufferGeometry().setFromPoints(pts);
+      const mat = new THREE.LineBasicMaterial({ color, transparent:true, opacity:0.9 });
+      const line = new THREE.Line(geo, mat);
+      scene.add(line);
+      return line;
+    }
+
+    addLine([{x:xMin,z:zMin},{x:xMax,z:zMin},{x:xMax,z:zMax},{x:xMin,z:zMax},{x:xMin,z:zMin}]);
+    const zMid = (zMin+zMax)/2;
+    addLine([{x:xMin,z:zMid},{x:xMax,z:zMid}]);
+
+    // Hoop
+    const hoopGroup = new THREE.Group();
+    scene.add(hoopGroup);
+
+    const rimY = 3.05;
+    const rimR = 0.23;
+
+    const board = new THREE.Mesh(
+      new THREE.BoxGeometry(1.8, 1.05, 0.07),
+      new THREE.MeshStandardMaterial({ color: 0xe6e6e6, roughness: 0.6 })
+    );
+    hoopGroup.add(board);
+
+    const pole = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.08, 0.10, 4.2, 18),
+      new THREE.MeshStandardMaterial({ color: 0x22262e, roughness: 0.8 })
+    );
+    hoopGroup.add(pole);
+
+    const rimMesh = new THREE.Mesh(
+      new THREE.TorusGeometry(rimR, 0.02, 10, 48),
+      new THREE.MeshStandardMaterial({ color: 0xff6a3d, roughness: 0.35, metalness: 0.3 })
+    );
+    rimMesh.rotation.x = Math.PI/2;
+    hoopGroup.add(rimMesh);
+
+    // Ball
+    const ballRadius = 0.12;
+    const ballMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(ballRadius, 28, 20),
+      new THREE.MeshStandardMaterial({ color: 0xf28c28, roughness: 0.55 })
+    );
+    scene.add(ballMesh);
+
+    // Player (hidden in FP)
+    const player = new THREE.Group();
+    scene.add(player);
+
+    const playerBody = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.22, 0.70, 6, 12),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.75 })
+    );
+    playerBody.position.y = 0.92;
+    player.add(playerBody);
+
+    const playerHead = new THREE.Mesh(
+      new THREE.SphereGeometry(0.19, 16, 12),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55 })
+    );
+    playerHead.position.y = 1.62;
+    player.add(playerHead);
+
+    // Teammate (for pass)
+    const teammate = new THREE.Group();
+    scene.add(teammate);
+    {
+      const m = new THREE.MeshStandardMaterial({ color: 0x79b7ff, roughness: 0.7 });
+      const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.20, 0.60, 6, 12), m);
+      body.position.y = 0.85; teammate.add(body);
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.18, 16, 12), m);
+      head.position.y = 1.55; teammate.add(head);
+    }
+
+    // Defender (steals)
+    const defender = new THREE.Group();
+    scene.add(defender);
+    {
+      const m = new THREE.MeshStandardMaterial({ color: 0xff6b6b, roughness: 0.7 });
+      const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.21, 0.62, 6, 12), m);
+      body.position.y = 0.86; defender.add(body);
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.18, 16, 12), m);
+      head.position.y = 1.56; defender.add(head);
+    }
+
+    // Aim line
+    let aimLine = null;
+    function setAimLine(a, b){
+      if (aimLine) scene.remove(aimLine);
+      const geo = new THREE.BufferGeometry().setFromPoints([a.clone(), b.clone()]);
+      const mat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent:true, opacity:0.55 });
+      aimLine = new THREE.Line(geo, mat);
+      scene.add(aimLine);
+    }
+    function clearAimLine(){
+      if (aimLine){ scene.remove(aimLine); aimLine = null; }
+    }
+
+    // ============================================================
+    // Game state + Shot clock
+    // ============================================================
+    const GAME = {
+      level: 1,
+      score: 0,
+      shots: 0,
+      possession: "YOU", // YOU | TEAM | DEF
+      slow: false,
+      turnovers: 0,
+      stealsAgainst: 0,
+      shotClock: 24.0
+    };
+
+    function shotClockMax(){
+      // mild difficulty scaling (never below 10)
+      return clamp(24 - (GAME.level - 1) * 1.2, 10, 24);
+    }
+    function resetShotClock(){
+      GAME.shotClock = shotClockMax();
+      clockMaxEl.textContent = `/${shotClockMax().toFixed(0)}`;
+    }
+
+    function updateScoreUI(){
+      scoreEl.textContent = String(GAME.score);
+      shotsEl.textContent = String(GAME.shots);
+      pctEl.textContent = `${GAME.shots ? Math.round((GAME.score/GAME.shots)*100) : 0}%`;
+      posReadEl.textContent = GAME.possession;
+      lvlEl.textContent = String(GAME.level);
+      tosEl.textContent = String(GAME.turnovers);
+      stlEl.textContent = String(GAME.stealsAgainst);
+      clockEl.textContent = GAME.shotClock.toFixed(1);
+      clockMaxEl.textContent = `/${shotClockMax().toFixed(0)}`;
+    }
+    updateScoreUI();
+
+    // ============================================================
+    // Level progression (hoop + NPC positions)
+    // ============================================================
+    function setLevel(level){
+      GAME.level = Math.max(1, Math.floor(level));
+
+      const side = Math.sin(GAME.level * 0.75) * clamp(GAME.level * 0.22, 0, 2.6);
+      const inward = clamp(GAME.level * 0.55, 0, 7.0);
+      const hoopZ = zMin + 2.2 + inward;
+
+      hoopGroup.position.set(side, 0, hoopZ);
+
+      const boardZ = hoopZ - 0.55;
+      board.position.set(0, 3.35, boardZ);
+      pole.position.set(0, 2.1, boardZ - 1.0);
+      rimMesh.position.set(0, rimY, hoopZ);
+
+      player.position.set(0, 0, zMax - 4.5);
+
+      teammate.position.set(
+        clamp(side*0.6 + 1.4*Math.sin(GAME.level*0.9), xMin+1.3, xMax-1.3),
+        0,
+        clamp(lerp(zMax-6.0, hoopZ+4.3, 0.55), zMin+3.0, zMax-3.0)
+      );
+
+      defender.position.set(
+        clamp(-side*0.65 + 1.6*Math.cos(GAME.level*0.7), xMin+1.2, xMax-1.2),
+        0,
+        clamp(player.position.z - 4.6, zMin+2.0, zMax-2.0)
+      );
+
+      resetBall(true);
+      resetShotClock();
+      updateScoreUI();
+    }
+
+    // ============================================================
+    // Ball physics + possession
+    // ============================================================
+    const ball = {
+      held: false,
+      locked: false,
+      heldBy: null, // "YOU" | "TEAM" | "DEF" | null
+      thrown: false,
+      shotActive: false,
+      scoredThisShot: false,
+      pos: new THREE.Vector3(0, ballRadius, zMax - 4.6),
+      vel: new THREE.Vector3(0, 0, 0),
+      prevPos: new THREE.Vector3(0, ballRadius, zMax - 4.6),
+      teamHoldT: 0,
+      defHoldT: 0,
+      throwCooldown: 0
+    };
+
+    function dropBallNear(pos, spread=0.8){
+      ball.held = false;
+      ball.locked = false;
+      ball.heldBy = null;
+      ball.thrown = false;
+      ball.shotActive = false;
+      ball.scoredThisShot = false;
+      ball.vel.set(0,0,0);
+      ball.pos.set(
+        clamp(pos.x + (Math.random()*2-1)*spread, xMin+0.8, xMax-0.8),
+        ballRadius,
+        clamp(pos.z + (Math.random()*2-1)*spread, zMin+1.0, zMax-1.0)
+      );
+      ball.prevPos.copy(ball.pos);
+      ballMesh.position.copy(ball.pos);
+      clearAimLine();
+    }
+
+    function resetBall(soft=false){
+      dropBallNear(player.position.clone().add(new THREE.Vector3(0,0,-0.8)), 0.25);
+      ball.teamHoldT = 0;
+      ball.defHoldT = 0;
+      ball.throwCooldown = 0;
+
+      GAME.possession = "YOU";
+      resetShotClock();
+      updateScoreUI();
+      if (!soft) lastEl.textContent = "—";
+    }
+
+    function collideRim(){
+      const hoopZ = hoopGroup.position.z;
+      const dx = ball.pos.x - hoopGroup.position.x;
+      const dz = ball.pos.z - hoopZ;
+      const d = Math.hypot(dx, dz);
+
+      const tube = 0.03 + ballRadius;
+      const yClose = Math.abs(ball.pos.y - rimY) < (tube * 1.3);
+      if (!yClose) return;
+
+      if (Math.abs(d - rimR) < tube){
+        const nx = dx / (d || 1);
+        const nz = dz / (d || 1);
+        const v = ball.vel;
+        const vn = v.x*nx + v.z*nz;
+        if (vn < 0) {
+          v.x -= 1.7 * vn * nx;
+          v.z -= 1.7 * vn * nz;
+          v.y *= 0.92;
+          v.y += 0.35;
+        }
+        const push = (tube - Math.abs(d - rimR)) * 0.55;
+        ball.pos.x += nx * push;
+        ball.pos.z += nz * push;
+      }
+    }
+
+    function collideBackboard(){
+      const hoopZ = hoopGroup.position.z;
+      const boardZ = hoopZ - 0.55 + 0.04;
+      if (ball.prevPos.z > boardZ && ball.pos.z <= boardZ){
+        const halfW = 0.9, halfH = 0.52;
+        const bx = ball.pos.x - hoopGroup.position.x;
+        const by = ball.pos.y - 3.35;
+        if (Math.abs(bx) <= halfW && Math.abs(by) <= halfH){
+          ball.vel.z = Math.abs(ball.vel.z) * 0.75;
+          ball.vel.x *= 0.9;
+          ball.vel.y *= 0.85;
+          ball.pos.z = boardZ + 0.03;
+        }
+      }
+    }
+
+    function checkScore(){
+      if (!ball.shotActive || ball.scoredThisShot) return;
+
+      const hoopZ = hoopGroup.position.z;
+      const prevY = ball.prevPos.y;
+      const currY = ball.pos.y;
+
+      const dx = ball.pos.x - hoopGroup.position.x;
+      const dz = ball.pos.z - hoopZ;
+      const inside = (Math.hypot(dx, dz) < (rimR - ballRadius*0.25));
+      const nearHoop = Math.abs(ball.pos.z - hoopZ) < (rimR * 1.8);
+
+      if (prevY > rimY && currY <= rimY && inside && nearHoop){
+        ball.scoredThisShot = true;
+        GAME.score++;
+        lastEl.textContent = "SWISH ✅";
+        updateScoreUI();
+
+        // scoring gives you a fresh check + next level
+        setLevel(GAME.level + 1);
+      }
+    }
+
+    function stepPhysics(dt){
+      ball.prevPos.copy(ball.pos);
+
+      const g = Number(gravityEl.value);
+      ball.vel.y += g * dt;
+      ball.vel.multiplyScalar(1 - clamp(dt*0.18, 0, 0.06));
+      ball.pos.addScaledVector(ball.vel, dt);
+
+      // floor
+      if (ball.pos.y < ballRadius){
+        ball.pos.y = ballRadius;
+        if (ball.vel.y < 0) ball.vel.y *= -0.62;
+        ball.vel.x *= 0.86;
+        ball.vel.z *= 0.86;
+      }
+
+      collideBackboard();
+      collideRim();
+      checkScore();
+
+      // out of bounds
+      const out =
+        (ball.pos.x < xMin-2 || ball.pos.x > xMax+2 || ball.pos.z < zMin-2 || ball.pos.z > zMax+2 || ball.pos.y < -3);
+      if (out){
+        lastEl.textContent = "OUT ➜ turnover";
+        forceTurnover("OUT");
+      }
+
+      ballMesh.position.copy(ball.pos);
+    }
+
+    // ============================================================
+    // Hand tracking (MediaPipe Hands)
+    // ============================================================
+    const video = el('video');
+    const overlay = el('overlay');
+    const octx = overlay.getContext('2d');
+
+    let cam = null;
+    let hands = null;
+    let cameraRunning = false;
+
+    function fingerUp(lm, tipIdx, pipIdx){
+      return (lm[tipIdx].y + 0.01) < lm[pipIdx].y;
+    }
+
+    const handState = {
+      present:false,
+      indexUp:false, middleUp:false, ringUp:false, pinkyUp:false,
+      openRaw:false,
+      fistRaw:false,
+      fist:false,
+      prevFist:false,
+      fistOpenT:0,
+      tip:{x:0.5,y:0.5,z:0},
+      wrist:{x:0.5,y:0.5,z:0},
+      moveTarget: new THREE.Vector3(0,0,zMax-4.5),
+      aimMarker: new THREE.Vector3(0,1.6,zMax-5.0),
+      prevAimMarker:null,
+      vel: new THREE.Vector3(0,0,0),
+      speed:0,
+      depthRaw:0,
+      lastT:0
+    };
+
+    function drawLandmarksOnOverlay(results){
+      octx.clearRect(0,0,overlay.width, overlay.height);
+      if (!results.multiHandLandmarks || !results.multiHandLandmarks.length) return;
+      for (const lm of results.multiHandLandmarks){
+        drawConnectors(octx, lm, HAND_CONNECTIONS, { color: '#5df', lineWidth: 2 });
+        drawLandmarks(octx, lm, { color: '#f55', lineWidth: 1, radius: 2 });
+      }
+    }
+
+    function computeDepth(wrist){
+      const depthGain = Number(depthGainEl.value);
+      const dzRaw = clamp((-wrist.z) * 3.0, 0, 1.2);
+      handState.depthRaw = dzRaw;
+      return dzRaw * depthGain;
+    }
+
+    function mapMoveToCourt(wrist){
+      const x = lerp(xMin + 0.8, xMax - 0.8, mx(wrist.x));
+      const z = lerp(zMin + 1.4, zMax - 1.2, wrist.y);
+      return new THREE.Vector3(x, 0, z);
+    }
+
+    function mapAimMarker(tip, wrist){
+      const dx = (mx(tip.x) - mx(wrist.x));
+      const dy = (wrist.y - tip.y);
+      const depth = computeDepth(wrist);
+
+      const side = clamp(dx * 10.0, -2.5, 2.5);
+      const up   = clamp(dy * 7.0, -0.6, 2.4);
+
+      const hoopPos = new THREE.Vector3(hoopGroup.position.x, 0, hoopGroup.position.z);
+      const forward = hoopPos.clone().sub(player.position.clone().setY(0)).setY(0).normalize();
+      const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0,1,0)).normalize();
+
+      const marker = player.position.clone().add(new THREE.Vector3(0, 1.55, 0));
+      marker.add(right.clone().multiplyScalar(clamp(side * 0.22, -0.7, 0.7)));
+      marker.y += clamp(up * 0.28, -0.12, 0.75);
+      marker.add(forward.clone().multiplyScalar(2.0 + depth * 2.2));
+
+      marker.x = clamp(marker.x, xMin+0.7, xMax-0.7);
+      marker.z = clamp(marker.z, zMin+1.0, zMax-1.0);
+      marker.y = clamp(marker.y, 0.9, 5.4);
+      return marker;
+    }
+
+    async function startCamera(){
+      if (cameraRunning) return;
+      statusLine.textContent = "Status: requesting camera…";
+
+      const resizeOverlay = ()=>{
+        overlay.width = overlay.clientWidth;
+        overlay.height = overlay.clientHeight;
+      };
+      resizeOverlay();
+      new ResizeObserver(resizeOverlay).observe(el('camWrap'));
+
+      hands = new Hands({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+      hands.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.7,
+        minTrackingConfidence: 0.7
+      });
+
+      hands.onResults((results)=>{
+        drawLandmarksOnOverlay(results);
+
+        const now = performance.now()/1000;
+
+        if (!results.multiHandLandmarks || !results.multiHandLandmarks.length){
+          handState.present = false;
+          handReadEl.textContent = "—";
+          modeReadEl.textContent = "—";
+          statusLine.textContent = "Status: no hand detected";
+          return;
+        }
+
+        const lm = results.multiHandLandmarks[0];
+        handState.present = true;
+
+        const tip = lm[8];
+        const wrist = lm[0];
+        handState.tip = {x:tip.x,y:tip.y,z:tip.z};
+        handState.wrist = {x:wrist.x,y:wrist.y,z:wrist.z};
+
+        handState.indexUp  = fingerUp(lm, 8, 6);
+        handState.middleUp = fingerUp(lm,12,10);
+        handState.ringUp   = fingerUp(lm,16,14);
+        handState.pinkyUp  = fingerUp(lm,20,18);
+
+        handState.openRaw = handState.indexUp && handState.middleUp && handState.ringUp && handState.pinkyUp;
+        handState.fistRaw = (!handState.indexUp && !handState.middleUp && !handState.ringUp && !handState.pinkyUp);
+
+        const dt = handState.lastT ? (now - handState.lastT) : 0;
+        handState.lastT = now;
+
+        // fist grace
+        const grace = Number(gripGraceEl.value)/1000;
+        handState.prevFist = handState.fist;
+
+        if (handState.fistRaw){
+          handState.fist = true;
+          handState.fistOpenT = 0;
+        } else {
+          if (handState.fist){
+            handState.fistOpenT += (dt || 0);
+            if (handState.fistOpenT > grace){
+              handState.fist = false;
+            }
+          } else {
+            handState.fist = false;
+          }
+        }
+
+        handState.moveTarget.copy(mapMoveToCourt(wrist));
+
+        const aimM = mapAimMarker(tip, wrist);
+        if (dt > 0.0005 && handState.prevAimMarker){
+          handState.vel.copy(aimM).sub(handState.prevAimMarker).divideScalar(dt);
+          handState.speed = handState.vel.length();
+        } else {
+          handState.vel.set(0,0,0);
+          handState.speed = 0;
+        }
+        handState.prevAimMarker = aimM.clone();
+        handState.aimMarker.copy(aimM);
+
+        statusLine.textContent = `Status: ${handState.fist ? "FIST (protect/lock)" : handState.openRaw ? "OPEN (move/dribble)" : "RELAX"} • v=${handState.speed.toFixed(2)}`;
+        handReadEl.textContent =
+          `open=${handState.openRaw?"YES":"NO"} fist=${handState.fist?"YES":"NO"} pinky=${handState.pinkyUp?"UP":"—"} v=${handState.speed.toFixed(2)} depth=${handState.depthRaw.toFixed(2)}`;
+
+        if (ball.held && ball.heldBy === "YOU" && ball.locked){
+          modeReadEl.textContent = handState.pinkyUp ? "PASS 🤝" : "SHOT 🎯";
+        } else {
+          modeReadEl.textContent = "—";
+        }
+      });
+
+      video.autoplay = true;
+      video.playsInline = true;
+      video.muted = true;
+
+      cam = new Camera(video, {
+        onFrame: async () => { await hands.send({ image: video }); },
+        width: 640,
+        height: 480
+      });
+
+      try{
+        await cam.start();
+        cameraRunning = true;
+        statusLine.textContent = "Status: camera ON (show your hand)";
+      } catch (err){
+        statusLine.textContent = "Status: camera ERROR (permission / http / device)";
+        console.error(err);
+      }
+    }
+
+    // ============================================================
+    // Auto pickup on ground collision
+    // ============================================================
+    function autoPickupIfCollide(){
+      if (ball.held || ball.heldBy) return;
+
+      const onGround = ball.pos.y <= (ballRadius + 0.02);
+      const slowEnough = ball.vel.length() < 1.6;
+      if (!onGround || !slowEnough) return;
+
+      const d = player.position.distanceTo(ball.pos);
+      if (d < 0.75){
+        ball.held = true;
+        ball.heldBy = "YOU";
+        ball.locked = false;
+        ball.thrown = false;
+        ball.shotActive = false;
+        ball.scoredThisShot = false;
+        ball.vel.set(0,0,0);
+
+        GAME.possession = "YOU";
+        resetShotClock();
+        lastEl.textContent = "AUTO PICKUP ✅";
+        updateScoreUI();
+      }
+    }
+
+    // ============================================================
+    // Shot clock + turnovers
+    // ============================================================
+    function forceTurnover(reason){
+      GAME.turnovers++;
+      GAME.possession = "DEF";
+      lastEl.textContent = `TURNOVER (${reason}) ⛔`;
+      updateScoreUI();
+
+      // defender immediately “gets it” and after a short beat drops it back on court
+      defenderState.hasBall = true;
+      defenderState.holdT = 0;
+      defenderState.reason = reason;
+
+      ball.held = true;
+      ball.heldBy = "DEF";
+      ball.locked = false;
+      ball.thrown = false;
+      ball.shotActive = false;
+      ball.vel.set(0,0,0);
+
+      clearAimLine();
+    }
+
+    function updateShotClock(dt){
+      // run clock only when YOU possess the ball (held by YOU)
+      const running = (ball.held && ball.heldBy === "YOU");
+      if (!running) return;
+
+      GAME.shotClock = Math.max(0, GAME.shotClock - dt);
+
+      if (GAME.shotClock <= 0){
+        forceTurnover("SHOT CLOCK");
+        resetShotClock();
+      }
+    }
+
+    // ============================================================
+    // Throwing (fist -> open triggers)
+    // ============================================================
+    function ballisticVelocity(from, to, gAbs, time){
+      const dx = to.x - from.x;
+      const dz = to.z - from.z;
+      const dy = to.y - from.y;
+      const vx = dx / time;
+      const vz = dz / time;
+      const vy = (dy + 0.5 * gAbs * time * time) / time;
+      return new THREE.Vector3(vx, vy, vz);
+    }
+
+    function youThrowBall(){
+      if (!ball.held || ball.heldBy !== "YOU") return;
+
+      const relSens = Number(releaseVelEl.value);
+      const tossGain = Number(tossGainEl.value);
+      const speed = handState.speed;
+
+      if (speed < relSens){
+        lastEl.textContent = "NO THROW (soft)";
+        return;
+      }
+
+      const gAbs = Math.abs(Number(gravityEl.value));
+      const hoopPos = new THREE.Vector3(hoopGroup.position.x, rimY, hoopGroup.position.z);
+      const isPass = handState.pinkyUp;
+
+      let target, time;
+      const power01 = clamp((speed - relSens) / 4.0, 0, 1);
+
+      if (isPass){
+        target = teammate.position.clone().add(new THREE.Vector3(0, 1.15, 0));
+        time = lerp(0.70, 0.42, power01);
+        target.y += 0.12;
+      } else {
+        target = hoopPos.clone();
+        const depthBoost = clamp(handState.depthRaw * Number(depthGainEl.value), 0, 1.6);
+        target.y = rimY + 0.18 + clamp(depthBoost * 0.25, 0, 0.55);
+        time = lerp(1.05, 0.72, power01);
+      }
+
+      const baseV = ballisticVelocity(ball.pos, target, gAbs, time);
+
+      const english = handState.vel.clone().multiplyScalar(0.18 * tossGain);
+      english.x = clamp(english.x, -3.2, 3.2);
+      english.y = clamp(english.y, -1.2, 3.2);
+      english.z = clamp(english.z, -3.2, 3.2);
+
+      const v = baseV.add(english);
+
+      ball.held = false;
+      ball.locked = false;
+      ball.heldBy = null;
+      ball.thrown = true;
+      ball.shotActive = !isPass;
+      ball.scoredThisShot = false;
+      ball.vel.copy(v);
+
+      if (!isPass) GAME.shots += 1;
+
+      // reset clock on shot attempt (simple + game-feel)
+      if (!isPass) resetShotClock();
+
+      updateScoreUI();
+      lastEl.textContent = isPass ? "PASS 🤝" : "SHOT 🎯";
+      clearAimLine();
+
+      ball.throwCooldown = 0.25;
+    }
+
+    // ============================================================
+    // Team catch/return
+    // ============================================================
+    function teamTryCatch(){
+      if (ball.held) return false;
+      const catchPos = teammate.position.clone().add(new THREE.Vector3(0, 1.15, 0));
+      const d = catchPos.distanceTo(ball.pos);
+      const catchable = d < 0.55 && ball.pos.y < 2.0 && Math.abs(ball.vel.y) < 7.0;
+      if (!catchable) return false;
+
+      ball.held = true;
+      ball.heldBy = "TEAM";
+      ball.locked = false;
+      ball.vel.set(0,0,0);
+      ball.thrown = false;
+      ball.shotActive = false;
+      ball.teamHoldT = 0.0;
+
+      GAME.possession = "TEAM";
+      updateScoreUI();
+      lastEl.textContent = "TEAM CATCH 🟦";
+      return true;
+    }
+
+    function teamHoldAndReturn(dt){
+      ball.teamHoldT += dt;
+      const holdPos = teammate.position.clone().add(new THREE.Vector3(0, 1.15, 0));
+      ball.pos.lerp(holdPos, 1 - Math.pow(0.001, dt));
+      ballMesh.position.copy(ball.pos);
+
+      if (ball.teamHoldT > 0.55){
+        const gAbs = Math.abs(Number(gravityEl.value));
+        const target = player.position.clone().add(new THREE.Vector3(0, 1.25, 0));
+        const time = 0.55;
+        const v = ballisticVelocity(ball.pos, target, gAbs, time);
+
+        ball.held = false;
+        ball.heldBy = null;
+        ball.thrown = true;
+        ball.shotActive = false;
+        ball.vel.copy(v);
+
+        GAME.possession = "YOU";
+        resetShotClock();
+        updateScoreUI();
+        lastEl.textContent = "RETURN PASS 🔁";
+      }
+    }
+
+    // ============================================================
+    // Defender logic (steal + returns ball)
+    // ============================================================
+    const defenderState = {
+      hasBall: false,
+      holdT: 0,
+      stealCooldown: 0,
+      reason: ""
+    };
+
+    function updateDefender(dt){
+      // basic “guard” positioning: stay between player and hoop, with some lateral jitter
+      const hoopPos0 = new THREE.Vector3(hoopGroup.position.x, 0, hoopGroup.position.z);
+      const p0 = player.position.clone().setY(0);
+      const toHoop = hoopPos0.clone().sub(p0).setY(0);
+      const distPH = Math.max(0.001, toHoop.length());
+      const dirPH = toHoop.clone().multiplyScalar(1/distPH);
+
+      const right = new THREE.Vector3().crossVectors(dirPH, new THREE.Vector3(0,1,0)).normalize();
+      const t = performance.now()/1000;
+
+      const guardDist = clamp(2.2 - GAME.level*0.05, 1.4, 2.2);
+      const lateral = Math.sin(t*0.85 + GAME.level*0.7) * clamp(0.9 + GAME.level*0.05, 0.9, 1.5);
+      const target = p0.clone()
+        .add(dirPH.clone().multiplyScalar(-guardDist))
+        .add(right.clone().multiplyScalar(lateral));
+
+      target.x = clamp(target.x, xMin+1.0, xMax-1.0);
+      target.z = clamp(target.z, zMin+1.5, zMax-1.5);
+
+      // move defender
+      const cur = defender.position.clone();
+      const to = target.clone().sub(cur);
+      const d = Math.hypot(to.x, to.z);
+      const speed = clamp(6.4 + GAME.level*0.25, 6.4, 10.0);
+
+      if (d > 0.01){
+        const step = Math.min(d, speed * dt);
+        to.multiplyScalar(step / (d || 1));
+        defender.position.x += to.x;
+        defender.position.z += to.z;
+      }
+
+      // steal attempt
+      defenderState.stealCooldown = Math.max(0, defenderState.stealCooldown - dt);
+
+      const youHaveBall = ball.held && ball.heldBy === "YOU";
+      if (youHaveBall && defenderState.stealCooldown <= 0){
+        const dist = defender.position.distanceTo(player.position);
+        const close = dist < 0.95;
+
+        if (close){
+          // if you’re locked (fist), it’s harder to steal
+          const baseRate = handState.fist ? 0.35 : 1.1;  // steals per second (rough)
+          const lvlBoost = 1 + clamp((GAME.level-1)*0.06, 0, 0.45);
+          const moveBoost = handState.openRaw ? 1.15 : 0.95;
+
+          const rate = baseRate * lvlBoost * moveBoost;
+          const p = chanceFromRate(rate, dt);
+
+          if (Math.random() < p){
+            // STEAL
+            GAME.stealsAgainst++;
+            updateScoreUI();
+            lastEl.textContent = "STOLEN 🟥 (make a FIST to protect!)";
+
+            defenderState.hasBall = true;
+            defenderState.holdT = 0;
+            defenderState.stealCooldown = 0.85; // cooldown until next attempt
+            GAME.possession = "DEF";
+            resetShotClock();
+
+            // transfer possession
+            ball.held = true;
+            ball.heldBy = "DEF";
+            ball.locked = false;
+            ball.thrown = false;
+            ball.shotActive = false;
+            ball.vel.set(0,0,0);
+            clearAimLine();
+          }
+        }
+      }
+
+      // if defender has ball, hold briefly then drop to ground (so you can recover)
+      if (ball.held && ball.heldBy === "DEF"){
+        defenderState.holdT += dt;
+
+        const holdPos = defender.position.clone().add(new THREE.Vector3(0, 1.05, 0));
+        ball.pos.lerp(holdPos, 1 - Math.pow(0.001, dt));
+        ballMesh.position.copy(ball.pos);
+
+        // defender “resets play” by dropping ball near midcourt after a moment
+        if (defenderState.holdT > 0.85){
+          defenderState.hasBall = false;
+          defenderState.holdT = 0;
+
+          const mid = new THREE.Vector3(0, 0, (zMin+zMax)/2);
+          dropBallNear(mid, 1.2);
+
+          GAME.possession = "YOU";   // you can go pick it up
+          resetShotClock();
+          updateScoreUI();
+          lastEl.textContent = "BALL DROPPED — GO GET IT ⚡";
+        }
+      }
+    }
+
+    // ============================================================
+    // Player movement: open = move (dribble), fist = stop
+    // ============================================================
+    const playerMove = { speed: 8.5, target: new THREE.Vector3(0,0,zMax-4.5) };
+    let prevPlayerPos = new THREE.Vector3();
+
+    function updatePlayer(dt){
+      if (!handState.present) return;
+
+      if (ball.throwCooldown > 0) return;
+
+      // stop movement if fist is on OR if defender has ball
+      if (handState.fist) return;
+      if (ball.held && ball.heldBy === "DEF") return;
+
+      // move only when open-hand is detected
+      if (!handState.openRaw) return;
+
+      playerMove.target.copy(handState.moveTarget);
+      playerMove.target.x = clamp(playerMove.target.x, xMin+0.7, xMax-0.7);
+      playerMove.target.z = clamp(playerMove.target.z, zMin+1.0, zMax-1.0);
+
+      const cur = player.position.clone();
+      const to = playerMove.target.clone().sub(cur);
+      const d = Math.hypot(to.x, to.z);
+
+      if (d > 0.01){
+        const step = Math.min(d, playerMove.speed * dt);
+        to.multiplyScalar(step / (d || 1));
+        player.position.x += to.x;
+        player.position.z += to.z;
+      }
+
+      // teammate wander a bit
+      const t = performance.now()/1000;
+      teammate.position.x = clamp(teammate.position.x + Math.sin(t*0.85 + GAME.level)*dt*0.9, xMin+1.2, xMax-1.2);
+    }
+
+    // ============================================================
+    // DRIBBLE + LOCK (carry behavior)
+    // ============================================================
+    let dribblePhase = 0;
+
+    function carryBall(dt){
+      // compute player speed for dribble intensity
+      const dv = player.position.clone().sub(prevPlayerPos);
+      const moveSpeed = dt > 0 ? (Math.hypot(dv.x, dv.z) / dt) : 0;
+
+      const hoopPos = new THREE.Vector3(hoopGroup.position.x, 0, hoopGroup.position.z);
+      const forward = hoopPos.clone().sub(player.position.clone().setY(0)).setY(0).normalize();
+      const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0,1,0)).normalize();
+
+      // dribble: if moving, bounce to the floor; if not moving, simple light bob
+      const moving = moveSpeed > 0.35 && handState.openRaw;
+      const handHeight = 1.12;
+      const minY = ballRadius + 0.02;
+
+      if (moving){
+        dribblePhase += dt * (7.0 + moveSpeed * 0.85);
+      } else {
+        dribblePhase += dt * 2.8;
+      }
+
+      const bounce = Math.pow(Math.abs(Math.sin(dribblePhase)), 0.55); // 0..1, bouncy
+      const y = moving
+        ? lerp(minY, handHeight, bounce)
+        : (handHeight - 0.06 + 0.04*Math.sin(dribblePhase*1.2));
+
+      const dribbleSide = 0.26; // slightly to the right
+      const forwardOffset = 0.22;
+
+      const carryPos = player.position.clone()
+        .add(new THREE.Vector3(0, y, 0))
+        .add(right.clone().multiplyScalar(dribbleSide))
+        .add(forward.clone().multiplyScalar(forwardOffset));
+
+      ball.pos.lerp(carryPos, 1 - Math.pow(0.001, dt));
+      ballMesh.position.copy(ball.pos);
+      clearAimLine();
+    }
+
+    function lockBall(dt){
+      const hoopPos = new THREE.Vector3(hoopGroup.position.x, rimY, hoopGroup.position.z);
+      const forward = hoopPos.clone().sub(player.position.clone().setY(0)).setY(0).normalize();
+      const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0,1,0)).normalize();
+
+      const base = player.position.clone()
+        .add(new THREE.Vector3(0, 1.25, 0))
+        .add(forward.clone().multiplyScalar(0.45));
+
+      const offset = handState.aimMarker.clone().sub(player.position.clone().add(new THREE.Vector3(0,1.25,0)));
+      offset.x = clamp(offset.x, -2.2, 2.2);
+      offset.y = clamp(offset.y, -0.3, 2.2);
+      offset.z = clamp(offset.z, -2.0, 2.0);
+
+      const holdPos = base
+        .add(right.clone().multiplyScalar(clamp(offset.x*0.22, -0.55, 0.55)))
+        .add(new THREE.Vector3(0, clamp(offset.y*0.28, -0.12, 0.65), 0))
+        .add(forward.clone().multiplyScalar(clamp(offset.z*0.12, -0.25, 0.55)));
+
+      ball.pos.lerp(holdPos, 1 - Math.pow(0.001, dt));
+      ballMesh.position.copy(ball.pos);
+
+      const target = handState.pinkyUp
+        ? teammate.position.clone().add(new THREE.Vector3(0,1.2,0))
+        : hoopPos.clone().setY(rimY + 0.10);
+
+      setAimLine(ball.pos, target);
+    }
+
+    // ============================================================
+    // First-person camera
+    // ============================================================
+    const CAM = { FP:0, TP:1, RIM:2 };
+    let camMode = CAM.FP;
+
+    function setCamMode(m){
+      camMode = m;
+      camBtn.textContent = `View: ${m===CAM.FP?"FP":m===CAM.TP?"3P":"RIM"}`;
+    }
+
+    function updateCamera(dt){
+      const hoopPos = new THREE.Vector3(hoopGroup.position.x, rimY, hoopGroup.position.z);
+      const head = player.position.clone().add(new THREE.Vector3(0, 1.68, 0));
+
+      const target = (ball.held && ball.heldBy==="YOU" && ball.locked)
+        ? (handState.pinkyUp ? teammate.position.clone().add(new THREE.Vector3(0,1.2,0)) : hoopPos.clone())
+        : hoopPos.clone();
+
+      const forward = target.clone().sub(head).normalize();
+
+      if (camMode === CAM.FP){
+        playerBody.visible = false;
+        playerHead.visible = false;
+        reticleEl.classList.remove('hidden');
+
+        const camPos = head.clone().add(new THREE.Vector3(0, 0.03, 0)).add(forward.clone().multiplyScalar(0.05));
+        camera.position.lerp(camPos, 1 - Math.pow(0.001, dt));
+        const look = head.clone().add(forward.clone().multiplyScalar(10)).add(new THREE.Vector3(0, 0.05, 0));
+        camera.lookAt(look);
+      } else if (camMode === CAM.TP){
+        playerBody.visible = true;
+        playerHead.visible = true;
+        reticleEl.classList.add('hidden');
+
+        const desired = head.clone()
+          .add(forward.clone().multiplyScalar(-8.2))
+          .add(new THREE.Vector3(0, 2.0, 0));
+
+        camera.position.lerp(desired, 1 - Math.pow(0.001, dt));
+        camera.lookAt(head.clone().add(forward.clone().multiplyScalar(6.0)));
+      } else {
+        playerBody.visible = true;
+        playerHead.visible = true;
+        reticleEl.classList.add('hidden');
+
+        const desired = hoopPos.clone().add(new THREE.Vector3(0, 1.2, 4.2));
+        camera.position.lerp(desired, 1 - Math.pow(0.001, dt));
+        camera.lookAt(hoopPos);
+      }
+    }
+
+    // ============================================================
+    // Main loop
+    // ============================================================
+    const clock = new THREE.Clock();
+
+    function animate(){
+      requestAnimationFrame(animate);
+
+      const dtRaw = clock.getDelta();
+      const dt = clamp(dtRaw, 0, 0.033) * (GAME.slow ? 0.35 : 1.0);
+
+      // cooldown tick
+      if (ball.throwCooldown > 0) ball.throwCooldown = Math.max(0, ball.throwCooldown - dt);
+
+      // store previous player pos for dribble
+      prevPlayerPos.copy(player.position);
+
+      // movement + defender
+      updatePlayer(dt);
+      updateDefender(dt);
+
+      // physics if ball in air
+      if (!ball.held && (ball.thrown || ball.shotActive)){
+        stepPhysics(dt);
+      }
+
+      // auto pickup
+      autoPickupIfCollide();
+
+      // shot clock
+      updateShotClock(dt);
+
+      // possession: YOU
+      if (ball.held && ball.heldBy === "YOU"){
+        const wasLocked = ball.locked;
+        ball.locked = !!handState.fist;
+
+        if (ball.locked) lockBall(dt);
+        else carryBall(dt);
+
+        // release event: fist -> open triggers throw
+        const openingNow = (handState.indexUp || handState.middleUp || handState.ringUp || handState.pinkyUp);
+        if (handState.prevFist && !handState.fist && wasLocked && openingNow){
+          youThrowBall();
+        }
+      }
+
+      // team catch/return
+      if (!ball.held) teamTryCatch();
+      if (ball.held && ball.heldBy === "TEAM") teamHoldAndReturn(dt);
+
+      // UI updates
+      ballReadEl.textContent =
+        `held=${ball.held ? (ball.heldBy||"YES") : "NO"} locked=${ball.locked?"YES":"NO"} v=${ball.vel.length().toFixed(2)}`;
+
+      // clock visual warning
+      if (ball.held && ball.heldBy === "YOU" && GAME.shotClock <= 5.0){
+        clockEl.style.opacity = "1";
+        clockEl.style.textShadow = "0 0 10px rgba(255,120,120,.55)";
+      } else {
+        clockEl.style.textShadow = "none";
+      }
+
+      updateScoreUI();
+      updateCamera(dt);
+
+      renderer.render(scene, camera);
+    }
+
+    // ============================================================
+    // Buttons
+    // ============================================================
+    startCamBtn.addEventListener('click', startCamera);
+
+    resetBallBtn.addEventListener('click', ()=> resetBall(false));
+
+    resetScoreBtn.addEventListener('click', ()=>{
+      GAME.score = 0;
+      GAME.shots = 0;
+      GAME.turnovers = 0;
+      GAME.stealsAgainst = 0;
+      lastEl.textContent = "—";
+      resetShotClock();
+      updateScoreUI();
+    });
+
+    slowBtn.addEventListener('click', ()=>{
+      GAME.slow = !GAME.slow;
+      slowBtn.textContent = `Slow: ${GAME.slow ? "ON" : "OFF"}`;
+    });
+
+    camBtn.addEventListener('click', ()=>{
+      const next = (camMode + 1) % 3;
+      setCamMode(next);
+    });
+
+    levelBtn.addEventListener('click', ()=> setLevel(GAME.level + 1));
+
+    // ============================================================
+    // Init
+    // ============================================================
+    function init(){
+      setLevel(1);
+      setCamMode(CAM.FP);
+      resetShotClock();
+      updateScoreUI();
+      // Serve locally (camera needs https or localhost):
+      // `python -m http.server 8000` then open http://localhost:8000
+    }
+    init();
+    animate();
+
+    addEventListener('resize', ()=>{
+      camera.aspect = innerWidth/innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+  </script>
+</body>
+</html>

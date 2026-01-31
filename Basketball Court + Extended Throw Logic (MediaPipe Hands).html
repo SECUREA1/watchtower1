@@ -1,0 +1,1078 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Basketball Court + Extended Throw Logic (MediaPipe Hands)</title>
+
+  <style>
+    :root{
+      --bg:#0b1020;
+      --panel: rgba(18, 24, 46, 0.86);
+      --panel2: rgba(10, 14, 28, 0.78);
+      --text:#e9edff;
+      --muted: rgba(233,237,255,.75);
+      --line: rgba(255,255,255,.12);
+      --accent: rgba(122,167,255,.22);
+      --good: rgba(48,209,88,.85);
+      --bad: rgba(255,69,58,.85);
+    }
+    html,body{height:100%;margin:0;background:radial-gradient(1200px 800px at 50% 20%, #18245a, var(--bg));color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;overflow:hidden;}
+    .wrap{display:grid;grid-template-columns:1fr 380px;gap:14px;height:100%;padding:14px;box-sizing:border-box;}
+    .stage{position:relative;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.02));box-shadow:0 18px 60px rgba(0,0,0,.35);}
+    canvas{width:100%;height:100%;display:block;}
+    .hud{
+      position:absolute;top:10px;left:10px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;
+      padding:10px 12px;border-radius:14px;background:var(--panel2);border:1px solid var(--line);backdrop-filter:blur(10px);user-select:none;
+      z-index:5;
+    }
+    .pill{
+      padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid var(--line);
+      font-size:13px;color:var(--muted);display:inline-flex;gap:8px;align-items:center;white-space:nowrap;
+    }
+    .pill b{color:var(--text);font-weight:800;}
+    .btn{
+      cursor:pointer;padding:7px 10px;border-radius:12px;border:1px solid var(--line);
+      background:var(--accent);color:var(--text);font-weight:800;font-size:13px;
+      transition:transform .05s ease, background .15s ease;
+    }
+    .btn:hover{background:rgba(122,167,255,.30);}
+    .btn:active{transform:translateY(1px);}
+
+    .panel{
+      border:1px solid var(--line);border-radius:16px;background:var(--panel);backdrop-filter:blur(10px);
+      box-shadow:0 18px 60px rgba(0,0,0,.25);overflow:hidden;display:flex;flex-direction:column;min-width:0;
+    }
+    .panel header{padding:12px 14px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:baseline;gap:10px;}
+    .panel header h2{margin:0;font-size:15px;letter-spacing:.2px;}
+    .panel header .small{color:var(--muted);font-size:12px;}
+    .controls{padding:12px 14px;overflow:auto;}
+    .row{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.07);}
+    .row:last-child{border-bottom:0;}
+    .row label{font-size:13px;color:var(--muted);}
+    .row output{font-size:12px;color:var(--text);opacity:.9;min-width:76px;text-align:right;font-variant-numeric: tabular-nums;}
+    input[type="range"]{width:100%;}
+    select{
+      width:100%;
+      background:rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.14);
+      color:rgba(233,237,255,.92);
+      border-radius:10px;
+      padding:8px 10px;
+      outline:none;
+    }
+    .note{padding:12px 14px;border-top:1px solid var(--line);color:var(--muted);font-size:12px;line-height:1.45;}
+    .note b{color:var(--text);}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New";}
+
+    /* Camera preview */
+    .camPanel{
+      margin-top:12px;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(10,12,18,.50);
+      border-radius:14px;
+      padding:10px;
+    }
+    .camPanel h3{margin:0 0 8px;font-size:12px;letter-spacing:.3px;color:rgba(233,237,255,.92);}
+    .camWrap{
+      width:100%;
+      border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.14);
+      background:rgba(255,255,255,.04);
+      position:relative;
+      aspect-ratio: 4 / 3;
+      display:none;
+    }
+    #webcam{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);opacity:.92;}
+    #overlay{position:absolute;inset:0;width:100%;height:100%;transform:scaleX(-1);pointer-events:none;}
+    #statusLine{margin-top:8px;font-size:12px;color:rgba(233,237,255,.86);}
+
+    .toast{
+      position:absolute;left:50%;bottom:14px;transform:translateX(-50%);
+      padding:10px 12px;border-radius:14px;background:rgba(0,0,0,.55);border:1px solid var(--line);
+      color:var(--text);font-size:13px;display:none;max-width:85%;text-align:center;backdrop-filter:blur(10px);z-index:6;
+    }
+
+    .clickShield{
+      position:absolute; inset:0;
+      display:flex; align-items:center; justify-content:center;
+      background:rgba(0,0,0,.35);
+      z-index:7;
+    }
+    .clickShieldInner{
+      padding:14px 16px;
+      border-radius:16px;
+      border:1px solid rgba(255,255,255,.18);
+      background:rgba(10,12,18,.68);
+      backdrop-filter:blur(10px);
+      text-align:center;
+      max-width:min(520px, 90%);
+      box-shadow: 0 18px 60px rgba(0,0,0,.45);
+    }
+    .clickShieldInner .title{font-weight:900;letter-spacing:.2px;margin-bottom:6px;}
+    .clickShieldInner .sub{color:rgba(233,237,255,.75);font-size:13px;line-height:1.4;}
+    .clickShieldInner .hint{margin-top:10px;font-size:12px;color:rgba(233,237,255,.72);}
+    .clickShieldInner button{
+      margin-top:12px;
+      width:100%;
+      padding:10px 12px;
+      border-radius:14px;
+      border:1px solid rgba(122,167,255,.35);
+      background:rgba(122,167,255,.20);
+      color:rgba(233,237,255,.95);
+      font-weight:900;
+      cursor:pointer;
+    }
+    .clickShieldInner button:hover{background:rgba(122,167,255,.28);}
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="stage">
+      <canvas id="game"></canvas>
+
+      <div class="hud">
+        <span class="pill">Score: <b id="score">0</b></span>
+        <span class="pill">Coins: <b id="coins">0</b></span>
+        <span class="pill">Held: <b id="held">None</b></span>
+        <button class="btn" id="start">Start Camera</button>
+        <button class="btn" id="reset">Reset</button>
+        <button class="btn" id="toggleDebug">Debug: ON</button>
+        <button class="btn" id="togglePreview">Preview: OFF</button>
+      </div>
+
+      <div class="toast" id="toast"></div>
+
+      <!-- Browser camera policies usually require a click. This overlay ensures it starts. -->
+      <div class="clickShield" id="clickShield">
+        <div class="clickShieldInner">
+          <div class="title">Enable Camera</div>
+          <div class="sub">
+            This game needs your webcam for hand tracking.<br/>
+            Click below (or click anywhere) to start.
+          </div>
+          <button id="clickToStart">Start Camera Now</button>
+          <div class="hint mono">Tip: run from <b>http://localhost</b> or HTTPS.</div>
+        </div>
+      </div>
+    </div>
+
+    <aside class="panel">
+      <header>
+        <h2>Tuner</h2>
+        <div class="small">fist hold → open release (extended throw)</div>
+      </header>
+
+      <div class="controls">
+        <div class="row">
+          <div>
+            <label>Grab mode</label>
+            <select id="grabMode">
+              <option value="fist" selected>Fist (CLOSE = hold)</option>
+              <option value="pinch">Pinch (thumb-index)</option>
+            </select>
+          </div>
+          <output class="mono" id="grabModeOut">fist</output>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Release sensitivity (peak velocity) <span class="mono" id="relOut">0.18</span></label>
+            <input id="releaseThresh" type="range" min="0.05" max="0.45" step="0.01" value="0.18">
+          </div>
+          <output class="mono" id="releaseThreshOut">0.18</output>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Hand velocity gain <span class="mono" id="vGainOut">1.00</span></label>
+            <input id="vGain" type="range" min="0.4" max="2.0" step="0.01" value="1.00">
+          </div>
+          <output class="mono" id="vGainOut2">1.00</output>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Throw multiplier <span class="mono" id="throwMulOut">6.5</span></label>
+            <input id="throwMul" type="range" min="0.5" max="14" step="0.1" value="6.5">
+          </div>
+          <output class="mono" id="throwMulOut2">6.5</output>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Aim assist (to hoop) <span class="mono" id="aimAssistOut">0.35</span></label>
+            <input id="aimAssist" type="range" min="0" max="1" step="0.01" value="0.35">
+          </div>
+          <output class="mono" id="aimAssistOut2">0.35</output>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Spin gain <span class="mono" id="spinGainOut">8.0</span></label>
+            <input id="spinGain" type="range" min="1" max="18" step="0.1" value="8.0">
+          </div>
+          <output class="mono" id="spinGainOut2">8.0</output>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Magnus curve strength <span class="mono" id="magnusOut">0.030</span></label>
+            <input id="magnusK" type="range" min="0" max="0.10" step="0.001" value="0.030">
+          </div>
+          <output class="mono" id="magnusKOut">0.030</output>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Gravity <span class="mono" id="gravityOut">-14.0</span></label>
+            <input id="gravity" type="range" min="-30" max="-1" step="0.5" value="-14">
+          </div>
+          <output class="mono" id="gravityOut2">-14.0</output>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Floor bounce <span class="mono" id="bounceOut">0.68</span></label>
+            <input id="bounce" type="range" min="0.10" max="0.95" step="0.01" value="0.68">
+          </div>
+          <output class="mono" id="bounceOut2">0.68</output>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Pinch threshold (if pinch mode) <span class="mono" id="pinchOut">0.085</span></label>
+            <input id="pinchThreshold" type="range" min="0.01" max="0.25" step="0.005" value="0.085">
+          </div>
+          <output class="mono" id="pinchOut2">0.085</output>
+        </div>
+
+        <div class="camPanel">
+          <h3>Camera</h3>
+          <div class="camWrap" id="camWrap">
+            <video id="webcam" autoplay playsinline muted></video>
+            <canvas id="overlay"></canvas>
+          </div>
+          <div id="statusLine" class="mono">Status: camera OFF</div>
+        </div>
+      </div>
+
+      <div class="note">
+        <b>How it throws now (extended logic):</b><br/>
+        • Detects <b>hand closed</b> (fist) to hold the ball<br/>
+        • On <b>closed → open</b>, it throws only if <b>peak hand speed</b> exceeds your Release Sensitivity<br/>
+        • Uses hand motion + optional <b>aim assist</b> + optional <b>spin curve</b>
+      </div>
+    </aside>
+  </div>
+
+  <!-- MediaPipe Hands (legacy) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+
+  <script>
+    // -----------------------------
+    // Utilities
+    // -----------------------------
+    const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+    const lerp  = (a,b,t)=>a+(b-a)*t;
+    const len2  = (x,y)=>Math.hypot(x,y);
+
+    function rotate2D(x,y,ang){
+      const c=Math.cos(ang), s=Math.sin(ang);
+      return { x: x*c - y*s, y: x*s + y*c };
+    }
+
+    function dist3(a,b){
+      const dx=a.x-b.x, dy=a.y-b.y, dz=(a.z||0)-(b.z||0);
+      return Math.hypot(dx,dy,dz);
+    }
+
+    function unwrapAngle(prev, curr){
+      let d = curr - prev;
+      while (d > Math.PI) d -= 2*Math.PI;
+      while (d < -Math.PI) d += 2*Math.PI;
+      return prev + d;
+    }
+
+    // Closure heuristic: fingertip-to-MCP distances normalized by wrist-to-MCP baseline
+    function isHandClosed(lm){
+      const wrist = lm[0];
+      const idxM = lm[5], midM = lm[9], ringM = lm[13], pinkyM = lm[17];
+      const idxT = lm[8], midT = lm[12], ringT = lm[16], pinkyT = lm[20];
+
+      const base = (dist3(wrist, idxM)+dist3(wrist, midM)+dist3(wrist, ringM)+dist3(wrist, pinkyM))/4;
+      if (base < 1e-6) return false;
+
+      const curls = [
+        dist3(idxT, idxM)/base,
+        dist3(midT, midM)/base,
+        dist3(ringT, ringM)/base,
+        dist3(pinkyT, pinkyM)/base
+      ];
+      const curled = curls.filter(v=>v < 0.72).length;
+      return curled >= 3;
+    }
+
+    // Finger direction angle (index MCP -> index tip)
+    function fingerAngle(lm){
+      const idxM = lm[5], idxT = lm[8];
+      return Math.atan2(idxT.y - idxM.y, idxT.x - idxM.x);
+    }
+
+    // -----------------------------
+    // DOM
+    // -----------------------------
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+
+    const scoreEl = document.getElementById("score");
+    const coinsEl = document.getElementById("coins");
+    const heldEl  = document.getElementById("held");
+
+    const btnStart = document.getElementById("start");
+    const btnReset = document.getElementById("reset");
+    const btnDebug = document.getElementById("toggleDebug");
+    const btnPrev  = document.getElementById("togglePreview");
+
+    const clickShield = document.getElementById("clickShield");
+    const clickToStart = document.getElementById("clickToStart");
+
+    const toastEl = document.getElementById("toast");
+    const camWrap = document.getElementById("camWrap");
+    const video = document.getElementById("webcam");
+    const overlay = document.getElementById("overlay");
+    const octx = overlay.getContext("2d");
+    const statusLine = document.getElementById("statusLine");
+
+    const ui = {
+      grabMode: document.getElementById("grabMode"),
+      grabModeOut: document.getElementById("grabModeOut"),
+
+      releaseThresh: document.getElementById("releaseThresh"),
+      releaseThreshOut: document.getElementById("releaseThreshOut"),
+      relOut: document.getElementById("relOut"),
+
+      vGain: document.getElementById("vGain"),
+      vGainOut: document.getElementById("vGainOut"),
+      vGainOut2: document.getElementById("vGainOut2"),
+
+      throwMul: document.getElementById("throwMul"),
+      throwMulOut: document.getElementById("throwMulOut"),
+      throwMulOut2: document.getElementById("throwMulOut2"),
+
+      aimAssist: document.getElementById("aimAssist"),
+      aimAssistOut: document.getElementById("aimAssistOut"),
+      aimAssistOut2: document.getElementById("aimAssistOut2"),
+
+      spinGain: document.getElementById("spinGain"),
+      spinGainOut: document.getElementById("spinGainOut"),
+      spinGainOut2: document.getElementById("spinGainOut2"),
+
+      magnusK: document.getElementById("magnusK"),
+      magnusKOut: document.getElementById("magnusKOut"),
+
+      gravity: document.getElementById("gravity"),
+      gravityOut: document.getElementById("gravityOut"),
+      gravityOut2: document.getElementById("gravityOut2"),
+
+      bounce: document.getElementById("bounce"),
+      bounceOut: document.getElementById("bounceOut"),
+      bounceOut2: document.getElementById("bounceOut2"),
+
+      pinchThreshold: document.getElementById("pinchThreshold"),
+      pinchOut: document.getElementById("pinchOut"),
+      pinchOut2: document.getElementById("pinchOut2"),
+    };
+
+    function syncTuner(){
+      ui.grabModeOut.textContent = ui.grabMode.value;
+
+      ui.releaseThreshOut.textContent = Number(ui.releaseThresh.value).toFixed(2);
+      ui.relOut.textContent = Number(ui.releaseThresh.value).toFixed(2);
+
+      ui.vGainOut.textContent = Number(ui.vGain.value).toFixed(2);
+      ui.vGainOut2.textContent = Number(ui.vGain.value).toFixed(2);
+
+      ui.throwMulOut.textContent = Number(ui.throwMul.value).toFixed(1);
+      ui.throwMulOut2.textContent = Number(ui.throwMul.value).toFixed(1);
+
+      ui.aimAssistOut.textContent = Number(ui.aimAssist.value).toFixed(2);
+      ui.aimAssistOut2.textContent = Number(ui.aimAssist.value).toFixed(2);
+
+      ui.spinGainOut.textContent = Number(ui.spinGain.value).toFixed(1);
+      ui.spinGainOut2.textContent = Number(ui.spinGain.value).toFixed(1);
+
+      ui.magnusKOut.textContent = Number(ui.magnusK.value).toFixed(3);
+
+      ui.gravityOut.textContent = Number(ui.gravity.value).toFixed(1);
+      ui.gravityOut2.textContent = Number(ui.gravity.value).toFixed(1);
+
+      ui.bounceOut.textContent = Number(ui.bounce.value).toFixed(2);
+      ui.bounceOut2.textContent = Number(ui.bounce.value).toFixed(2);
+
+      ui.pinchOut.textContent = Number(ui.pinchThreshold.value).toFixed(3);
+      ui.pinchOut2.textContent = Number(ui.pinchThreshold.value).toFixed(3);
+    }
+    Object.values(ui).forEach(el=>{
+      if (el && (el.tagName === "INPUT" || el.tagName === "SELECT")) el.addEventListener("input", syncTuner);
+    });
+    syncTuner();
+
+    // -----------------------------
+    // Resize
+    // -----------------------------
+    function resize() {
+      const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = Math.floor(rect.width * dpr);
+      canvas.height = Math.floor(rect.height * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    window.addEventListener("resize", resize);
+    resize();
+
+    // -----------------------------
+    // Court (world)
+    // -----------------------------
+    const COURT = { w: 28, h: 15 };
+    const HOOP  = { x: COURT.w - 1.6, y: COURT.h/2, r: 0.55 };
+    const BACKBOARD = { x: COURT.w - 1.1, y: COURT.h/2, w: 0.1, h: 2.6 };
+    const BALL_RADIUS = 0.28;
+
+    // -----------------------------
+    // Camera (world->screen)
+    // -----------------------------
+    const camera = {
+      pos: { x: COURT.w/2, y: COURT.h/2 },
+      yaw: 0,
+      zoom: 52
+    };
+
+    function applyCameraTransform() {
+      const w = canvas.getBoundingClientRect().width;
+      const h = canvas.getBoundingClientRect().height;
+      const cx = w/2, cy = h/2;
+
+      camera.zoom = 52; // fixed for this version; easy to add slider again if you want
+
+      ctx.setTransform(1,0,0,1,0,0);
+      ctx.translate(cx, cy);
+      ctx.scale(camera.zoom, -camera.zoom);
+      ctx.rotate(-camera.yaw);
+      ctx.translate(-camera.pos.x, -camera.pos.y);
+    }
+
+    function screenToWorld(px, py) {
+      const w = canvas.getBoundingClientRect().width;
+      const h = canvas.getBoundingClientRect().height;
+      const cx = w/2, cy = h/2;
+
+      const zoom = 52;
+      const dx = (px - cx)/zoom;
+      const dy = -(py - cy)/zoom;
+
+      const r = rotate2D(dx, dy, +camera.yaw);
+      return { x: r.x + camera.pos.x, y: r.y + camera.pos.y };
+    }
+
+    // -----------------------------
+    // Game state
+    // -----------------------------
+    let debug = true;
+    let preview = false;
+
+    let score = 0;
+    let coins = 0;
+    let balls = [];
+    let ballLoaded = false; // kept (used if you re-add buy mechanic later)
+
+    function makeBall(opts = {}) {
+      return {
+        id: crypto.randomUUID(),
+        r: BALL_RADIUS,
+        pos: { x: opts.x ?? (COURT.w*0.25 + Math.random()*(COURT.w*0.35)), y: opts.y ?? (2 + Math.random()*(COURT.h - 4)) },
+        vel: { x: 0, y: 0 },
+        grabbed: false,
+        spin: 0, // rad/s (2D)
+        lastPosForScore: null,
+      };
+    }
+
+    function resetGame() {
+      score = 0;
+      coins = 0;
+      balls = Array.from({ length: 6 }, () => makeBall());
+      ballLoaded = false;
+      toast("Reset.");
+      syncHud();
+    }
+
+    function syncHud(){
+      scoreEl.textContent = String(score);
+      coinsEl.textContent = String(coins);
+      const held = balls.find(b => b.grabbed);
+      heldEl.textContent = held ? "Ball" : "None";
+    }
+
+    function toast(msg){
+      toastEl.textContent = msg;
+      toastEl.style.display = "block";
+      clearTimeout(toast._t);
+      toast._t = setTimeout(()=> toastEl.style.display="none", 1600);
+    }
+
+    // -----------------------------
+    // Score check
+    // -----------------------------
+    function checkScore(ball){
+      if (!ball.lastPosForScore) {
+        ball.lastPosForScore = { x: ball.pos.x, y: ball.pos.y };
+        return false;
+      }
+      const prev = ball.lastPosForScore;
+      const curr = ball.pos;
+
+      const crossed = (prev.x < HOOP.x) && (curr.x >= HOOP.x);
+      if (!crossed) { ball.lastPosForScore = { x: curr.x, y: curr.y }; return false; }
+
+      const dy = Math.abs(curr.y - HOOP.y);
+      const inside = dy < (HOOP.r * 0.85);
+      ball.lastPosForScore = { x: curr.x, y: curr.y };
+
+      if (inside) {
+        score += 1;
+        coins += 1;
+        toast("SWISH! +1 score, +1 coin");
+        syncHud();
+        return true;
+      }
+      return false;
+    }
+
+    // -----------------------------
+    // Physics with optional magnus curve from spin
+    // -----------------------------
+    function stepPhysics(dt){
+      const g = Number(ui.gravity.value);
+      const bounce = Number(ui.bounce.value);
+      const magnusK = Number(ui.magnusK.value);
+
+      for (const b of balls) {
+        if (b.grabbed) continue;
+
+        // magnus: a = k * spin * perp(v)
+        // perp(v) = (-vy, vx)
+        const axMagnus = magnusK * b.spin * (-b.vel.y);
+        const ayMagnus = magnusK * b.spin * ( b.vel.x);
+
+        b.vel.y += (g + ayMagnus) * dt;
+        b.vel.x += (axMagnus) * dt;
+
+        b.pos.x += b.vel.x * dt;
+        b.pos.y += b.vel.y * dt;
+
+        // floor
+        const floorY = 0 + b.r;
+        if (b.pos.y < floorY) {
+          b.pos.y = floorY;
+          b.vel.y = Math.abs(b.vel.y) * bounce;
+          b.vel.x *= 0.985;
+          b.spin *= 0.92;
+        }
+
+        // backboard
+        const bx = BACKBOARD.x;
+        const halfH = BACKBOARD.h/2;
+        if (Math.abs(b.pos.x - bx) < (b.r + BACKBOARD.w) &&
+            b.pos.y > (BACKBOARD.y - halfH) &&
+            b.pos.y < (BACKBOARD.y + halfH)) {
+          if (b.pos.x > bx) { b.pos.x = bx + (b.r + BACKBOARD.w); b.vel.x = Math.abs(b.vel.x) * 0.82; }
+          else { b.pos.x = bx - (b.r + BACKBOARD.w); b.vel.x = -Math.abs(b.vel.x) * 0.82; }
+          b.spin *= 0.95;
+        }
+
+        // mild drag
+        b.vel.x *= 0.998;
+        b.spin *= 0.997;
+
+        // scoring
+        if (checkScore(b)) {
+          // reset the scored ball
+          const nb = makeBall();
+          b.pos = nb.pos;
+          b.vel = nb.vel;
+          b.spin = 0;
+          b.grabbed = false;
+          b.lastPosForScore = null;
+        }
+      }
+    }
+
+    // -----------------------------
+    // Draw
+    // -----------------------------
+    function drawCourt(){
+      ctx.save();
+      applyCameraTransform();
+
+      // wood
+      ctx.fillStyle = "#c58b4f";
+      ctx.fillRect(0, 0, COURT.w, COURT.h);
+
+      // stripes
+      ctx.globalAlpha = 0.08;
+      ctx.fillStyle = "#000";
+      for (let i=0;i<40;i++){
+        const x=(i/40)*COURT.w;
+        ctx.fillRect(x, 0, 0.22, COURT.h);
+      }
+      ctx.globalAlpha = 1;
+
+      // lines
+      ctx.strokeStyle = "rgba(255,255,255,0.85)";
+      ctx.lineWidth = 0.06;
+      ctx.strokeRect(0.2,0.2,COURT.w-0.4,COURT.h-0.4);
+
+      ctx.beginPath();
+      ctx.moveTo(COURT.w/2, 0.2);
+      ctx.lineTo(COURT.w/2, COURT.h-0.2);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(COURT.w/2, COURT.h/2, 1.8, 0, Math.PI*2);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.rect(COURT.w-6.2, COURT.h/2-2.8, 6.0, 5.6);
+      ctx.stroke();
+
+      // backboard
+      ctx.fillStyle = "rgba(255,255,255,0.9)";
+      ctx.fillRect(BACKBOARD.x, BACKBOARD.y - BACKBOARD.h/2, BACKBOARD.w, BACKBOARD.h);
+
+      // rim
+      ctx.strokeStyle = "#ff3b30";
+      ctx.lineWidth = 0.10;
+      ctx.beginPath();
+      ctx.arc(HOOP.x, HOOP.y, HOOP.r, 0, Math.PI*2);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    function drawBalls(){
+      ctx.save();
+      applyCameraTransform();
+
+      for (const b of balls) {
+        ctx.beginPath();
+        ctx.fillStyle = "#ff8c2b";
+        ctx.arc(b.pos.x, b.pos.y, b.r, 0, Math.PI*2);
+        ctx.fill();
+
+        // seam
+        ctx.strokeStyle = "rgba(70,40,15,0.55)";
+        ctx.lineWidth = 0.03;
+        ctx.beginPath();
+        ctx.arc(b.pos.x, b.pos.y, b.r*0.92, 0.2, Math.PI+0.2);
+        ctx.stroke();
+
+        // spin indicator (small line)
+        if (Math.abs(b.spin) > 0.2) {
+          const ang = performance.now()*0.002 * Math.sign(b.spin);
+          const lx = Math.cos(ang) * b.r*0.8;
+          const ly = Math.sin(ang) * b.r*0.8;
+          ctx.strokeStyle = "rgba(255,255,255,0.35)";
+          ctx.lineWidth = 0.04;
+          ctx.beginPath();
+          ctx.moveTo(b.pos.x - lx, b.pos.y - ly);
+          ctx.lineTo(b.pos.x + lx, b.pos.y + ly);
+          ctx.stroke();
+        }
+      }
+
+      ctx.restore();
+    }
+
+    // -----------------------------
+    // Hand tracking (extended throw logic from your pitch script)
+    // -----------------------------
+    let hands = null;
+    let cam = null;
+    let cameraRunning = false;
+
+    // right-hand throw state
+    const right = {
+      present: false,
+      wrist: {x:0.5,y:0.5,z:0},
+      prevWrist: null,
+      lastT: 0,
+      wristVel: 0,
+      peakVel: 0,
+
+      prevAngle: null,
+      angVel: 0,
+
+      closed: false,
+      prevClosed: false,
+
+      // world-space velocity vector (from wrist movement)
+      world: { x:0, y:0 }, // using index tip for control point
+      wristWorld: null,
+      prevWristWorld: null,
+      worldVel: { x:0, y:0 },
+    };
+
+    // left-hand state (optional later; kept minimal here)
+    const left = {
+      present: false,
+      closed: false
+    };
+
+    function pinchClosed(lm){
+      const thumb = lm[4], idx = lm[8];
+      return dist3(thumb, idx) < Number(ui.pinchThreshold.value);
+    }
+
+    function drawOverlay(results){
+      octx.clearRect(0,0,overlay.width, overlay.height);
+      if (!debug) return;
+      if (!results.multiHandLandmarks || !results.multiHandLandmarks.length) return;
+
+      for (const lm of results.multiHandLandmarks){
+        drawConnectors(octx, lm, HAND_CONNECTIONS, { color: '#5df', lineWidth: 2 });
+        drawLandmarks(octx, lm, { color: '#f55', lineWidth: 1, radius: 2 });
+      }
+    }
+
+    function maybeGrabBall(handWorld, grabbing){
+      const held = balls.find(b => b.grabbed);
+
+      if (grabbing) {
+        if (held) return;
+
+        // grab nearest in reach
+        let best=null, bestD=999;
+        for (const b of balls){
+          if (b.grabbed) continue;
+          const d = len2(b.pos.x - handWorld.x, b.pos.y - handWorld.y);
+          if (d < (b.r + 0.75) && d < bestD){ best=b; bestD=d; }
+        }
+        if (best){
+          best.grabbed = true;
+          best.vel.x = 0; best.vel.y = 0;
+          best.spin = 0;
+          best.lastPosForScore = null;
+          syncHud();
+        }
+      }
+    }
+
+    function releaseThrowIfNeeded(handWorld){
+      const held = balls.find(b => b.grabbed);
+      if (!held) return;
+
+      // extended release gate:
+      // closed -> open AND peakVel > threshold
+      const relThresh = Number(ui.releaseThresh.value);
+      const throwMul  = Number(ui.throwMul.value);
+      const vGain     = Number(ui.vGain.value);
+      const aimAssist = Number(ui.aimAssist.value);
+      const spinGain  = Number(ui.spinGain.value);
+
+      const shouldThrow = right.prevClosed && !right.closed && right.peakVel > relThresh;
+
+      // Always release when open, but only "throw hard" if shouldThrow
+      held.grabbed = false;
+
+      if (!shouldThrow) {
+        // soft drop
+        held.vel.x = (right.worldVel.x || 0) * 0.4;
+        held.vel.y = (right.worldVel.y || 0) * 0.4;
+        held.spin  = right.angVel * 0.25;
+        right.peakVel *= 0.4;
+        return;
+      }
+
+      // Build a stable speed from peakVel (normalized/s), like your pitch mapping style
+      // (tuned for this court scale)
+      const minSpeed = 4.5;
+      const maxSpeed = 26;
+      const speed = clamp(minSpeed + (right.peakVel * 38 * vGain) * 0.22, minSpeed, maxSpeed);
+
+      // Direction: blend hand motion direction with hoop direction
+      let vx = right.worldVel.x;
+      let vy = right.worldVel.y;
+
+      // If user didn't move much in world coords, aim to hoop
+      const mv = Math.hypot(vx, vy);
+      let motionDir = mv > 0.0005 ? { x: vx/mv, y: vy/mv } : null;
+
+      const hoopDirRaw = { x: HOOP.x - handWorld.x, y: HOOP.y - handWorld.y };
+      const hd = Math.hypot(hoopDirRaw.x, hoopDirRaw.y) || 1;
+      const hoopDir = { x: hoopDirRaw.x/hd, y: hoopDirRaw.y/hd };
+
+      const dirBase = motionDir ? {
+        x: lerp(motionDir.x, hoopDir.x, aimAssist),
+        y: lerp(motionDir.y, hoopDir.y, aimAssist)
+      } : hoopDir;
+
+      // Normalize blended dir
+      const dd = Math.hypot(dirBase.x, dirBase.y) || 1;
+      const dir = { x: dirBase.x/dd, y: dirBase.y/dd };
+
+      // Add a little "up arc" bias if aiming mostly sideways
+      const arcBoost = 0.18;
+      const dir2 = { x: dir.x, y: clamp(dir.y + arcBoost, -0.2, 1.0) };
+      const d2 = Math.hypot(dir2.x, dir2.y) || 1;
+      const dirF = { x: dir2.x/d2, y: dir2.y/d2 };
+
+      held.vel.x = dirF.x * speed * throwMul * 0.11;
+      held.vel.y = dirF.y * speed * throwMul * 0.11;
+
+      // Spin from angular velocity (like your pitch script -> rpm concept)
+      held.spin = clamp(right.angVel * spinGain, -60, 60);
+
+      // reset peak a bit so you don’t chain-launch from one flick
+      right.peakVel = 0;
+
+      syncHud();
+    }
+
+    async function startCamera(){
+      if (cameraRunning) return;
+
+      statusLine.textContent = "Status: requesting camera…";
+
+      const resizeOverlay = ()=>{
+        overlay.width = overlay.clientWidth || 1;
+        overlay.height = overlay.clientHeight || 1;
+      };
+      resizeOverlay();
+      new ResizeObserver(resizeOverlay).observe(camWrap);
+
+      hands = new Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+      });
+
+      hands.setOptions({
+        maxNumHands: 2,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.7,
+        minTrackingConfidence: 0.7
+      });
+
+      hands.onResults((results) => {
+        drawOverlay(results);
+
+        // clear present flags
+        right.present = false;
+        left.present = false;
+
+        if (!results.multiHandLandmarks || !results.multiHandLandmarks.length){
+          statusLine.textContent = "Status: no hand detected";
+          // decay peakVel slowly so open gestures don't launch later
+          right.peakVel *= 0.985;
+          return;
+        }
+
+        const now = performance.now()/1000;
+
+        for (let i=0; i<results.multiHandLandmarks.length; i++){
+          const lm = results.multiHandLandmarks[i];
+          const handed = results.multiHandedness?.[i]?.label || "Right";
+
+          // Mirror x to match mirrored video display
+          // (so moving your hand right moves the cursor right)
+          const rect = canvas.getBoundingClientRect();
+          const idxTip = lm[8];
+          const wrist = lm[0];
+
+          const idxX = (1 - idxTip.x) * rect.width;
+          const idxY = idxTip.y * rect.height;
+          const world = screenToWorld(idxX, idxY);
+
+          if (handed === "Right") {
+            right.present = true;
+
+            // closed state depends on grab mode
+            right.prevClosed = right.closed;
+            if (ui.grabMode.value === "fist") right.closed = isHandClosed(lm);
+            else right.closed = pinchClosed(lm);
+
+            // wrist normalized (mirrored in x for consistency with user feel)
+            right.wrist = { x: (1 - wrist.x), y: wrist.y, z: wrist.z };
+
+            // dt
+            const dt = right.lastT ? (now - right.lastT) : 0;
+            right.lastT = now;
+
+            // wrist vel (normalized/s) + peak (like your pitch script)
+            if (dt > 0.0001 && right.prevWrist){
+              const v = Math.hypot(right.wrist.x - right.prevWrist.x, right.wrist.y - right.prevWrist.y) / dt;
+              right.wristVel = right.wristVel ? lerp(right.wristVel, v, 0.35) : v;
+              right.peakVel = Math.max(right.peakVel * 0.98, right.wristVel);
+            }
+            right.prevWrist = { ...right.wrist };
+
+            // angle + angVel
+            let ang = fingerAngle(lm);
+            if (right.prevAngle !== null){
+              const unwrapped = unwrapAngle(right.prevAngle, ang);
+              const d = unwrapped - right.prevAngle;
+              if (dt > 0.0001) right.angVel = lerp(right.angVel, d/dt, 0.25);
+              right.prevAngle = unwrapped;
+            } else {
+              right.prevAngle = ang;
+              right.angVel = 0;
+            }
+
+            // world velocity vector from wrist movement (more stable than fingertip)
+            const wristSX = right.wrist.x * rect.width;
+            const wristSY = right.wrist.y * rect.height;
+            const wristWorld = screenToWorld(wristSX, wristSY);
+
+            if (dt > 0.0001 && right.prevWristWorld){
+              const vx = (wristWorld.x - right.prevWristWorld.x) / dt;
+              const vy = (wristWorld.y - right.prevWristWorld.y) / dt;
+              // smoothing
+              right.worldVel.x = right.worldVel.x ? lerp(right.worldVel.x, vx, 0.35) : vx;
+              right.worldVel.y = right.worldVel.y ? lerp(right.worldVel.y, vy, 0.35) : vy;
+            }
+            right.prevWristWorld = wristWorld;
+            right.wristWorld = wristWorld;
+
+            right.world = world;
+
+            // Hold logic
+            maybeGrabBall(world, right.closed);
+
+            // If holding, snap ball to finger point
+            const held = balls.find(b=>b.grabbed);
+            if (held && right.closed){
+              held.pos.x = world.x;
+              held.pos.y = world.y;
+              held.vel.x = 0;
+              held.vel.y = 0;
+              held.lastPosForScore = null;
+              // avoid accidental launches if the fist is held too long:
+              right.peakVel *= 0.995;
+            }
+
+            // Release logic
+            if (!right.closed) {
+              releaseThrowIfNeeded(world);
+            }
+
+            statusLine.textContent =
+              `Status: Right=${right.closed ? "CLOSED" : "OPEN"} ` +
+              `vel=${right.wristVel.toFixed(2)} peak=${right.peakVel.toFixed(2)} angVel=${right.angVel.toFixed(2)}`;
+
+          } else {
+            left.present = true;
+            left.closed = isHandClosed(lm);
+          }
+        }
+      });
+
+      // MediaPipe Camera helper
+      video.autoplay = true;
+      video.playsInline = true;
+      video.muted = true;
+
+      cam = new Camera(video, {
+        onFrame: async () => { await hands.send({ image: video }); },
+        width: 640,
+        height: 480
+      });
+
+      try{
+        await cam.start();
+        cameraRunning = true;
+        statusLine.textContent = "Status: camera ON (show your hands)";
+        clickShield.style.display = "none";
+        toast("Camera ON. Make a fist to hold; open to release.");
+      } catch (err){
+        statusLine.textContent = "Status: camera ERROR (permission / http / device)";
+        toast("Camera blocked. Use localhost or HTTPS, then click Start Camera.");
+        console.error(err);
+      }
+    }
+
+    // -----------------------------
+    // Main loop
+    // -----------------------------
+    let lastT = performance.now();
+    function loop(){
+      const now = performance.now();
+      const dt = clamp((now - lastT)/1000, 0, 1/20);
+      lastT = now;
+
+      // simulate
+      stepPhysics(dt);
+
+      // render
+      ctx.setTransform(1,0,0,1,0,0);
+      ctx.clearRect(0,0,canvas.getBoundingClientRect().width, canvas.getBoundingClientRect().height);
+
+      drawCourt();
+      drawBalls();
+
+      // small screen-space marker for right hand
+      if (debug && right.present){
+        const rect = canvas.getBoundingClientRect();
+        // reconstruct a screen pos from normalized wrist for visual
+        const sx = right.wrist.x * rect.width;
+        const sy = right.wrist.y * rect.height;
+
+        ctx.save();
+        ctx.setTransform(1,0,0,1,0,0);
+        ctx.fillStyle = right.closed ? "rgba(48,209,88,0.95)" : "rgba(255,69,58,0.95)";
+        ctx.beginPath();
+        ctx.arc(sx, sy, 7, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = "rgba(255,255,255,0.75)";
+        ctx.font = "12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas";
+        ctx.fillText(`peak ${right.peakVel.toFixed(2)}`, sx + 10, sy - 10);
+        ctx.restore();
+      }
+
+      requestAnimationFrame(loop);
+    }
+
+    // -----------------------------
+    // UI buttons
+    // -----------------------------
+    btnReset.addEventListener("click", resetGame);
+
+    btnDebug.addEventListener("click", ()=>{
+      debug = !debug;
+      btnDebug.textContent = `Debug: ${debug ? "ON" : "OFF"}`;
+    });
+
+    btnPrev.addEventListener("click", ()=>{
+      preview = !preview;
+      btnPrev.textContent = `Preview: ${preview ? "ON" : "OFF"}`;
+      camWrap.style.display = preview ? "block" : "none";
+    });
+
+    btnStart.addEventListener("click", startCamera);
+    clickToStart.addEventListener("click", startCamera);
+
+    // click anywhere to start camera (helps satisfy browser gesture requirement)
+    document.addEventListener("pointerdown", ()=>{
+      if (!cameraRunning) startCamera();
+    }, { once:false });
+
+    // Try autostart (will fail on many browsers until click; that's why shield exists)
+    (async ()=>{
+      resetGame();
+      toast("Click to enable camera.");
+      try { await startCamera(); } catch {}
+      requestAnimationFrame(loop);
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,756 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Hand Pinch Basketball (Web) - Inverted Hands + Tiger Balls</title>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; background: #0b0b0b; overflow: hidden; }
+    #wrap { position: relative; width: 100%; height: 100%; }
+    canvas { display:block; }
+    #hud2d {
+      position:absolute; left:0; top:0; width:100%; height:100%;
+      pointer-events:none;
+    }
+    #ui {
+      position: absolute; top: 12px; left: 12px;
+      background: rgba(20,20,20,0.78); color: #eaeaea;
+      font: 14px/1.3 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      padding: 12px; border-radius: 10px; width: 360px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+    }
+    #ui h3 { margin: 0 0 8px 0; font-size: 14px; font-weight: 700; }
+    .row { display:flex; align-items:center; gap:10px; margin: 8px 0; }
+    .row label { width: 170px; opacity: 0.9; }
+    .row input[type="range"] { width: 150px; }
+    .badge {
+      display:inline-block; padding: 2px 8px; border-radius: 999px;
+      background: rgba(255,255,255,0.08); margin-left: 6px;
+      font-size: 12px; opacity: 0.95;
+    }
+    #status { margin-top: 8px; font-size: 12px; opacity: 0.85; }
+    #video { display:none; }
+    .hr { height:1px; background: rgba(255,255,255,0.08); margin: 10px 0; }
+  </style>
+
+  <!-- Three.js -->
+  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+
+  <!-- MediaPipe Hands -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+</head>
+
+<body>
+<div id="wrap">
+  <video id="video" playsinline></video>
+  <canvas id="webgl"></canvas>
+  <canvas id="hud2d"></canvas>
+
+  <div id="ui">
+    <h3>Inverted Hands Basketball <span class="badge">MP Left→Grab/Toss, MP Right→WASD/Rotate</span></h3>
+
+    <div class="row">
+      <label>Pinch Threshold (Grab)</label>
+      <input id="pinchThr" type="range" min="0.01" max="0.20" step="0.005" value="0.08" />
+      <span id="pinchVal" class="badge">0.080</span>
+    </div>
+
+    <div class="row">
+      <label>Rotation Threshold</label>
+      <input id="rotThr" type="range" min="0.01" max="0.20" step="0.005" value="0.08" />
+      <span id="rotVal" class="badge">0.080</span>
+    </div>
+
+    <div class="row">
+      <label>Throw Power</label>
+      <input id="throwPow" type="range" min="1" max="18" step="0.5" value="6.0" />
+      <span id="throwVal" class="badge">6.0</span>
+    </div>
+
+    <div class="hr"></div>
+
+    <h3 style="margin:0 0 8px 0;">Per-hand Cursor Offsets (pixels)</h3>
+
+    <div class="row">
+      <label>Grab/Toss Hand X</label>
+      <input id="grabOffX" type="range" min="-400" max="400" step="1" value="0" />
+      <span id="grabOffXVal" class="badge">0</span>
+    </div>
+    <div class="row">
+      <label>Grab/Toss Hand Y</label>
+      <input id="grabOffY" type="range" min="-300" max="300" step="1" value="0" />
+      <span id="grabOffYVal" class="badge">0</span>
+    </div>
+
+    <div class="row">
+      <label>WASD/Rotate Hand X</label>
+      <input id="moveOffX" type="range" min="-400" max="400" step="1" value="0" />
+      <span id="moveOffXVal" class="badge">0</span>
+    </div>
+    <div class="row">
+      <label>WASD/Rotate Hand Y</label>
+      <input id="moveOffY" type="range" min="-300" max="300" step="1" value="0" />
+      <span id="moveOffYVal" class="badge">0</span>
+    </div>
+
+    <div id="status">Initializing…</div>
+  </div>
+</div>
+
+<script>
+(() => {
+  // -----------------------
+  // Canvas + HUD
+  // -----------------------
+  const webglCanvas = document.getElementById('webgl');
+  const hudCanvas = document.getElementById('hud2d');
+  const hud = hudCanvas.getContext('2d', { alpha: true });
+
+  // WASD zone (same idea as your python)
+  const wasd_zone = { top: 150, bottom: 350, left: 100, right: 500 };
+  let wasd_sensitivity = 1.0;
+
+  // -----------------------
+  // UI wiring
+  // -----------------------
+  const statusEl = document.getElementById('status');
+
+  const pinchThrEl = document.getElementById('pinchThr');
+  const rotThrEl = document.getElementById('rotThr');
+  const throwPowEl = document.getElementById('throwPow');
+
+  const pinchValEl = document.getElementById('pinchVal');
+  const rotValEl = document.getElementById('rotVal');
+  const throwValEl = document.getElementById('throwVal');
+
+  const grabOffXEl = document.getElementById('grabOffX');
+  const grabOffYEl = document.getElementById('grabOffY');
+  const moveOffXEl = document.getElementById('moveOffX');
+  const moveOffYEl = document.getElementById('moveOffY');
+
+  const grabOffXValEl = document.getElementById('grabOffXVal');
+  const grabOffYValEl = document.getElementById('grabOffYVal');
+  const moveOffXValEl = document.getElementById('moveOffXVal');
+  const moveOffYValEl = document.getElementById('moveOffYVal');
+
+  let pinch_threshold = parseFloat(pinchThrEl.value);
+  let rotation_threshold = parseFloat(rotThrEl.value);
+  let throwing_factor = parseFloat(throwPowEl.value);
+
+  let grabOffset = { x: parseInt(grabOffXEl.value, 10), y: parseInt(grabOffYEl.value, 10) };
+  let moveOffset = { x: parseInt(moveOffXEl.value, 10), y: parseInt(moveOffYEl.value, 10) };
+
+  function updateBadges() {
+    pinchValEl.textContent = pinch_threshold.toFixed(3);
+    rotValEl.textContent = rotation_threshold.toFixed(3);
+    throwValEl.textContent = throwing_factor.toFixed(1);
+
+    grabOffXValEl.textContent = String(grabOffset.x);
+    grabOffYValEl.textContent = String(grabOffset.y);
+    moveOffXValEl.textContent = String(moveOffset.x);
+    moveOffYValEl.textContent = String(moveOffset.y);
+  }
+
+  pinchThrEl.addEventListener('input', () => { pinch_threshold = parseFloat(pinchThrEl.value); updateBadges(); });
+  rotThrEl.addEventListener('input', () => { rotation_threshold = parseFloat(rotThrEl.value); updateBadges(); });
+  throwPowEl.addEventListener('input', () => { throwing_factor = parseFloat(throwPowEl.value); updateBadges(); });
+
+  function bindOffset(el, key, axis) {
+    el.addEventListener('input', () => {
+      if (key === 'grab') grabOffset[axis] = parseInt(el.value, 10);
+      if (key === 'move') moveOffset[axis] = parseInt(el.value, 10);
+      updateBadges();
+    });
+  }
+  bindOffset(grabOffXEl, 'grab', 'x');
+  bindOffset(grabOffYEl, 'grab', 'y');
+  bindOffset(moveOffXEl, 'move', 'x');
+  bindOffset(moveOffYEl, 'move', 'y');
+
+  updateBadges();
+
+  // -----------------------
+  // Three.js scene
+  // -----------------------
+  const renderer = new THREE.WebGLRenderer({ canvas: webglCanvas, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x050505);
+
+  const camera = new THREE.PerspectiveCamera(45, 16/9, 0.1, 200);
+  camera.position.set(0, 1.2, 4);
+
+  // Lights
+  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  const key = new THREE.DirectionalLight(0xffffff, 1.2);
+  key.position.set(8, 12, 5);
+  scene.add(key);
+
+  // Ground
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(80, 80),
+    new THREE.MeshStandardMaterial({ color: 0x111316, roughness: 1.0, metalness: 0.0 })
+  );
+  ground.rotation.x = -Math.PI/2;
+  ground.position.y = -1;
+  scene.add(ground);
+
+  // Simple environment box
+  const box = new THREE.Mesh(
+    new THREE.BoxGeometry(2, 2, 2),
+    new THREE.MeshStandardMaterial({ color: 0x2244ff, roughness: 0.6 })
+  );
+  box.position.set(2, 0, -8);
+  scene.add(box);
+
+  // -----------------------
+  // Higher-quality hoop assembly
+  // -----------------------
+  const hoop = new THREE.Group();
+  hoop.position.set(-3, 1, -10);
+
+  // Pole
+  const pole = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.08, 0.10, 4.0, 24),
+    new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.7, metalness: 0.2 })
+  );
+  pole.position.set(0.0, 0.0, -1.2);
+  pole.position.y = -0.6;
+  hoop.add(pole);
+
+  // Arm
+  const arm = new THREE.Mesh(
+    new THREE.BoxGeometry(0.15, 0.15, 1.0),
+    new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.7, metalness: 0.2 })
+  );
+  arm.position.set(0, 1.0, -0.6);
+  hoop.add(arm);
+
+  // Backboard frame + board
+  const backboard = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.8, 1.2),
+    new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.85, metalness: 0.0 })
+  );
+  backboard.position.set(0, 1.0, -1.1);
+  hoop.add(backboard);
+
+  const boardFrame = new THREE.Mesh(
+    new THREE.BoxGeometry(1.86, 1.26, 0.05),
+    new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.6, metalness: 0.1 })
+  );
+  boardFrame.position.copy(backboard.position);
+  boardFrame.position.z -= 0.03;
+  hoop.add(boardFrame);
+
+  // Rim
+  const rim = new THREE.Mesh(
+    new THREE.TorusGeometry(0.55, 0.05, 18, 48),
+    new THREE.MeshStandardMaterial({ color: 0xff2b2b, roughness: 0.35, metalness: 0.25 })
+  );
+  rim.rotation.x = Math.PI/2;
+  rim.position.set(0, 0.78, -0.55);
+  hoop.add(rim);
+
+  // Net (simple strands cylinder)
+  const netGroup = new THREE.Group();
+  netGroup.position.copy(rim.position);
+
+  const strandMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 });
+  const strands = 16;
+  for (let i = 0; i < strands; i++) {
+    const a = (i / strands) * Math.PI * 2;
+    const x = Math.cos(a) * 0.52;
+    const z = Math.sin(a) * 0.52;
+    const strand = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.008, 0.008, 0.7, 10),
+      strandMat
+    );
+    strand.position.set(x * 0.6, -0.35, z * 0.6);
+    netGroup.add(strand);
+  }
+  hoop.add(netGroup);
+
+  scene.add(hoop);
+
+  // -----------------------
+  // Tiger stripe texture for balls (procedural)
+  // -----------------------
+  function makeTigerTexture(size=512) {
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const ctx = c.getContext('2d');
+
+    // orange base
+    ctx.fillStyle = '#d9761b';
+    ctx.fillRect(0,0,size,size);
+
+    // subtle noise
+    const img = ctx.getImageData(0,0,size,size);
+    for (let i=0; i<img.data.length; i+=4) {
+      const n = (Math.random()*18 - 9);
+      img.data[i]   = Math.max(0, Math.min(255, img.data[i]   + n));
+      img.data[i+1] = Math.max(0, Math.min(255, img.data[i+1] + n));
+      img.data[i+2] = Math.max(0, Math.min(255, img.data[i+2] + n));
+    }
+    ctx.putImageData(img,0,0);
+
+    // stripes
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = '#1b0d06';
+    for (let i=0; i<26; i++) {
+      const x = (i/26)*size + (Math.random()*30 - 15);
+      const w = 14 + Math.random()*26;
+      const skew = (Math.random()*0.7 - 0.35);
+      ctx.save();
+      ctx.translate(x, 0);
+      ctx.transform(1, skew, 0, 1, 0, 0);
+      ctx.beginPath();
+      ctx.moveTo(-w, 0);
+      ctx.bezierCurveTo(-w*0.2, size*0.25, -w*1.2, size*0.5, -w*0.2, size*0.75);
+      ctx.bezierCurveTo(w*0.5, size*0.9, w*0.2, size, w, size);
+      ctx.lineTo(w, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1.0;
+
+    // faint seams
+    ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.arc(size/2, size/2, size*0.38, 0, Math.PI*2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(size/2, size/2, size*0.38, 0, Math.PI);
+    ctx.stroke();
+
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.anisotropy = 4;
+    tex.needsUpdate = true;
+    return tex;
+  }
+
+  const tigerTex = makeTigerTexture(512);
+  const ballMaterial = new THREE.MeshStandardMaterial({
+    map: tigerTex,
+    roughness: 0.55,
+    metalness: 0.05
+  });
+
+  // -----------------------
+  // Balls + physics
+  // -----------------------
+  const BALL_COUNT = 5;
+  const balls = [];
+
+  function randomBallPos() {
+    return new THREE.Vector3(
+      THREE.MathUtils.randFloat(-2, 2),
+      -0.6,
+      THREE.MathUtils.randFloat(-6.5, -4.5)
+    );
+  }
+
+  function makeBall() {
+    const mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.4, 32, 32),
+      ballMaterial.clone()
+    );
+    const ball = {
+      mesh,
+      radius: 0.4,
+      velocity: new THREE.Vector3(0,0,0),
+      grabbed: false,
+      lastReleasePos: null,
+      reset() {
+        this.mesh.position.copy(randomBallPos());
+        this.velocity.set(0,0,0);
+        this.grabbed = false;
+        this.lastReleasePos = null;
+      }
+    };
+    ball.reset();
+    scene.add(mesh);
+    return ball;
+  }
+  for (let i=0; i<BALL_COUNT; i++) balls.push(makeBall());
+
+  function checkBasketScore(ball) {
+    const p = ball.mesh.position;
+    const rimWorld = new THREE.Vector3();
+    rim.getWorldPosition(rimWorld);
+
+    const dx = p.x - rimWorld.x;
+    const dz = p.z - rimWorld.z;
+    const distXZ = Math.sqrt(dx*dx + dz*dz);
+
+    const rimRadius = 0.55;
+    if (distXZ < rimRadius && Math.abs(p.y - rimWorld.y) < 0.22) return true;
+    return false;
+  }
+
+  const GRAVITY = -9.5;
+  const FLOOR_Y = -1 + 0.4;
+
+  function stepPhysics(dt) {
+    for (const ball of balls) {
+      if (ball.grabbed) continue;
+      ball.velocity.y += GRAVITY * dt;
+      ball.mesh.position.addScaledVector(ball.velocity, dt);
+
+      if (ball.mesh.position.y < FLOOR_Y) {
+        ball.mesh.position.y = FLOOR_Y;
+        if (ball.velocity.y < 0) ball.velocity.y *= -0.65;
+        ball.velocity.x *= 0.985;
+        ball.velocity.z *= 0.985;
+      }
+
+      const p = ball.mesh.position;
+      if (p.y < -12 || Math.abs(p.x) > 18 || Math.abs(p.z) > 30) ball.reset();
+      if (checkBasketScore(ball)) ball.reset();
+    }
+  }
+
+  // -----------------------
+  // Screen sizing
+  // -----------------------
+  function resize() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    webglCanvas.width = w; webglCanvas.height = h;
+    hudCanvas.width = w; hudCanvas.height = h;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
+  window.addEventListener('resize', resize);
+
+  // -----------------------
+  // Hand -> world mapping
+  // -----------------------
+  const raycaster = new THREE.Raycaster();
+  const interactionPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 8.0); // z = -8
+
+  function screenToWorld(xPx, yPx) {
+    const w = webglCanvas.width;
+    const h = webglCanvas.height;
+    const ndc = new THREE.Vector2(
+      (xPx / w) * 2 - 1,
+      -((yPx / h) * 2 - 1)
+    );
+    raycaster.setFromCamera(ndc, camera);
+    const out = new THREE.Vector3();
+    raycaster.ray.intersectPlane(interactionPlane, out);
+    return out;
+  }
+
+  // -----------------------
+  // Gesture helpers
+  // -----------------------
+  function pinchDistance(lm) {
+    const thumb = lm[4], index = lm[8];
+    const dx = thumb.x - index.x;
+    const dy = thumb.y - index.y;
+    const dz = (thumb.z || 0) - (index.z || 0);
+    return Math.sqrt(dx*dx + dy*dy + dz*dz);
+  }
+  function isHandOpen(lm) {
+    const wrist = lm[0];
+    return (lm[4].y < wrist.y && lm[8].y < wrist.y && lm[20].y < wrist.y);
+  }
+
+  // -----------------------
+  // LEFT-hand control (but inverted: this will run on MP "Right")
+  // -----------------------
+  let left_rotation_mode = false;
+  let last_left_screen = null;
+
+  function leftHandControl(screen_x, screen_y, lm) {
+    const pinch = pinchDistance(lm);
+
+    const wasd = new THREE.Vector3(0,0,0);
+    const rot = new THREE.Vector2(0,0);
+    let markerColor = 'rgb(255,0,0)';
+
+    if (pinch < rotation_threshold) {
+      left_rotation_mode = true;
+      markerColor = 'rgb(0,255,0)';
+      const cur = new THREE.Vector2(screen_x, screen_y);
+      if (!last_left_screen) last_left_screen = cur;
+      else {
+        const delta = cur.clone().sub(last_left_screen);
+        rot.set(delta.x * 0.0025, delta.y * 0.0025);
+        last_left_screen = cur;
+      }
+    } else {
+      left_rotation_mode = false;
+      last_left_screen = null;
+
+      if (screen_x > wasd_zone.left && screen_x < wasd_zone.right &&
+          screen_y > wasd_zone.top && screen_y < wasd_zone.bottom) {
+        markerColor = 'rgb(255,255,0)';
+      }
+
+      const top_bound = wasd_zone.top + (wasd_zone.bottom - wasd_zone.top)/3;
+      const bottom_bound = wasd_zone.bottom - (wasd_zone.bottom - wasd_zone.top)/3;
+      const left_bound = wasd_zone.left + (wasd_zone.right - wasd_zone.left)/3;
+      const right_bound = wasd_zone.right - (wasd_zone.right - wasd_zone.left)/3;
+
+      if (screen_y < top_bound) wasd.z = -1;        // forward
+      else if (screen_y > bottom_bound) wasd.z = 1; // backward
+
+      if (screen_x < left_bound) wasd.x = -1;       // left
+      else if (screen_x > right_bound) wasd.x = 1;  // right
+    }
+
+    return { wasd, rot, marker: { x: screen_x, y: screen_y, color: markerColor } };
+  }
+
+  // -----------------------
+  // RIGHT-hand actions (but inverted: this will run on MP "Left")
+  // -----------------------
+  let grabHandWorld = null;
+  let lastGrabHandWorld = null;
+
+  function tryGrabBall(handWorld) {
+    let best = null, bestD = Infinity;
+    for (const ball of balls) {
+      const d = ball.mesh.position.distanceTo(handWorld);
+      if (d < (ball.radius + 0.6) && d < bestD) { bestD = d; best = ball; }
+    }
+    if (best) best.grabbed = true;
+  }
+
+  function moveGrabbedBalls(handWorld) {
+    for (const ball of balls) {
+      if (ball.grabbed) {
+        ball.mesh.position.copy(handWorld);
+        ball.velocity.set(0,0,0);
+      }
+    }
+  }
+
+  function releaseBallsWithThrow() {
+    if (!grabHandWorld || !lastGrabHandWorld) return;
+    const delta = grabHandWorld.clone().sub(lastGrabHandWorld);
+    const v = delta.multiplyScalar(throwing_factor);
+    v.z = -v.z;
+
+    for (const ball of balls) {
+      if (ball.grabbed) {
+        ball.grabbed = false;
+        ball.velocity.copy(v);
+        ball.lastReleasePos = grabHandWorld.clone();
+      }
+    }
+  }
+
+  // -----------------------
+  // HUD
+  // -----------------------
+  const markers = { move: null, grab: null };
+
+  function drawHUD() {
+    const w = hudCanvas.width, h = hudCanvas.height;
+    hud.clearRect(0,0,w,h);
+
+    // WASD zone
+    hud.strokeStyle = 'rgb(0,255,0)';
+    hud.lineWidth = 3;
+    hud.strokeRect(wasd_zone.left, wasd_zone.top, wasd_zone.right-wasd_zone.left, wasd_zone.bottom-wasd_zone.top);
+
+    hud.fillStyle = 'rgb(0,255,0)';
+    hud.font = '28px system-ui, sans-serif';
+    hud.fillText('W', wasd_zone.left + 200, wasd_zone.top - 12);
+    hud.fillText('S', wasd_zone.left + 200, wasd_zone.bottom + 36);
+    hud.fillText('A', wasd_zone.left - 28, wasd_zone.top + 120);
+    hud.fillText('D', wasd_zone.right + 10, wasd_zone.top + 120);
+
+    // Move marker (WASD/rotate)
+    if (markers.move) {
+      hud.fillStyle = markers.move.color;
+      hud.beginPath();
+      hud.arc(markers.move.x, markers.move.y, 10, 0, Math.PI*2);
+      hud.fill();
+    }
+
+    // Grab marker
+    if (markers.grab) {
+      hud.fillStyle = markers.grab.color;
+      hud.beginPath();
+      hud.arc(markers.grab.x, markers.grab.y, 10, 0, Math.PI*2);
+      hud.fill();
+    }
+
+    // Held ball indicator
+    const anyGrabbed = balls.some(b => b.grabbed);
+    if (anyGrabbed) {
+      const t = performance.now() / 500;
+      const flash = (Math.sin(t) + 1) / 2;
+      const col = flash > 0.5 ? 'rgb(0,255,0)' : 'rgb(255,165,0)';
+      const x = Math.round(w * 0.82);
+      const y = Math.round(h * 0.86);
+      const r = Math.round(Math.min(w,h) * 0.05);
+      hud.fillStyle = col;
+      hud.beginPath();
+      hud.arc(x, y, r, 0, Math.PI*2);
+      hud.fill();
+    }
+  }
+
+  // -----------------------
+  // Camera movement
+  // -----------------------
+  let camera_yaw = 0;
+  let camera_pitch = 0;
+
+  function applyCameraControls(wasdDir, rotDelta, dt) {
+    const speed = 3.0 * wasd_sensitivity;
+    const move = wasdDir.clone().multiplyScalar(speed * dt);
+
+    camera_yaw += rotDelta.x * 180/Math.PI;
+    camera_pitch += rotDelta.y * 180/Math.PI;
+    camera_pitch = Math.max(-75, Math.min(75, camera_pitch));
+
+    const yawRad = THREE.MathUtils.degToRad(camera_yaw);
+    const forward = new THREE.Vector3(Math.sin(yawRad), 0, -Math.cos(yawRad));
+    const right = new THREE.Vector3(Math.cos(yawRad), 0, Math.sin(yawRad));
+
+    const worldMove = new THREE.Vector3();
+    worldMove.addScaledVector(right, move.x);
+    worldMove.addScaledVector(forward, -move.z);
+    camera.position.add(worldMove);
+
+    const pitchRad = THREE.MathUtils.degToRad(camera_pitch);
+    const dirX = Math.cos(pitchRad) * Math.sin(yawRad);
+    const dirY = Math.sin(pitchRad);
+    const dirZ = -Math.cos(pitchRad) * Math.cos(yawRad);
+    const target = camera.position.clone().add(new THREE.Vector3(dirX, dirY, dirZ));
+    camera.lookAt(target);
+  }
+
+  // -----------------------
+  // MediaPipe Hands (in-browser)
+  // -----------------------
+  const videoEl = document.getElementById('video');
+
+  const hands = new Hands({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+  });
+
+  hands.setOptions({
+    maxNumHands: 2,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.8,
+    minTrackingConfidence: 0.8
+  });
+
+  let latestHands = null;
+  hands.onResults((results) => { latestHands = results; });
+
+  const mpCamera = new Camera(videoEl, {
+    onFrame: async () => { await hands.send({ image: videoEl }); },
+    width: 960,
+    height: 540
+  });
+
+  // -----------------------
+  // Main loop
+  // -----------------------
+  let lastT = performance.now();
+  function animate(now) {
+    const dt = Math.min(0.033, (now - lastT) / 1000);
+    lastT = now;
+
+    let wasd = new THREE.Vector3(0,0,0);
+    let rot = new THREE.Vector2(0,0);
+    markers.move = null;
+    markers.grab = null;
+
+    // HANDS INVERTED HERE:
+    // - MediaPipe "Left" => Grab/Toss logic
+    // - MediaPipe "Right" => WASD/Rotate logic
+    if (latestHands && latestHands.multiHandLandmarks && latestHands.multiHandedness) {
+      for (let i = 0; i < latestHands.multiHandLandmarks.length; i++) {
+        const lm = latestHands.multiHandLandmarks[i];
+        const mpLabel = latestHands.multiHandedness[i].label; // 'Left' / 'Right'
+
+        // index fingertip for cursor point
+        const idxTip = lm[8];
+        let sx = idxTip.x * hudCanvas.width;
+        let sy = idxTip.y * hudCanvas.height;
+
+        if (mpLabel === 'Left') {
+          // INVERTED: MP Left is now the grab/toss hand
+          sx += grabOffset.x;
+          sy += grabOffset.y;
+
+          // marker
+          markers.grab = { x: Math.round(sx), y: Math.round(sy), color: 'rgb(0,255,0)' };
+
+          // world coord + grab/toss
+          grabHandWorld = screenToWorld(sx, sy);
+
+          const pinch = pinchDistance(lm);
+          const open = isHandOpen(lm);
+
+          if (pinch < pinch_threshold && grabHandWorld) {
+            tryGrabBall(grabHandWorld);
+          } else if (open) {
+            releaseBallsWithThrow();
+          }
+
+          if (grabHandWorld) moveGrabbedBalls(grabHandWorld);
+
+          if (grabHandWorld) {
+            if (!lastGrabHandWorld) lastGrabHandWorld = grabHandWorld.clone();
+            else lastGrabHandWorld.copy(grabHandWorld);
+          }
+
+        } else if (mpLabel === 'Right') {
+          // INVERTED: MP Right is now the WASD/rotate controller
+          sx += moveOffset.x;
+          sy += moveOffset.y;
+
+          const r = leftHandControl(Math.round(sx), Math.round(sy), lm);
+          wasd.add(r.wasd);
+          rot.add(r.rot);
+          markers.move = r.marker;
+        }
+      }
+    }
+
+    applyCameraControls(wasd, rot, dt);
+    stepPhysics(dt);
+
+    renderer.render(scene, camera);
+    drawHUD();
+
+    requestAnimationFrame(animate);
+  }
+
+  // -----------------------
+  // Start
+  // -----------------------
+  async function start() {
+    statusEl.textContent = 'Requesting camera…';
+    try {
+      resize();
+      await mpCamera.start();
+      statusEl.textContent = 'Running. MP Left = grab/toss. MP Right = WASD/rotate. Use offsets to align tracking.';
+      requestAnimationFrame(animate);
+    } catch (err) {
+      console.error(err);
+      statusEl.textContent = 'Camera failed. Use HTTPS or localhost, and allow camera permission.';
+    }
+  }
+
+  start();
+})();
+</script>
+</body>
+</html>

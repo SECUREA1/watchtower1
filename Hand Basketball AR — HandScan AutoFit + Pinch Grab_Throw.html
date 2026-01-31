@@ -1,0 +1,1420 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Hand Basketball AR — HandScan AutoFit + Pinch Grab/Throw</title>
+  <style>
+    :root{
+      --bg:#050814;
+      --panel: rgba(0,0,0,.38);
+      --stroke: rgba(255,255,255,.16);
+      --txt: rgba(255,255,255,.92);
+      --muted: rgba(255,255,255,.72);
+      --cyan:#20ffe6;
+      --violet:#b04cff;
+      --amber:#ffcf55;
+      --red:#ff4646;
+      --green:#46ff87;
+      --shadow: 0 14px 42px rgba(0,0,0,.40);
+    }
+    *{ box-sizing:border-box; }
+    html,body{ height:100%; margin:0; background:var(--bg); color:var(--txt); font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; overflow:hidden;}
+    #video{ display:none; }
+    #view{ position:fixed; inset:0; width:100vw; height:100vh; display:block; background: radial-gradient(900px 500px at 50% 10%, rgba(32,255,230,.12), transparent 60%); }
+
+    /* gesture cursor */
+    #cursor{
+      position: fixed; width: 18px; height: 18px; border-radius: 999px;
+      border: 2px solid rgba(32,255,230,.95);
+      box-shadow: 0 0 18px rgba(32,255,230,.25), 0 0 26px rgba(176,76,255,.18);
+      transform: translate(-50%,-50%);
+      pointer-events:none; z-index: 9999; display:none;
+      background: radial-gradient(circle at 30% 30%, rgba(255,255,255,.35), rgba(32,255,230,.08));
+      transition: border-color .09s ease, box-shadow .09s ease, transform .09s ease, opacity .09s ease;
+      opacity: .95;
+    }
+    #cursor.pinch{
+      border-color: rgba(255,207,85,.98);
+      box-shadow: 0 0 20px rgba(255,207,85,.28), 0 0 36px rgba(176,76,255,.18);
+      transform: translate(-50%,-50%) scale(0.92);
+    }
+
+    /* top-left HUD */
+    #hud{
+      position:fixed; left:12px; top:12px; z-index:10;
+      display:flex; gap:10px; align-items:flex-start; flex-wrap:wrap;
+      pointer-events:none;
+    }
+    .card{
+      pointer-events:none;
+      background: var(--panel);
+      border: 1px solid var(--stroke);
+      backdrop-filter: blur(8px);
+      border-radius: 14px;
+      padding: 10px 12px;
+      box-shadow: var(--shadow);
+      min-width: 260px;
+    }
+    .title{
+      font-weight: 950; letter-spacing:.4px; text-transform: uppercase; font-size: 12px;
+      display:flex; align-items:center; justify-content:space-between; gap:8px;
+      margin-bottom:6px;
+    }
+    .pill{
+      display:inline-flex; align-items:center; gap:6px;
+      border: 1px solid rgba(255,255,255,.18);
+      background: rgba(0,0,0,.22);
+      padding: 4px 9px;
+      border-radius: 999px;
+      font-size: 12px;
+      color: var(--muted);
+      white-space:nowrap;
+    }
+    .pill b{ color: var(--txt); }
+    .dot{ width:9px; height:9px; border-radius:50%; background: var(--red); box-shadow: 0 0 14px rgba(255,59,59,.35); }
+    .dot.ok{ background: var(--green); box-shadow: 0 0 14px rgba(55,255,116,.28); }
+    .dot.warn{ background: var(--amber); box-shadow: 0 0 14px rgba(255,207,85,.22); }
+    .row{ font-size:13px; line-height:1.35; color:var(--txt); }
+    .muted{ color:var(--muted); }
+
+    /* right panel */
+    #panel{
+      position:fixed; right:12px; top:12px; z-index:10;
+      width: min(520px, calc(100vw - 24px));
+      background: rgba(0,0,0,.35);
+      border: 1px solid rgba(255,255,255,.16);
+      backdrop-filter: blur(10px);
+      border-radius: 16px;
+      padding: 10px;
+      box-shadow: var(--shadow);
+      user-select:none;
+      max-height: calc(100vh - 24px);
+      overflow:auto;
+    }
+    .head{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
+    .brand{ font-weight:1000; letter-spacing:.6px; text-transform:uppercase; font-size:12px; display:flex; align-items:center; gap:8px; }
+    .brand .spark{
+      width:10px;height:10px;border-radius:50%;
+      background: radial-gradient(circle at 30% 30%, #fff, var(--cyan));
+      box-shadow: 0 0 16px rgba(32,255,230,.26);
+    }
+    .btn{
+      border:1px solid rgba(255,255,255,.16);
+      background:
+        radial-gradient(circle at 30% 20%, rgba(32,255,230,.18), transparent 55%),
+        linear-gradient(180deg, rgba(176,76,255,.28), rgba(0,0,0,.25));
+      color: rgba(255,255,255,.95);
+      padding: 9px 12px;
+      border-radius: 12px;
+      cursor:pointer;
+      font-weight: 950;
+      transition: transform .08s ease, filter .12s ease;
+      white-space:nowrap;
+    }
+    .btn:hover{ filter: brightness(1.06) drop-shadow(0 0 12px rgba(32,255,230,.18)); }
+    .btn:active{ transform: translateY(1px); }
+    .btn.secondary{ background: rgba(0,0,0,.28); }
+    .btn.danger{ background: linear-gradient(180deg, rgba(255,70,70,.30), rgba(0,0,0,.25)); }
+
+    .group{
+      margin-top: 10px;
+      padding: 10px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(0,0,0,.20);
+    }
+    .gtitle{ font-weight:1000; font-size:12px; letter-spacing:.4px; text-transform:uppercase; margin-bottom:8px; color:rgba(255,255,255,.92); }
+    .help{ font-size:11px; color:rgba(255,255,255,.72); line-height:1.25; }
+
+    .setting{ margin-bottom: 10px; }
+    .setting label{
+      display:flex; justify-content:space-between; gap:10px; align-items:center;
+      font-size:12px; font-weight:950; color:rgba(255,255,255,.92);
+      margin-bottom: 6px;
+    }
+    .setting .val{ color: var(--cyan); }
+    input[type="range"]{ width:100%; }
+    input[type="checkbox"]{ transform: scale(1.15); }
+    .toggleRow{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+
+    /* overlay */
+    #overlay{
+      position:fixed; inset:0; z-index:50;
+      display:flex; align-items:center; justify-content:center;
+      padding:16px;
+      background: rgba(0,0,0,.55);
+      backdrop-filter: blur(10px);
+    }
+    #overlay.hidden{ display:none; }
+    #overlayCard{
+      width:min(980px, 98vw);
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,.18);
+      background:
+        radial-gradient(900px 500px at 20% 0%, rgba(32,255,230,.12), transparent 60%),
+        radial-gradient(900px 600px at 90% 10%, rgba(176,76,255,.12), transparent 60%),
+        rgba(8,12,34,.70);
+      box-shadow: 0 18px 64px rgba(0,0,0,.55);
+      overflow:hidden;
+      padding: 14px;
+    }
+    #overlayCard h1{ margin:0 0 8px; font-size:18px; font-weight:1000; letter-spacing:.4px; text-transform:uppercase; }
+    #overlayCard p{ margin:0 0 10px; color:rgba(255,255,255,.85); line-height:1.35; }
+    .grid{ display:grid; grid-template-columns: 1.2fr .8fr; gap: 12px; align-items:start; }
+    @media (max-width: 860px){ .grid{ grid-template-columns: 1fr; } }
+    .warnBox{
+      background: rgba(0,0,0,.28);
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 14px;
+      padding: 10px;
+      color: rgba(255,255,255,.88);
+    }
+    .warnBox b{ color: var(--amber); }
+    .progress{
+      height:10px; width:100%;
+      background: rgba(255,255,255,.12);
+      border: 1px solid rgba(255,255,255,.14);
+      border-radius: 999px;
+      overflow:hidden;
+    }
+    .bar{
+      height:100%;
+      width:0%;
+      background: linear-gradient(90deg, rgba(32,255,230,.95), rgba(176,76,255,.95));
+      transition: width .08s linear;
+    }
+    .statusLine{
+      margin-top:8px; padding:10px;
+      background: rgba(0,0,0,.22);
+      border: 1px solid rgba(255,255,255,.14);
+      border-radius: 14px;
+      font-size: 13px; line-height: 1.35;
+    }
+    code.k{
+      background: rgba(0,0,0,.24);
+      border: 1px solid rgba(255,255,255,.14);
+      padding: 2px 6px;
+      border-radius: 8px;
+      color: rgba(255,255,255,.9);
+    }
+
+    /* on-screen controls (NO WASD shown) */
+    #controls{
+      position:fixed; left:12px; bottom:12px; z-index:20;
+      display:flex; gap:12px; align-items:flex-end;
+      pointer-events:none;
+    }
+    #controls.hidden{ display:none; }
+    .pad{
+      pointer-events:none;
+      width:160px; height:160px;
+      border-radius: 18px;
+      background: rgba(0,0,0,.26);
+      border: 1px solid rgba(255,255,255,.16);
+      backdrop-filter: blur(10px);
+      box-shadow: var(--shadow);
+      display:grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      grid-template-rows: 1fr 1fr 1fr;
+      gap:8px;
+      padding:10px;
+    }
+    .pad .cell{
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(0,0,0,.22);
+      display:flex; align-items:center; justify-content:center;
+      color: rgba(255,255,255,.85);
+      font-weight: 1000;
+      letter-spacing:.2px;
+    }
+    .pad .cell.on{
+      background: rgba(32,255,230,.16);
+      border-color: rgba(32,255,230,.35);
+      box-shadow: 0 0 16px rgba(32,255,230,.16);
+      color: rgba(255,255,255,.95);
+    }
+    .mini{
+      pointer-events:none;
+      width:220px;
+      border-radius: 18px;
+      background: rgba(0,0,0,.26);
+      border: 1px solid rgba(255,255,255,.16);
+      backdrop-filter: blur(10px);
+      box-shadow: var(--shadow);
+      padding:10px;
+    }
+    .mini .line{ font-size:12px; color:rgba(255,255,255,.86); margin:4px 0; }
+    .mini b{ color: var(--cyan); }
+  </style>
+</head>
+
+<body>
+  <canvas id="view"></canvas>
+  <video id="video" autoplay playsinline muted></video>
+  <div id="cursor"></div>
+
+  <div id="hud">
+    <div class="card">
+      <div class="title">
+        <span>Hand Basketball AR</span>
+        <span class="pill">Score <b id="score">0</b></span>
+      </div>
+      <div class="row"><b>Move hand:</b> left zone (centered AutoFit).</div>
+      <div class="row"><b>Ball hand:</b> right zone pinch to grab, release to throw.</div>
+      <div class="row muted" id="lastPlay">Last: —</div>
+    </div>
+
+    <div class="card" style="min-width:340px">
+      <div class="title">
+        <span>Status</span>
+        <span class="pill"><span class="dot warn" id="dotCam"></span> <b id="camStat">camera</b></span>
+      </div>
+      <div class="row"><span class="pill"><span class="dot warn" id="dotMP"></span> <b id="mpStat">mediapipe</b></span></div>
+      <div class="row muted" id="hintLine">Press Start to request permissions.</div>
+      <div class="row" style="margin-top:6px">
+        <span class="pill">Profile <b id="profileStat">none</b></span>
+        <span class="pill">AutoFit <b id="fitStat">off</b></span>
+      </div>
+    </div>
+  </div>
+
+  <div id="controls">
+    <div class="pad" id="pad">
+      <div class="cell"></div>
+      <div class="cell" id="cUp">↑</div>
+      <div class="cell"></div>
+      <div class="cell" id="cLeft">←</div>
+      <div class="cell" id="cMid">•</div>
+      <div class="cell" id="cRight">→</div>
+      <div class="cell"></div>
+      <div class="cell" id="cDown">↓</div>
+      <div class="cell"></div>
+    </div>
+    <div class="mini">
+      <div class="line">Move: <b id="mvVec">0.00, 0.00</b></div>
+      <div class="line">Pinch: <b id="pinchStat">off</b></div>
+      <div class="line">Hold: <b id="holdStat">no</b></div>
+      <div class="line">Throw v: <b id="throwStat">0.00</b></div>
+    </div>
+  </div>
+
+  <div id="panel">
+    <div class="head">
+      <div class="brand"><span class="spark"></span> Basketball Controls</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn secondary" id="openOverlay">Start / Fit</button>
+        <button class="btn secondary" id="toggleDebug">Debug: ON</button>
+        <button class="btn secondary" id="toggleControls">Controls: ON</button>
+        <button class="btn secondary" id="resetScore">Reset</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gtitle">HandScan AutoFit (Comfort Calibration)</div>
+      <div class="row muted">This saves your <b>center position + hand scale</b> so movement feels stable.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap; margin-top:10px;">
+        <button class="btn" id="createProfile">Create / Overwrite Profile</button>
+        <button class="btn secondary" id="loginProfile">Login + Apply AutoFit</button>
+        <button class="btn danger" id="deleteProfile">Delete</button>
+      </div>
+      <div class="help" style="margin-top:8px">
+        Tip: During scan, hold your <b>move hand</b> where you want “neutral” to be.
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gtitle">Scan + Fit Result</div>
+      <div class="setting">
+        <label><span>Scan duration (ms)</span><span class="val" id="vScan">3200</span></label>
+        <input id="scanMs" type="range" min="1400" max="5200" step="100" value="3200" />
+        <div class="help">Longer scan = easier to center your hand before it locks.</div>
+      </div>
+      <div class="row">Hand scale: <span class="pill"><b id="handScale">—</b></span></div>
+      <div class="row">Move gain: <span class="pill"><b id="fitGain">—</b></span></div>
+      <div class="row">Deadzone: <span class="pill"><b id="fitDead">—</b></span></div>
+      <div class="row">Throw boost: <span class="pill"><b id="fitThrow">—</b></span></div>
+    </div>
+
+    <div class="group">
+      <div class="gtitle">Movement Tuning</div>
+      <div class="setting">
+        <label><span>Base speed</span><span class="val" id="vBaseSpeed">1.10</span></label>
+        <input id="baseSpeed" type="range" min="0.60" max="2.20" step="0.01" value="1.10" />
+      </div>
+      <div class="setting">
+        <label><span>Deadzone (normalized)</span><span class="val" id="vDead">0.12</span></label>
+        <input id="deadzone" type="range" min="0.02" max="0.30" step="0.01" value="0.12" />
+      </div>
+      <div class="setting" style="margin-bottom:0;">
+        <label><span>Smoothing</span><span class="val" id="vSmooth">0.22</span></label>
+        <input id="smooth" type="range" min="0.05" max="0.65" step="0.01" value="0.22" />
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gtitle">Grab + Throw</div>
+      <div class="setting">
+        <label><span>Pinch ON threshold</span><span class="val" id="vPinchOn">0.040</span></label>
+        <input id="pinchOn" type="range" min="0.020" max="0.090" step="0.001" value="0.040" />
+        <div class="help">Lower = tighter pinch required.</div>
+      </div>
+      <div class="setting">
+        <label><span>Pinch hysteresis</span><span class="val" id="vPinchHy">1.25</span></label>
+        <input id="pinchHy" type="range" min="1.05" max="1.90" step="0.01" value="1.25" />
+      </div>
+      <div class="setting">
+        <label><span>Grab radius (px)</span><span class="val" id="vGrabR">80</span></label>
+        <input id="grabR" type="range" min="25" max="140" step="1" value="80" />
+      </div>
+      <div class="setting" style="margin-bottom:0;">
+        <label><span>Throw power</span><span class="val" id="vThrowPow">1.20</span></label>
+        <input id="throwPow" type="range" min="0.40" max="2.40" step="0.02" value="1.20" />
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gtitle">Zones</div>
+      <div class="help">
+        <b>Move hand</b> is preferred on the <b>left</b> side. <b>Ball hand</b> on the <b>right</b> side.
+        AutoFit uses the move hand center as neutral.
+      </div>
+    </div>
+  </div>
+
+  <!-- Overlay (start + scan) -->
+  <div id="overlay">
+    <div id="overlayCard">
+      <h1>Start + HandScan AutoFit</h1>
+      <div class="grid">
+        <div>
+          <p>
+            1) Press <b>Start</b> to enable the camera (required by browsers).<br/>
+            2) Optionally <b>Create Profile</b> (long scan to center your move hand).<br/>
+            3) Then <b>Login</b> to re-apply AutoFit anytime.
+          </p>
+          <div class="warnBox" id="secureBox"><b>Important:</b> Camera requires HTTPS or localhost.</div>
+
+          <div style="margin-top:10px">
+            <div class="row"><b>Scan progress</b></div>
+            <div class="progress"><div class="bar" id="scanBar"></div></div>
+            <div class="statusLine" id="overlayStatus">Ready.</div>
+          </div>
+
+          <div class="help" style="margin-top:8px">
+            For best fit: keep your <b>move hand</b> steady in the <b>left zone</b> at the distance you’ll actually play.
+          </div>
+        </div>
+
+        <div>
+          <button class="btn" id="startBtn" style="width:100%; font-size:14px;">Start Camera</button>
+          <div style="height:10px"></div>
+          <button class="btn secondary" id="closeOverlay" style="width:100%;">Close Overlay</button>
+
+          <div style="height:14px"></div>
+
+          <button class="btn" id="overlayCreate" style="width:100%;">Create / Overwrite Profile (Scan)</button>
+          <div style="height:10px"></div>
+          <button class="btn secondary" id="overlayLogin" style="width:100%;">Login + Apply AutoFit (Scan)</button>
+
+          <div style="margin-top:12px" class="help">
+            Movement is gesture-driven (no WASD shown). You can hide the on-screen controls with
+            <code class="k">Controls: ON</code>.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MediaPipe Hands -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.min.js"></script>
+
+  <script>
+  /********************************************************************
+   * Hand Basketball AR — HandScan AutoFit + Gesture Movement + Pinch Grab/Throw
+   *
+   * What you asked for:
+   * - Same "hand fit" logic as guitar: profile scan, store signature, apply fit
+   * - Longer scan so user can center hands comfortably
+   * - Better control logic: forward/back/left/right via fitted neutral center
+   * - Pinch grab + throw (release applies throw velocity)
+   * - Hide WASD, replace with on-screen controls, and allow hiding those too
+   ********************************************************************/
+
+  // ===== helpers =====
+  const el = (id)=>document.getElementById(id);
+  const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
+  const lerp=(a,b,t)=>a+(b-a)*t;
+
+  // ===== canvas =====
+  const canvas = el("view");
+  const ctx = canvas.getContext("2d", { alpha:false });
+  let W=0,H=0,DPR=1;
+  function resize(){
+    DPR = Math.max(1, window.devicePixelRatio || 1);
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = Math.floor(W*DPR);
+    canvas.height = Math.floor(H*DPR);
+    canvas.style.width = W+"px";
+    canvas.style.height = H+"px";
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  // ===== UI status dots =====
+  function setDot(dotId, state){
+    const d = el(dotId);
+    d.classList.remove("ok","warn");
+    if(state==="ok") d.classList.add("ok");
+    else d.classList.add("warn");
+  }
+
+  // ===== config =====
+  const cfg = {
+    debug: true,
+    controlsOn: true,
+
+    // movement
+    baseSpeed: 1.10,
+    deadzone: 0.12,      // normalized (relative to calibrated radius)
+    smooth: 0.22,
+
+    // grab/throw
+    pinchOn: 0.040,
+    pinchHy: 1.25,
+    grabRadiusPx: 80,
+    throwPower: 1.20,
+
+    // scan duration
+    scanMs: 3200,
+
+    // zones (normalized screen x)
+    moveZoneX1: 0.50,
+    ballZoneX0: 0.52
+  };
+
+  // ===== wire sliders =====
+  function refreshLabels(){
+    el("toggleDebug").textContent = "Debug: " + (cfg.debug ? "ON" : "OFF");
+    el("toggleControls").textContent = "Controls: " + (cfg.controlsOn ? "ON" : "OFF");
+
+    el("vBaseSpeed").textContent = cfg.baseSpeed.toFixed(2);
+    el("vDead").textContent = cfg.deadzone.toFixed(2);
+    el("vSmooth").textContent = cfg.smooth.toFixed(2);
+
+    el("vPinchOn").textContent = cfg.pinchOn.toFixed(3);
+    el("vPinchHy").textContent = cfg.pinchHy.toFixed(2);
+    el("vGrabR").textContent = String(cfg.grabRadiusPx|0);
+    el("vThrowPow").textContent = cfg.throwPower.toFixed(2);
+
+    el("vScan").textContent = String(cfg.scanMs|0);
+  }
+  refreshLabels();
+
+  el("toggleDebug").addEventListener("click", ()=>{ cfg.debug = !cfg.debug; refreshLabels(); });
+  el("toggleControls").addEventListener("click", ()=>{
+    cfg.controlsOn = !cfg.controlsOn;
+    el("controls").classList.toggle("hidden", !cfg.controlsOn);
+    refreshLabels();
+  });
+  el("resetScore").addEventListener("click", ()=> setScore(0));
+
+  el("baseSpeed").addEventListener("input",(e)=>{ cfg.baseSpeed = parseFloat(e.target.value); refreshLabels(); });
+  el("deadzone").addEventListener("input",(e)=>{ cfg.deadzone = parseFloat(e.target.value); refreshLabels(); });
+  el("smooth").addEventListener("input",(e)=>{ cfg.smooth = parseFloat(e.target.value); refreshLabels(); });
+
+  el("pinchOn").addEventListener("input",(e)=>{ cfg.pinchOn = parseFloat(e.target.value); refreshLabels(); });
+  el("pinchHy").addEventListener("input",(e)=>{ cfg.pinchHy = parseFloat(e.target.value); refreshLabels(); });
+  el("grabR").addEventListener("input",(e)=>{ cfg.grabRadiusPx = parseInt(e.target.value,10); refreshLabels(); });
+  el("throwPow").addEventListener("input",(e)=>{ cfg.throwPower = parseFloat(e.target.value); refreshLabels(); });
+
+  el("scanMs").addEventListener("input",(e)=>{ cfg.scanMs = parseInt(e.target.value,10); refreshLabels(); });
+
+  // ===== HUD =====
+  let score=0;
+  function setScore(n){ score=n|0; el("score").textContent = String(score); }
+  function setLastPlay(s){ el("lastPlay").textContent = "Last: " + s; }
+
+  // ===== camera =====
+  const video = el("video");
+  let stream=null, videoReady=false;
+
+  async function startCamera(){
+    if(!navigator.mediaDevices?.getUserMedia) throw new Error("getUserMedia not available.");
+    try{
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode:"user", width:{ideal:1280}, height:{ideal:720} },
+        audio:false
+      });
+    }catch(err){
+      stream = await navigator.mediaDevices.getUserMedia({ video:true, audio:false });
+    }
+    video.srcObject = stream;
+    video.muted = true;
+    const p = video.play();
+    if(p && typeof p.then === "function") await p;
+    videoReady = true;
+    el("camStat").textContent="ready"; setDot("dotCam","ok");
+  }
+
+  // ===== MediaPipe Hands =====
+  let mpHands=null, handsRunning=false, mpBusy=false;
+  let lastHands=[];
+
+  function dist(a,b){ const dx=a.x-b.x, dy=a.y-b.y; return Math.sqrt(dx*dx + dy*dy); }
+  function pinchDistance(lm){ return dist(lm[8], lm[4]); }
+
+  const handTrack = new Map();
+  function handKey(label, idx){ return (label && label!=="Unknown") ? label : ("H"+idx); }
+  function handMid(lm){
+    const idx=lm[8], th=lm[4];
+    return { x: (1-((idx.x+th.x)*0.5))*W, y: (((idx.y+th.y)*0.5))*H };
+  }
+  function updateHandMotion(h, idx){
+    const k = handKey(h.label, idx);
+    const m = handMid(h.lm);
+    const now = performance.now();
+    const prev = handTrack.get(k);
+    let v=0;
+    if(prev){
+      const dt = Math.max(1, now - prev.ts);
+      v = Math.hypot(m.x - prev.mx, m.y - prev.my) / dt; // px/ms
+    }
+    handTrack.set(k, { mx:m.x, my:m.y, ts:now, v });
+    h.motion = { v, mx:m.x, my:m.y };
+    return h;
+  }
+
+  async function initMediaPipe(){
+    if(typeof Hands === "undefined") throw new Error("MediaPipe Hands failed to load.");
+    mpHands = new Hands({ locateFile: (f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${f}` });
+    mpHands.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.60,
+      minTrackingConfidence: 0.60
+    });
+    mpHands.onResults((results)=>{
+      const hands=[];
+      const lms = results.multiHandLandmarks || [];
+      const mhd = results.multiHandedness || [];
+      for(let i=0;i<lms.length;i++){
+        const label = (mhd[i]?.classification?.[0]?.label) || "Unknown";
+        hands.push(updateHandMotion({
+          lm: lms[i],
+          label,
+          pinchD: pinchDistance(lms[i])
+        }, i));
+      }
+      lastHands = hands;
+    });
+
+    handsRunning = true;
+    el("mpStat").textContent="ready"; setDot("dotMP","ok");
+  }
+
+  async function mpLoop(){
+    if(!handsRunning || !videoReady) return;
+    if(mpBusy){ requestAnimationFrame(mpLoop); return; }
+    mpBusy = true;
+    try{ await mpHands.send({ image: video }); }
+    catch(e){ console.error(e); el("mpStat").textContent="error"; setDot("dotMP","warn"); }
+    finally{ mpBusy=false; requestAnimationFrame(mpLoop); }
+  }
+
+  // ===== pick cursor (for ball hand) =====
+  const cursorEl = el("cursor");
+  let cursorX=W*0.5, cursorY=H*0.5;
+  let ballHandX=W*0.7, ballHandY=H*0.5;
+  let lastBallHandX=ballHandX, lastBallHandY=ballHandY;
+  let pinchD=1, pinched=false;
+
+  function updateBallHand(lm){
+    const idx=lm[8], th=lm[4];
+    const ix=(1-idx.x)*W;
+    const iy=idx.y*H;
+    const tx=(1-th.x)*W;
+    const ty=th.y*H;
+
+    // cursor smoothing
+    cursorX = cursorX*(1-cfg.smooth) + ix*cfg.smooth;
+    cursorY = cursorY*(1-cfg.smooth) + iy*cfg.smooth;
+
+    cursorEl.style.display="block";
+    cursorEl.style.left = cursorX+"px";
+    cursorEl.style.top  = cursorY+"px";
+
+    pinchD = dist(idx, th);
+    const pinchOn = cfg.pinchOn;
+    const pinchOff = cfg.pinchOn * cfg.pinchHy;
+
+    if(!pinched && pinchD < pinchOn) pinched = true;
+    if(pinched && pinchD > pinchOff) pinched = false;
+
+    cursorEl.classList.toggle("pinch", pinched);
+
+    // "hand point" = midpoint thumb/index
+    lastBallHandX = ballHandX; lastBallHandY = ballHandY;
+    const mx=(ix+tx)*0.5, my=(iy+ty)*0.5;
+    ballHandX = lerp(ballHandX, mx, 0.35);
+    ballHandY = lerp(ballHandY, my, 0.35);
+  }
+
+  // ===== assign move hand vs ball hand =====
+  function assignHands(hands){
+    if(!hands.length) return { move:null, ball:null };
+    if(hands.length===1) return { move:hands[0], ball:null };
+
+    // Prefer left side = move, right side = ball
+    const hx = hands.map(h => (h.motion?.mx ?? handMid(h.lm).x));
+    const leftIdx = hx[0] <= hx[1] ? 0 : 1;
+    const rightIdx = 1-leftIdx;
+
+    // If both on same side, pick higher motion as ball hand (more active)
+    const bothLeft = hx[0] < W*cfg.moveZoneX1 && hx[1] < W*cfg.moveZoneX1;
+    const bothRight = hx[0] > W*cfg.ballZoneX0 && hx[1] > W*cfg.ballZoneX0;
+    if(bothLeft || bothRight){
+      const v0 = hands[0].motion?.v||0;
+      const v1 = hands[1].motion?.v||0;
+      const ballIdx = (v0>=v1)?0:1;
+      return { move:hands[1-ballIdx], ball:hands[ballIdx] };
+    }
+
+    return { move:hands[leftIdx], ball:hands[rightIdx] };
+  }
+
+  // ===== game: player + ball + hoop =====
+  const game = {
+    // player in world coords (0..1)
+    px: 0.50,
+    py: 0.70,
+    pvx: 0,
+    pvy: 0,
+
+    // hoop target
+    hx: 0.82,
+    hy: 0.28,
+    hr: 0.04,
+
+    // ball
+    bx: 0.50,
+    by: 0.55,
+    bvx: 0,
+    bvy: 0,
+    br: 0.030,
+    held: false,
+
+    // throw tracking
+    throwV: 0,
+    lastReleaseAt: -1e9
+  };
+
+  // ===== AutoFit profile (HandScan) =====
+  const LS_KEY = "basket_hand_profile_v1";
+
+  function loadProfile(){
+    try{ const raw=localStorage.getItem(LS_KEY); return raw?JSON.parse(raw):null; }catch(_){ return null; }
+  }
+  function saveProfile(p){ localStorage.setItem(LS_KEY, JSON.stringify(p)); updateProfileUI(); }
+  function deleteProfile(){ localStorage.removeItem(LS_KEY); updateProfileUI(); }
+
+  function updateProfileUI(){
+    const p=loadProfile();
+    el("profileStat").textContent = p ? "saved" : "none";
+  }
+  updateProfileUI();
+
+  function calcHandMetrics(lm){
+    const wrist = lm[0];
+    const iMCP  = lm[5];
+    const mMCP  = lm[9];
+    const pMCP  = lm[17];
+
+    const palmW = dist(iMCP, pMCP);
+    const palmL = dist(wrist, mMCP);
+    const span  = dist(lm[4], lm[20]);
+
+    const iLen = dist(lm[5], lm[8]);
+    const mLen = dist(lm[9], lm[12]);
+    const rLen = dist(lm[13], lm[16]);
+    const pLen = dist(lm[17], lm[20]);
+
+    const wOverL = palmW / Math.max(1e-6, palmL);
+    const spanOverL = span / Math.max(1e-6, palmL);
+    const fingers = [
+      iLen / Math.max(1e-6, palmL),
+      mLen / Math.max(1e-6, palmL),
+      rLen / Math.max(1e-6, palmL),
+      pLen / Math.max(1e-6, palmL)
+    ];
+
+    const screenScale = palmW; // normalized landmark space
+
+    // capture neutral center for MOVE hand
+    const mid = handMid(lm);
+    const centerXNorm = clamp(mid.x / Math.max(1,W), 0.05, 0.95);
+    const centerYNorm = clamp(mid.y / Math.max(1,H), 0.05, 0.95);
+
+    return {
+      signature: [wOverL, spanOverL, ...fingers],
+      screenScale,
+      centerXNorm,
+      centerYNorm
+    };
+  }
+
+  function vecMean(vs){
+    const n=vs.length; if(!n) return null;
+    const m=new Array(vs[0].length).fill(0);
+    for(const v of vs) for(let i=0;i<m.length;i++) m[i]+=v[i];
+    for(let i=0;i<m.length;i++) m[i]/=n;
+    return m;
+  }
+  function vecVar(vs, mean){
+    const n=vs.length; if(!n) return null;
+    const v=new Array(mean.length).fill(0);
+    for(const x of vs) for(let i=0;i<v.length;i++){
+      const d=x[i]-mean[i];
+      v[i]+=d*d;
+    }
+    for(let i=0;i<v.length;i++) v[i]/=n;
+    return v;
+  }
+  function vecDist(a,b){
+    let s=0;
+    for(let i=0;i<a.length;i++){ const d=a[i]-b[i]; s+=d*d; }
+    return Math.sqrt(s);
+  }
+
+  // Applied fit values (movement neutral + sensitivity)
+  const fit = {
+    on: false,
+    centerX: 0.25,
+    centerY: 0.55,
+    // radius is “how far to push” before max speed; derived from scale
+    radiusN: 0.18,
+    gain: 1.0,
+    throwBoost: 1.0,
+    scale: 0.18
+  };
+
+  function applyAutoFit(meanScale, cxNorm, cyNorm){
+    // map scale to 0..1 range (these bounds are “typical” mediapipe palmW)
+    const s = clamp((meanScale - 0.14) / (0.26 - 0.14), 0, 1);
+
+    fit.scale = meanScale;
+    fit.centerX = clamp(cxNorm ?? 0.25, 0.05, 0.95);
+    fit.centerY = clamp(cyNorm ?? 0.55, 0.05, 0.95);
+
+    // Bigger hand / closer camera = smaller radius needed
+    fit.radiusN = clamp(lerp(0.22, 0.14, s), 0.10, 0.28);
+
+    // Gain scales movement so it feels consistent after deadzone
+    fit.gain = lerp(0.90, 1.35, s);
+
+    // Throw boost for closer/further hands to normalize feel
+    fit.throwBoost = lerp(1.15, 0.92, s);
+
+    fit.on = true;
+    el("fitStat").textContent = "on";
+
+    // Show fit stats
+    el("handScale").textContent = meanScale.toFixed(3);
+    el("fitGain").textContent = fit.gain.toFixed(2);
+    el("fitDead").textContent = cfg.deadzone.toFixed(2);
+    el("fitThrow").textContent = (fit.throwBoost*cfg.throwPower).toFixed(2);
+  }
+
+  // ===== scan controller (LONGER scan) =====
+  let scanMode="idle"; // "idle" | "create" | "login"
+  let scanStart=0;
+  const sigFrames=[];
+  const scaleFrames=[];
+  const cxFrames=[];
+  const cyFrames=[];
+
+  function startScan(mode){
+    scanMode=mode;
+    scanStart=performance.now();
+    sigFrames.length=0;
+    scaleFrames.length=0;
+    cxFrames.length=0;
+    cyFrames.length=0;
+    el("scanBar").style.width="0%";
+    el("overlayStatus").textContent = (mode==="create")
+      ? "Creating profile: hold your MOVE hand steady in the LEFT zone…"
+      : "Logging in: hold your MOVE hand steady in the LEFT zone…";
+  }
+  function stopScan(){
+    scanMode="idle";
+    el("scanBar").style.width="0%";
+  }
+
+  function scanTick(){
+    if(scanMode==="idle") return;
+
+    const now=performance.now();
+    const dur=cfg.scanMs|0;
+    const t=clamp((now-scanStart)/Math.max(800,dur),0,1);
+    el("scanBar").style.width=(t*100).toFixed(1)+"%";
+
+    if(!lastHands || !lastHands.length) return;
+
+    // Prefer a hand that is IN LEFT zone (move zone) and stable
+    let best=null;
+    for(const h of lastHands){
+      const mid = h.motion?.mx ?? handMid(h.lm).x;
+      const inLeft = (mid <= W*cfg.moveZoneX1);
+      if(!inLeft) continue;
+
+      const m=calcHandMetrics(h.lm);
+      const v=h.motion?.v||0;
+
+      // stable + bigger scale slightly preferred
+      const score = (m.screenScale*2.0) - v*0.07;
+      if(!best || score > best.score) best = { h, m, v, score };
+    }
+
+    // If no hand is in left zone, we can't calibrate movement center reliably
+    if(!best){
+      el("overlayStatus").textContent = "Move hand not in LEFT zone. Put your move hand on the left side and hold steady…";
+      scanStart = performance.now(); // keep it forgiving
+      sigFrames.length=0; scaleFrames.length=0; cxFrames.length=0; cyFrames.length=0;
+      el("scanBar").style.width="0%";
+      return;
+    }
+
+    const steady = (best.v || 0) < 0.40; // stricter for long scan
+    if(!steady) return;
+
+    sigFrames.push(best.m.signature);
+    scaleFrames.push(best.m.screenScale);
+    cxFrames.push(best.m.centerXNorm);
+    cyFrames.push(best.m.centerYNorm);
+
+    if(t>=1){
+      const meanSig = vecMean(sigFrames);
+      const varSig = vecVar(sigFrames, meanSig);
+      const instability = Math.sqrt(varSig.reduce((a,b)=>a+b,0)/varSig.length);
+
+      // long scan is meant to be forgiving; still reject if very noisy
+      if(instability > 0.022){
+        el("overlayStatus").textContent = "Too much motion/noise. Hold steadier; scanning again…";
+        scanStart=performance.now();
+        sigFrames.length=0; scaleFrames.length=0; cxFrames.length=0; cyFrames.length=0;
+        el("scanBar").style.width="0%";
+        return;
+      }
+
+      const meanScale = scaleFrames.reduce((a,b)=>a+b,0)/Math.max(1,scaleFrames.length);
+      const meanCX = cxFrames.reduce((a,b)=>a+b,0)/Math.max(1,cxFrames.length);
+      const meanCY = cyFrames.reduce((a,b)=>a+b,0)/Math.max(1,cyFrames.length);
+
+      if(scanMode==="create"){
+        saveProfile({ createdAt: Date.now(), signature: meanSig });
+        applyAutoFit(meanScale, meanCX, meanCY);
+        el("overlayStatus").textContent = "✅ Profile saved. AutoFit applied.";
+        el("overlay").classList.add("hidden");
+        stopScan();
+        el("hintLine").textContent = "Profile created + AutoFit applied.";
+        return;
+      }
+
+      if(scanMode==="login"){
+        const p=loadProfile();
+        if(!p){
+          el("overlayStatus").textContent = "No profile saved. Create one first.";
+          stopScan();
+          return;
+        }
+        const d = vecDist(meanSig, p.signature);
+        const ok = d <= 0.085; // gameplay match tolerance
+        if(ok){
+          applyAutoFit(meanScale, meanCX, meanCY);
+          el("overlayStatus").textContent = "✅ Login matched. AutoFit applied.";
+          el("overlay").classList.add("hidden");
+          stopScan();
+          el("hintLine").textContent = "Logged in + AutoFit applied.";
+        }else{
+          el("overlayStatus").textContent = `❌ Login failed (distance=${d.toFixed(3)}). Try again or recreate profile.`;
+          stopScan();
+        }
+      }
+    }
+  }
+
+  // ===== movement from move hand (fitted neutral center) =====
+  let moveVec = {x:0,y:0}; // -1..1
+  let moveSm = {x:0,y:0};
+
+  function updateMoveFromHand(lm){
+    const mid = handMid(lm);
+    const nx = mid.x / Math.max(1,W);
+    const ny = mid.y / Math.max(1,H);
+
+    const cx = fit.on ? fit.centerX : 0.25;
+    const cy = fit.on ? fit.centerY : 0.55;
+
+    // normalized delta / radius
+    const r = fit.on ? fit.radiusN : 0.18;
+    let dx = (nx - cx) / Math.max(0.001, r);
+    let dy = (ny - cy) / Math.max(0.001, r);
+
+    // clamp
+    dx = clamp(dx, -1, 1);
+    dy = clamp(dy, -1, 1);
+
+    // deadzone
+    const mag = Math.hypot(dx,dy);
+    const dz = cfg.deadzone;
+    let sx=0, sy=0;
+    if(mag > dz){
+      const m2 = (mag - dz) / Math.max(1e-6, (1 - dz));
+      const k = m2 / Math.max(1e-6, mag);
+      sx = dx * k;
+      sy = dy * k;
+    }
+
+    // smoothing
+    moveSm.x = moveSm.x*(1-cfg.smooth) + sx*cfg.smooth;
+    moveSm.y = moveSm.y*(1-cfg.smooth) + sy*cfg.smooth;
+
+    // gain
+    const g = (fit.on ? fit.gain : 1.0) * cfg.baseSpeed;
+    moveVec.x = clamp(moveSm.x * g, -1, 1);
+    moveVec.y = clamp(moveSm.y * g, -1, 1);
+  }
+
+  // ===== grab + throw =====
+  function worldToScreen(x,y){ return {x: x*W, y: y*H}; }
+  function screenToWorld(x,y){ return {x: x/Math.max(1,W), y: y/Math.max(1,H)}; }
+
+  function tryGrab(){
+    if(game.held) return;
+    const b = worldToScreen(game.bx, game.by);
+    const d = Math.hypot(ballHandX - b.x, ballHandY - b.y);
+    if(d <= cfg.grabRadiusPx){
+      game.held = true;
+      game.bvx = 0; game.bvy = 0;
+      setLastPlay("Grab");
+    }
+  }
+
+  function releaseThrow(){
+    if(!game.held) return;
+    // throw velocity from hand motion (px/frame approx)
+    const vx = (ballHandX - lastBallHandX);
+    const vy = (ballHandY - lastBallHandY);
+
+    const speed = Math.hypot(vx,vy);
+    const n = speed / 40; // normalize
+    const power = cfg.throwPower * (fit.on ? fit.throwBoost : 1.0);
+
+    // scale into world velocity (per second-ish, but we'll integrate dt)
+    game.bvx = clamp((vx / Math.max(1,W)) * 2.2 * power, -2.4, 2.4);
+    game.bvy = clamp((vy / Math.max(1,H)) * 2.2 * power, -2.4, 2.4);
+
+    game.throwV = speed;
+    game.held = false;
+    game.lastReleaseAt = performance.now();
+    setLastPlay("Throw");
+
+    // UI readouts
+    el("throwStat").textContent = speed.toFixed(2);
+  }
+
+  // ===== simple physics + scoring =====
+  function step(dt){
+    // player movement: moveVec.y is forward/back (screen y), but we keep it simple
+    const sp = 0.62; // world units per second at full input
+    game.px += moveVec.x * sp * dt;
+    game.py += moveVec.y * sp * dt;
+
+    // bounds
+    game.px = clamp(game.px, 0.08, 0.92);
+    game.py = clamp(game.py, 0.10, 0.92);
+
+    // ball
+    if(game.held){
+      const w = screenToWorld(ballHandX, ballHandY);
+      // offset slightly toward right hand
+      game.bx = lerp(game.bx, w.x, 0.55);
+      game.by = lerp(game.by, w.y, 0.55);
+    }else{
+      // gravity-ish + damping
+      const g = 0.55;
+      game.bvy += g * dt;
+      game.bx += game.bvx * dt;
+      game.by += game.bvy * dt;
+
+      game.bvx *= Math.pow(0.985, dt*60);
+      game.bvy *= Math.pow(0.988, dt*60);
+
+      // floor bounce
+      const floor = 0.92;
+      if(game.by > floor){
+        game.by = floor;
+        game.bvy *= -0.55;
+        game.bvx *= 0.88;
+      }
+      // walls
+      if(game.bx < 0.06){ game.bx=0.06; game.bvx *= -0.55; }
+      if(game.bx > 0.94){ game.bx=0.94; game.bvx *= -0.55; }
+      if(game.by < 0.06){ game.by=0.06; game.bvy *= -0.55; }
+    }
+
+    // scoring: ball through hoop radius
+    const dx = game.bx - game.hx;
+    const dy = game.by - game.hy;
+    const d = Math.hypot(dx,dy);
+
+    // only score shortly after a release (prevents idle scoring)
+    const recentlyThrown = (performance.now() - game.lastReleaseAt) < 1400;
+    if(recentlyThrown && d < game.hr*0.65 && game.bvy > 0){
+      setScore(score+1);
+      setLastPlay("Swish!");
+      // reset ball near player
+      game.bx = game.px;
+      game.by = game.py - 0.10;
+      game.bvx = 0; game.bvy = 0;
+      game.lastReleaseAt = -1e9;
+    }
+  }
+
+  // ===== draw =====
+  function roundedRectPath(x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);
+    ctx.arcTo(x,y,x+w,y,r);
+    ctx.closePath();
+  }
+
+  function drawCourt(){
+    // background
+    ctx.fillStyle="#050814";
+    ctx.fillRect(0,0,W,H);
+
+    // camera feed (mirrored)
+    if(videoReady && video.videoWidth){
+      ctx.save();
+      ctx.translate(W,0);
+      ctx.scale(-1,1);
+      const vw=video.videoWidth, vh=video.videoHeight;
+      const s=Math.max(W/vw, H/vh);
+      const dw=vw*s, dh=vh*s;
+      const dx=(W-dw)/2, dy=(H-dh)/2;
+      ctx.drawImage(video, dx, dy, dw, dh);
+      ctx.restore();
+
+      // vignette
+      const g = ctx.createRadialGradient(W*0.5,H*0.45,Math.min(W,H)*0.10, W*0.5,H*0.5, Math.min(W,H)*0.72);
+      g.addColorStop(0, "rgba(0,0,0,0.00)");
+      g.addColorStop(1, "rgba(0,0,0,0.58)");
+      ctx.fillStyle=g;
+      ctx.fillRect(0,0,W,H);
+    }
+
+    // court overlay
+    ctx.save();
+    ctx.globalAlpha = 0.22;
+    ctx.strokeStyle = "rgba(255,255,255,0.55)";
+    ctx.lineWidth = 2;
+    roundedRectPath(W*0.08, H*0.08, W*0.84, H*0.84, 28);
+    ctx.stroke();
+
+    // center line + circle
+    ctx.globalAlpha = 0.16;
+    ctx.beginPath();
+    ctx.moveTo(W*0.50, H*0.08);
+    ctx.lineTo(W*0.50, H*0.92);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(W*0.50, H*0.50, Math.min(W,H)*0.12, 0, Math.PI*2);
+    ctx.stroke();
+
+    // zones
+    ctx.globalAlpha = 0.10;
+    ctx.fillStyle = "rgba(176,76,255,1)";
+    roundedRectPath(W*0.08, H*0.14, W*(cfg.moveZoneX1-0.08), H*0.72, 18);
+    ctx.fill();
+
+    ctx.globalAlpha = 0.08;
+    ctx.fillStyle = "rgba(255,207,85,1)";
+    roundedRectPath(W*cfg.ballZoneX0, H*0.14, W*(0.92-cfg.ballZoneX0), H*0.72, 18);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawHoop(){
+    const hx = game.hx*W, hy = game.hy*H;
+    const r = game.hr*Math.min(W,H);
+
+    // rim
+    ctx.save();
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = "rgba(255,170,55,0.95)";
+    ctx.beginPath();
+    ctx.arc(hx, hy, r, 0, Math.PI*2);
+    ctx.stroke();
+
+    // backboard
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "rgba(255,255,255,0.55)";
+    roundedRectPath(hx - r*1.8, hy - r*2.2, r*1.4, r*2.8, 10);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawPlayer(){
+    const p = worldToScreen(game.px, game.py);
+    ctx.save();
+    ctx.fillStyle = "rgba(32,255,230,0.90)";
+    ctx.strokeStyle = "rgba(0,0,0,0.35)";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 18, 0, Math.PI*2);
+    ctx.fill(); ctx.stroke();
+
+    // facing marker
+    ctx.fillStyle = "rgba(255,255,255,0.80)";
+    ctx.beginPath();
+    ctx.arc(p.x + moveVec.x*14, p.y + moveVec.y*14, 4, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawBall(){
+    const b = worldToScreen(game.bx, game.by);
+    const r = game.br*Math.min(W,H);
+
+    ctx.save();
+    const grd = ctx.createRadialGradient(b.x-r*0.2, b.y-r*0.2, r*0.2, b.x, b.y, r);
+    grd.addColorStop(0,"rgba(255,255,255,0.85)");
+    grd.addColorStop(1,"rgba(255,120,45,0.92)");
+    ctx.fillStyle = grd;
+    ctx.strokeStyle = "rgba(0,0,0,0.30)";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(b.x,b.y,r,0,Math.PI*2);
+    ctx.fill(); ctx.stroke();
+
+    // seams
+    ctx.globalAlpha = 0.35;
+    ctx.strokeStyle = "rgba(0,0,0,0.70)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(b.x,b.y,r*0.70,0,Math.PI*2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(b.x-r,b.y);
+    ctx.lineTo(b.x+r,b.y);
+    ctx.stroke();
+    ctx.restore();
+
+    // grab radius hint when pinched
+    if(cfg.debug && pinched){
+      ctx.save();
+      ctx.globalAlpha = 0.18;
+      ctx.strokeStyle = "rgba(255,207,85,0.95)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(ballHandX, ballHandY, cfg.grabRadiusPx, 0, Math.PI*2);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  function drawDebugHands(){
+    if(!cfg.debug || !lastHands?.length) return;
+    ctx.save();
+    ctx.globalAlpha=0.75;
+    for(const h of lastHands){
+      const lm=h.lm;
+      const pts=[0,4,8,12,16,20,9,5,17];
+      for(const id of pts){
+        const p=lm[id];
+        const x=(1-p.x)*W;
+        const y=p.y*H;
+        ctx.fillStyle = (id===4||id===8) ? "rgba(255,207,85,.95)" : "rgba(32,255,230,.90)";
+        ctx.beginPath(); ctx.arc(x,y,4,0,Math.PI*2); ctx.fill();
+      }
+      const m = handMid(lm);
+      ctx.fillStyle="rgba(255,255,255,0.85)";
+      ctx.font="900 12px system-ui, sans-serif";
+      ctx.fillText(h.label, m.x+8, m.y-8);
+    }
+
+    // neutral center marker
+    if(fit.on){
+      ctx.globalAlpha = 0.85;
+      ctx.strokeStyle = "rgba(176,76,255,0.80)";
+      ctx.lineWidth = 2;
+      const cx = fit.centerX*W, cy = fit.centerY*H;
+      ctx.beginPath();
+      ctx.arc(cx, cy, fit.radiusN*Math.min(W,H), 0, Math.PI*2);
+      ctx.stroke();
+      ctx.fillStyle = "rgba(176,76,255,0.90)";
+      ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI*2); ctx.fill();
+    }
+
+    ctx.restore();
+  }
+
+  // ===== on-screen controls indicator =====
+  function updatePad(){
+    const up = el("cUp"), dn = el("cDown"), lf = el("cLeft"), rt = el("cRight"), mid = el("cMid");
+    const vx = moveVec.x, vy = moveVec.y;
+
+    const th = 0.10;
+    up.classList.toggle("on", vy < -th);
+    dn.classList.toggle("on", vy > th);
+    lf.classList.toggle("on", vx < -th);
+    rt.classList.toggle("on", vx > th);
+    mid.classList.toggle("on", Math.hypot(vx,vy) <= th);
+
+    el("mvVec").textContent = `${vx.toFixed(2)}, ${vy.toFixed(2)}`;
+    el("pinchStat").textContent = pinched ? "ON" : "off";
+    el("holdStat").textContent = game.held ? "YES" : "no";
+  }
+
+  // ===== main loop =====
+  let lastT = performance.now();
+  function loop(){
+    const now = performance.now();
+    const dt = clamp((now - lastT)/1000, 0, 0.033);
+    lastT = now;
+
+    // compute hands -> move/ball
+    if(lastHands && lastHands.length){
+      const { move, ball } = assignHands(lastHands);
+
+      if(move?.lm) updateMoveFromHand(move.lm);
+      else { moveVec.x=0; moveVec.y=0; }
+
+      if(ball?.lm) updateBallHand(ball.lm);
+      else { cursorEl.style.display="none"; pinched=false; }
+
+      // grab/throw logic
+      if(pinched){
+        tryGrab();
+      }else{
+        // release throw only if was holding
+        releaseThrow();
+      }
+    }else{
+      cursorEl.style.display="none";
+      pinched=false;
+      moveVec.x=0; moveVec.y=0;
+      if(game.held) releaseThrow();
+    }
+
+    // physics
+    step(dt);
+
+    // draw
+    drawCourt();
+    drawHoop();
+    drawPlayer();
+    drawBall();
+    drawDebugHands();
+
+    // scan overlay tick
+    scanTick();
+
+    // update controls
+    if(cfg.controlsOn) updatePad();
+
+    requestAnimationFrame(loop);
+  }
+
+  // ===== overlay + buttons =====
+  const secure = window.isSecureContext || location.hostname === "localhost" || location.hostname === "127.0.0.1";
+  el("secureBox").innerHTML = secure
+    ? "<b>Good:</b> secure context detected. Camera should work if permissions are granted."
+    : "<b>Important:</b> Camera requires HTTPS or localhost (secure context).";
+
+  let started=false;
+
+  el("startBtn").addEventListener("click", async ()=>{
+    try{
+      el("overlayStatus").textContent = "Requesting camera permission…";
+      el("camStat").textContent="starting"; setDot("dotCam","warn");
+      await startCamera();
+
+      el("overlayStatus").textContent = "Loading MediaPipe Hands…";
+      el("mpStat").textContent="starting"; setDot("dotMP","warn");
+      await initMediaPipe();
+
+      started=true;
+      el("overlayStatus").textContent = "Running ✓";
+      el("hintLine").textContent = "Running. Move with left-hand center; pinch right hand to grab/throw.";
+      el("overlay").classList.add("hidden");
+
+      requestAnimationFrame(loop);
+      requestAnimationFrame(mpLoop);
+    }catch(e){
+      console.error(e);
+      el("overlayStatus").textContent = "❌ Start failed: " + (e?.message || String(e));
+      el("camStat").textContent="error"; setDot("dotCam","warn");
+      el("mpStat").textContent="error"; setDot("dotMP","warn");
+    }
+  });
+
+  el("closeOverlay").addEventListener("click", ()=>{
+    el("overlay").classList.add("hidden");
+  });
+
+  el("openOverlay").addEventListener("click", ()=>{
+    el("overlay").classList.remove("hidden");
+    el("overlayStatus").textContent = started ? "Ready. Choose Create/Login scan." : "Ready. Press Start.";
+    stopScan();
+  });
+
+  el("overlayCreate").addEventListener("click", ()=>{
+    if(!started){ el("overlayStatus").textContent="Start first."; return; }
+    startScan("create");
+  });
+  el("overlayLogin").addEventListener("click", ()=>{
+    if(!started){ el("overlayStatus").textContent="Start first."; return; }
+    if(!loadProfile()){ el("overlayStatus").textContent="No profile saved. Create one first."; return; }
+    startScan("login");
+  });
+
+  el("createProfile").addEventListener("click", ()=>{
+    el("overlay").classList.remove("hidden");
+    if(!started){ el("overlayStatus").textContent="Start first."; return; }
+    startScan("create");
+  });
+  el("loginProfile").addEventListener("click", ()=>{
+    el("overlay").classList.remove("hidden");
+    if(!started){ el("overlayStatus").textContent="Start first."; return; }
+    if(!loadProfile()){ el("overlayStatus").textContent="No profile saved. Create one first."; return; }
+    startScan("login");
+  });
+  el("deleteProfile").addEventListener("click", ()=>{
+    deleteProfile();
+    el("profileStat").textContent="none";
+    el("fitStat").textContent="off";
+    fit.on = false;
+    el("overlayStatus").textContent="Profile deleted.";
+    el("hintLine").textContent = "Profile deleted.";
+    el("handScale").textContent="—";
+    el("fitGain").textContent="—";
+    el("fitDead").textContent="—";
+    el("fitThrow").textContent="—";
+  });
+
+  // ===== init statuses =====
+  el("camStat").textContent="idle"; setDot("dotCam","warn");
+  el("mpStat").textContent="idle"; setDot("dotMP","warn");
+  el("controls").classList.toggle("hidden", !cfg.controlsOn);
+  </script>
+</body>
+</html>

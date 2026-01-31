@@ -1,0 +1,1445 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>IonCore Basketball — Two-Hand Gesture Control</title>
+<style>
+:root{
+  --bg:#050712;
+  --panel:rgba(255,255,255,.035);
+  --accent1:#39E0FF; /* Ion cyan */
+  --accent2:#FF8A59; /* Ion orange */
+  --muted:rgba(255,255,255,.14);
+  --uiText: rgba(255,255,255,.94);
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:var(--uiText);overflow:hidden}
+canvas{display:block;width:100vw;height:100vh;background: linear-gradient(180deg,#041018,#071018 40%);}
+#video{position:fixed;left:-9999px;top:-9999px;width:640px;height:480px;opacity:0;pointer-events:none}
+
+/* HUD */
+.hud{position:fixed;top:12px;left:50%;transform:translateX(-50%);display:flex;gap:10px;align-items:center;z-index:20;flex-wrap:wrap;justify-content:center;max-width:min(1200px,96vw)}
+.pill{padding:8px 12px;border-radius:999px;background:var(--panel);border:1px solid var(--muted);display:flex;gap:10px;align-items:center;min-width:110px}
+.small{font-size:13px;opacity:.9}
+.bar{width:160px;height:10px;background:rgba(255,255,255,.04);border-radius:999px;overflow:hidden;border:1px solid rgba(255,255,255,.05)}
+.fill{height:100%;width:0%;background:linear-gradient(90deg,var(--accent1),var(--accent2));transition:width 90ms linear}
+
+/* Main overlay */
+#overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:20px;z-index:60;background:radial-gradient(1200px 600px at 50% 25%, rgba(60,190,255,.03), rgba(0,0,0,.72));backdrop-filter:blur(6px)}
+.card{width:min(980px,94vw);border-radius:14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.05);overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+.cardHeader{padding:14px;display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1px solid rgba(255,255,255,.06)}
+.title{font-weight:900;font-size:18px;letter-spacing:0.3px}
+.subtitle{opacity:.92;margin-top:4px;font-size:13px}
+.modeRow{display:flex;gap:10px;padding:12px;flex-wrap:wrap}
+.modeBtn{flex:1;min-width:260px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.05);padding:12px;border-radius:12px;cursor:pointer;text-align:left;color:var(--uiText)}
+.modeBtn span{display:block;opacity:.82;font-size:13px;margin-top:4px;line-height:1.25}
+.modeBtn.selected{border-color:rgba(57,224,255,.22);box-shadow:0 0 0 1px rgba(57,224,255,.08) inset}
+.cardBody{padding:12px;display:flex;gap:12px;flex-wrap:wrap}
+.panel{flex:1;min-width:240px;background:rgba(0,0,0,.20);border-radius:10px;padding:10px;border:1px solid rgba(255,255,255,.04)}
+.panel h3{margin:6px 0 10px 0}
+.cardFooter{padding:12px;display:flex;justify-content:space-between;gap:12px;align-items:center;border-top:1px solid rgba(255,255,255,.06)}
+.actionBtn{padding:10px 14px;border-radius:999px;cursor:pointer;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.06);font-weight:900;color:var(--uiText)}
+.actionBtn.primary{background:linear-gradient(90deg,var(--accent1),var(--accent2));color:#041017;border-color:rgba(255,255,255,.06)}
+.actionBtn:disabled{opacity:.45;cursor:not-allowed}
+.hint{font-size:13px;opacity:.82;line-height:1.35}
+
+/* startup calibration */
+.startup{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:62;background:radial-gradient(900px 520px at 50% 20%, rgba(60,190,255,.03), rgba(0,0,0,.72));backdrop-filter:blur(6px)}
+.startupCard{width:min(860px,94vw);background:rgba(255,255,255,.03);border-radius:12px;padding:14px;border:1px solid rgba(255,255,255,.05)}
+.chip{display:inline-block;padding:8px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.06);background:rgba(0,0,0,.18);margin-right:8px}
+.chip.ok{border-color:rgba(57,224,255,.30);background:rgba(57,224,255,.07)}
+.chip.bad{border-color:rgba(255,120,120,.25);background:rgba(255,120,120,.06)}
+
+/* footer hints */
+#bridge{position:fixed;left:12px;bottom:12px;padding:8px 10px;border-radius:12px;background:rgba(0,0,0,.22);border:1px solid rgba(255,255,255,.06);color:rgba(255,255,255,.76);z-index:20;font-size:13px;max-width:min(720px,90vw);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.controlsHint{position:fixed;right:12px;bottom:12px;z-index:20;background:rgba(0,0,0,.22);border:1px solid rgba(255,255,255,.06);padding:10px;border-radius:8px;font-size:13px;color:rgba(255,255,255,.84);max-width:min(420px,92vw)}
+svg.icon{width:22px;height:22px}
+
+/* tiny neon anim */
+@keyframes softGlow{0%{ box-shadow:0 0 0 rgba(57,224,255,.0) }100%{ box-shadow:0 0 28px rgba(57,224,255,.14) }}
+.glowOn{ animation:softGlow 1.2s ease-in-out infinite alternate; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<video id="video" playsinline></video>
+
+<!-- HUD -->
+<div class="hud" id="hud">
+  <div class="pill"><div id="scoreTxt" style="font-weight:900">Score: 0</div></div>
+  <div class="pill"><div id="madeTxt" class="small">Made: 0</div></div>
+  <div class="pill"><div id="missTxt" class="small">Miss: 0</div></div>
+  <div class="pill"><div id="streakTxt" class="small">Streak: 0</div></div>
+  <div class="pill">
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div class="small" style="font-weight:900">Shot Power</div>
+      <div class="bar"><div id="powerFill" class="fill"></div></div>
+    </div>
+  </div>
+  <div class="pill">
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div class="small" style="font-weight:900">Time</div>
+      <div class="bar"><div id="timeFill" class="fill"></div></div>
+    </div>
+  </div>
+  <div class="pill"><div id="bestTxt" class="small">Best: 0</div></div>
+</div>
+
+<!-- main overlay -->
+<div id="overlay">
+  <div class="card">
+    <div class="cardHeader">
+      <div>
+        <div class="title">IonCore Basketball — Two-Hand Control</div>
+        <div class="subtitle">Gesture + Keyboard • Two-hand sign-in • Right hand = Move • Left hand = Aim + Pinch to shoot</div>
+        <div class="hint" style="margin-top:6px">
+          Gesture mode requires <b>HTTPS</b> (or <b>localhost</b>) and camera permission.
+        </div>
+      </div>
+      <div style="opacity:.86;text-align:right">
+        <div style="font-weight:900">IonCore • Training Court</div>
+        <div class="hint">Fast-release throw • Smooth movement • Neon rim</div>
+      </div>
+    </div>
+
+    <div class="modeRow">
+      <button id="pickGesture" class="modeBtn">
+        <strong>Gesture Controller (2 Hands)</strong>
+        <span>Startup scan + two-hand pinch sign-in. Right hand drives player. Left hand aims crosshair. Pinch-hold to charge, release to shoot.</span>
+      </button>
+      <button id="pickKeyboard" class="modeBtn">
+        <strong>Keyboard + Mouse</strong>
+        <span>A/D or ←/→ move • Mouse aim • Hold click/Space to charge • Release to shoot • ESC pause</span>
+      </button>
+    </div>
+
+    <div class="cardBody">
+      <div class="panel">
+        <h3>Tuners</h3>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <label>Micro Range (in) — sensitivity</label>
+          <input id="microIn" type="range" min="0.25" max="3.00" step="0.05" value="0.75">
+          <div id="microInV">0.75 in</div>
+
+          <label>Pinch Threshold</label>
+          <input id="pinchT" type="range" min="0.18" max="0.52" step="0.01" value="0.30">
+          <div id="pinchTV">0.30</div>
+
+          <label>Throw Speed (fast)</label>
+          <input id="throwSpeed" type="range" min="0.8" max="2.2" step="0.05" value="1.55">
+          <div id="throwSpeedV">1.55x</div>
+
+          <label>Charge Time (seconds)</label>
+          <input id="chargeTime" type="range" min="0.10" max="0.60" step="0.01" value="0.25">
+          <div id="chargeTimeV">0.25s</div>
+
+          <label style="margin-top:6px"><input id="mirrorX" type="checkbox" checked> Mirror X (selfie feel)</label>
+          <label><input id="swapHands" type="checkbox"> Swap Hands (left/right)</label>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>How to Play</h3>
+        <div class="hint">
+          <b>Gesture mode</b><br/>
+          • Right hand: move (small wrist shifts) <br/>
+          • Left hand: aim (index tip) <br/>
+          • Left pinch-hold: charge shot (fast) <br/>
+          • Release pinch: shoot <br/>
+          • Two-hand pinch: quick ball recall (if ball is loose) <br/><br/>
+          <b>Scoring</b><br/>
+          • Swish = +3, Rim/board = +2 <br/>
+          • Streak bonus ramps every 3 makes
+        </div>
+      </div>
+    </div>
+
+    <div class="cardFooter">
+      <div><button id="resetBtn" class="actionBtn">Reset Tuners</button></div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+        <button id="startBtn" class="actionBtn primary glowOn" disabled>Start</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- startup calibration -->
+<div class="startup" id="startup">
+  <div class="startupCard">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+      <div style="min-width:260px">
+        <h2 style="margin:0">IonCore Startup — Gesture Sign-In</h2>
+        <div id="startupMsg" class="hint">Raise both hands in view. Hold steady for 3-2-1.</div>
+      </div>
+      <div style="font-weight:900;font-size:42px" id="startupCount"></div>
+    </div>
+
+    <div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:8px">
+      <span id="chipAim" class="chip bad">Aim hand: not seen</span>
+      <span id="chipDrv" class="chip bad">Drive hand: not seen</span>
+      <span id="chipInch" class="chip">Micro: —</span>
+      <span class="chip">Tip: two-hand pinch = sign-in</span>
+    </div>
+
+    <div style="margin-top:12px">
+      <div style="height:10px;background:rgba(255,255,255,.06);border-radius:8px;overflow:hidden">
+        <div id="bar1" style="height:10px;width:0%;background:linear-gradient(90deg,var(--accent1),var(--accent2))"></div>
+      </div>
+      <div style="height:10px;background:rgba(255,255,255,.06);border-radius:8px;overflow:hidden;margin-top:8px">
+        <div id="bar2" style="height:10px;width:0%;background:linear-gradient(90deg,var(--accent1),var(--accent2))"></div>
+      </div>
+    </div>
+
+    <div style="margin-top:12px;text-align:right;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
+      <button id="skipStartup" class="actionBtn">Skip</button>
+    </div>
+  </div>
+</div>
+
+<div class="controlsHint" id="controlsHint">
+  <div style="font-weight:900;margin-bottom:6px">Controls</div>
+  <div id="hintText">Gesture: Right = move • Left = aim • Pinch-hold charge • Release shoot • Two-hand pinch recall</div>
+</div>
+
+<div id="bridge">Controller: not selected</div>
+
+<!-- MediaPipe -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+<script>
+(() => {
+  // -------------------------
+  // Helpers / constants
+  // -------------------------
+  const clamp = (v,a,b)=> Math.max(a, Math.min(b, v));
+  const rand = (a,b)=> a + Math.random()*(b-a);
+
+  function pxPerInch(){
+    const d=document.createElement('div');
+    d.style.width='1in'; d.style.position='absolute'; d.style.left='-200%';
+    document.body.appendChild(d);
+    const p = d.getBoundingClientRect().width || 96;
+    d.remove();
+    return p;
+  }
+  let PX_IN = pxPerInch();
+  window.addEventListener('resize', ()=> PX_IN = pxPerInch(), { passive:true });
+
+  // -------------------------
+  // Canvas
+  // -------------------------
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d', { alpha:false });
+
+  let DPR = 1;
+  function resize(){
+    DPR = Math.max(1, Math.min(2, window.devicePixelRatio||1));
+    canvas.width = Math.floor(window.innerWidth * DPR);
+    canvas.height = Math.floor(window.innerHeight * DPR);
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+  window.addEventListener('resize', resize, { passive:true });
+  resize();
+
+  // -------------------------
+  // UI Refs
+  // -------------------------
+  const UI = {
+    pickGesture: document.getElementById('pickGesture'),
+    pickKeyboard: document.getElementById('pickKeyboard'),
+    startBtn: document.getElementById('startBtn'),
+    resetBtn: document.getElementById('resetBtn'),
+
+    microIn: document.getElementById('microIn'),
+    microInV: document.getElementById('microInV'),
+    pinchT: document.getElementById('pinchT'),
+    pinchTV: document.getElementById('pinchTV'),
+    throwSpeed: document.getElementById('throwSpeed'),
+    throwSpeedV: document.getElementById('throwSpeedV'),
+    chargeTime: document.getElementById('chargeTime'),
+    chargeTimeV: document.getElementById('chargeTimeV'),
+    mirrorX: document.getElementById('mirrorX'),
+    swapHands: document.getElementById('swapHands'),
+
+    overlay: document.getElementById('overlay'),
+    bridge: document.getElementById('bridge'),
+    hintText: document.getElementById('hintText'),
+
+    scoreTxt: document.getElementById('scoreTxt'),
+    madeTxt: document.getElementById('madeTxt'),
+    missTxt: document.getElementById('missTxt'),
+    streakTxt: document.getElementById('streakTxt'),
+    powerFill: document.getElementById('powerFill'),
+    timeFill: document.getElementById('timeFill'),
+    bestTxt: document.getElementById('bestTxt'),
+
+    startup: document.getElementById('startup'),
+    startupMsg: document.getElementById('startupMsg'),
+    startupCount: document.getElementById('startupCount'),
+    chipAim: document.getElementById('chipAim'),
+    chipDrv: document.getElementById('chipDrv'),
+    chipInch: document.getElementById('chipInch'),
+    bar1: document.getElementById('bar1'),
+    bar2: document.getElementById('bar2'),
+    skipStartup: document.getElementById('skipStartup'),
+  };
+
+  function setBridge(t){ UI.bridge.textContent = t; }
+
+  // -------------------------
+  // Config persistence
+  // -------------------------
+  const cfgDefaults = {
+    microRangeInches: 0.75,
+    pinchThresh: 0.30,
+    smoothing: 0.22,
+    mirrorX: true,
+    swapHands: false,
+    throwSpeedMul: 1.55,
+    chargeTimeSec: 0.25
+  };
+  const cfgKey = 'ioncore_basket_cfg_v1';
+  const modeKey = 'ioncore_basket_mode_v1';
+  const bestKey = 'ioncore_basket_best_v1';
+
+  const cfg = Object.assign({}, cfgDefaults);
+
+  function loadCfg(){
+    try{
+      const raw = localStorage.getItem(cfgKey);
+      if(raw) Object.assign(cfg, JSON.parse(raw));
+    }catch{}
+  }
+  function saveCfg(){
+    try{ localStorage.setItem(cfgKey, JSON.stringify(cfg)); }catch{}
+  }
+  loadCfg();
+
+  // Apply UI values
+  UI.microIn.value = cfg.microRangeInches;
+  UI.pinchT.value = cfg.pinchThresh;
+  UI.throwSpeed.value = cfg.throwSpeedMul;
+  UI.chargeTime.value = cfg.chargeTimeSec;
+  UI.mirrorX.checked = !!cfg.mirrorX;
+  UI.swapHands.checked = !!cfg.swapHands;
+
+  UI.microInV.textContent = cfg.microRangeInches.toFixed(2) + ' in';
+  UI.pinchTV.textContent = cfg.pinchThresh.toFixed(2);
+  UI.throwSpeedV.textContent = cfg.throwSpeedMul.toFixed(2) + 'x';
+  UI.chargeTimeV.textContent = cfg.chargeTimeSec.toFixed(2) + 's';
+
+  UI.microIn.addEventListener('input', ()=>{
+    cfg.microRangeInches = +UI.microIn.value;
+    UI.microInV.textContent = cfg.microRangeInches.toFixed(2) + ' in';
+    saveCfg();
+  });
+  UI.pinchT.addEventListener('input', ()=>{
+    cfg.pinchThresh = +UI.pinchT.value;
+    UI.pinchTV.textContent = cfg.pinchThresh.toFixed(2);
+    saveCfg();
+  });
+  UI.throwSpeed.addEventListener('input', ()=>{
+    cfg.throwSpeedMul = +UI.throwSpeed.value;
+    UI.throwSpeedV.textContent = cfg.throwSpeedMul.toFixed(2) + 'x';
+    saveCfg();
+  });
+  UI.chargeTime.addEventListener('input', ()=>{
+    cfg.chargeTimeSec = +UI.chargeTime.value;
+    UI.chargeTimeV.textContent = cfg.chargeTimeSec.toFixed(2) + 's';
+    saveCfg();
+  });
+  UI.mirrorX.addEventListener('change', ()=>{
+    cfg.mirrorX = !!UI.mirrorX.checked;
+    saveCfg();
+  });
+  UI.swapHands.addEventListener('change', ()=>{
+    cfg.swapHands = !!UI.swapHands.checked;
+    saveCfg();
+  });
+
+  UI.resetBtn.addEventListener('pointerdown', (e)=>{
+    e.preventDefault();
+    Object.assign(cfg, cfgDefaults);
+    saveCfg();
+
+    UI.microIn.value = cfg.microRangeInches;
+    UI.pinchT.value = cfg.pinchThresh;
+    UI.throwSpeed.value = cfg.throwSpeedMul;
+    UI.chargeTime.value = cfg.chargeTimeSec;
+    UI.mirrorX.checked = !!cfg.mirrorX;
+    UI.swapHands.checked = !!cfg.swapHands;
+
+    UI.microInV.textContent = cfg.microRangeInches.toFixed(2) + ' in';
+    UI.pinchTV.textContent = cfg.pinchThresh.toFixed(2);
+    UI.throwSpeedV.textContent = cfg.throwSpeedMul.toFixed(2) + 'x';
+    UI.chargeTimeV.textContent = cfg.chargeTimeSec.toFixed(2) + 's';
+
+    setBridge('Tuners reset to IonCore defaults');
+  }, { passive:false });
+
+  // -------------------------
+  // Input (keyboard/mouse + gesture)
+  // -------------------------
+  const input = {
+    moveX: 0,
+    aimCursor:{ x: window.innerWidth*0.5, y: window.innerHeight*0.45, seen:false },
+    aimPinch:false,
+    bothPinch:false,
+  };
+
+  const keys = new Set();
+  const mouse = { active:false, x: window.innerWidth*0.5, y: window.innerHeight*0.45, down:false };
+
+  window.addEventListener('keydown', (e)=>{
+    keys.add(e.code);
+    if(e.code === 'Escape'){
+      if(started){
+        paused = !paused;
+        setBridge(paused ? 'Paused (ESC)' : 'Resumed');
+      }
+    }
+    if(e.code === 'Space') e.preventDefault();
+  }, { passive:false });
+
+  window.addEventListener('keyup', (e)=> keys.delete(e.code));
+
+  window.addEventListener('pointermove', (e)=>{
+    mouse.active = true;
+    mouse.x = e.clientX; mouse.y = e.clientY;
+  });
+  window.addEventListener('pointerdown', ()=> mouse.down = true);
+  window.addEventListener('pointerup', ()=> mouse.down = false);
+
+  function pollKeyboard(){
+    const left = keys.has('KeyA') || keys.has('ArrowLeft');
+    const right = keys.has('KeyD') || keys.has('ArrowRight');
+    input.moveX = (right?1:0) - (left?1:0);
+
+    input.aimCursor.seen = mouse.active;
+    input.aimCursor.x = mouse.x;
+    input.aimCursor.y = mouse.y;
+
+    // charge uses mouse.down or Space
+    input.aimPinch = mouse.down || keys.has('Space');
+    input.bothPinch = keys.has('KeyR'); // keyboard "recall"
+  }
+
+  // -------------------------
+  // Gesture Hand Tracking + Sign-In
+  // -------------------------
+  const videoEl = document.getElementById('video');
+
+  const gesture = {
+    enabled:false,
+    camera:null,
+    hands:null,
+    running:false,
+    lastErr:'',
+    startupOpen:false,
+    stage:'idle', // idle | calibrate | signin | done
+    steadyT:0,
+    countdownT:0,
+    signinHold:0,
+    signedIn:false,
+    baseAim:null,
+    baseDrv:null,
+    aimSm:{x:window.innerWidth*0.5, y:window.innerHeight*0.45},
+    drvSm:{x:0,y:0},
+    bothPinchCooldown:0,
+    lastAimPinch:false,
+  };
+
+  function landmark(hand, idx){ return hand?.landmarks?.[idx] || null; }
+
+  function pinchDistanceNorm(hand){
+    const t = landmark(hand, 4);
+    const i = landmark(hand, 8);
+    if(!t || !i) return 999;
+    const dx = t.x - i.x, dy = t.y - i.y, dz = (t.z||0)-(i.z||0);
+    return Math.sqrt(dx*dx + dy*dy + dz*dz);
+  }
+
+  function handCenter(hand){
+    const w = landmark(hand, 0);
+    if(w) return { x:w.x, y:w.y };
+    const pts = hand.landmarks || [];
+    if(!pts.length) return null;
+    let sx=0, sy=0;
+    for(const p of pts){ sx+=p.x; sy+=p.y; }
+    return { x:sx/pts.length, y:sy/pts.length };
+  }
+
+  function toScreenXY(norm){
+    let x = norm.x, y = norm.y;
+    if(cfg.mirrorX) x = 1 - x;
+    return { x: x * window.innerWidth, y: y * window.innerHeight };
+  }
+
+  function smooth2D(a, b, t){
+    return { x: a.x + (b.x - a.x)*t, y: a.y + (b.y - a.y)*t };
+  }
+
+  function openStartup(){
+    gesture.startupOpen = true;
+    gesture.stage = 'calibrate';
+    gesture.steadyT = 0;
+    gesture.countdownT = 0;
+    gesture.signinHold = 0;
+    gesture.signedIn = false;
+    gesture.baseAim = null;
+    gesture.baseDrv = null;
+    UI.startup.style.display = 'flex';
+    UI.startupCount.textContent = '';
+    UI.bar1.style.width = '0%';
+    UI.bar2.style.width = '0%';
+    UI.chipInch.textContent = `Micro: ${cfg.microRangeInches.toFixed(2)} in`;
+    UI.startupMsg.textContent = 'Raise both hands in view. Hold steady for 3-2-1.';
+    setBridge('Gesture Startup: camera + sign-in required');
+  }
+
+  function closeStartup(){
+    gesture.startupOpen = false;
+    UI.startup.style.display = 'none';
+  }
+
+  async function startGestureSystem(){
+    if(gesture.running) return true;
+    gesture.enabled = true;
+
+    gesture.hands = new Hands({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    });
+    gesture.hands.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.65,
+      minTrackingConfidence: 0.60
+    });
+    gesture.hands.onResults((results)=>{
+      try{ handleHandsResults(results); }catch(err){ console.warn(err); }
+    });
+
+    try{
+      gesture.camera = new Camera(videoEl, {
+        onFrame: async () => {
+          if(!gesture.hands) return;
+          await gesture.hands.send({image: videoEl});
+        },
+        width: 640, height: 480
+      });
+      await gesture.camera.start();
+      gesture.running = true;
+      setBridge('Gesture camera online');
+      return true;
+    }catch(e){
+      gesture.lastErr = String(e?.message || e);
+      console.warn('Camera start error:', e);
+      setBridge('Camera blocked. Use HTTPS/localhost + allow permission.');
+      return false;
+    }
+  }
+
+  function assignHands(results){
+    const out = [];
+    const lm = results.multiHandLandmarks || [];
+    const hd = results.multiHandedness || [];
+
+    for(let i=0;i<lm.length;i++){
+      const handed = hd[i]?.label || 'Unknown';
+      const obj = { handed, landmarks: lm[i] };
+      const c = handCenter(obj);
+      obj.centerNorm = c;
+      obj.centerPx = c ? toScreenXY(c) : null;
+      obj.pinch = pinchDistanceNorm(obj);
+      out.push(obj);
+    }
+
+    let left = out.find(h=>h.handed==='Left') || null;
+    let right = out.find(h=>h.handed==='Right') || null;
+    if(!left && out.length===1) left = out[0];
+    if(!right && out.length===1) right = out[0];
+
+    if(cfg.swapHands){
+      const tmp = left; left = right; right = tmp;
+    }
+    // Aim = left, Drive = right
+    return { aim:left, drv:right };
+  }
+
+  function handleHandsResults(results){
+    if(controllerMode !== 'gesture') return;
+
+    const { aim, drv } = assignHands(results);
+    const aimSeen = !!(aim && aim.centerNorm);
+    const drvSeen = !!(drv && drv.centerNorm);
+
+    UI.chipAim.classList.toggle('ok', aimSeen);
+    UI.chipAim.classList.toggle('bad', !aimSeen);
+    UI.chipAim.textContent = aimSeen ? 'Aim hand: seen' : 'Aim hand: not seen';
+
+    UI.chipDrv.classList.toggle('ok', drvSeen);
+    UI.chipDrv.classList.toggle('bad', !drvSeen);
+    UI.chipDrv.textContent = drvSeen ? 'Drive hand: seen' : 'Drive hand: not seen';
+
+    const pinchThresh = cfg.pinchThresh;
+    const aimPinched = aimSeen && aim.pinch < pinchThresh;
+    const drvPinched = drvSeen && drv.pinch < pinchThresh;
+    const bothPinched = aimPinched && drvPinched;
+
+    input.aimPinch = !!aimPinched;
+    input.bothPinch = !!bothPinched;
+
+    // Aim cursor (index tip)
+    if(aimSeen){
+      const idxTip = landmark(aim, 8) || aim.centerNorm;
+      const p = toScreenXY(idxTip);
+
+      input.aimCursor.seen = true;
+
+      if(gesture.baseAim && aim.centerNorm){
+        const base = gesture.baseAim;
+        const now = aim.centerNorm;
+
+        const sens = 1.25 / clamp(cfg.microRangeInches, 0.25, 3.0);
+        const dx = (now.x - base.x) * sens;
+        const dy = (now.y - base.y) * sens;
+
+        const target = {
+          x: window.innerWidth*0.5 + dx * window.innerWidth,
+          y: window.innerHeight*0.45 + dy * window.innerHeight
+        };
+
+        const smooth = clamp(cfg.smoothing, 0.06, 0.6);
+        gesture.aimSm = smooth2D(gesture.aimSm, target, smooth);
+        input.aimCursor.x = gesture.aimSm.x;
+        input.aimCursor.y = gesture.aimSm.y;
+      }else{
+        gesture.aimSm = smooth2D(gesture.aimSm, p, 0.25);
+        input.aimCursor.x = gesture.aimSm.x;
+        input.aimCursor.y = gesture.aimSm.y;
+      }
+    }else{
+      input.aimCursor.seen = false;
+    }
+
+    // Drive movement from baseline: map wrist displacement to left/right
+    if(drvSeen && gesture.baseDrv && drv.centerNorm){
+      const base = gesture.baseDrv;
+      const now = drv.centerNorm;
+
+      const sens = 1.6 / clamp(cfg.microRangeInches, 0.25, 3.0);
+      const dx = (now.x - base.x) * sens;
+      const dxPx = dx * window.innerWidth;
+
+      const dead = 10 + 0.08*PX_IN; // small deadzone
+      const v = Math.abs(dxPx) < dead ? 0 : clamp(dxPx / (window.innerWidth*0.18), -1, 1);
+
+      const smooth = clamp(cfg.smoothing, 0.06, 0.6);
+      gesture.drvSm = smooth2D(gesture.drvSm, {x:v, y:0}, smooth);
+      input.moveX = gesture.drvSm.x;
+    }else{
+      input.moveX = 0;
+    }
+
+    // Startup sign-in pipeline
+    if(gesture.startupOpen){
+      const dt = 1/60;
+
+      if(gesture.stage === 'calibrate'){
+        if(aimSeen && drvSeen){
+          gesture.steadyT += dt;
+          UI.bar1.style.width = `${clamp(gesture.steadyT/0.75, 0, 1)*100}%`;
+
+          if(gesture.steadyT > 0.75){
+            if(gesture.countdownT <= 0) gesture.countdownT = 3.0;
+            gesture.countdownT = Math.max(0, gesture.countdownT - dt);
+            UI.startupCount.textContent = String(Math.ceil(gesture.countdownT));
+            UI.bar2.style.width = `${clamp((3.0-gesture.countdownT)/3.0, 0, 1)*100}%`;
+
+            if(!gesture.baseAim && aim.centerNorm) gesture.baseAim = { x: aim.centerNorm.x, y: aim.centerNorm.y };
+            if(!gesture.baseDrv && drv.centerNorm) gesture.baseDrv = { x: drv.centerNorm.x, y: drv.centerNorm.y };
+
+            if(gesture.countdownT <= 0){
+              gesture.stage = 'signin';
+              gesture.signinHold = 0;
+              UI.startupCount.textContent = '';
+              UI.bar1.style.width = '0%';
+              UI.bar2.style.width = '0%';
+              UI.startupMsg.textContent = 'Calibration complete. TWO-HAND PINCH and hold to sign-in.';
+              setBridge('Gesture: calibration done → two-hand pinch to sign-in');
+            }
+          }
+        }else{
+          gesture.steadyT = 0;
+          gesture.countdownT = 0;
+          UI.startupCount.textContent = '';
+          UI.bar1.style.width = '0%';
+          UI.bar2.style.width = '0%';
+          gesture.baseAim = null;
+          gesture.baseDrv = null;
+        }
+      }else if(gesture.stage === 'signin'){
+        if(bothPinched){
+          gesture.signinHold += dt;
+          UI.bar1.style.width = `${clamp(gesture.signinHold/0.18, 0, 1)*100}%`;
+          UI.bar2.style.width = `${clamp(gesture.signinHold/0.60, 0, 1)*100}%`;
+
+          if(gesture.signinHold >= 0.60){
+            gesture.signedIn = true;
+            gesture.stage = 'done';
+            UI.startupMsg.textContent = 'Signed in ✔  Starting session...';
+            setBridge('Gesture sign-in OK');
+            setTimeout(()=>{
+              closeStartup();
+              UI.overlay.style.display = 'none';
+              startNewRun();
+            }, 160);
+          }
+        }else{
+          gesture.signinHold = Math.max(0, gesture.signinHold - dt*2.0);
+          UI.bar1.style.width = `${clamp(gesture.signinHold/0.18, 0, 1)*100}%`;
+          UI.bar2.style.width = `${clamp(gesture.signinHold/0.60, 0, 1)*100}%`;
+        }
+      }
+    }
+  }
+
+  UI.skipStartup.addEventListener('pointerdown', async (e)=>{
+    e.preventDefault();
+    closeStartup();
+    UI.overlay.style.display = 'none';
+    if(controllerMode === 'gesture' && !gesture.running){
+      startGestureSystem();
+    }
+    startNewRun();
+  }, { passive:false });
+
+  // -------------------------
+  // Game state (Basketball)
+  // -------------------------
+  let controllerMode = localStorage.getItem(modeKey) || '';
+  let started = false;
+  let paused = true;
+
+  let score = 0;
+  let made = 0;
+  let miss = 0;
+  let streak = 0;
+
+  let best = Number(localStorage.getItem(bestKey) || '0') || 0;
+  UI.bestTxt.textContent = `Best: ${best}`;
+
+  // Session time
+  const SESSION_SEC = 60;
+  let timeLeft = SESSION_SEC;
+
+  // Court objects
+  const hoop = {
+    x: () => window.innerWidth * 0.5,
+    y: () => window.innerHeight * 0.22,
+    rimR: 18,
+    rimW: 44,         // scoring window width
+    backboardW: 120,
+    backboardH: 70,
+    backboardOffsetY: -30
+  };
+
+  const player = {
+    x: window.innerWidth*0.5,
+    y: window.innerHeight*0.82,
+    r: 22,
+    speed: 560
+  };
+
+  const ball = {
+    x: player.x,
+    y: player.y - 18,
+    r: 10,
+    vx: 0,
+    vy: 0,
+    held: true,
+    air: false,
+    lastY: 0,
+    touchedRim: false,
+    touchedBoard: false,
+    scoredThisShot: false,
+    shotCooldown: 0,
+    recallCooldown: 0
+  };
+
+  // Shot charge (fast)
+  let charging = false;
+  let chargeT = 0; // seconds
+  let lastChargePinch = false;
+
+  // Simple particles
+  const particles = [];
+  function pop(x,y,n=16,scale=1){
+    for(let i=0;i<n;i++){
+      const a = rand(0,Math.PI*2);
+      const s = rand(60,280)*scale;
+      particles.push({
+        x,y,
+        vx: Math.cos(a)*s,
+        vy: Math.sin(a)*s,
+        life: rand(0.25,0.9),
+        size: rand(1.5,3.8)*scale,
+        col: `rgba(${Math.floor(rand(180,255))},${Math.floor(rand(150,220))},${Math.floor(rand(90,210))},.95)`
+      });
+    }
+  }
+
+  // -------------------------
+  // Drawing
+  // -------------------------
+  let perf = 0;
+
+  function roundRectPath(ctx,x,y,w,h,r){
+    r = Math.min(r, w/2, h/2);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function drawCourt(){
+    const w = window.innerWidth, h = window.innerHeight;
+    // wood-ish gradient
+    const g = ctx.createLinearGradient(0,0,0,h);
+    g.addColorStop(0,'#041018');
+    g.addColorStop(0.40,'#0b1b22');
+    g.addColorStop(1,'#041018');
+    ctx.fillStyle = g;
+    ctx.fillRect(0,0,w,h);
+
+    // neon lane
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    ctx.strokeStyle = 'rgba(57,224,255,0.20)';
+    ctx.lineWidth = 3;
+    const laneW = Math.min(320, w*0.46);
+    const laneH = Math.min(420, h*0.58);
+    roundRectPath(ctx, w*0.5 - laneW*0.5, h*0.34, laneW, laneH, 28);
+    ctx.stroke();
+
+    // 3pt arc-ish
+    ctx.globalAlpha = 0.25;
+    ctx.beginPath();
+    ctx.arc(w*0.5, h*0.86, Math.min(w,h)*0.42, Math.PI*1.05, Math.PI*1.95);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawHoop(){
+    const w = window.innerWidth, h = window.innerHeight;
+    const hx = hoop.x(), hy = hoop.y();
+
+    // backboard
+    const bw = hoop.backboardW, bh = hoop.backboardH;
+    const bx = hx - bw*0.5;
+    const by = hy + hoop.backboardOffsetY;
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = 0.65;
+    ctx.fillStyle = 'rgba(255,255,255,0.04)';
+    roundRectPath(ctx, bx, by, bw, bh, 10);
+    ctx.fill();
+
+    ctx.globalAlpha = 0.75;
+    ctx.strokeStyle = 'rgba(57,224,255,0.22)';
+    ctx.lineWidth = 2;
+    roundRectPath(ctx, bx, by, bw, bh, 10);
+    ctx.stroke();
+
+    // target square
+    ctx.globalAlpha = 0.35;
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(hx-22, by+18, 44, 34);
+    ctx.restore();
+
+    // rim glow
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    const pulse = 1 + Math.sin(perf*4)*0.05;
+    ctx.globalAlpha = 0.9;
+    ctx.strokeStyle = 'rgba(255,138,89,0.85)';
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.arc(hx, hy, hoop.rimR*pulse, 0, Math.PI*2);
+    ctx.stroke();
+
+    ctx.globalAlpha = 0.35;
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(hx, hy, (hoop.rimR+10)*pulse, 0, Math.PI*2);
+    ctx.stroke();
+
+    // net lines
+    ctx.globalAlpha = 0.24;
+    ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+    ctx.lineWidth = 1.5;
+    for(let i=-2;i<=2;i++){
+      ctx.beginPath();
+      ctx.moveTo(hx + i*9, hy + 6);
+      ctx.lineTo(hx + i*6, hy + 52);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawPlayer(){
+    ctx.save();
+    ctx.translate(player.x, player.y);
+
+    // body
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = 'rgba(57,224,255,0.14)';
+    ctx.beginPath();
+    ctx.arc(0,0, player.r+18, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.globalAlpha = 0.95;
+    ctx.fillStyle = 'rgba(255,255,255,0.10)';
+    ctx.beginPath();
+    ctx.arc(0,0, player.r, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.globalAlpha = 0.85;
+    ctx.strokeStyle = 'rgba(57,224,255,0.30)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0,0, player.r, 0, Math.PI*2);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawBall(){
+    ctx.save();
+    ctx.translate(ball.x, ball.y);
+
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = 0.85;
+    const glow = ctx.createRadialGradient(0,0,2,0,0,24);
+    glow.addColorStop(0,'rgba(255,255,255,0.18)');
+    glow.addColorStop(1,'rgba(255,255,255,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(0,0,24,0,Math.PI*2);
+    ctx.fill();
+
+    // ball
+    ctx.globalAlpha = 0.98;
+    ctx.fillStyle = 'rgba(255,138,89,0.82)';
+    ctx.beginPath();
+    ctx.arc(0,0, ball.r, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.globalAlpha = 0.40;
+    ctx.strokeStyle = 'rgba(0,0,0,0.42)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.arc(0,0, ball.r*0.82, 0, Math.PI*2);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(-ball.r, 0); ctx.lineTo(ball.r, 0);
+    ctx.moveTo(0, -ball.r); ctx.lineTo(0, ball.r);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawAim(){
+    const seen = input.aimCursor.seen;
+    if(!seen) return;
+
+    const x = input.aimCursor.x, y = input.aimCursor.y;
+    ctx.save();
+    ctx.translate(x,y);
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = input.aimPinch ? 1 : 0.85;
+    const pulse = 1 + Math.sin(perf*10)*0.06;
+
+    ctx.strokeStyle = input.aimPinch ? 'rgba(255,120,120,.95)' : 'rgba(255,190,160,.85)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-16*pulse,0); ctx.lineTo(16*pulse,0);
+    ctx.moveTo(0,-16*pulse); ctx.lineTo(0,16*pulse);
+    ctx.stroke();
+
+    ctx.globalAlpha = 0.28;
+    ctx.strokeStyle = 'rgba(57,224,255,0.22)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0,0, 28*pulse, 0, Math.PI*2);
+    ctx.stroke();
+
+    ctx.restore();
+
+    // Aim line from player to cursor
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = 0.18;
+    ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(player.x, player.y - 12);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawParticles(){
+    for(const p of particles){
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+      ctx.globalAlpha = clamp(p.life, 0, 1);
+      ctx.fillStyle = p.col;
+      ctx.beginPath();
+      ctx.arc(p.x,p.y,p.size,0,Math.PI*2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  // -------------------------
+  // Basketball physics / scoring
+  // -------------------------
+  function resetBallToPlayer(){
+    ball.held = true;
+    ball.air = false;
+    ball.vx = 0; ball.vy = 0;
+    ball.touchedRim = false;
+    ball.touchedBoard = false;
+    ball.scoredThisShot = false;
+    ball.x = player.x;
+    ball.y = player.y - 18;
+  }
+
+  function recallBall(){
+    if(ball.recallCooldown > 0) return;
+    if(ball.held) return;
+    ball.recallCooldown = 0.75;
+    pop(ball.x, ball.y, 18, 0.9);
+    resetBallToPlayer();
+    setBridge('Ball recalled (two-hand pinch)');
+  }
+
+  function computeShotVelocity(power01){
+    // Aim vector: from player to aim cursor, clamp to upward angles
+    let ax = input.aimCursor.seen ? input.aimCursor.x : player.x;
+    let ay = input.aimCursor.seen ? input.aimCursor.y : (player.y - 180);
+
+    // prefer aiming above player
+    ay = Math.min(ay, player.y - 60);
+
+    let dx = ax - player.x;
+    let dy = ay - player.y;
+    let ang = Math.atan2(dy, dx); // negative is upward
+
+    // clamp between -85deg and -15deg (mostly upward)
+    ang = clamp(ang, -Math.PI*0.48 - Math.PI*0.5, -Math.PI*0.08); // roughly [-1.99, -0.25]
+    // a cleaner clamp:
+    ang = clamp(ang, -Math.PI*0.80, -Math.PI*0.15);
+
+    const base = 780 * cfg.throwSpeedMul;     // FAST throw
+    const maxAdd = 520 * cfg.throwSpeedMul;   // extra with charge
+    const speed = base + maxAdd * power01;
+
+    return { vx: Math.cos(ang)*speed, vy: Math.sin(ang)*speed };
+  }
+
+  function shootBall(power01){
+    if(ball.shotCooldown > 0) return;
+    if(!ball.held) return;
+
+    const v = computeShotVelocity(power01);
+    ball.held = false;
+    ball.air = true;
+    ball.vx = v.vx;
+    ball.vy = v.vy;
+    ball.shotCooldown = 0.18; // fast repeat (when ball returns)
+    ball.lastY = ball.y;
+    ball.touchedRim = false;
+    ball.touchedBoard = false;
+    ball.scoredThisShot = false;
+
+    pop(player.x, player.y-18, 10, 0.7);
+    setBridge(power01 > 0.7 ? 'Throw: laser quick!' : 'Throw');
+  }
+
+  function applyScore(points, label){
+    score += points;
+    made += 1;
+    streak += 1;
+
+    // streak bonus every 3 makes
+    if(streak > 0 && streak % 3 === 0){
+      score += 1;
+      setBridge(`${label} +${points} (streak bonus)`);
+    }else{
+      setBridge(`${label} +${points}`);
+    }
+
+    if(score > best){
+      best = score;
+      localStorage.setItem(bestKey, String(best));
+      UI.bestTxt.textContent = `Best: ${best}`;
+    }
+  }
+
+  function missShot(){
+    miss += 1;
+    streak = 0;
+    setBridge('Miss');
+  }
+
+  // -------------------------
+  // Game loop updates
+  // -------------------------
+  function updatePlayer(dt){
+    const sp = player.speed;
+    player.x += input.moveX * sp * dt;
+    player.x = clamp(player.x, player.r+12, window.innerWidth - player.r-12);
+
+    // keep y fixed (training court)
+    player.y = window.innerHeight*0.82;
+
+    if(ball.held){
+      // dribble/hold bob
+      const bob = Math.sin(perf*10)*3;
+      ball.x = player.x + 10;
+      ball.y = player.y - 18 + bob;
+    }
+  }
+
+  function updateCharge(dt){
+    // convert pinch (or mouse/space) into: hold to charge, release to shoot
+    const pinched = !!input.aimPinch;
+
+    if(ball.held){
+      if(pinched){
+        charging = true;
+        chargeT += dt;
+      }else{
+        if(charging && lastChargePinch && !pinched){
+          // release -> shoot
+          const tMax = clamp(cfg.chargeTimeSec, 0.10, 0.60);
+          const p01 = clamp(chargeT / tMax, 0, 1);
+
+          // fast mode: even quick flick gives meaningful power
+          const fastCurve = 0.25 + 0.75*Math.pow(p01, 0.55);
+          shootBall(fastCurve);
+
+          charging = false;
+          chargeT = 0;
+        }else{
+          charging = false;
+          chargeT = 0;
+        }
+      }
+    }else{
+      charging = false;
+      chargeT = 0;
+    }
+
+    lastChargePinch = pinched;
+
+    // UI power meter
+    const tMax = clamp(cfg.chargeTimeSec, 0.10, 0.60);
+    const p01 = clamp(chargeT / tMax, 0, 1);
+    UI.powerFill.style.width = `${(p01*100).toFixed(0)}%`;
+  }
+
+  function circleVsSegment(cx,cy,cr, x1,y1,x2,y2){
+    const dx = x2-x1, dy = y2-y1;
+    const len2 = dx*dx+dy*dy;
+    if(len2 <= 0.0001) return Math.hypot(cx-x1, cy-y1) <= cr;
+    let t = ((cx-x1)*dx + (cy-y1)*dy) / len2;
+    t = clamp(t, 0, 1);
+    const px = x1 + t*dx, py = y1 + t*dy;
+    return Math.hypot(cx-px, cy-py) <= cr;
+  }
+
+  function updateBall(dt){
+    ball.shotCooldown = Math.max(0, ball.shotCooldown - dt);
+    ball.recallCooldown = Math.max(0, ball.recallCooldown - dt);
+
+    if(ball.held) return;
+
+    ball.lastY = ball.y;
+
+    // physics
+    const gravity = 980; // px/s^2
+    ball.vy += gravity * dt;
+    ball.x += ball.vx * dt;
+    ball.y += ball.vy * dt;
+
+    // mild air drag
+    ball.vx *= Math.pow(0.92, dt);
+    ball.vy *= Math.pow(0.995, dt);
+
+    // walls
+    if(ball.x < ball.r+8){ ball.x = ball.r+8; ball.vx *= -0.72; ball.touchedRim = true; }
+    if(ball.x > window.innerWidth - ball.r-8){ ball.x = window.innerWidth - ball.r-8; ball.vx *= -0.72; ball.touchedRim = true; }
+
+    // floor
+    const floorY = window.innerHeight*0.92;
+    if(ball.y > floorY - ball.r){
+      ball.y = floorY - ball.r;
+      ball.vy *= -0.54;
+      ball.vx *= 0.74;
+
+      // if slow enough, end shot and return
+      if(Math.abs(ball.vy) < 120 && Math.abs(ball.vx) < 80){
+        if(!ball.scoredThisShot) missShot();
+        resetBallToPlayer();
+      }
+    }
+
+    // hoop collisions / scoring
+    const hx = hoop.x(), hy = hoop.y();
+    const rimR = hoop.rimR;
+
+    // backboard line segment
+    const bx1 = hx - hoop.backboardW*0.5;
+    const by1 = hy + hoop.backboardOffsetY + 10;
+    const bx2 = hx + hoop.backboardW*0.5;
+    const by2 = by1;
+
+    // backboard collision (horizontal segment)
+    if(circleVsSegment(ball.x,ball.y,ball.r, bx1,by1, bx2,by2)){
+      ball.y = by1 + ball.r + 1;
+      ball.vy = Math.abs(ball.vy) * 0.55;
+      ball.vx *= 0.86;
+      ball.touchedBoard = true;
+      pop(ball.x, ball.y, 10, 0.6);
+    }
+
+    // rim collision (circle)
+    const dRim = Math.hypot(ball.x-hx, ball.y-hy);
+    if(dRim < rimR + ball.r){
+      // push out
+      const nx = (ball.x-hx) / Math.max(0.001, dRim);
+      const ny = (ball.y-hy) / Math.max(0.001, dRim);
+      ball.x = hx + nx * (rimR + ball.r + 0.6);
+      ball.y = hy + ny * (rimR + ball.r + 0.6);
+      // reflect velocity
+      const vn = ball.vx*nx + ball.vy*ny;
+      ball.vx = ball.vx - 1.8*vn*nx;
+      ball.vy = ball.vy - 1.8*vn*ny;
+      ball.vx *= 0.72;
+      ball.vy *= 0.72;
+      ball.touchedRim = true;
+      pop(ball.x, ball.y, 10, 0.65);
+    }
+
+    // scoring detection: crossing rim plane downwards inside rim window
+    if(!ball.scoredThisShot){
+      const crossedDown = (ball.lastY < hy && ball.y >= hy && ball.vy > 0);
+      if(crossedDown){
+        const within = Math.abs(ball.x - hx) <= (hoop.rimW*0.5 - 2);
+        if(within){
+          ball.scoredThisShot = true;
+          // swish if no rim/board touch
+          const swish = !ball.touchedRim && !ball.touchedBoard;
+          applyScore(swish ? 3 : 2, swish ? 'SWISH' : 'Bucket');
+          pop(hx, hy+28, swish ? 34 : 24, swish ? 1.2 : 0.95);
+        }
+      }
+    }
+
+    // out of screen top -> let it come back down; if it exits fully, reset
+    if(ball.y < -200){
+      // nothing
+    }
+  }
+
+  function updateParticles(dt){
+    for(let i=particles.length-1;i>=0;i--){
+      const p = particles[i];
+      p.life -= dt;
+      p.x += p.vx*dt;
+      p.y += p.vy*dt;
+      p.vx *= Math.pow(0.10, dt);
+      p.vy *= Math.pow(0.10, dt);
+      if(p.life <= 0) particles.splice(i,1);
+    }
+  }
+
+  function updateTime(dt){
+    if(!started || paused) return;
+    timeLeft = Math.max(0, timeLeft - dt);
+    UI.timeFill.style.width = `${(timeLeft/SESSION_SEC*100).toFixed(0)}%`;
+
+    if(timeLeft <= 0){
+      paused = true;
+      setBridge('Session complete — back to menu');
+      setTimeout(()=>{
+        UI.overlay.style.display = 'flex';
+        started = false;
+      }, 450);
+    }
+  }
+
+  function updateHud(){
+    UI.scoreTxt.textContent = `Score: ${score}`;
+    UI.madeTxt.textContent = `Made: ${made}`;
+    UI.missTxt.textContent = `Miss: ${miss}`;
+    UI.streakTxt.textContent = `Streak: ${streak}`;
+  }
+
+  // -------------------------
+  // Two-hand pinch: recall ball (gesture), or KeyR (keyboard)
+  // -------------------------
+  function handleRecall(dt){
+    if(controllerMode === 'gesture'){
+      gesture.bothPinchCooldown = Math.max(0, gesture.bothPinchCooldown - dt);
+      if(input.bothPinch && gesture.bothPinchCooldown <= 0){
+        gesture.bothPinchCooldown = 0.85;
+        recallBall();
+      }
+    }else{
+      if(input.bothPinch) recallBall();
+    }
+  }
+
+  // -------------------------
+  // Main loop
+  // -------------------------
+  let lastT = performance.now();
+  function frame(now){
+    const dt = clamp((now - lastT)/1000, 0, 0.05);
+    lastT = now;
+    perf += dt;
+
+    if(controllerMode === 'keyboard') pollKeyboard();
+
+    if(started && !paused){
+      updateTime(dt);
+      updatePlayer(dt);
+      updateCharge(dt);
+      updateBall(dt);
+      handleRecall(dt);
+      updateParticles(dt);
+    }else{
+      // keep particles fading
+      updateParticles(dt);
+      updateCharge(dt); // still show power meter decay
+    }
+
+    // draw
+    drawCourt();
+    drawHoop();
+    drawAim();
+    drawPlayer();
+    drawBall();
+    drawParticles();
+
+    updateHud();
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  // -------------------------
+  // Start / mode selection
+  // -------------------------
+  function setMode(m){
+    controllerMode = m;
+    localStorage.setItem(modeKey, m);
+
+    UI.pickGesture.classList.toggle('selected', m==='gesture');
+    UI.pickKeyboard.classList.toggle('selected', m==='keyboard');
+
+    UI.startBtn.disabled = false;
+    UI.startBtn.textContent = (m==='gesture') ? 'Start (Gesture)' : 'Start (Keyboard)';
+
+    UI.hintText.textContent =
+      (m==='gesture')
+        ? 'Gesture: Right = move • Left = aim • Pinch-hold charge • Release shoot • Two-hand pinch recall'
+        : 'Keyboard: A/D move • Mouse aim • Hold click/Space charge • Release shoot • R recall • ESC pause';
+
+    setBridge(`Controller: ${m}`);
+  }
+
+  UI.pickGesture.addEventListener('pointerdown', async (e)=>{
+    e.preventDefault();
+    setMode('gesture');
+    await startGestureSystem(); // permission prompt early
+  }, { passive:false });
+
+  UI.pickKeyboard.addEventListener('pointerdown', (e)=>{
+    e.preventDefault();
+    setMode('keyboard');
+    setBridge('Keyboard selected');
+  }, { passive:false });
+
+  UI.startBtn.addEventListener('pointerdown', async (e)=>{
+    e.preventDefault();
+
+    if(controllerMode === 'gesture'){
+      const ok = await startGestureSystem();
+      if(!ok){
+        setBridge('Gesture camera failed. Starting anyway (no gesture).');
+        UI.overlay.style.display = 'none';
+        startNewRun();
+        return;
+      }
+      openStartup();
+      return;
+    }
+
+    UI.overlay.style.display = 'none';
+    startNewRun();
+  }, { passive:false });
+
+  // -------------------------
+  // Run control
+  // -------------------------
+  function startNewRun(){
+    started = true;
+    paused = false;
+
+    score = 0; made = 0; miss = 0; streak = 0;
+    timeLeft = SESSION_SEC;
+
+    player.x = window.innerWidth*0.5;
+    player.y = window.innerHeight*0.82;
+
+    resetBallToPlayer();
+    charging = false; chargeT = 0; lastChargePinch = false;
+
+    UI.powerFill.style.width = '0%';
+    UI.timeFill.style.width = '100%';
+    setBridge('Training session started — rapid throws enabled');
+  }
+
+  // restore last mode
+  if(controllerMode === 'gesture' || controllerMode === 'keyboard'){
+    setMode(controllerMode);
+  }else{
+    setBridge('Controller: not selected');
+  }
+
+  // keep aim cursor sane on resize
+  window.addEventListener('resize', ()=>{
+    input.aimCursor.x = window.innerWidth*0.5;
+    input.aimCursor.y = window.innerHeight*0.45;
+    if(ball.held) resetBallToPlayer();
+  }, { passive:true });
+
+})();
+</script>
+</body>
+</html>

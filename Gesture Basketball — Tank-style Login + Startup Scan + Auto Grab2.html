@@ -1,0 +1,1891 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Gesture Basketball — Tank-style Login + Startup Scan + Auto Grab</title>
+
+  <style>
+    :root{ --uiText: rgba(255,255,255,.92); }
+    *{ box-sizing:border-box; }
+    html,body{
+      margin:0; padding:0;
+      width:100%; height:100%;
+      background:#0b0b0b;
+      overflow:hidden;
+      touch-action:none;
+      -webkit-user-select:none;
+      user-select:none;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+    #wrap{ position:relative; width:100%; height:100%; }
+    canvas{ display:block; }
+    #video{ position:fixed; left:-9999px; top:-9999px; width: 960px; height: 540px; opacity:0; pointer-events:none; }
+
+    /* 2D HUD canvas on top */
+    #hud2d{
+      position:absolute; left:0; top:0; width:100%; height:100%;
+      pointer-events:none;
+      z-index: 5;
+    }
+
+    /* top buttons */
+    .topBtn{
+      pointer-events:auto;
+      position:fixed;
+      top: calc(env(safe-area-inset-top) + 10px);
+      padding:10px 12px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.10);
+      border: 1px solid rgba(255,255,255,.14);
+      color: rgba(255,255,255,.92);
+      font: 14px/1 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+      backdrop-filter: blur(8px);
+      z-index: 30;
+      display:none;
+    }
+    #menuBtn{ right: calc(env(safe-area-inset-right) + 170px); }
+    #panelBtn{ right: calc(env(safe-area-inset-right) + 92px); }
+    #pauseBtn{ right: calc(env(safe-area-inset-right) + 10px); }
+
+    #bridge{
+      position:fixed;
+      left: calc(env(safe-area-inset-left) + 10px);
+      bottom: calc(env(safe-area-inset-bottom) + 10px);
+      padding:8px 10px;
+      border-radius: 12px;
+      background: rgba(0,0,0,.28);
+      border:1px solid rgba(255,255,255,.10);
+      color: rgba(255,255,255,.72);
+      font: 12px/1.2 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+      pointer-events:none;
+      max-width: 92vw;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      z-index: 25;
+    }
+
+    /* ===== MENU / LOGIN OVERLAY (Tank-style) ===== */
+    #overlay{
+      position:fixed; inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding: calc(env(safe-area-inset-top) + 14px) 14px calc(env(safe-area-inset-bottom) + 14px);
+      background: radial-gradient(1200px 800px at 50% 25%, rgba(160,210,255,.10), rgba(0,0,0,.60));
+      backdrop-filter: blur(10px);
+      z-index: 80;
+      overflow:hidden;
+    }
+    #card{
+      width: min(980px, 96vw);
+      max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 28px);
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 18px;
+      box-shadow: 0 30px 80px rgba(0,0,0,.35);
+      color: rgba(255,255,255,.90);
+      font: 13px/1.35 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+      display:flex;
+      flex-direction:column;
+      overflow:hidden;
+    }
+    #cardHeader{
+      padding: 14px 14px 10px;
+      border-bottom: 1px solid rgba(255,255,255,.10);
+      background: rgba(0,0,0,.14);
+    }
+    #titleRow{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap: 12px;
+    }
+    #titleRow h1{
+      margin: 0;
+      font: 900 18px/1.15 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+      letter-spacing: .2px;
+    }
+    #subtitle{ opacity:.82; margin-top: 6px; max-width: 95ch; }
+    #cardBody{
+      padding: 12px 14px 12px;
+      overflow:auto;
+      -webkit-overflow-scrolling: touch;
+      min-height: 0;
+    }
+    .grid{
+      display:grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+      gap: 12px;
+    }
+    @media (max-width: 980px){ .grid{ grid-template-columns: 1fr; } }
+
+    .panel{
+      background: rgba(0,0,0,.22);
+      border: 1px solid rgba(255,255,255,.10);
+      border-radius: 14px;
+      padding: 10px 10px 8px;
+      min-width: 0;
+    }
+    .panel h3{
+      margin: 2px 0 8px;
+      font: 900 13px/1.15 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+      letter-spacing:.15px;
+    }
+    .row{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      margin: 7px 0;
+      min-width: 0;
+    }
+    .row label{ flex: 0 0 240px; opacity:.95; min-width: 0; }
+    .row input[type="range"]{ width:100%; min-width: 0; }
+    .row .v{
+      width: 110px;
+      text-align:right;
+      opacity:.85;
+      font-variant-numeric: tabular-nums;
+      flex: 0 0 auto;
+    }
+    .row input[type="checkbox"]{ transform: scale(1.05); }
+
+    @media (max-width: 560px){
+      #cardHeader{ padding: 12px 12px 10px; }
+      #cardBody{ padding: 10px 12px 12px; }
+      .row{ flex-direction:column; align-items:stretch; gap:6px; }
+      .row label{ flex: 0 0 auto; width:100%; }
+      .row .v{ width:100%; text-align:right; }
+    }
+
+    #cardFooter{
+      padding: 12px 14px 14px;
+      border-top: 1px solid rgba(255,255,255,.10);
+      background: rgba(0,0,0,.14);
+    }
+    .actions{ display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap; }
+    .actionBtn{
+      padding: 12px 14px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.16);
+      background: rgba(255,255,255,.10);
+      color: rgba(255,255,255,.92);
+      cursor:pointer;
+      font: 800 13px/1 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+    }
+    .actionBtn.primary{
+      background: rgba(90,255,160,.22);
+      border-color: rgba(90,255,160,.26);
+    }
+    .actionBtn:disabled{ opacity:.45; cursor:not-allowed; }
+    .hint{ opacity:.80; font-size: 12px; margin-top: 6px; }
+
+    /* ===== STARTUP CALIBRATION (Tank-style) ===== */
+    #startup{
+      position:fixed; inset:0;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding: calc(env(safe-area-inset-top) + 14px) 14px calc(env(safe-area-inset-bottom) + 14px);
+      background: radial-gradient(1100px 700px at 50% 35%, rgba(255,140,140,.08), rgba(0,0,0,.62));
+      backdrop-filter: blur(10px);
+      z-index: 90;
+      color: rgba(255,255,255,.92);
+      font: 14px/1.35 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+      overflow:hidden;
+    }
+    #startupCard{
+      width: min(900px, 96vw);
+      max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 28px);
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.08);
+      box-shadow: 0 30px 80px rgba(0,0,0,.35);
+      padding: 14px 14px 12px;
+      overflow:auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    #startupTop{ display:flex; align-items:flex-start; justify-content:space-between; gap: 12px; margin-bottom: 10px; }
+    #startupTop h2{ margin:0; font: 900 16px/1.15 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif; letter-spacing:.2px; }
+    #startupMsg{ opacity:.85; margin-top: 6px; }
+    #startupCount{ font: 900 56px/1 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif; opacity:.95; min-width: 80px; text-align:right; }
+    #startupStatus{ display:flex; gap:10px; flex-wrap:wrap; margin-top: 10px; }
+    .chip{
+      padding:8px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(0,0,0,.22);
+      opacity:.9;
+      font-variant-numeric: tabular-nums;
+      max-width: 100%;
+    }
+    .chip.ok{ border-color: rgba(90,255,160,.30); background: rgba(90,255,160,.14); }
+    .chip.bad{ border-color: rgba(255,120,120,.25); background: rgba(255,120,120,.10); }
+    #startupBars{ display:flex; gap:10px; margin-top: 12px; align-items:center; flex-wrap:wrap; }
+    .pbar{
+      flex: 1 1 260px;
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.12);
+      overflow:hidden;
+      border: 1px solid rgba(255,255,255,.10);
+    }
+    .pbar > i{ display:block; height:100%; width:0%; background: rgba(140,220,255,.95); }
+    #startupNote{ margin-top: 10px; opacity:.78; font-size: 12px; }
+    #startupActions{ display:flex; gap:10px; justify-content:flex-end; margin-top: 12px; flex-wrap:wrap; }
+
+    /* ===== LIVE TUNER PANEL (Hide/Show panel) ===== */
+    #liveTuner{
+      position:fixed;
+      top: calc(env(safe-area-inset-top) + 58px);
+      right: calc(env(safe-area-inset-right) + 10px);
+      width: min(430px, 92vw);
+      max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 80px);
+      background: rgba(10,14,20,.72);
+      border: 1px solid rgba(255,255,255,.14);
+      border-radius: 16px;
+      backdrop-filter: blur(10px);
+      z-index: 60;
+      display:none;
+      overflow:hidden;
+    }
+    #liveTunerHeader{
+      padding: 10px 10px 8px;
+      border-bottom: 1px solid rgba(255,255,255,.10);
+      display:flex;
+      gap:10px;
+      align-items:center;
+      justify-content:space-between;
+      color: rgba(255,255,255,.92);
+      font: 900 13px/1 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+    }
+    #liveTunerHeader small{ font-weight:700; opacity:.8; }
+    #liveTunerBody{
+      padding: 10px 10px 12px;
+      overflow:auto;
+      -webkit-overflow-scrolling: touch;
+      color: rgba(255,255,255,.90);
+      font: 13px/1.35 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+    }
+    .miniBtn{
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.16);
+      background: rgba(255,255,255,.10);
+      color: rgba(255,255,255,.92);
+      cursor:pointer;
+      font: 900 12px/1 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+    }
+
+    /* tiny helper text */
+    .kbdHint{
+      opacity:.75;
+      font-size:12px;
+      margin-top:6px;
+    }
+  </style>
+
+  <!-- Three.js -->
+  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+
+  <!-- MediaPipe Hands -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+</head>
+
+<body>
+<div id="wrap">
+  <video id="video" playsinline></video>
+  <canvas id="webgl"></canvas>
+  <canvas id="hud2d"></canvas>
+
+  <button id="menuBtn" class="topBtn">Menu</button>
+  <button id="panelBtn" class="topBtn">Panel</button>
+  <button id="pauseBtn" class="topBtn">Pause</button>
+  <div id="bridge">Gesture: not started</div>
+
+  <!-- LIVE TUNER PANEL (this is the hide/show panel) -->
+  <div id="liveTuner">
+    <div id="liveTunerHeader">
+      <div>
+        Live Panel <small id="liveMode">(gesture)</small>
+      </div>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <button id="recenterBtn" class="miniBtn">Recenter</button>
+        <button id="recalBtn" class="miniBtn">Startup Scan</button>
+        <button id="closeLiveBtn" class="miniBtn">Close</button>
+      </div>
+    </div>
+    <div id="liveTunerBody">
+      <div class="panel">
+        <h3>Gesture Alignment (Tank-style)</h3>
+
+        <div class="row">
+          <label>Micro Range (inches → full speed)</label>
+          <input id="microInLive" type="range" min="0.25" max="3.00" step="0.05" value="0.75">
+          <div class="v" id="microInLiveV">0.75 in</div>
+        </div>
+
+        <div class="row">
+          <label>Deadzone (px)</label>
+          <input id="deadPxLive" type="range" min="0" max="140" step="1" value="18">
+          <div class="v" id="deadPxLiveV">18</div>
+        </div>
+
+        <div class="row">
+          <label>Smoothing</label>
+          <input id="smoothLive" type="range" min="0.00" max="0.92" step="0.01" value="0.22">
+          <div class="v" id="smoothLiveV">0.22</div>
+        </div>
+
+        <div class="row">
+          <label>Move Speed</label>
+          <input id="moveSpeedLive" type="range" min="0.8" max="6.0" step="0.1" value="3.0">
+          <div class="v" id="moveSpeedLiveV">3.0</div>
+        </div>
+
+        <div class="row">
+          <label>Look Speed</label>
+          <input id="lookSpeedLive" type="range" min="0.4" max="3.0" step="0.05" value="1.05">
+          <div class="v" id="lookSpeedLiveV">1.05</div>
+        </div>
+
+        <div class="row">
+          <label>Invert Look Y</label>
+          <input id="invLookYLive" type="checkbox">
+          <div class="v"></div>
+        </div>
+
+        <div class="row">
+          <label>Mirror X (Selfie)</label>
+          <input id="mirrorXLive" type="checkbox" checked>
+          <div class="v"></div>
+        </div>
+
+        <div class="row">
+          <label>Swap Hands</label>
+          <input id="swapHandsLive" type="checkbox">
+          <div class="v"></div>
+        </div>
+
+        <div class="row">
+          <label>Show HUD Markers</label>
+          <input id="showHudLive" type="checkbox" checked>
+          <div class="v"></div>
+        </div>
+
+        <div class="kbdHint">
+          Tip: <b>Move hand</b> (MP Right by default): move to walk • pinch to look (turn).<br/>
+          <b>Grab hand</b> (MP Left): pinch to grab (auto-magnet near) • release to throw.
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:10px;">
+        <h3>Grab / Throw</h3>
+
+        <div class="row">
+          <label>Grab Pinch Threshold</label>
+          <input id="grabPinchLive" type="range" min="0.18" max="0.52" step="0.01" value="0.30">
+          <div class="v" id="grabPinchLiveV">0.30</div>
+        </div>
+
+        <div class="row">
+          <label>Look Pinch Threshold (Move hand)</label>
+          <input id="lookPinchLive" type="range" min="0.18" max="0.52" step="0.01" value="0.30">
+          <div class="v" id="lookPinchLiveV">0.30</div>
+        </div>
+
+        <div class="row">
+          <label>Throw Power</label>
+          <input id="throwPowLive" type="range" min="1" max="18" step="0.5" value="6.0">
+          <div class="v" id="throwPowLiveV">6.0</div>
+        </div>
+
+        <div class="row">
+          <label>Auto-Grab Magnet (world units)</label>
+          <input id="autoGrabLive" type="range" min="0.20" max="2.50" step="0.05" value="0.90">
+          <div class="v" id="autoGrabLiveV">0.90</div>
+        </div>
+
+        <div class="row">
+          <label>Grab Offset X (px)</label>
+          <input id="grabOffXLive" type="range" min="-400" max="400" step="1" value="0">
+          <div class="v" id="grabOffXLiveV">0</div>
+        </div>
+        <div class="row">
+          <label>Grab Offset Y (px)</label>
+          <input id="grabOffYLive" type="range" min="-300" max="300" step="1" value="0">
+          <div class="v" id="grabOffYLiveV">0</div>
+        </div>
+
+        <div class="row">
+          <label>Move Offset X (px)</label>
+          <input id="moveOffXLive" type="range" min="-400" max="400" step="1" value="0">
+          <div class="v" id="moveOffXLiveV">0</div>
+        </div>
+        <div class="row">
+          <label>Move Offset Y (px)</label>
+          <input id="moveOffYLive" type="range" min="-300" max="300" step="1" value="0">
+          <div class="v" id="moveOffYLiveV">0</div>
+        </div>
+
+        <div class="row" style="justify-content:flex-end;">
+          <button id="defaultsLive" class="actionBtn">Defaults</button>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:10px;">
+        <h3>Readout</h3>
+        <div id="liveReadout" style="opacity:.82; font-size:12px; font-variant-numeric: tabular-nums; word-break: break-word;">—</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LOGIN / MENU OVERLAY -->
+  <div id="overlay">
+    <div id="card">
+      <div id="cardHeader">
+        <div id="titleRow">
+          <div>
+            <h1>Gesture Basketball</h1>
+            <div id="subtitle">
+              Tank-style login + alignment: <b>Startup Scan</b> locks your neutral + deadzone + micro range.<br/>
+              Controls: <b>Move hand</b> (MP Right) = move / pinch = look • <b>Grab hand</b> (MP Left) = pinch grab / release throw.
+            </div>
+          </div>
+          <div style="opacity:.75; font-size:12px; text-align:right;">
+            Tip: press <b>Panel</b> to hide/show tuning
+          </div>
+        </div>
+      </div>
+
+      <div id="cardBody">
+        <div class="grid">
+          <div class="panel">
+            <h3>Startup Tuners</h3>
+
+            <div class="row">
+              <label>Micro Range (inches → full speed)</label>
+              <input id="microIn" type="range" min="0.25" max="3.00" step="0.05" value="0.75">
+              <div class="v" id="microInV">0.75 in</div>
+            </div>
+
+            <div class="row">
+              <label>Deadzone (px)</label>
+              <input id="deadPx" type="range" min="0" max="140" step="1" value="18">
+              <div class="v" id="deadPxV">18</div>
+            </div>
+
+            <div class="row">
+              <label>Smoothing</label>
+              <input id="smooth" type="range" min="0.00" max="0.92" step="0.01" value="0.22">
+              <div class="v" id="smoothV">0.22</div>
+            </div>
+
+            <div class="row">
+              <label>Move Speed</label>
+              <input id="moveSpeed" type="range" min="0.8" max="6.0" step="0.1" value="3.0">
+              <div class="v" id="moveSpeedV">3.0</div>
+            </div>
+
+            <div class="row">
+              <label>Look Speed</label>
+              <input id="lookSpeed" type="range" min="0.4" max="3.0" step="0.05" value="1.05">
+              <div class="v" id="lookSpeedV">1.05</div>
+            </div>
+
+            <div class="row">
+              <label>Invert Look Y</label>
+              <input id="invLookY" type="checkbox">
+              <div class="v"></div>
+            </div>
+
+            <div class="row">
+              <label>Mirror X (Selfie)</label>
+              <input id="mirrorX" type="checkbox" checked>
+              <div class="v"></div>
+            </div>
+
+            <div class="row">
+              <label>Swap Hands</label>
+              <input id="swapHands" type="checkbox">
+              <div class="v"></div>
+            </div>
+
+            <div class="row">
+              <label>Show HUD Markers</label>
+              <input id="showHud" type="checkbox" checked>
+              <div class="v"></div>
+            </div>
+
+            <div class="hint">
+              <b>Easy pickup:</b> while pinching the grab hand, the ball magnet radius helps auto-grab when near.
+            </div>
+          </div>
+
+          <div class="panel">
+            <h3>Grab / Throw</h3>
+
+            <div class="row">
+              <label>Grab Pinch Threshold</label>
+              <input id="grabPinch" type="range" min="0.18" max="0.52" step="0.01" value="0.30">
+              <div class="v" id="grabPinchV">0.30</div>
+            </div>
+
+            <div class="row">
+              <label>Look Pinch Threshold (Move hand)</label>
+              <input id="lookPinch" type="range" min="0.18" max="0.52" step="0.01" value="0.30">
+              <div class="v" id="lookPinchV">0.30</div>
+            </div>
+
+            <div class="row">
+              <label>Throw Power</label>
+              <input id="throwPow" type="range" min="1" max="18" step="0.5" value="6.0">
+              <div class="v" id="throwPowV">6.0</div>
+            </div>
+
+            <div class="row">
+              <label>Auto-Grab Magnet (world units)</label>
+              <input id="autoGrab" type="range" min="0.20" max="2.50" step="0.05" value="0.90">
+              <div class="v" id="autoGrabV">0.90</div>
+            </div>
+
+            <div class="row">
+              <label>Grab Offset X (px)</label>
+              <input id="grabOffX" type="range" min="-400" max="400" step="1" value="0">
+              <div class="v" id="grabOffXV">0</div>
+            </div>
+            <div class="row">
+              <label>Grab Offset Y (px)</label>
+              <input id="grabOffY" type="range" min="-300" max="300" step="1" value="0">
+              <div class="v" id="grabOffYV">0</div>
+            </div>
+
+            <div class="row">
+              <label>Move Offset X (px)</label>
+              <input id="moveOffX" type="range" min="-400" max="400" step="1" value="0">
+              <div class="v" id="moveOffXV">0</div>
+            </div>
+            <div class="row">
+              <label>Move Offset Y (px)</label>
+              <input id="moveOffY" type="range" min="-300" max="300" step="1" value="0">
+              <div class="v" id="moveOffYV">0</div>
+            </div>
+
+            <div class="hint">
+              <b>Gameplay:</b> pinch grab to hold ball → move hand to aim camera → release pinch to throw.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="cardFooter">
+        <div class="actions">
+          <button id="resetBtn" class="actionBtn">Reset</button>
+          <button id="startBtn" class="actionBtn primary">Start Gesture Login</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STARTUP CALIBRATION -->
+  <div id="startup">
+    <div id="startupCard">
+      <div id="startupTop">
+        <div>
+          <h2>Startup Scan — Neutral + Deadzone + Micro Range</h2>
+          <div id="startupMsg">Raise both hands. Hold steady for 3-2-1.</div>
+        </div>
+        <div id="startupCount"></div>
+      </div>
+
+      <div id="startupStatus">
+        <div id="chipMove" class="chip bad">Move hand: not seen</div>
+        <div id="chipGrab" class="chip bad">Grab hand: not seen</div>
+        <div id="chipInch" class="chip">Micro: —</div>
+      </div>
+
+      <div id="startupBars">
+        <div class="pbar"><i id="bar1"></i></div>
+        <div class="pbar"><i id="bar2"></i></div>
+      </div>
+
+      <div id="startupNote">
+        Step 1: steady hands for centering + jitter scan.<br/>
+        Step 2: move the <b>move hand</b> only a little (~0.5–1 inch) to confirm micro range.
+      </div>
+
+      <div id="startupActions">
+        <button id="skipStartup" class="actionBtn">Skip</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  // -----------------------
+  // Helpers
+  // -----------------------
+  const clamp = (v,a,b)=> Math.max(a, Math.min(b, v));
+  const hypot = Math.hypot;
+
+  function pxPerInch(){
+    const d = document.createElement("div");
+    d.style.width = "1in";
+    d.style.position = "absolute";
+    d.style.left = "-200%";
+    d.style.top = "0";
+    document.body.appendChild(d);
+    const p = d.getBoundingClientRect().width || 96;
+    d.remove();
+    return p;
+  }
+  let PX_IN = pxPerInch();
+  window.addEventListener("resize", ()=>{ PX_IN = pxPerInch(); }, { passive:true });
+
+  function distLm(a,b){
+    const dx = (a.x - b.x), dy = (a.y - b.y);
+    return Math.sqrt(dx*dx + dy*dy);
+  }
+  function avgLm(points){
+    let x=0,y=0,z=0;
+    for (const p of points){ x+=p.x; y+=p.y; z+=(p.z||0); }
+    const n = Math.max(1, points.length);
+    return { x:x/n, y:y/n, z:z/n };
+  }
+
+  // -----------------------
+  // UI refs
+  // -----------------------
+  const webglCanvas = document.getElementById("webgl");
+  const hudCanvas = document.getElementById("hud2d");
+  const hud = hudCanvas.getContext("2d", { alpha:true });
+
+  const ui = {
+    bridge: document.getElementById("bridge"),
+    menuBtn: document.getElementById("menuBtn"),
+    panelBtn: document.getElementById("panelBtn"),
+    pauseBtn: document.getElementById("pauseBtn"),
+
+    overlay: document.getElementById("overlay"),
+    startBtn: document.getElementById("startBtn"),
+    resetBtn: document.getElementById("resetBtn"),
+
+    startup: document.getElementById("startup"),
+    startupMsg: document.getElementById("startupMsg"),
+    startupCount: document.getElementById("startupCount"),
+    chipMove: document.getElementById("chipMove"),
+    chipGrab: document.getElementById("chipGrab"),
+    chipInch: document.getElementById("chipInch"),
+    bar1: document.getElementById("bar1"),
+    bar2: document.getElementById("bar2"),
+    skipStartup: document.getElementById("skipStartup"),
+
+    liveTuner: document.getElementById("liveTuner"),
+    closeLiveBtn: document.getElementById("closeLiveBtn"),
+    recenterBtn: document.getElementById("recenterBtn"),
+    recalBtn: document.getElementById("recalBtn"),
+    defaultsLive: document.getElementById("defaultsLive"),
+    liveReadout: document.getElementById("liveReadout"),
+  };
+
+  function setBridge(t){ ui.bridge.textContent = t; }
+
+  // -----------------------
+  // Config (tank-style)
+  // -----------------------
+  const cfgDefaults = {
+    microRangeInches: 0.75,
+    deadzonePx: 18,
+    smoothing: 0.22,
+
+    moveSpeed: 3.0,
+    lookSpeed: 1.05,
+    invLookY: false,
+
+    mirrorX: true,
+    swapHands: false,
+    showHud: true,
+
+    grabPinchThresh: 0.30, // pinchNorm ratio threshold
+    lookPinchThresh: 0.30, // pinchNorm ratio threshold (move hand)
+
+    throwPower: 6.0,
+    autoGrabRadius: 0.90,  // world units "magnet" for easier pickup
+
+    grabOffX: 0,
+    grabOffY: 0,
+    moveOffX: 0,
+    moveOffY: 0,
+  };
+
+  const cfgKey = "gesture_basket_cfg_v1";
+  const cfg = { ...cfgDefaults };
+
+  function loadCfg(){
+    try{
+      const raw = localStorage.getItem(cfgKey);
+      if(!raw) return;
+      const o = JSON.parse(raw);
+      for(const k of Object.keys(cfgDefaults)){
+        const t = typeof cfgDefaults[k];
+        if(t === "boolean" && typeof o[k] === "boolean") cfg[k] = o[k];
+        if(t === "number"  && typeof o[k] === "number" && isFinite(o[k])) cfg[k] = o[k];
+      }
+    } catch {}
+  }
+  function saveCfg(){ try{ localStorage.setItem(cfgKey, JSON.stringify(cfg)); } catch {} }
+
+  const rangeBindings = [];
+  const checkBindings = [];
+
+  function bindRange(id, key, fmt){
+    const el = document.getElementById(id);
+    const vEl = document.getElementById(id + "V");
+    if(!el) return;
+    rangeBindings.push({ el, vEl, key, fmt });
+    el.addEventListener("input", ()=>{
+      cfg[key] = +el.value;
+      saveCfg();
+      syncControls();
+    }, { passive:true });
+  }
+  function bindCheck(id, key){
+    const el = document.getElementById(id);
+    if(!el) return;
+    checkBindings.push({ el, key });
+    el.addEventListener("change", ()=>{
+      cfg[key] = !!el.checked;
+      saveCfg();
+      syncControls();
+    }, { passive:true });
+  }
+  function syncControls(){
+    for(const b of rangeBindings){
+      b.el.value = cfg[b.key];
+      if(b.vEl && b.fmt) b.vEl.textContent = b.fmt(cfg[b.key]);
+    }
+    for(const b of checkBindings){
+      b.el.checked = !!cfg[b.key];
+    }
+  }
+
+  // Overlay bindings
+  bindRange("microIn", "microRangeInches", v=>`${v.toFixed(2)} in`);
+  bindRange("deadPx", "deadzonePx", v=>String(Math.round(v)));
+  bindRange("smooth", "smoothing", v=>v.toFixed(2));
+  bindRange("moveSpeed", "moveSpeed", v=>v.toFixed(1));
+  bindRange("lookSpeed", "lookSpeed", v=>v.toFixed(2));
+
+  bindCheck("invLookY", "invLookY");
+  bindCheck("mirrorX", "mirrorX");
+  bindCheck("swapHands", "swapHands");
+  bindCheck("showHud", "showHud");
+
+  bindRange("grabPinch", "grabPinchThresh", v=>v.toFixed(2));
+  bindRange("lookPinch", "lookPinchThresh", v=>v.toFixed(2));
+  bindRange("throwPow", "throwPower", v=>v.toFixed(1));
+  bindRange("autoGrab", "autoGrabRadius", v=>v.toFixed(2));
+
+  bindRange("grabOffX","grabOffX", v=>String(Math.round(v)));
+  bindRange("grabOffY","grabOffY", v=>String(Math.round(v)));
+  bindRange("moveOffX","moveOffX", v=>String(Math.round(v)));
+  bindRange("moveOffY","moveOffY", v=>String(Math.round(v)));
+
+  // Live panel bindings
+  bindRange("microInLive", "microRangeInches", v=>`${v.toFixed(2)} in`);
+  bindRange("deadPxLive", "deadzonePx", v=>String(Math.round(v)));
+  bindRange("smoothLive", "smoothing", v=>v.toFixed(2));
+  bindRange("moveSpeedLive", "moveSpeed", v=>v.toFixed(1));
+  bindRange("lookSpeedLive", "lookSpeed", v=>v.toFixed(2));
+
+  bindCheck("invLookYLive", "invLookY");
+  bindCheck("mirrorXLive", "mirrorX");
+  bindCheck("swapHandsLive", "swapHands");
+  bindCheck("showHudLive", "showHud");
+
+  bindRange("grabPinchLive", "grabPinchThresh", v=>v.toFixed(2));
+  bindRange("lookPinchLive", "lookPinchThresh", v=>v.toFixed(2));
+  bindRange("throwPowLive", "throwPower", v=>v.toFixed(1));
+  bindRange("autoGrabLive", "autoGrabRadius", v=>v.toFixed(2));
+
+  bindRange("grabOffXLive","grabOffX", v=>String(Math.round(v)));
+  bindRange("grabOffYLive","grabOffY", v=>String(Math.round(v)));
+  bindRange("moveOffXLive","moveOffX", v=>String(Math.round(v)));
+  bindRange("moveOffYLive","moveOffY", v=>String(Math.round(v)));
+
+  loadCfg();
+  syncControls();
+
+  // -----------------------
+  // Screen sizing
+  // -----------------------
+  const renderer = new THREE.WebGLRenderer({ canvas: webglCanvas, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+  function resize(){
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    webglCanvas.width = w; webglCanvas.height = h;
+    hudCanvas.width = w; hudCanvas.height = h;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
+  window.addEventListener("resize", resize);
+
+  // -----------------------
+  // Three.js scene
+  // -----------------------
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x050505);
+
+  const camera = new THREE.PerspectiveCamera(45, 16/9, 0.1, 240);
+  camera.position.set(0, 1.45, 6.2);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  const keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
+  keyLight.position.set(8, 12, 5);
+  scene.add(keyLight);
+
+  // Ground (dark)
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(80, 80),
+    new THREE.MeshStandardMaterial({ color: 0x0f1216, roughness: 1.0, metalness: 0.0 })
+  );
+  ground.rotation.x = -Math.PI/2;
+  ground.position.y = -1.0;
+  scene.add(ground);
+
+  // Court texture (simple procedural)
+  function makeCourtTexture(size=1024){
+    const c = document.createElement("canvas");
+    c.width = c.height = size;
+    const ctx = c.getContext("2d");
+
+    // wood base
+    ctx.fillStyle = "#7a4b1f";
+    ctx.fillRect(0,0,size,size);
+
+    // planks
+    const plankH = 34;
+    for(let y=0;y<size;y+=plankH){
+      ctx.fillStyle = (Math.floor(y/plankH)%2===0) ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)";
+      ctx.fillRect(0,y,size,plankH);
+    }
+
+    // subtle noise
+    const img = ctx.getImageData(0,0,size,size);
+    for(let i=0;i<img.data.length;i+=4){
+      const n = (Math.random()*16 - 8);
+      img.data[i]   = Math.max(0, Math.min(255, img.data[i]   + n));
+      img.data[i+1] = Math.max(0, Math.min(255, img.data[i+1] + n));
+      img.data[i+2] = Math.max(0, Math.min(255, img.data[i+2] + n));
+    }
+    ctx.putImageData(img,0,0);
+
+    // court lines (half-court vibe)
+    ctx.strokeStyle = "rgba(245,245,245,0.85)";
+    ctx.lineWidth = 10;
+
+    const pad = 90;
+    ctx.strokeRect(pad, pad, size - pad*2, size - pad*2);
+
+    // center circle + midline
+    ctx.beginPath();
+    ctx.moveTo(size/2, pad);
+    ctx.lineTo(size/2, size - pad);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(size/2, size/2, size*0.14, 0, Math.PI*2);
+    ctx.stroke();
+
+    // key near far end (top)
+    const keyW = size*0.22;
+    const keyH = size*0.18;
+    ctx.strokeRect(size/2 - keyW/2, pad, keyW, keyH);
+
+    // free throw circle
+    ctx.beginPath();
+    ctx.arc(size/2, pad + keyH, size*0.11, Math.PI, Math.PI*2);
+    ctx.stroke();
+
+    // three-point arc (approx)
+    ctx.beginPath();
+    ctx.arc(size/2, pad + size*0.05, size*0.34, 0.22*Math.PI, 0.78*Math.PI);
+    ctx.stroke();
+
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.anisotropy = 4;
+    tex.needsUpdate = true;
+    return tex;
+  }
+
+  const courtTex = makeCourtTexture(1024);
+  const courtMat = new THREE.MeshStandardMaterial({ map: courtTex, roughness: 0.75, metalness: 0.0 });
+  const court = new THREE.Mesh(new THREE.PlaneGeometry(28, 15), courtMat);
+  court.rotation.x = -Math.PI/2;
+  court.position.set(0, -0.999, -8.0);
+  scene.add(court);
+
+  // Hoop assembly
+  const hoop = new THREE.Group();
+  hoop.position.set(0, 1, -20);
+
+  const pole = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.08, 0.10, 4.0, 24),
+    new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.7, metalness: 0.2 })
+  );
+  pole.position.set(0.0, -0.6, -1.2);
+  hoop.add(pole);
+
+  const arm = new THREE.Mesh(
+    new THREE.BoxGeometry(0.15, 0.15, 1.0),
+    new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.7, metalness: 0.2 })
+  );
+  arm.position.set(0, 1.0, -0.6);
+  hoop.add(arm);
+
+  const backboard = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.8, 1.2),
+    new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.85, metalness: 0.0 })
+  );
+  backboard.position.set(0, 1.0, -1.1);
+  hoop.add(backboard);
+
+  const boardFrame = new THREE.Mesh(
+    new THREE.BoxGeometry(1.86, 1.26, 0.05),
+    new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.6, metalness: 0.1 })
+  );
+  boardFrame.position.copy(backboard.position);
+  boardFrame.position.z -= 0.03;
+  hoop.add(boardFrame);
+
+  const rim = new THREE.Mesh(
+    new THREE.TorusGeometry(0.55, 0.05, 18, 48),
+    new THREE.MeshStandardMaterial({ color: 0xff2b2b, roughness: 0.35, metalness: 0.25 })
+  );
+  rim.rotation.x = Math.PI/2;
+  rim.position.set(0, 0.78, -0.55);
+  hoop.add(rim);
+
+  const netGroup = new THREE.Group();
+  netGroup.position.copy(rim.position);
+  const strandMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 });
+  const strands = 16;
+  for (let i = 0; i < strands; i++) {
+    const a = (i / strands) * Math.PI * 2;
+    const x = Math.cos(a) * 0.52;
+    const z = Math.sin(a) * 0.52;
+    const strand = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.008, 0.008, 0.7, 10),
+      strandMat
+    );
+    strand.position.set(x * 0.6, -0.35, z * 0.6);
+    netGroup.add(strand);
+  }
+  hoop.add(netGroup);
+  scene.add(hoop);
+
+  // Tiger stripe texture for balls (procedural)
+  function makeTigerTexture(size=512) {
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const ctx = c.getContext('2d');
+
+    ctx.fillStyle = '#d9761b';
+    ctx.fillRect(0,0,size,size);
+
+    const img = ctx.getImageData(0,0,size,size);
+    for (let i=0; i<img.data.length; i+=4) {
+      const n = (Math.random()*18 - 9);
+      img.data[i]   = Math.max(0, Math.min(255, img.data[i]   + n));
+      img.data[i+1] = Math.max(0, Math.min(255, img.data[i+1] + n));
+      img.data[i+2] = Math.max(0, Math.min(255, img.data[i+2] + n));
+    }
+    ctx.putImageData(img,0,0);
+
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = '#1b0d06';
+    for (let i=0; i<26; i++) {
+      const x = (i/26)*size + (Math.random()*30 - 15);
+      const w = 14 + Math.random()*26;
+      const skew = (Math.random()*0.7 - 0.35);
+      ctx.save();
+      ctx.translate(x, 0);
+      ctx.transform(1, skew, 0, 1, 0, 0);
+      ctx.beginPath();
+      ctx.moveTo(-w, 0);
+      ctx.bezierCurveTo(-w*0.2, size*0.25, -w*1.2, size*0.5, -w*0.2, size*0.75);
+      ctx.bezierCurveTo(w*0.5, size*0.9, w*0.2, size, w, size);
+      ctx.lineTo(w, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1.0;
+
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.anisotropy = 4;
+    tex.needsUpdate = true;
+    return tex;
+  }
+
+  const tigerTex = makeTigerTexture(512);
+  const baseBallMat = new THREE.MeshStandardMaterial({
+    map: tigerTex,
+    roughness: 0.55,
+    metalness: 0.05
+  });
+
+  // Balls + physics
+  const BALL_COUNT = 5;
+  const balls = [];
+
+  function randomBallPos() {
+    return new THREE.Vector3(
+      THREE.MathUtils.randFloat(-2.5, 2.5),
+      -0.6,
+      THREE.MathUtils.randFloat(-11.5, -7.5)
+    );
+  }
+
+  function makeBall() {
+    const mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.4, 32, 32),
+      baseBallMat.clone()
+    );
+    const ball = {
+      mesh,
+      radius: 0.4,
+      velocity: new THREE.Vector3(0,0,0),
+      reset(){
+        this.mesh.position.copy(randomBallPos());
+        this.velocity.set(0,0,0);
+      }
+    };
+    ball.reset();
+    scene.add(mesh);
+    return ball;
+  }
+  for(let i=0;i<BALL_COUNT;i++) balls.push(makeBall());
+
+  function checkBasketScore(ball) {
+    const p = ball.mesh.position;
+    const rimWorld = new THREE.Vector3();
+    rim.getWorldPosition(rimWorld);
+
+    const dx = p.x - rimWorld.x;
+    const dz = p.z - rimWorld.z;
+    const distXZ = Math.sqrt(dx*dx + dz*dz);
+    const rimRadius = 0.55;
+
+    return (distXZ < rimRadius && Math.abs(p.y - rimWorld.y) < 0.22);
+  }
+
+  const GRAVITY = -9.5;
+  const FLOOR_Y = -1 + 0.4;
+
+  let heldBall = null;
+
+  function stepPhysics(dt){
+    for(const b of balls){
+      if(b === heldBall) continue;
+
+      b.velocity.y += GRAVITY * dt;
+      b.mesh.position.addScaledVector(b.velocity, dt);
+
+      if (b.mesh.position.y < FLOOR_Y) {
+        b.mesh.position.y = FLOOR_Y;
+        if (b.velocity.y < 0) b.velocity.y *= -0.65;
+        b.velocity.x *= 0.985;
+        b.velocity.z *= 0.985;
+      }
+
+      const p = b.mesh.position;
+      if (p.y < -12 || Math.abs(p.x) > 18 || Math.abs(p.z) > 60) b.reset();
+      if (checkBasketScore(b)) b.reset();
+    }
+  }
+
+  // -----------------------
+  // Hand -> world mapping
+  // -----------------------
+  const raycaster = new THREE.Raycaster();
+  const INTERACT_Z = -10; // where your "hand plane" lives
+  const interactionPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -INTERACT_Z); // z = INTERACT_Z
+
+  function screenToWorld(xPx, yPx) {
+    const w = webglCanvas.width;
+    const h = webglCanvas.height;
+    const ndc = new THREE.Vector2(
+      (xPx / w) * 2 - 1,
+      -((yPx / h) * 2 - 1)
+    );
+    raycaster.setFromCamera(ndc, camera);
+    const out = new THREE.Vector3();
+    raycaster.ray.intersectPlane(interactionPlane, out);
+    return out;
+  }
+
+  // -----------------------
+  // Gesture state (tank-like)
+  // -----------------------
+  const g = {
+    // raw screen px positions (after mirror + offsets)
+    rawMoveX: 0, rawMoveY: 0, rawMoveZ: 0,
+    rawGrabX: 0, rawGrabY: 0, rawGrabZ: 0,
+
+    neutralMove: null, // {x,y,z}
+    neutralGrab: null,
+
+    moveSeen: false,
+    grabSeen: false,
+    lastMoveAt: 0,
+    lastGrabAt: 0,
+    lastAnyAt: 0,
+
+    pinchMoveLatched: false, // move hand pinch = look mode
+    pinchGrabLatched: false  // grab hand pinch = hold ball
+  };
+
+  function pinchLatch(prevLatched, pinchNorm, downT){
+    const upT = downT + 0.05;
+    if (!prevLatched){
+      if (pinchNorm <= downT) return true;
+      return false;
+    } else {
+      if (pinchNorm >= upT) return false;
+      return true;
+    }
+  }
+
+  // -----------------------
+  // MediaPipe Hands
+  // -----------------------
+  const videoEl = document.getElementById("video");
+  let hands = null;
+  let cam = null;
+
+  function onHandsResults(results){
+    const now = performance.now();
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    const lms = results.multiHandLandmarks || [];
+    const handed = results.multiHandedness || [];
+
+    let sawMove = false;
+    let sawGrab = false;
+
+    for(let i=0;i<lms.length;i++){
+      const lm = lms[i];
+      const mpLabel = (handed[i] && handed[i].label) ? handed[i].label : "Right";
+
+      // swap logic from tank: swap hands at label stage
+      const effectiveLabel = cfg.swapHands ? (mpLabel==="Left" ? "Right" : "Left") : mpLabel;
+
+      // Default mapping:
+      // MP Left  -> GRAB
+      // MP Right -> MOVE/LOOK
+      const role = (effectiveLabel === "Left") ? "grab" : "move";
+
+      const idxTip   = lm[8];
+      const thumbTip = lm[4];
+      const wrist    = lm[0];
+      const idxMcp   = lm[5];
+      const midMcp   = lm[9];
+      const pinkMcp  = lm[17];
+
+      const palm = avgLm([wrist, idxMcp, midMcp, pinkMcp]);
+
+      // Blend index tip + palm for stability (like tank)
+      const BLEND = 0.22;
+      let px = idxTip.x * (1-BLEND) + palm.x * BLEND;
+      let py = idxTip.y * (1-BLEND) + palm.y * BLEND;
+      let pz = (idxTip.z || 0) * (1-BLEND) + (palm.z || 0) * BLEND;
+
+      // mirror X (selfie)
+      if (cfg.mirrorX) px = 1 - px;
+
+      // Convert to pixels
+      let sx = px * w;
+      let sy = py * h;
+
+      // per-role offsets
+      if(role === "grab"){
+        sx += cfg.grabOffX;
+        sy += cfg.grabOffY;
+      } else {
+        sx += cfg.moveOffX;
+        sy += cfg.moveOffY;
+      }
+
+      // pinch normalization (tank-style): dist(thumb,index)/handScale
+      const scaleA = distLm(wrist, midMcp);
+      const scaleB = distLm(idxMcp, pinkMcp);
+      const handScale = Math.max(0.0001, scaleA, scaleB);
+      const pinchNorm = distLm(thumbTip, idxTip) / handScale;
+
+      if(role === "move"){
+        g.rawMoveX = sx; g.rawMoveY = sy; g.rawMoveZ = pz;
+        g.pinchMoveLatched = pinchLatch(g.pinchMoveLatched, pinchNorm, cfg.lookPinchThresh);
+
+        g.moveSeen = true;
+        g.lastMoveAt = now;
+        sawMove = true;
+      } else {
+        g.rawGrabX = sx; g.rawGrabY = sy; g.rawGrabZ = pz;
+        g.pinchGrabLatched = pinchLatch(g.pinchGrabLatched, pinchNorm, cfg.grabPinchThresh);
+
+        g.grabSeen = true;
+        g.lastGrabAt = now;
+        sawGrab = true;
+      }
+    }
+
+    if(sawMove || sawGrab) g.lastAnyAt = now;
+
+    const HOLD_MS = 320;
+    g.moveSeen = (now - g.lastMoveAt) <= HOLD_MS;
+    g.grabSeen = (now - g.lastGrabAt) <= HOLD_MS;
+  }
+
+  async function startGesture(){
+    if (!window.Hands || !window.Camera) return false;
+    if (hands && cam) return true;
+
+    hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+    hands.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.65,
+      minTrackingConfidence: 0.65
+    });
+    hands.onResults(onHandsResults);
+
+    cam = new Camera(videoEl, {
+      onFrame: async () => { try { await hands.send({ image: videoEl }); } catch {} },
+      width: 960,
+      height: 540
+    });
+
+    try { await cam.start(); return true; }
+    catch { hands = null; cam = null; return false; }
+  }
+
+  function stopGesture(){
+    try { if (cam && cam.stop) cam.stop(); } catch {}
+    cam = null;
+    hands = null;
+  }
+
+  // -----------------------
+  // Startup tuner (tank-style)
+  // -----------------------
+  const startup = {
+    active:false,
+    phase:"idle", // waitHands | countdown | range | done
+    stableT:0,
+    countdownT:0,
+    rangeT:0,
+    rawMove: [],
+    rawGrab: [],
+    neutralMove:null,
+    neutralGrab:null,
+    jitterMove:0,
+    jitterGrab:0,
+    maxMove:0
+  };
+
+  function showStartup(show){
+    ui.startup.style.display = show ? "flex" : "none";
+    if(!show){
+      ui.startupCount.textContent = "";
+      ui.bar1.style.width = "0%";
+      ui.bar2.style.width = "0%";
+    }
+  }
+
+  function statsStd(points){
+    if(!points || points.length < 3) return { sx:0, sy:0 };
+    let mx=0,my=0;
+    for(const p of points){ mx += p.x; my += p.y; }
+    mx /= points.length; my /= points.length;
+    let vx=0, vy=0;
+    for(const p of points){
+      const dx = p.x - mx, dy = p.y - my;
+      vx += dx*dx; vy += dy*dy;
+    }
+    vx /= points.length; vy /= points.length;
+    return { sx: Math.sqrt(vx), sy: Math.sqrt(vy) };
+  }
+
+  function beginStartupTuner(){
+    startup.active = true;
+    startup.phase = "waitHands";
+    startup.stableT = 0;
+    startup.countdownT = 0;
+    startup.rangeT = 0;
+    startup.rawMove.length = 0;
+    startup.rawGrab.length = 0;
+    startup.neutralMove = null;
+    startup.neutralGrab = null;
+    startup.jitterMove = 0;
+    startup.jitterGrab = 0;
+    startup.maxMove = 0;
+
+    ui.chipInch.textContent = `Micro: ${cfg.microRangeInches.toFixed(2)} in (${Math.round(cfg.microRangeInches*PX_IN)} px)`;
+    ui.startupMsg.innerHTML = `Raise both hands. Hold steady for <b>3-2-1</b>.`;
+    ui.startupCount.textContent = "";
+    ui.bar1.style.width = "0%";
+    ui.bar2.style.width = "0%";
+
+    showStartup(true);
+    setBridge("Startup Scan: raise both hands in view…");
+  }
+
+  function updateStartup(dt){
+    if(!startup.active) return;
+
+    const bothSeen = g.moveSeen && g.grabSeen;
+
+    ui.chipMove.className = "chip " + (g.moveSeen ? "ok" : "bad");
+    ui.chipGrab.className = "chip " + (g.grabSeen ? "ok" : "bad");
+    ui.chipMove.textContent = `Move hand: ${g.moveSeen ? "seen" : "not seen"}`;
+    ui.chipGrab.textContent = `Grab hand: ${g.grabSeen ? "seen" : "not seen"}`;
+    ui.chipInch.textContent = `Micro: ${cfg.microRangeInches.toFixed(2)} in`;
+
+    if(startup.phase === "waitHands"){
+      if(bothSeen){
+        startup.stableT += dt;
+        const pct = clamp(startup.stableT / 0.40, 0, 1);
+        ui.bar1.style.width = `${(pct*100).toFixed(0)}%`;
+        if(startup.stableT >= 0.40){
+          startup.phase = "countdown";
+          startup.countdownT = 3.0;
+          startup.rawMove.length = 0;
+          startup.rawGrab.length = 0;
+          ui.startupMsg.innerHTML = `Hold steady. Capturing neutral + jitter…`;
+        }
+      } else {
+        startup.stableT = 0;
+        ui.bar1.style.width = "0%";
+        ui.startupMsg.innerHTML = `Raise both hands in view. Hold steady.`;
+      }
+      return;
+    }
+
+    if(startup.phase === "countdown"){
+      if(!bothSeen){
+        startup.phase = "waitHands";
+        startup.stableT = 0;
+        ui.startupMsg.innerHTML = `Hands lost—raise both hands again.`;
+        return;
+      }
+
+      startup.countdownT -= dt;
+      const secondsLeft = Math.max(0, startup.countdownT);
+      ui.startupCount.textContent = String(Math.max(1, Math.ceil(secondsLeft)));
+
+      const pct = clamp((3.0 - secondsLeft) / 3.0, 0, 1);
+      ui.bar1.style.width = `${(pct*100).toFixed(0)}%`;
+
+      startup.rawMove.push({ x: g.rawMoveX, y: g.rawMoveY, z: g.rawMoveZ });
+      startup.rawGrab.push({ x: g.rawGrabX, y: g.rawGrabY, z: g.rawGrabZ });
+
+      if(startup.countdownT <= 0){
+        const mean = (arr)=>{
+          let x=0,y=0,z=0;
+          for(const p of arr){ x+=p.x; y+=p.y; z+=p.z; }
+          const n = Math.max(1, arr.length);
+          return { x:x/n, y:y/n, z:z/n };
+        };
+        startup.neutralMove = mean(startup.rawMove);
+        startup.neutralGrab = mean(startup.rawGrab);
+
+        const sM = statsStd(startup.rawMove);
+        const sG = statsStd(startup.rawGrab);
+        startup.jitterMove = Math.sqrt(sM.sx*sM.sx + sM.sy*sM.sy);
+        startup.jitterGrab = Math.sqrt(sG.sx*sG.sx + sG.sy*sG.sy);
+
+        // apply neutrals
+        g.neutralMove = { ...startup.neutralMove };
+        g.neutralGrab = { ...startup.neutralGrab };
+
+        startup.phase = "range";
+        startup.rangeT = 1.6;
+        startup.maxMove = 0;
+
+        ui.startupMsg.innerHTML =
+          `Now move the <b>move hand</b> only a little (<b>~0.5–1 inch</b>) for 1.6s.<br/>This confirms micro range & sets deadzone.`;
+        ui.startupCount.textContent = "";
+        ui.bar2.style.width = "0%";
+      }
+      return;
+    }
+
+    if(startup.phase === "range"){
+      startup.rangeT -= dt;
+
+      if(g.moveSeen && startup.neutralMove){
+        const d = hypot(g.rawMoveX - startup.neutralMove.x, g.rawMoveY - startup.neutralMove.y);
+        startup.maxMove = Math.max(startup.maxMove, d);
+      }
+
+      const pct = clamp((1.6 - Math.max(0, startup.rangeT)) / 1.6, 0, 1);
+      ui.bar2.style.width = `${(pct*100).toFixed(0)}%`;
+
+      if(startup.rangeT <= 0){
+        // deadzone from jitter (tank-ish)
+        cfg.deadzonePx = Math.round(clamp(startup.jitterMove * 3.0 + 10, 0, 140));
+
+        // infer micro range from max move (if user actually moved)
+        if(startup.maxMove > 0){
+          const inferredIn = clamp(startup.maxMove / PX_IN, 0.25, 3.0);
+          // set to inferred (easier alignment)
+          cfg.microRangeInches = inferredIn;
+        }
+
+        saveCfg();
+        syncControls();
+
+        startup.phase = "done";
+        ui.startupMsg.innerHTML = `Calibrated ✔ — neutral locked, deadzone + micro range saved.`;
+        ui.bar1.style.width = "100%";
+        ui.bar2.style.width = "100%";
+
+        setTimeout(()=>{
+          startup.active = false;
+          showStartup(false);
+          paused = false;
+          ui.pauseBtn.textContent = "Pause";
+          setBridge(`Gesture ON • micro ${cfg.microRangeInches.toFixed(2)}in • dead ${cfg.deadzonePx}px • pinch=grab`);
+        }, 650);
+      }
+      return;
+    }
+  }
+
+  ui.skipStartup.addEventListener("pointerdown", (e)=>{
+    e.preventDefault();
+    startup.active = false;
+    showStartup(false);
+    paused = false;
+    ui.pauseBtn.textContent = "Pause";
+    // seed neutrals if possible
+    if(!g.neutralMove && g.moveSeen) g.neutralMove = { x:g.rawMoveX, y:g.rawMoveY, z:g.rawMoveZ };
+    if(!g.neutralGrab && g.grabSeen) g.neutralGrab = { x:g.rawGrabX, y:g.rawGrabY, z:g.rawGrabZ };
+    setBridge("Startup skipped — neutrals auto-seeded.");
+  }, { passive:false });
+
+  // -----------------------
+  // Camera controls (move/look)
+  // -----------------------
+  let cameraYaw = 0;   // degrees
+  let cameraPitch = -6; // degrees
+  let moveAnalog = new THREE.Vector2(0,0);
+
+  function computeAnalogFromMoveHand(){
+    const fresh = (performance.now() - g.lastAnyAt) < 450;
+    if(!fresh || !g.moveSeen || !g.neutralMove) return new THREE.Vector2(0,0);
+
+    const dx = g.rawMoveX - g.neutralMove.x;
+    const dy = g.rawMoveY - g.neutralMove.y;
+
+    const len = hypot(dx,dy);
+    const dead = cfg.deadzonePx;
+    const microPx = Math.max(8, cfg.microRangeInches * PX_IN);
+
+    let ax=0, ay=0;
+    if(len > (dead + 2)){
+      const dirx = dx / len;
+      const diry = dy / len;
+      const eff = Math.max(0, len - dead);
+      let throttle = clamp(eff / microPx, 0, 1);
+      throttle = throttle * throttle;
+
+      ax = dirx * throttle;
+      ay = diry * throttle;
+    }
+
+    // smoothing (tank-ish)
+    const a = clamp(cfg.smoothing, 0, 0.98);
+    moveAnalog.x = moveAnalog.x * a + ax * (1 - a);
+    moveAnalog.y = moveAnalog.y * a + ay * (1 - a);
+
+    return moveAnalog.clone();
+  }
+
+  function applyCameraControls(moveVec, lookVec, dt){
+    const speed = cfg.moveSpeed;
+
+    const yawRad = THREE.MathUtils.degToRad(cameraYaw);
+    const forward = new THREE.Vector3(Math.sin(yawRad), 0, -Math.cos(yawRad));
+    const right   = new THREE.Vector3(Math.cos(yawRad), 0,  Math.sin(yawRad));
+
+    // move: up on screen (negative y) = forward
+    const worldMove = new THREE.Vector3();
+    worldMove.addScaledVector(right, moveVec.x * speed * dt);
+    worldMove.addScaledVector(forward, -lookOrMoveY(moveVec.y) * speed * dt);
+    camera.position.add(worldMove);
+
+    // look
+    cameraYaw += lookVec.x * (cfg.lookSpeed * 120) * dt;
+    const lookY = cfg.invLookY ? -lookVec.y : lookVec.y;
+    cameraPitch += lookY * (cfg.lookSpeed * 120) * dt;
+    cameraPitch = clamp(cameraPitch, -75, 75);
+
+    const yaw = THREE.MathUtils.degToRad(cameraYaw);
+    const pitch = THREE.MathUtils.degToRad(cameraPitch);
+    const dirX = Math.cos(pitch) * Math.sin(yaw);
+    const dirY = Math.sin(pitch);
+    const dirZ = -Math.cos(pitch) * Math.cos(yaw);
+    const target = camera.position.clone().add(new THREE.Vector3(dirX, dirY, dirZ));
+    camera.lookAt(target);
+  }
+
+  // helper to keep move y consistent with screen-space
+  function lookOrMoveY(v){ return v; }
+
+  // -----------------------
+  // Grab / throw logic (auto-magnet near balls)
+  // -----------------------
+  let grabHandWorld = null;
+  let lastHoldHandWorld = null;
+  let smoothedHandVel = new THREE.Vector3(0,0,0);
+  let grabCooldown = 0;
+  let prevGrabLatched = false;
+
+  function findClosestBall(handWorld){
+    let best = null;
+    let bestD = Infinity;
+    for(const b of balls){
+      if(b === heldBall) continue;
+      const d = b.mesh.position.distanceTo(handWorld);
+      const maxD = b.radius + cfg.autoGrabRadius;
+      if(d < maxD && d < bestD){
+        bestD = d; best = b;
+      }
+    }
+    return best;
+  }
+
+  function beginHold(ball){
+    heldBall = ball;
+    heldBall.velocity.set(0,0,0);
+    lastHoldHandWorld = null;
+    smoothedHandVel.set(0,0,0);
+  }
+
+  function releaseHoldWithThrow(dt){
+    if(!heldBall || !lastHoldHandWorld) return;
+
+    // throw velocity from smoothed hand velocity
+    const v = smoothedHandVel.clone().multiplyScalar(cfg.throwPower);
+
+    // small arc assist (only if moving)
+    const speed = v.length();
+    if(speed > 0.8) v.y += speed * 0.12;
+
+    // keep your old z inversion
+    v.z = -v.z;
+
+    heldBall.velocity.copy(v);
+    heldBall = null;
+    grabCooldown = 0.18;
+  }
+
+  // -----------------------
+  // HUD drawing
+  // -----------------------
+  function drawHUD(){
+    const w = hudCanvas.width;
+    const h = hudCanvas.height;
+    hud.clearRect(0,0,w,h);
+
+    if(!cfg.showHud) return;
+
+    // neutral marker
+    if(g.neutralMove){
+      hud.globalAlpha = 0.85;
+      hud.strokeStyle = "rgba(176,76,255,0.85)";
+      hud.lineWidth = 2;
+      hud.beginPath();
+      hud.arc(g.neutralMove.x, g.neutralMove.y, 24, 0, Math.PI*2);
+      hud.stroke();
+      hud.fillStyle = "rgba(176,76,255,0.95)";
+      hud.beginPath();
+      hud.arc(g.neutralMove.x, g.neutralMove.y, 4, 0, Math.PI*2);
+      hud.fill();
+      hud.globalAlpha = 1.0;
+
+      hud.fillStyle = "rgba(255,255,255,0.80)";
+      hud.font = "12px system-ui, sans-serif";
+      hud.fillText("NEUTRAL", g.neutralMove.x + 10, g.neutralMove.y - 10);
+    }
+
+    // move marker
+    if(g.moveSeen){
+      const col = g.pinchMoveLatched ? "rgba(255,165,0,0.95)" : "rgba(255,255,0,0.95)";
+      hud.fillStyle = col;
+      hud.beginPath();
+      hud.arc(g.rawMoveX, g.rawMoveY, 9, 0, Math.PI*2);
+      hud.fill();
+
+      hud.fillStyle = "rgba(255,255,255,0.75)";
+      hud.font = "12px system-ui, sans-serif";
+      hud.fillText(g.pinchMoveLatched ? "LOOK" : "MOVE", g.rawMoveX + 12, g.rawMoveY + 4);
+    }
+
+    // grab marker
+    if(g.grabSeen){
+      hud.fillStyle = "rgba(0,255,0,0.95)";
+      hud.beginPath();
+      hud.arc(g.rawGrabX, g.rawGrabY, 9, 0, Math.PI*2);
+      hud.fill();
+
+      hud.fillStyle = "rgba(255,255,255,0.75)";
+      hud.font = "12px system-ui, sans-serif";
+      hud.fillText(g.pinchGrabLatched ? "GRAB" : "OPEN", g.rawGrabX + 12, g.rawGrabY + 4);
+    }
+
+    // held ball indicator
+    if(heldBall){
+      const t = performance.now()/500;
+      const flash = (Math.sin(t)+1)/2;
+      const col = flash > 0.5 ? "rgba(0,255,0,0.9)" : "rgba(255,165,0,0.9)";
+      hud.fillStyle = col;
+      hud.beginPath();
+      hud.arc(Math.round(w*0.82), Math.round(h*0.86), Math.round(Math.min(w,h)*0.045), 0, Math.PI*2);
+      hud.fill();
+
+      hud.fillStyle = "rgba(0,0,0,0.55)";
+      hud.font = "900 12px system-ui, sans-serif";
+      hud.fillText("BALL", Math.round(w*0.82)-16, Math.round(h*0.86)+4);
+    }
+  }
+
+  // -----------------------
+  // Menu + panel controls
+  // -----------------------
+  let started = false;
+  let paused = true;
+
+  function showOverlay(show){
+    ui.overlay.style.display = show ? "flex" : "none";
+    if(show){
+      paused = true;
+      ui.pauseBtn.textContent = "Resume";
+      ui.liveTuner.style.display = "none";
+    }
+  }
+  function togglePause(){
+    if(!started) return;
+    paused = !paused;
+    ui.pauseBtn.textContent = paused ? "Resume" : "Pause";
+  }
+  function toggleLiveTuner(force){
+    const show = (typeof force === "boolean") ? force : (ui.liveTuner.style.display === "none");
+    ui.liveTuner.style.display = show ? "block" : "none";
+  }
+
+  ui.menuBtn.addEventListener("pointerdown", (e)=>{ e.preventDefault(); showOverlay(true); }, { passive:false });
+  ui.pauseBtn.addEventListener("pointerdown",(e)=>{ e.preventDefault(); togglePause(); }, { passive:false });
+  ui.panelBtn.addEventListener("pointerdown",(e)=>{ e.preventDefault(); toggleLiveTuner(); }, { passive:false });
+  ui.closeLiveBtn.addEventListener("pointerdown",(e)=>{ e.preventDefault(); toggleLiveTuner(false); }, { passive:false });
+
+  ui.recenterBtn.addEventListener("pointerdown", (e)=>{
+    e.preventDefault();
+    if(g.moveSeen) g.neutralMove = { x:g.rawMoveX, y:g.rawMoveY, z:g.rawMoveZ };
+    if(g.grabSeen) g.neutralGrab = { x:g.rawGrabX, y:g.rawGrabY, z:g.rawGrabZ };
+    setBridge("Recentered neutrals (move + grab).");
+  }, { passive:false });
+
+  ui.recalBtn.addEventListener("pointerdown", (e)=>{
+    e.preventDefault();
+    if(!started) return;
+    paused = true;
+    ui.pauseBtn.textContent = "Pause";
+    toggleLiveTuner(false);
+    beginStartupTuner();
+  }, { passive:false });
+
+  ui.defaultsLive.addEventListener("pointerdown", (e)=>{
+    e.preventDefault();
+    Object.assign(cfg, cfgDefaults);
+    saveCfg();
+    syncControls();
+    setBridge("Defaults restored.");
+  }, { passive:false });
+
+  ui.resetBtn.addEventListener("pointerdown", (e)=>{
+    e.preventDefault();
+    Object.assign(cfg, cfgDefaults);
+    saveCfg();
+    syncControls();
+    setBridge("Defaults restored.");
+  }, { passive:false });
+
+  // keyboard toggles: H = hud, P = panel, Esc = menu
+  window.addEventListener("keydown", (e)=>{
+    const k = e.key.toLowerCase();
+    if(k === "h"){
+      cfg.showHud = !cfg.showHud;
+      saveCfg(); syncControls();
+    }
+    if(k === "p"){
+      toggleLiveTuner();
+    }
+    if(e.code === "Escape" && started){
+      showOverlay(true);
+    }
+  }, { passive:true });
+
+  // -----------------------
+  // Start button: gesture login + startup scan
+  // -----------------------
+  ui.startBtn.addEventListener("pointerdown", async (e)=>{
+    e.preventDefault();
+
+    setBridge("Requesting camera…");
+    const ok = await startGesture();
+    if(!ok){
+      setBridge("Camera failed. Use HTTPS/localhost, allow permission.");
+      return;
+    }
+
+    started = true;
+    paused = true;
+
+    // show top buttons
+    ui.menuBtn.style.display = "block";
+    ui.panelBtn.style.display = "block";
+    ui.pauseBtn.style.display = "block";
+    ui.pauseBtn.textContent = "Pause";
+
+    showOverlay(false);
+
+    // run startup scan automatically (tank-style login)
+    beginStartupTuner();
+  }, { passive:false });
+
+  // -----------------------
+  // Main loop
+  // -----------------------
+  let lastT = performance.now();
+
+  function animate(now){
+    const dt = Math.min(0.033, Math.max(0.001, (now - lastT)/1000));
+    lastT = now;
+
+    // Always resize check (safe)
+    // (Do not spam resize; only when needed would be better, but okay.)
+    // We'll keep a light check:
+    if(webglCanvas.width !== window.innerWidth || webglCanvas.height !== window.innerHeight){
+      resize();
+    }
+
+    // Update startup scan while active (even if paused)
+    if(started && startup.active){
+      updateStartup(dt);
+    }
+
+    // derive move/look vectors from gestures (even if paused, we still compute HUD)
+    let moveVec = new THREE.Vector2(0,0);
+    let lookVec = new THREE.Vector2(0,0);
+
+    const analog = computeAnalogFromMoveHand();
+    const lookMode = !!g.pinchMoveLatched;
+
+    if(lookMode){
+      lookVec.copy(analog);
+      moveVec.set(0,0);
+    }else{
+      moveVec.copy(analog);
+      lookVec.set(0,0);
+    }
+
+    // grab hand world
+    grabHandWorld = (g.grabSeen) ? screenToWorld(g.rawGrabX, g.rawGrabY) : null;
+
+    // grab cooldown
+    grabCooldown = Math.max(0, grabCooldown - dt);
+
+    // Hold/throw logic (skip if we are in startup scan, but keep functional if you want; we keep active.)
+    if(started){
+      const grabLatched = !!g.pinchGrabLatched;
+
+      // begin pinch -> try grab (magnet)
+      if(grabLatched){
+        if(grabHandWorld){
+          if(!heldBall && grabCooldown <= 0){
+            const b = findClosestBall(grabHandWorld);
+            if(b) beginHold(b);
+          }
+          if(heldBall){
+            heldBall.mesh.position.copy(grabHandWorld);
+            heldBall.velocity.set(0,0,0);
+
+            // track hand velocity for throw
+            if(lastHoldHandWorld){
+              const instVel = grabHandWorld.clone().sub(lastHoldHandWorld).multiplyScalar(1/Math.max(1e-6, dt));
+              smoothedHandVel.lerp(instVel, 0.35);
+            }
+            if(!lastHoldHandWorld) lastHoldHandWorld = grabHandWorld.clone();
+            else lastHoldHandWorld.copy(grabHandWorld);
+          }
+        }
+      }
+
+      // release pinch edge -> throw
+      if(prevGrabLatched && !grabLatched){
+        releaseHoldWithThrow(dt);
+      }
+      prevGrabLatched = grabLatched;
+    }
+
+    // Apply camera controls + physics only when actually playing and not paused and not in startup
+    if(started && !paused && !startup.active){
+      applyCameraControls(moveVec, lookVec, dt);
+      stepPhysics(dt);
+    }
+
+    renderer.render(scene, camera);
+    drawHUD();
+
+    // Live readout
+    if(ui.liveTuner.style.display !== "none"){
+      const fresh = (performance.now() - g.lastAnyAt) < 450;
+      ui.liveReadout.textContent =
+        `fresh=${fresh}  moveSeen=${g.moveSeen} grabSeen=${g.grabSeen}  `+
+        `lookMode=${g.pinchMoveLatched?"Y":"n"} grabLatch=${g.pinchGrabLatched?"Y":"n"}  `+
+        `neutralMove=${g.neutralMove ? "Y" : "n"}  heldBall=${heldBall ? "Y" : "n"}  `+
+        `micro=${cfg.microRangeInches.toFixed(2)}in dead=${cfg.deadzonePx}px  `+
+        `throw=${cfg.throwPower.toFixed(1)} magnet=${cfg.autoGrabRadius.toFixed(2)}`;
+    }
+
+    requestAnimationFrame(animate);
+  }
+
+  // -----------------------
+  // Boot
+  // -----------------------
+  // initial camera look toward hoop
+  camera.lookAt(new THREE.Vector3(0, 1.1, -20));
+  resize();
+
+  // Start paused with menu showing (tank-like login)
+  showOverlay(true);
+  setBridge("Gesture: ready • Press Start Gesture Login");
+
+  requestAnimationFrame(animate);
+})();
+</script>
+</body>
+</html>

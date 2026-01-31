@@ -1,0 +1,1615 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>IonCore Basketball — True Court + Two-Hand Pipelines</title>
+<style>
+:root{
+  --bg:#050712;
+  --panel:rgba(255,255,255,.035);
+  --muted:rgba(255,255,255,.14);
+  --uiText: rgba(255,255,255,.94);
+  --c1:#39E0FF; /* ion cyan */
+  --c2:#FF8A59; /* ion orange */
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:var(--uiText);overflow:hidden}
+canvas{display:block;width:100vw;height:100vh;background:linear-gradient(180deg,#041018,#071018 40%);}
+#video{position:fixed;left:-9999px;top:-9999px;width:640px;height:480px;opacity:0;pointer-events:none}
+
+/* HUD */
+.hud{position:fixed;top:12px;left:50%;transform:translateX(-50%);display:flex;gap:10px;align-items:center;z-index:20;flex-wrap:wrap;justify-content:center;max-width:min(1200px,96vw)}
+.pill{padding:8px 12px;border-radius:999px;background:var(--panel);border:1px solid var(--muted);display:flex;gap:10px;align-items:center;min-width:110px}
+.small{font-size:13px;opacity:.9}
+.bar{width:170px;height:10px;background:rgba(255,255,255,.04);border-radius:999px;overflow:hidden;border:1px solid rgba(255,255,255,.05)}
+.fill{height:100%;width:0%;background:linear-gradient(90deg,var(--c1),var(--c2));transition:width 80ms linear}
+
+/* overlays */
+#overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:20px;z-index:60;background:radial-gradient(1200px 600px at 50% 25%, rgba(60,190,255,.03), rgba(0,0,0,.72));backdrop-filter:blur(6px)}
+.card{width:min(1020px,94vw);border-radius:14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.05);overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+.cardHeader{padding:14px;display:flex;justify-content:space-between;gap:16px;align-items:flex-start;border-bottom:1px solid rgba(255,255,255,.06)}
+.title{font-weight:900;font-size:18px;letter-spacing:0.3px}
+.subtitle{opacity:.92;margin-top:4px;font-size:13px;line-height:1.3}
+.modeRow{display:flex;gap:10px;padding:12px;flex-wrap:wrap}
+.modeBtn{flex:1;min-width:300px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.05);padding:12px;border-radius:12px;cursor:pointer;text-align:left;color:var(--uiText)}
+.modeBtn span{display:block;opacity:.82;font-size:13px;margin-top:4px;line-height:1.25}
+.modeBtn.selected{border-color:rgba(57,224,255,.22);box-shadow:0 0 0 1px rgba(57,224,255,.08) inset}
+.cardBody{padding:12px;display:flex;gap:12px;flex-wrap:wrap}
+.panel{flex:1;min-width:260px;background:rgba(0,0,0,.20);border-radius:10px;padding:10px;border:1px solid rgba(255,255,255,.04)}
+.panel h3{margin:6px 0 10px 0}
+.cardFooter{padding:12px;display:flex;justify-content:space-between;gap:12px;align-items:center;border-top:1px solid rgba(255,255,255,.06)}
+.actionBtn{padding:10px 14px;border-radius:999px;cursor:pointer;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.06);font-weight:900;color:var(--uiText)}
+.actionBtn.primary{background:linear-gradient(90deg,var(--c1),var(--c2));color:#041017;border-color:rgba(255,255,255,.06)}
+.actionBtn:disabled{opacity:.45;cursor:not-allowed}
+.hint{font-size:13px;opacity:.82;line-height:1.35}
+
+/* startup calibration */
+.startup{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:62;background:radial-gradient(900px 520px at 50% 20%, rgba(60,190,255,.03), rgba(0,0,0,.72));backdrop-filter:blur(6px)}
+.startupCard{width:min(900px,94vw);background:rgba(255,255,255,.03);border-radius:12px;padding:14px;border:1px solid rgba(255,255,255,.05)}
+.chip{display:inline-block;padding:8px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.06);background:rgba(0,0,0,.18);margin-right:8px;margin-bottom:8px}
+.chip.ok{border-color:rgba(57,224,255,.30);background:rgba(57,224,255,.07)}
+.chip.bad{border-color:rgba(255,120,120,.25);background:rgba(255,120,120,.06)}
+
+#bridge{position:fixed;left:12px;bottom:12px;padding:8px 10px;border-radius:12px;background:rgba(0,0,0,.22);border:1px solid rgba(255,255,255,.06);color:rgba(255,255,255,.76);z-index:20;font-size:13px;max-width:min(840px,90vw);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.controlsHint{position:fixed;right:12px;bottom:12px;z-index:20;background:rgba(0,0,0,.22);border:1px solid rgba(255,255,255,.06);padding:10px;border-radius:8px;font-size:13px;color:rgba(255,255,255,.84);max-width:min(520px,92vw)}
+
+@keyframes softGlow{0%{ box-shadow:0 0 0 rgba(57,224,255,.0) }100%{ box-shadow:0 0 28px rgba(57,224,255,.14) }}
+.glowOn{ animation:softGlow 1.2s ease-in-out infinite alternate; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<video id="video" playsinline></video>
+
+<div class="hud" id="hud">
+  <div class="pill"><div id="scoreTxt" style="font-weight:900">Score: 0</div></div>
+  <div class="pill"><div id="madeTxt" class="small">Made: 0</div></div>
+  <div class="pill"><div id="missTxt" class="small">Miss: 0</div></div>
+  <div class="pill"><div id="streakTxt" class="small">Streak: 0</div></div>
+  <div class="pill">
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div class="small" style="font-weight:900">Grip</div>
+      <div class="bar"><div id="gripFill" class="fill"></div></div>
+    </div>
+  </div>
+  <div class="pill">
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div class="small" style="font-weight:900">Time</div>
+      <div class="bar"><div id="timeFill" class="fill"></div></div>
+    </div>
+  </div>
+  <div class="pill"><div id="bestTxt" class="small">Best: 0</div></div>
+</div>
+
+<div id="overlay">
+  <div class="card">
+    <div class="cardHeader">
+      <div>
+        <div class="title">IonCore Basketball — True Court + Accurate Two-Hand Pipelines</div>
+        <div class="subtitle">
+          <b>LEFT HAND</b>: controls movement ONLY when it’s a <b>FIST</b> (closed). Open = <b>locked in place</b>.<br/>
+          <b>RIGHT HAND</b>: <b>FIST</b> = grip/hold ball in front. <b>OPEN + hand velocity</b> = throw / shot / pass.
+        </div>
+        <div class="hint" style="margin-top:6px">
+          Gesture mode needs <b>HTTPS</b> (or <b>localhost</b>) + camera permission.
+        </div>
+      </div>
+      <div style="opacity:.86;text-align:right">
+        <div style="font-weight:900">IonCore • Full Court Practice</div>
+        <div class="hint">2D court depth • rim height arc • defender pressure</div>
+      </div>
+    </div>
+
+    <div class="modeRow">
+      <button id="pickGesture" class="modeBtn">
+        <strong>Gesture Controller (2 Hands)</strong>
+        <span>Startup calibration uses OPEN hands steady → then BOTH FISTS to sign-in. Left fist moves. Right fist grips ball, open release throws (velocity-based).</span>
+      </button>
+      <button id="pickKeyboard" class="modeBtn">
+        <strong>Keyboard + Mouse</strong>
+        <span>W/S/A/D move • Hold mouse = grip ball • Release mouse = throw (mouse-flick power) • ESC pause</span>
+      </button>
+    </div>
+
+    <div class="cardBody">
+      <div class="panel">
+        <h3>Tuners</h3>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <label>Micro Range (in) — movement sensitivity</label>
+          <input id="microIn" type="range" min="0.25" max="3.00" step="0.05" value="0.85">
+          <div id="microInV">0.85 in</div>
+
+          <label>Fist Curl Threshold (lower = stricter fist)</label>
+          <input id="fistT" type="range" min="1.05" max="1.55" step="0.01" value="1.28">
+          <div id="fistTV">1.28</div>
+
+          <label>Movement Speed</label>
+          <input id="moveSp" type="range" min="0.75" max="2.50" step="0.05" value="1.35">
+          <div id="moveSpV">1.35x</div>
+
+          <label>Throw Velocity Scale</label>
+          <input id="throwVel" type="range" min="0.70" max="2.80" step="0.05" value="1.60">
+          <div id="throwVelV">1.60x</div>
+
+          <label>Arc Boost (shot height)</label>
+          <input id="arcBoost" type="range" min="0.60" max="2.20" step="0.05" value="1.25">
+          <div id="arcBoostV">1.25x</div>
+
+          <label style="margin-top:6px"><input id="mirrorX" type="checkbox" checked> Mirror X (selfie feel)</label>
+          <label><input id="swapHands" type="checkbox"> Swap Hands (left/right)</label>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>How it Works (your exact request)</h3>
+        <div class="hint">
+          ✅ <b>Left hand OPEN</b> → movement locked (player stays planted).<br/>
+          ✅ <b>Left hand FIST</b> → movement enabled. Wrist up = forward (toward hoop), wrist down = backward. (X shift also strafes.)<br/><br/>
+          ✅ <b>Right hand FIST</b> → ball grips and stays <b>in front</b> of player.<br/>
+          ✅ <b>Right hand OPEN + velocity</b> → the ball releases with your hand’s motion: shot / pass / throw.<br/><br/>
+          The court is a true basketball court layout with depth scaling, rim height arcs, and players.
+        </div>
+      </div>
+    </div>
+
+    <div class="cardFooter">
+      <div><button id="resetBtn" class="actionBtn">Reset Tuners</button></div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+        <button id="startBtn" class="actionBtn primary glowOn" disabled>Start</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="startup" id="startup">
+  <div class="startupCard">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+      <div style="min-width:260px">
+        <h2 style="margin:0">IonCore Startup — Accurate Two-Hand Pipeline</h2>
+        <div id="startupMsg" class="hint">Show BOTH hands OPEN and hold steady for calibration.</div>
+      </div>
+      <div style="font-weight:900;font-size:42px" id="startupCount"></div>
+    </div>
+
+    <div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:8px">
+      <span id="chipMove" class="chip bad">Move hand: not seen</span>
+      <span id="chipBall" class="chip bad">Ball hand: not seen</span>
+      <span id="chipStateL" class="chip">Left: —</span>
+      <span id="chipStateR" class="chip">Right: —</span>
+      <span id="chipMicro" class="chip">Micro: —</span>
+      <span class="chip">Sign-in: BOTH FISTS hold</span>
+    </div>
+
+    <div style="margin-top:12px">
+      <div style="height:10px;background:rgba(255,255,255,.06);border-radius:8px;overflow:hidden">
+        <div id="bar1" style="height:10px;width:0%;background:linear-gradient(90deg,var(--c1),var(--c2))"></div>
+      </div>
+      <div style="height:10px;background:rgba(255,255,255,.06);border-radius:8px;overflow:hidden;margin-top:8px">
+        <div id="bar2" style="height:10px;width:0%;background:linear-gradient(90deg,var(--c1),var(--c2))"></div>
+      </div>
+    </div>
+
+    <div style="margin-top:12px;text-align:right;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
+      <button id="skipStartup" class="actionBtn">Skip</button>
+    </div>
+  </div>
+</div>
+
+<div class="controlsHint" id="controlsHint">
+  <div style="font-weight:900;margin-bottom:6px">Controls</div>
+  <div id="hintText">Gesture: Left OPEN lock • Left FIST move • Right FIST hold • Right OPEN + velocity throw</div>
+</div>
+
+<div id="bridge">Controller: not selected</div>
+
+<!-- MediaPipe -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+<script>
+(() => {
+  // -------------------------
+  // Helpers
+  // -------------------------
+  const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+  const lerp = (a,b,t)=>a+(b-a)*t;
+  const rand = (a,b)=>a+Math.random()*(b-a);
+  const dist2 = (ax,ay,bx,by)=>{const dx=ax-bx, dy=ay-by; return dx*dx+dy*dy;};
+  const dist = (ax,ay,bx,by)=>Math.hypot(ax-bx, ay-by);
+
+  function pxPerInch(){
+    const d=document.createElement('div');
+    d.style.width='1in'; d.style.position='absolute'; d.style.left='-200%';
+    document.body.appendChild(d);
+    const p = d.getBoundingClientRect().width || 96;
+    d.remove();
+    return p;
+  }
+  let PX_IN = pxPerInch();
+  window.addEventListener('resize', ()=> PX_IN = pxPerInch(), { passive:true });
+
+  // -------------------------
+  // Canvas
+  // -------------------------
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d', { alpha:false });
+
+  let DPR=1;
+  function resize(){
+    DPR = Math.max(1, Math.min(2, window.devicePixelRatio||1));
+    canvas.width = Math.floor(window.innerWidth * DPR);
+    canvas.height = Math.floor(window.innerHeight * DPR);
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+  window.addEventListener('resize', resize, { passive:true });
+  resize();
+
+  // -------------------------
+  // UI refs
+  // -------------------------
+  const UI = {
+    pickGesture: document.getElementById('pickGesture'),
+    pickKeyboard: document.getElementById('pickKeyboard'),
+    startBtn: document.getElementById('startBtn'),
+    resetBtn: document.getElementById('resetBtn'),
+
+    microIn: document.getElementById('microIn'),
+    microInV: document.getElementById('microInV'),
+    fistT: document.getElementById('fistT'),
+    fistTV: document.getElementById('fistTV'),
+    moveSp: document.getElementById('moveSp'),
+    moveSpV: document.getElementById('moveSpV'),
+    throwVel: document.getElementById('throwVel'),
+    throwVelV: document.getElementById('throwVelV'),
+    arcBoost: document.getElementById('arcBoost'),
+    arcBoostV: document.getElementById('arcBoostV'),
+    mirrorX: document.getElementById('mirrorX'),
+    swapHands: document.getElementById('swapHands'),
+
+    overlay: document.getElementById('overlay'),
+    bridge: document.getElementById('bridge'),
+    hintText: document.getElementById('hintText'),
+
+    scoreTxt: document.getElementById('scoreTxt'),
+    madeTxt: document.getElementById('madeTxt'),
+    missTxt: document.getElementById('missTxt'),
+    streakTxt: document.getElementById('streakTxt'),
+    gripFill: document.getElementById('gripFill'),
+    timeFill: document.getElementById('timeFill'),
+    bestTxt: document.getElementById('bestTxt'),
+
+    startup: document.getElementById('startup'),
+    startupMsg: document.getElementById('startupMsg'),
+    startupCount: document.getElementById('startupCount'),
+    chipMove: document.getElementById('chipMove'),
+    chipBall: document.getElementById('chipBall'),
+    chipStateL: document.getElementById('chipStateL'),
+    chipStateR: document.getElementById('chipStateR'),
+    chipMicro: document.getElementById('chipMicro'),
+    bar1: document.getElementById('bar1'),
+    bar2: document.getElementById('bar2'),
+    skipStartup: document.getElementById('skipStartup'),
+  };
+  const setBridge = (t)=> UI.bridge.textContent = t;
+
+  // -------------------------
+  // Config persistence
+  // -------------------------
+  const cfgDefaults = {
+    microRangeInches: 0.85,
+    fistCurlThreshold: 1.28,
+    moveSpeedMul: 1.35,
+    throwVelMul: 1.60,
+    arcBoostMul: 1.25,
+    mirrorX: true,
+    swapHands: false,
+    smoothing: 0.24
+  };
+  const cfgKey = 'ioncore_basket_cfg_v2';
+  const modeKey = 'ioncore_basket_mode_v2';
+  const bestKey = 'ioncore_basket_best_v2';
+
+  const cfg = Object.assign({}, cfgDefaults);
+  function loadCfg(){
+    try{
+      const raw = localStorage.getItem(cfgKey);
+      if(raw) Object.assign(cfg, JSON.parse(raw));
+    }catch{}
+  }
+  function saveCfg(){
+    try{ localStorage.setItem(cfgKey, JSON.stringify(cfg)); }catch{}
+  }
+  loadCfg();
+
+  // Apply UI values
+  UI.microIn.value = cfg.microRangeInches;
+  UI.fistT.value = cfg.fistCurlThreshold;
+  UI.moveSp.value = cfg.moveSpeedMul;
+  UI.throwVel.value = cfg.throwVelMul;
+  UI.arcBoost.value = cfg.arcBoostMul;
+  UI.mirrorX.checked = !!cfg.mirrorX;
+  UI.swapHands.checked = !!cfg.swapHands;
+
+  UI.microInV.textContent = cfg.microRangeInches.toFixed(2) + ' in';
+  UI.fistTV.textContent = cfg.fistCurlThreshold.toFixed(2);
+  UI.moveSpV.textContent = cfg.moveSpeedMul.toFixed(2) + 'x';
+  UI.throwVelV.textContent = cfg.throwVelMul.toFixed(2) + 'x';
+  UI.arcBoostV.textContent = cfg.arcBoostMul.toFixed(2) + 'x';
+
+  UI.microIn.addEventListener('input', ()=>{ cfg.microRangeInches = +UI.microIn.value; UI.microInV.textContent = cfg.microRangeInches.toFixed(2)+' in'; saveCfg(); });
+  UI.fistT.addEventListener('input', ()=>{ cfg.fistCurlThreshold = +UI.fistT.value; UI.fistTV.textContent = cfg.fistCurlThreshold.toFixed(2); saveCfg(); });
+  UI.moveSp.addEventListener('input', ()=>{ cfg.moveSpeedMul = +UI.moveSp.value; UI.moveSpV.textContent = cfg.moveSpeedMul.toFixed(2)+'x'; saveCfg(); });
+  UI.throwVel.addEventListener('input', ()=>{ cfg.throwVelMul = +UI.throwVel.value; UI.throwVelV.textContent = cfg.throwVelMul.toFixed(2)+'x'; saveCfg(); });
+  UI.arcBoost.addEventListener('input', ()=>{ cfg.arcBoostMul = +UI.arcBoost.value; UI.arcBoostV.textContent = cfg.arcBoostMul.toFixed(2)+'x'; saveCfg(); });
+  UI.mirrorX.addEventListener('change', ()=>{ cfg.mirrorX = !!UI.mirrorX.checked; saveCfg(); });
+  UI.swapHands.addEventListener('change', ()=>{ cfg.swapHands = !!UI.swapHands.checked; saveCfg(); });
+
+  UI.resetBtn.addEventListener('pointerdown', (e)=>{
+    e.preventDefault();
+    Object.assign(cfg, cfgDefaults);
+    saveCfg();
+    UI.microIn.value = cfg.microRangeInches;
+    UI.fistT.value = cfg.fistCurlThreshold;
+    UI.moveSp.value = cfg.moveSpeedMul;
+    UI.throwVel.value = cfg.throwVelMul;
+    UI.arcBoost.value = cfg.arcBoostMul;
+    UI.mirrorX.checked = !!cfg.mirrorX;
+    UI.swapHands.checked = !!cfg.swapHands;
+    UI.microInV.textContent = cfg.microRangeInches.toFixed(2) + ' in';
+    UI.fistTV.textContent = cfg.fistCurlThreshold.toFixed(2);
+    UI.moveSpV.textContent = cfg.moveSpeedMul.toFixed(2) + 'x';
+    UI.throwVelV.textContent = cfg.throwVelMul.toFixed(2) + 'x';
+    UI.arcBoostV.textContent = cfg.arcBoostMul.toFixed(2) + 'x';
+    setBridge('Tuners reset to IonCore defaults');
+  }, { passive:false });
+
+  // -------------------------
+  // Input object
+  // -------------------------
+  const input = {
+    moveX: 0,
+    moveY: 0,
+    leftSeen:false,
+    rightSeen:false,
+    leftFist:false,
+    rightFist:false,
+    rightVel:{x:0,y:0}, // normalized velocity per second (after mirror)
+    rightPos:{x:0.5,y:0.5}, // normalized (after mirror)
+  };
+
+  // keyboard+mouse fallback
+  const keys = new Set();
+  const mouse = { x: window.innerWidth*0.5, y: window.innerHeight*0.5, down:false, lastX:null,lastY:null, vx:0, vy:0 };
+
+  window.addEventListener('keydown', (e)=>{
+    keys.add(e.code);
+    if(e.code === 'Escape'){
+      if(started){
+        paused = !paused;
+        setBridge(paused ? 'Paused (ESC)' : 'Resumed');
+      }
+    }
+  }, { passive:true });
+
+  window.addEventListener('keyup', (e)=> keys.delete(e.code), { passive:true });
+
+  window.addEventListener('pointermove', (e)=>{
+    const nowX = e.clientX, nowY = e.clientY;
+    if(mouse.lastX != null){
+      const dx = nowX - mouse.lastX, dy = nowY - mouse.lastY;
+      // crude velocity in px/frame; we convert later
+      mouse.vx = dx;
+      mouse.vy = dy;
+    }
+    mouse.lastX = nowX; mouse.lastY = nowY;
+    mouse.x = nowX; mouse.y = nowY;
+  }, { passive:true });
+  window.addEventListener('pointerdown', ()=> mouse.down = true, { passive:true });
+  window.addEventListener('pointerup', ()=> mouse.down = false, { passive:true });
+
+  function pollKeyboard(){
+    // move with WASD
+    const left = keys.has('KeyA')||keys.has('ArrowLeft');
+    const right= keys.has('KeyD')||keys.has('ArrowRight');
+    const up   = keys.has('KeyW')||keys.has('ArrowUp');
+    const down = keys.has('KeyS')||keys.has('ArrowDown');
+
+    input.moveX = (right?1:0) - (left?1:0);
+    input.moveY = (down?1:0) - (up?1:0);
+
+    // grip is mouse down
+    input.rightFist = mouse.down;
+    input.leftFist = !!(up||down||left||right); // "movement engaged" while keys pressed
+    input.rightVel.x = (mouse.vx / Math.max(1, window.innerWidth)) * 60;  // approximate per sec
+    input.rightVel.y = (mouse.vy / Math.max(1, window.innerHeight)) * 60;
+    input.rightPos.x = mouse.x / window.innerWidth;
+    input.rightPos.y = mouse.y / window.innerHeight;
+  }
+
+  // -------------------------
+  // Gesture system (accurate open/fist + baselines)
+  // -------------------------
+  const videoEl = document.getElementById('video');
+  const gesture = {
+    enabled:false,
+    camera:null,
+    hands:null,
+    running:false,
+    lastErr:'',
+    startupOpen:false,
+    stage:'idle', // calibrate -> signin -> done
+    steadyT:0,
+    countdownT:0,
+    signinHold:0,
+    signedIn:false,
+    baseLeft:null,
+    baseRight:null,
+    // velocity tracking (normalized, after mirror)
+    prevRight:null,
+    prevRightT:0,
+    smoothMove:{x:0,y:0}
+  };
+
+  function landmark(hand, idx){ return hand?.landmarks?.[idx] || null; }
+
+  function toMirroredNorm(p){
+    let x = p.x, y = p.y;
+    if(cfg.mirrorX) x = 1 - x;
+    return {x,y};
+  }
+
+  function handCenterNorm(hand){
+    const w = landmark(hand, 0);
+    if(!w) return null;
+    return toMirroredNorm(w);
+  }
+
+  // Robust-ish fist detector:
+  // ratio = dist(wrist, tip) / dist(wrist, mcp). Open fingers => ratio bigger. Fist => ratio smaller.
+  function isFist(hand){
+    const w = landmark(hand,0);
+    if(!w) return false;
+
+    const wrist = toMirroredNorm(w);
+
+    const checks = [
+      {tip:8,  mcp:5},   // index
+      {tip:12, mcp:9},   // middle
+      {tip:16, mcp:13},  // ring
+      {tip:20, mcp:17}   // pinky
+    ];
+
+    let curled = 0;
+    for(const c of checks){
+      const tip = landmark(hand,c.tip);
+      const mcp = landmark(hand,c.mcp);
+      if(!tip || !mcp) continue;
+      const t = toMirroredNorm(tip);
+      const m = toMirroredNorm(mcp);
+
+      const dTip = dist(wrist.x,wrist.y, t.x,t.y);
+      const dMcp = dist(wrist.x,wrist.y, m.x,m.y);
+      const ratio = dTip / Math.max(1e-5, dMcp);
+
+      if(ratio < cfg.fistCurlThreshold) curled++;
+    }
+
+    // fist if 3+ curled fingers
+    return curled >= 3;
+  }
+
+  function isOpenHand(hand){
+    const w = landmark(hand,0);
+    if(!w) return false;
+    const wrist = toMirroredNorm(w);
+
+    const checks = [
+      {tip:8,  mcp:5},
+      {tip:12, mcp:9},
+      {tip:16, mcp:13},
+      {tip:20, mcp:17}
+    ];
+
+    let openCount = 0;
+    for(const c of checks){
+      const tip = landmark(hand,c.tip);
+      const mcp = landmark(hand,c.mcp);
+      if(!tip || !mcp) continue;
+      const t = toMirroredNorm(tip);
+      const m = toMirroredNorm(mcp);
+
+      const dTip = dist(wrist.x,wrist.y, t.x,t.y);
+      const dMcp = dist(wrist.x,wrist.y, m.x,m.y);
+      const ratio = dTip / Math.max(1e-5, dMcp);
+
+      // open if clearly above threshold
+      if(ratio > cfg.fistCurlThreshold + 0.18) openCount++;
+    }
+    return openCount >= 3;
+  }
+
+  function assignHands(results){
+    const out = [];
+    const lm = results.multiHandLandmarks || [];
+    const hd = results.multiHandedness || [];
+    for(let i=0;i<lm.length;i++){
+      const handed = hd[i]?.label || 'Unknown';
+      out.push({ handed, landmarks: lm[i] });
+    }
+
+    // Prefer MediaPipe label; fallback by x position (mirrored space)
+    let left = out.find(h=>h.handed==='Left') || null;
+    let right= out.find(h=>h.handed==='Right')|| null;
+
+    if(!left || !right){
+      // fallback: sort by wrist x after mirror
+      const scored = out.map(h=>{
+        const w = landmark(h,0);
+        const cn = w ? toMirroredNorm(w) : {x:0.5,y:0.5};
+        return {h, x:cn.x};
+      }).sort((a,b)=>a.x-b.x);
+      // in mirrored space, smaller x is "left side of screen"
+      if(scored.length>=1 && !left) left = scored[0].h;
+      if(scored.length>=2 && !right) right = scored[scored.length-1].h;
+      if(scored.length===1){
+        right = scored[0].h;
+      }
+    }
+
+    if(cfg.swapHands){
+      const tmp=left; left=right; right=tmp;
+    }
+
+    return { left, right };
+  }
+
+  function openStartup(){
+    gesture.startupOpen = true;
+    gesture.stage = 'calibrate';
+    gesture.steadyT = 0;
+    gesture.countdownT = 0;
+    gesture.signinHold = 0;
+    gesture.signedIn = false;
+    gesture.baseLeft = null;
+    gesture.baseRight = null;
+    gesture.prevRight = null;
+    gesture.prevRightT = 0;
+    UI.startup.style.display = 'flex';
+    UI.startupCount.textContent = '';
+    UI.bar1.style.width = '0%';
+    UI.bar2.style.width = '0%';
+    UI.chipMicro.textContent = `Micro: ${cfg.microRangeInches.toFixed(2)} in`;
+    UI.startupMsg.textContent = 'Show BOTH hands OPEN and hold steady for calibration.';
+    setBridge('Gesture Startup: OPEN hands steady → BOTH FISTS to sign-in');
+  }
+
+  function closeStartup(){
+    gesture.startupOpen = false;
+    UI.startup.style.display = 'none';
+  }
+
+  async function startGestureSystem(){
+    if(gesture.running) return true;
+    gesture.enabled = true;
+
+    gesture.hands = new Hands({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    });
+    gesture.hands.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.70,
+      minTrackingConfidence: 0.65
+    });
+    gesture.hands.onResults((results)=>{
+      try{ handleHandsResults(results); }catch(err){ console.warn(err); }
+    });
+
+    try{
+      gesture.camera = new Camera(videoEl, {
+        onFrame: async () => {
+          if(!gesture.hands) return;
+          await gesture.hands.send({image: videoEl});
+        },
+        width: 640, height: 480
+      });
+      await gesture.camera.start();
+      gesture.running = true;
+      setBridge('Gesture camera online');
+      return true;
+    }catch(e){
+      gesture.lastErr = String(e?.message || e);
+      console.warn('Camera start error:', e);
+      setBridge('Camera blocked. Use HTTPS/localhost + allow permission.');
+      return false;
+    }
+  }
+
+  function smooth2(a,b,t){ return a + (b-a)*t; }
+
+  function handleHandsResults(results){
+    if(controllerMode !== 'gesture') return;
+
+    const { left, right } = assignHands(results);
+    const leftSeen = !!left && !!landmark(left,0);
+    const rightSeen= !!right && !!landmark(right,0);
+
+    input.leftSeen = leftSeen;
+    input.rightSeen= rightSeen;
+
+    UI.chipMove.classList.toggle('ok', leftSeen);
+    UI.chipMove.classList.toggle('bad', !leftSeen);
+    UI.chipMove.textContent = leftSeen ? 'Move hand: seen' : 'Move hand: not seen';
+
+    UI.chipBall.classList.toggle('ok', rightSeen);
+    UI.chipBall.classList.toggle('bad', !rightSeen);
+    UI.chipBall.textContent = rightSeen ? 'Ball hand: seen' : 'Ball hand: not seen';
+
+    const leftF = leftSeen ? isFist(left) : false;
+    const rightF= rightSeen? isFist(right): false;
+
+    input.leftFist = leftF;
+    input.rightFist= rightF;
+
+    UI.chipStateL.textContent = `Left: ${leftSeen ? (leftF ? 'FIST' : (isOpenHand(left) ? 'OPEN' : 'NEUTRAL')) : '—'}`;
+    UI.chipStateR.textContent = `Right: ${rightSeen ? (rightF ? 'FIST' : (isOpenHand(right) ? 'OPEN' : 'NEUTRAL')) : '—'}`;
+
+    // Movement: EXACT requirement
+    // - Left OPEN => locked (no movement)
+    // - Left FIST => enable movement from wrist displacement (x strafe + y forward/back)
+    if(leftSeen && leftF && gesture.baseLeft){
+      const now = handCenterNorm(left); // wrist in mirrored norm
+      const base = gesture.baseLeft;
+
+      // Sensitivity scaling from micro inches
+      const sens = 1.55 / clamp(cfg.microRangeInches, 0.25, 3.0);
+
+      const dx = (now.x - base.x) * sens;
+      const dy = (now.y - base.y) * sens;
+
+      // convert to [-1..1] with deadzone
+      const deadN = 0.018; // normalized deadzone
+      const rangeN = 0.12; // normalized range to full speed
+
+      let mx = Math.abs(dx) < deadN ? 0 : clamp(dx / rangeN, -1, 1);
+      let my = Math.abs(dy) < deadN ? 0 : clamp(dy / rangeN, -1, 1);
+
+      // smoothing
+      const s = clamp(cfg.smoothing, 0.06, 0.6);
+      gesture.smoothMove.x = smooth2(gesture.smoothMove.x, mx, s);
+      gesture.smoothMove.y = smooth2(gesture.smoothMove.y, my, s);
+
+      input.moveX = gesture.smoothMove.x;
+      input.moveY = gesture.smoothMove.y;
+    }else{
+      // locked when open OR not seen OR no baseline
+      input.moveX = 0;
+      input.moveY = 0;
+      gesture.smoothMove.x = smooth2(gesture.smoothMove.x, 0, 0.22);
+      gesture.smoothMove.y = smooth2(gesture.smoothMove.y, 0, 0.22);
+    }
+
+    // Right hand velocity (for throw/passes)
+    if(rightSeen){
+      const nowN = handCenterNorm(right);
+      const t = performance.now();
+      if(gesture.prevRight && gesture.prevRightT > 0){
+        const dt = Math.max(0.001, (t - gesture.prevRightT)/1000);
+        input.rightVel.x = (nowN.x - gesture.prevRight.x) / dt;
+        input.rightVel.y = (nowN.y - gesture.prevRight.y) / dt;
+      }else{
+        input.rightVel.x = 0; input.rightVel.y = 0;
+      }
+      input.rightPos.x = nowN.x;
+      input.rightPos.y = nowN.y;
+      gesture.prevRight = nowN;
+      gesture.prevRightT = t;
+    }else{
+      input.rightVel.x = 0; input.rightVel.y = 0;
+    }
+
+    // Startup pipeline:
+    // 1) Calibrate with BOTH hands OPEN (steady for 0.9s + 3..2..1)
+    // 2) Sign-in by holding BOTH FISTS for 0.6s
+    if(gesture.startupOpen){
+      const dt = 1/60;
+
+      if(gesture.stage === 'calibrate'){
+        const leftOpen = leftSeen && isOpenHand(left);
+        const rightOpen= rightSeen && isOpenHand(right);
+
+        if(leftOpen && rightOpen){
+          gesture.steadyT += dt;
+          UI.bar1.style.width = `${clamp(gesture.steadyT/0.9,0,1)*100}%`;
+
+          if(gesture.steadyT >= 0.9){
+            if(gesture.countdownT <= 0) gesture.countdownT = 3.0;
+            gesture.countdownT = Math.max(0, gesture.countdownT - dt);
+            UI.startupCount.textContent = String(Math.ceil(gesture.countdownT));
+            UI.bar2.style.width = `${clamp((3.0-gesture.countdownT)/3.0, 0, 1)*100}%`;
+
+            // capture baselines once (after steady begins)
+            if(!gesture.baseLeft && leftSeen) gesture.baseLeft = handCenterNorm(left);
+            if(!gesture.baseRight && rightSeen) gesture.baseRight = handCenterNorm(right);
+
+            if(gesture.countdownT <= 0){
+              gesture.stage = 'signin';
+              gesture.signinHold = 0;
+              UI.startupCount.textContent = '';
+              UI.bar1.style.width = '0%';
+              UI.bar2.style.width = '0%';
+              UI.startupMsg.textContent = 'Calibration complete. Now hold BOTH hands as FISTS to sign-in.';
+              setBridge('Calibration done → BOTH FISTS to sign-in');
+            }
+          }
+        }else{
+          // reset if not stable open
+          gesture.steadyT = 0;
+          gesture.countdownT = 0;
+          UI.startupCount.textContent = '';
+          UI.bar1.style.width = '0%';
+          UI.bar2.style.width = '0%';
+          gesture.baseLeft = null;
+          gesture.baseRight = null;
+        }
+      }else if(gesture.stage === 'signin'){
+        if(leftSeen && rightSeen && leftF && rightF){
+          gesture.signinHold += dt;
+          UI.bar1.style.width = `${clamp(gesture.signinHold/0.25,0,1)*100}%`;
+          UI.bar2.style.width = `${clamp(gesture.signinHold/0.60,0,1)*100}%`;
+
+          if(gesture.signinHold >= 0.60){
+            gesture.signedIn = true;
+            gesture.stage = 'done';
+            UI.startupMsg.textContent = 'Signed in ✔ Starting session...';
+            setBridge('Gesture sign-in OK');
+            setTimeout(()=>{
+              closeStartup();
+              UI.overlay.style.display = 'none';
+              startNewRun();
+            }, 160);
+          }
+        }else{
+          gesture.signinHold = Math.max(0, gesture.signinHold - dt*2.2);
+          UI.bar1.style.width = `${clamp(gesture.signinHold/0.25,0,1)*100}%`;
+          UI.bar2.style.width = `${clamp(gesture.signinHold/0.60,0,1)*100}%`;
+        }
+      }
+    }
+  }
+
+  UI.skipStartup.addEventListener('pointerdown', async (e)=>{
+    e.preventDefault();
+    closeStartup();
+    UI.overlay.style.display = 'none';
+    if(controllerMode === 'gesture' && !gesture.running) startGestureSystem();
+    startNewRun();
+  }, { passive:false });
+
+  // -------------------------
+  // Game state (True court with depth + rim height)
+  // -------------------------
+  let controllerMode = localStorage.getItem(modeKey) || '';
+  let started=false;
+  let paused=true;
+
+  let score=0, made=0, miss=0, streak=0;
+
+  let best = Number(localStorage.getItem(bestKey) || '0') || 0;
+  UI.bestTxt.textContent = `Best: ${best}`;
+
+  const SESSION_SEC = 60;
+  let timeLeft = SESSION_SEC;
+
+  // Court geometry (screen-space)
+  function courtRect(){
+    const w=window.innerWidth, h=window.innerHeight;
+    const marginX = Math.min(80, w*0.08);
+    const top = Math.min(90, h*0.10);
+    const bottom = Math.min(70, h*0.08);
+    const left = marginX;
+    const right = w - marginX;
+    return { left, right, top, bottom: h-bottom, w: right-left, h: (h-bottom)-top };
+  }
+
+  // Hoop in court
+  const hoop = {
+    // rim at near top
+    rimHeight: 250,      // z height
+    rimR: 22,            // radius on court plane
+    netDepth: 14,
+    boardW: 150,
+    boardH: 80
+  };
+
+  function hoopPos(){
+    const R = courtRect();
+    return { x: R.left + R.w*0.5, y: R.top + 46 };
+  }
+
+  // Perspective scale by y (near bottom bigger)
+  function depthScale(y){
+    const R=courtRect();
+    const t = clamp((y - R.top)/Math.max(1, R.h), 0, 1);
+    return lerp(0.65, 1.15, t);
+  }
+
+  // Player
+  const player = {
+    x: 0, y: 0,
+    baseR: 22,
+    speed: 540,
+    num: 7
+  };
+
+  // Defender (AI)
+  const defender = {
+    x: 0, y: 0,
+    baseR: 22,
+    speed: 420,
+    moodT: 0
+  };
+
+  // Teammate (AI)
+  const mate = {
+    x: 0, y: 0,
+    baseR: 20,
+    speed: 360
+  };
+
+  // Ball in 3D (x,y on court plane, z height)
+  const ball = {
+    x: 0, y: 0, z: 0,
+    vx: 0, vy: 0, vz: 0,
+    held: true,
+    owner: 'player', // player | loose
+    lastRightFist: false,
+    lastRightOpen: true,
+    scoredThisShot: false,
+    touchedRim: false,
+    touchedBoard: false,
+    shotCooldown: 0,
+    pickupCooldown: 0,
+  };
+
+  const particles = [];
+  function pop(x,y,n=16,scale=1){
+    for(let i=0;i<n;i++){
+      const a = rand(0,Math.PI*2);
+      const s = rand(80,320)*scale;
+      particles.push({
+        x,y,
+        vx: Math.cos(a)*s,
+        vy: Math.sin(a)*s,
+        life: rand(0.25,0.95),
+        size: rand(1.4,4.2)*scale,
+        col: `rgba(${Math.floor(rand(180,255))},${Math.floor(rand(150,220))},${Math.floor(rand(90,210))},.95)`
+      });
+    }
+  }
+
+  // -------------------------
+  // Drawing: true court + players
+  // -------------------------
+  let perf=0;
+
+  function roundRect(ctx,x,y,w,h,r){
+    r = Math.min(r, w/2, h/2);
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);
+    ctx.arcTo(x,y,x+w,y,r);
+    ctx.closePath();
+  }
+
+  function drawCourt(){
+    const w=window.innerWidth, h=window.innerHeight;
+    const R=courtRect();
+
+    // background
+    const g = ctx.createLinearGradient(0,0,0,h);
+    g.addColorStop(0,'#041018');
+    g.addColorStop(0.4,'#0b1b22');
+    g.addColorStop(1,'#041018');
+    ctx.fillStyle=g;
+    ctx.fillRect(0,0,w,h);
+
+    // court floor slab
+    ctx.save();
+    ctx.globalAlpha=0.92;
+    const wood = ctx.createLinearGradient(R.left, R.top, R.right, R.bottom);
+    wood.addColorStop(0,'rgba(255,255,255,0.030)');
+    wood.addColorStop(1,'rgba(255,255,255,0.010)');
+    ctx.fillStyle = wood;
+    roundRect(ctx, R.left, R.top, R.w, R.h, 18);
+    ctx.fill();
+
+    // neon outline
+    ctx.globalCompositeOperation='screen';
+    ctx.globalAlpha=0.55;
+    ctx.strokeStyle='rgba(57,224,255,0.22)';
+    ctx.lineWidth=3;
+    roundRect(ctx, R.left, R.top, R.w, R.h, 18);
+    ctx.stroke();
+
+    // half court line + center circle
+    const midY = R.top + R.h*0.53;
+    ctx.globalAlpha=0.28;
+    ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.moveTo(R.left+18, midY);
+    ctx.lineTo(R.right-18, midY);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(R.left+R.w*0.5, midY, 56, 0, Math.PI*2);
+    ctx.stroke();
+
+    // key / lane
+    const laneW = Math.min(320, R.w*0.50);
+    const laneH = Math.min(420, R.h*0.62);
+    ctx.globalAlpha=0.35;
+    roundRect(ctx, R.left + R.w*0.5 - laneW*0.5, R.top + 30, laneW, laneH, 16);
+    ctx.stroke();
+
+    // free throw circle
+    ctx.globalAlpha=0.20;
+    ctx.beginPath();
+    ctx.arc(R.left+R.w*0.5, R.top + laneH + 30, 62, Math.PI, 0);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawHoop(){
+    const hp = hoopPos();
+    const R=courtRect();
+
+    // backboard
+    ctx.save();
+    ctx.globalCompositeOperation='screen';
+    ctx.globalAlpha=0.65;
+
+    const bx = hp.x - hoop.boardW*0.5;
+    const by = R.top + 12;
+    ctx.fillStyle='rgba(255,255,255,0.035)';
+    roundRect(ctx, bx, by, hoop.boardW, hoop.boardH, 10);
+    ctx.fill();
+
+    ctx.globalAlpha=0.75;
+    ctx.strokeStyle='rgba(57,224,255,0.22)';
+    ctx.lineWidth=2;
+    roundRect(ctx, bx, by, hoop.boardW, hoop.boardH, 10);
+    ctx.stroke();
+
+    // rim glow (on court plane)
+    const pulse = 1 + Math.sin(perf*4)*0.05;
+    ctx.globalAlpha=0.95;
+    ctx.strokeStyle='rgba(255,138,89,0.90)';
+    ctx.lineWidth=6;
+    ctx.beginPath();
+    ctx.arc(hp.x, hp.y, hoop.rimR*pulse, 0, Math.PI*2);
+    ctx.stroke();
+
+    ctx.globalAlpha=0.35;
+    ctx.strokeStyle='rgba(255,255,255,0.18)';
+    ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.arc(hp.x, hp.y, (hoop.rimR+10)*pulse, 0, Math.PI*2);
+    ctx.stroke();
+
+    // net hint
+    ctx.globalAlpha=0.22;
+    ctx.strokeStyle='rgba(255,255,255,0.16)';
+    ctx.lineWidth=1.4;
+    for(let i=-2;i<=2;i++){
+      ctx.beginPath();
+      ctx.moveTo(hp.x + i*10, hp.y + 6);
+      ctx.lineTo(hp.x + i*6, hp.y + 52);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  function drawPlayerCircle(ent, label, colorA, colorB){
+    const s = depthScale(ent.y);
+    const r = ent.baseR * s;
+
+    ctx.save();
+    ctx.translate(ent.x, ent.y);
+    ctx.globalCompositeOperation='screen';
+
+    // aura
+    ctx.globalAlpha=0.80;
+    ctx.fillStyle=colorA;
+    ctx.beginPath();
+    ctx.arc(0,0,r+18*s,0,Math.PI*2);
+    ctx.fill();
+
+    // body
+    ctx.globalAlpha=0.95;
+    ctx.fillStyle=colorB;
+    ctx.beginPath();
+    ctx.arc(0,0,r,0,Math.PI*2);
+    ctx.fill();
+
+    // outline
+    ctx.globalAlpha=0.85;
+    ctx.strokeStyle='rgba(255,255,255,0.18)';
+    ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.arc(0,0,r,0,Math.PI*2);
+    ctx.stroke();
+
+    // label
+    ctx.globalAlpha=0.92;
+    ctx.fillStyle='rgba(0,0,0,0.55)';
+    ctx.font = `${Math.max(12, Math.floor(14*s))}px system-ui`;
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    ctx.fillText(label, 0, 0);
+
+    ctx.restore();
+  }
+
+  function drawBall(){
+    // render size scales with depth + height (z adds glow)
+    const s = depthScale(ball.y);
+    const r = 10 * s;
+    const lift = ball.z; // z in px
+    const yScreen = ball.y - lift*0.55; // project height upward
+
+    // shadow
+    ctx.save();
+    ctx.globalAlpha = clamp(0.28 - lift/900, 0.06, 0.28);
+    ctx.fillStyle='rgba(0,0,0,0.45)';
+    ctx.beginPath();
+    ctx.ellipse(ball.x, ball.y + 10*s, r*1.2, r*0.55, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+
+    // ball
+    ctx.save();
+    ctx.translate(ball.x, yScreen);
+    ctx.globalCompositeOperation='screen';
+
+    // glow
+    ctx.globalAlpha=0.65;
+    const glow = ctx.createRadialGradient(0,0,2,0,0,28*s);
+    glow.addColorStop(0,'rgba(255,255,255,0.18)');
+    glow.addColorStop(1,'rgba(255,255,255,0)');
+    ctx.fillStyle=glow;
+    ctx.beginPath();
+    ctx.arc(0,0,28*s,0,Math.PI*2);
+    ctx.fill();
+
+    // core
+    ctx.globalAlpha=0.98;
+    ctx.fillStyle='rgba(255,138,89,0.82)';
+    ctx.beginPath();
+    ctx.arc(0,0,r,0,Math.PI*2);
+    ctx.fill();
+
+    ctx.globalAlpha=0.42;
+    ctx.strokeStyle='rgba(0,0,0,0.40)';
+    ctx.lineWidth=1.2;
+    ctx.beginPath();
+    ctx.arc(0,0,r*0.82,0,Math.PI*2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-r,0); ctx.lineTo(r,0);
+    ctx.moveTo(0,-r); ctx.lineTo(0,r);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawGripIndicator(){
+    // 0..1 grip bar reflects right fist state (or mouse down)
+    const v = (controllerMode==='gesture') ? (input.rightFist ? 1 : 0) : (mouse.down ? 1 : 0);
+    UI.gripFill.style.width = `${(v*100).toFixed(0)}%`;
+  }
+
+  function drawParticles(){
+    for(const p of particles){
+      ctx.save();
+      ctx.globalCompositeOperation='screen';
+      ctx.globalAlpha = clamp(p.life,0,1);
+      ctx.fillStyle = p.col;
+      ctx.beginPath();
+      ctx.arc(p.x,p.y,p.size,0,Math.PI*2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  // -------------------------
+  // Physics / scoring
+  // -------------------------
+  function resetPositions(){
+    const R=courtRect();
+    player.x = R.left + R.w*0.5;
+    player.y = R.top + R.h*0.84;
+
+    defender.x = R.left + R.w*0.5 + 120;
+    defender.y = R.top + R.h*0.55;
+
+    mate.x = R.left + R.w*0.5 - 160;
+    mate.y = R.top + R.h*0.62;
+
+    ball.held = true;
+    ball.owner = 'player';
+    ball.x = player.x;
+    ball.y = player.y;
+    ball.z = 0;
+    ball.vx=0; ball.vy=0; ball.vz=0;
+    ball.scoredThisShot=false;
+    ball.touchedRim=false;
+    ball.touchedBoard=false;
+    ball.shotCooldown=0;
+    ball.pickupCooldown=0;
+    ball.lastRightFist=false;
+    ball.lastRightOpen=true;
+  }
+
+  function clampToCourt(ent){
+    const R=courtRect();
+    ent.x = clamp(ent.x, R.left+30, R.right-30);
+    ent.y = clamp(ent.y, R.top+70, R.bottom-40);
+  }
+
+  function applyScore(points, label){
+    score += points;
+    made += 1;
+    streak += 1;
+
+    // streak bonus every 3 makes
+    if(streak > 0 && streak % 3 === 0){
+      score += 1;
+      setBridge(`${label} +${points} (streak bonus)`);
+    }else{
+      setBridge(`${label} +${points}`);
+    }
+
+    if(score > best){
+      best = score;
+      localStorage.setItem(bestKey, String(best));
+      UI.bestTxt.textContent = `Best: ${best}`;
+    }
+  }
+
+  function missShot(){
+    miss += 1;
+    streak = 0;
+    setBridge('Miss');
+  }
+
+  function tryPickupBall(){
+    if(ball.pickupCooldown > 0) return;
+    if(ball.held) return;
+    if(!input.rightFist) return; // requires right fist grip
+    // pickup if close enough
+    if(dist2(ball.x,ball.y, player.x,player.y) < 110*110){
+      ball.held = true;
+      ball.owner = 'player';
+      ball.vx=0; ball.vy=0; ball.vz=0;
+      ball.z = 0;
+      ball.scoredThisShot=false;
+      ball.touchedRim=false;
+      ball.touchedBoard=false;
+      ball.pickupCooldown = 0.25;
+      pop(player.x, player.y, 14, 0.8);
+      setBridge('Ball picked up (Right FIST)');
+    }
+  }
+
+  function releaseThrowFromHand(){
+    if(ball.shotCooldown > 0) return;
+    if(!ball.held) return;
+
+    // compute throw based on RIGHT hand velocity (gesture) or mouse flick (keyboard)
+    let vxN = input.rightVel.x;
+    let vyN = input.rightVel.y;
+
+    // Convert normalized velocity to court-plane px/s
+    // - moving hand UP (vy negative) should throw toward hoop (forward), i.e., negative vy on court plane too.
+    const throwScale = 980 * cfg.throwVelMul;
+    let vx = vxN * throwScale;
+    let vy = vyN * throwScale;
+
+    // If user didn't move enough, default to a shot toward hoop
+    const mag = Math.hypot(vx,vy);
+    const hp = hoopPos();
+    if(mag < 220){
+      const dx = hp.x - player.x;
+      const dy = hp.y - player.y;
+      const d = Math.max(1, Math.hypot(dx,dy));
+      // forward to hoop
+      vx = (dx/d) * (760 * cfg.throwVelMul);
+      vy = (dy/d) * (760 * cfg.throwVelMul);
+    }
+
+    // Determine arc from upward hand speed (vy negative) and an arc boost
+    // More upward hand motion => more vertical velocity
+    const upBoost = clamp((-vyN) * 380, -180, 520);
+    let vz = (560 + upBoost) * cfg.arcBoostMul;
+
+    // If it's a sideways pass (x dominant), flatten it a bit
+    if(Math.abs(vx) > Math.abs(vy)*1.15){
+      vz *= 0.68; // pass flatter
+    }
+
+    // Defender pressure: if defender is close at release, reduce vertical and speed slightly
+    const press = clamp(1 - (dist(player.x,player.y, defender.x,defender.y) / 220), 0, 0.35);
+    vx *= (1 - press*0.18);
+    vy *= (1 - press*0.18);
+    vz *= (1 - press*0.22);
+
+    // Apply
+    ball.held = false;
+    ball.owner = 'loose';
+    ball.x = player.x;
+    ball.y = player.y;
+    ball.z = Math.max(10, hoop.rimHeight*0.14); // start slightly lifted
+    ball.vx = vx;
+    ball.vy = vy;
+    ball.vz = vz;
+    ball.scoredThisShot = false;
+    ball.touchedRim = false;
+    ball.touchedBoard = false;
+    ball.shotCooldown = 0.18;
+    ball.pickupCooldown = 0.25;
+
+    pop(player.x, player.y-10, 12, 0.75);
+    setBridge('Release: throw / shot / pass (velocity-based)');
+  }
+
+  function updateBall(dt){
+    ball.shotCooldown = Math.max(0, ball.shotCooldown - dt);
+    ball.pickupCooldown = Math.max(0, ball.pickupCooldown - dt);
+
+    if(ball.held){
+      // ball stays in front when right fist is held (your request)
+      // "in front" means toward hoop direction
+      const hp = hoopPos();
+      const dx = hp.x - player.x;
+      const dy = hp.y - player.y;
+      const d = Math.max(1, Math.hypot(dx,dy));
+      const front = 34 * depthScale(player.y);
+      ball.x = player.x + (dx/d)*front;
+      ball.y = player.y + (dy/d)*front;
+      ball.z = 0;
+
+      // release detection: right fist -> open transition releases
+      const rightIsFist = input.rightFist;
+      const wasFist = ball.lastRightFist;
+
+      // if it was fist and now not fist => OPEN release event
+      if(wasFist && !rightIsFist){
+        releaseThrowFromHand();
+      }
+
+      ball.lastRightFist = rightIsFist;
+      ball.lastRightOpen = !rightIsFist;
+      return;
+    }
+
+    // airborne / loose physics
+    const R=courtRect();
+    const hp=hoopPos();
+
+    // integrate
+    const g = 980;    // gravity on z (px/s^2)
+    const floorF = 0; // floor at z=0
+
+    // drag
+    ball.vx *= Math.pow(0.985, dt*60);
+    ball.vy *= Math.pow(0.985, dt*60);
+    ball.vz *= Math.pow(0.996, dt*60);
+
+    ball.x += ball.vx * dt;
+    ball.y += ball.vy * dt;
+    ball.z += ball.vz * dt;
+    ball.vz -= g * dt;
+
+    // court boundaries bounce
+    if(ball.x < R.left+26){ ball.x = R.left+26; ball.vx *= -0.62; }
+    if(ball.x > R.right-26){ ball.x = R.right-26; ball.vx *= -0.62; }
+    if(ball.y < R.top+30){ ball.y = R.top+30; ball.vy *= -0.62; }
+    if(ball.y > R.bottom-22){ ball.y = R.bottom-22; ball.vy *= -0.62; }
+
+    // floor bounce
+    if(ball.z <= floorF){
+      ball.z = floorF;
+      if(Math.abs(ball.vz) > 180){
+        ball.vz *= -0.55;
+        ball.vx *= 0.82;
+        ball.vy *= 0.82;
+      }else{
+        // settle
+        ball.vz = 0;
+        ball.vx *= 0.86;
+        ball.vy *= 0.86;
+        if(Math.hypot(ball.vx, ball.vy) < 55){
+          ball.vx = 0; ball.vy = 0;
+          // if it was a shot attempt and never scored, count miss once then allow pickup
+          if(!ball.scoredThisShot){
+            missShot();
+            ball.scoredThisShot = true; // prevent double miss
+          }
+        }
+      }
+    }
+
+    // Backboard collision (simple plane near hoop)
+    // board sits a bit above rim on y
+    const boardY = hp.y - 18;
+    const boardZMin = hoop.rimHeight*0.65;
+    const boardZMax = hoop.rimHeight*1.55;
+    const boardHalfW = hoop.boardW*0.45;
+
+    const hitBoard =
+      (Math.abs(ball.x - hp.x) < boardHalfW) &&
+      (Math.abs(ball.y - boardY) < 8) &&
+      (ball.z > boardZMin && ball.z < boardZMax);
+
+    if(hitBoard){
+      ball.vy *= -0.60;
+      ball.vx *= 0.88;
+      ball.touchedBoard = true;
+      pop(ball.x, ball.y, 10, 0.7);
+    }
+
+    // Rim collision + scoring
+    const rimD = Math.hypot(ball.x - hp.x, ball.y - hp.y);
+    const nearRim = rimD < (hoop.rimR + 10);
+    const rimZ = hoop.rimHeight;
+    const withinRimHeight = (ball.z > rimZ-26 && ball.z < rimZ+22);
+
+    if(nearRim && withinRimHeight){
+      // bounce off rim ring
+      const nx = (ball.x - hp.x) / Math.max(1e-3, rimD);
+      const ny = (ball.y - hp.y) / Math.max(1e-3, rimD);
+      // push out
+      ball.x = hp.x + nx*(hoop.rimR + 10);
+      ball.y = hp.y + ny*(hoop.rimR + 10);
+      // reflect plane velocity
+      const vn = ball.vx*nx + ball.vy*ny;
+      ball.vx = ball.vx - 1.65*vn*nx;
+      ball.vy = ball.vy - 1.65*vn*ny;
+      ball.vx *= 0.70; ball.vy *= 0.70;
+      ball.touchedRim = true;
+      pop(ball.x, ball.y, 10, 0.65);
+    }
+
+    // Score condition:
+    // - ball passes through cylinder near rim center
+    // - above rim then goes below rim (descending) while inside rim radius
+    if(!ball.scoredThisShot){
+      // track "wasAbove" using vz sign + z threshold
+      const inside = rimD < (hoop.rimR - 6);
+      if(inside && ball.z < rimZ-6 && ball.vz < 0){
+        // require that it was recently above rim height to avoid ground false positives
+        // (cheap: check if touched rim/board or if z started high)
+        ball.scoredThisShot = true;
+
+        const swish = (!ball.touchedRim && !ball.touchedBoard);
+        applyScore(swish ? 3 : 2, swish ? 'SWISH' : 'BUCKET');
+        pop(hp.x, hp.y+24, swish ? 34 : 24, swish ? 1.2 : 0.95);
+
+        // soften ball after scoring
+        ball.vx *= 0.65; ball.vy *= 0.65; ball.vz *= 0.55;
+      }
+    }
+  }
+
+  function updateParticles(dt){
+    for(let i=particles.length-1;i>=0;i--){
+      const p = particles[i];
+      p.life -= dt;
+      p.x += p.vx*dt;
+      p.y += p.vy*dt;
+      p.vx *= Math.pow(0.10, dt);
+      p.vy *= Math.pow(0.10, dt);
+      if(p.life <= 0) particles.splice(i,1);
+    }
+  }
+
+  function updateAI(dt){
+    // Defender: soft chase player, but not all the way under hoop
+    const R=courtRect();
+    defender.moodT += dt;
+
+    const goalX = player.x + Math.sin(defender.moodT*0.7)*30;
+    const goalY = clamp(player.y - 80, R.top + 130, R.bottom - 70);
+
+    const dx = goalX - defender.x;
+    const dy = goalY - defender.y;
+    const d = Math.max(1, Math.hypot(dx,dy));
+
+    defender.x += (dx/d) * defender.speed * dt;
+    defender.y += (dy/d) * defender.speed * dt;
+    clampToCourt(defender);
+
+    // Teammate: drift around mid-lane
+    const mateGoalX = R.left + R.w*0.5 - 190 + Math.sin(perf*0.6)*120;
+    const mateGoalY = R.top + R.h*0.62 + Math.cos(perf*0.5)*60;
+
+    const dx2 = mateGoalX - mate.x;
+    const dy2 = mateGoalY - mate.y;
+    const d2 = Math.max(1, Math.hypot(dx2,dy2));
+    mate.x += (dx2/d2) * mate.speed * dt;
+    mate.y += (dy2/d2) * mate.speed * dt;
+    clampToCourt(mate);
+  }
+
+  function updatePlayer(dt){
+    const sp = player.speed * cfg.moveSpeedMul;
+
+    // EXACT: left open => locked (handled already by input.move=0)
+    player.x += input.moveX * sp * dt;
+    player.y += input.moveY * sp * dt;
+
+    clampToCourt(player);
+  }
+
+  function updateTime(dt){
+    if(!started || paused) return;
+    timeLeft = Math.max(0, timeLeft - dt);
+    UI.timeFill.style.width = `${(timeLeft/SESSION_SEC*100).toFixed(0)}%`;
+
+    if(timeLeft <= 0){
+      paused = true;
+      setBridge('Session complete — back to menu');
+      setTimeout(()=>{
+        UI.overlay.style.display = 'flex';
+        started = false;
+      }, 450);
+    }
+  }
+
+  function updateHud(){
+    UI.scoreTxt.textContent = `Score: ${score}`;
+    UI.madeTxt.textContent = `Made: ${made}`;
+    UI.missTxt.textContent = `Miss: ${miss}`;
+    UI.streakTxt.textContent = `Streak: ${streak}`;
+  }
+
+  // -------------------------
+  // Render order (depth)
+  // -------------------------
+  function drawAll(){
+    drawCourt();
+    drawHoop();
+
+    // depth sort: farther (smaller y) drawn first
+    const ents = [
+      {type:'def', y:defender.y, draw:()=>drawPlayerCircle(defender,'D','rgba(255,120,120,0.12)','rgba(255,255,255,0.10)')},
+      {type:'mate', y:mate.y, draw:()=>drawPlayerCircle(mate,'T','rgba(57,224,255,0.10)','rgba(255,255,255,0.08)')},
+      {type:'player', y:player.y, draw:()=>drawPlayerCircle(player,String(player.num),'rgba(57,224,255,0.14)','rgba(255,255,255,0.10)')},
+      {type:'ball', y:ball.y, draw:()=>drawBall()}
+    ];
+    ents.sort((a,b)=>a.y-b.y);
+    for(const e of ents) e.draw();
+
+    drawParticles();
+  }
+
+  // -------------------------
+  // Start / mode selection
+  // -------------------------
+  function setMode(m){
+    controllerMode = m;
+    localStorage.setItem(modeKey, m);
+
+    UI.pickGesture.classList.toggle('selected', m==='gesture');
+    UI.pickKeyboard.classList.toggle('selected', m==='keyboard');
+
+    UI.startBtn.disabled = false;
+    UI.startBtn.textContent = (m==='gesture') ? 'Start (Gesture)' : 'Start (Keyboard)';
+
+    UI.hintText.textContent =
+      (m==='gesture')
+        ? 'Gesture: LEFT OPEN lock • LEFT FIST move (up=forward) • RIGHT FIST hold • RIGHT OPEN + velocity throw'
+        : 'Keyboard: WASD move • Hold mouse grip • Release mouse throw (flick power) • ESC pause';
+
+    setBridge(`Controller: ${m}`);
+  }
+
+  UI.pickGesture.addEventListener('pointerdown', async (e)=>{
+    e.preventDefault();
+    setMode('gesture');
+    await startGestureSystem(); // prompt permission early
+  }, { passive:false });
+
+  UI.pickKeyboard.addEventListener('pointerdown', (e)=>{
+    e.preventDefault();
+    setMode('keyboard');
+    setBridge('Keyboard selected');
+  }, { passive:false });
+
+  UI.startBtn.addEventListener('pointerdown', async (e)=>{
+    e.preventDefault();
+
+    if(controllerMode === 'gesture'){
+      const ok = await startGestureSystem();
+      if(!ok){
+        setBridge('Gesture camera failed. Starting anyway (keyboard style).');
+        UI.overlay.style.display = 'none';
+        startNewRun();
+        return;
+      }
+      openStartup();
+      return;
+    }
+
+    UI.overlay.style.display = 'none';
+    startNewRun();
+  }, { passive:false });
+
+  // -------------------------
+  // Run control
+  // -------------------------
+  function startNewRun(){
+    started = true;
+    paused = false;
+
+    score=0; made=0; miss=0; streak=0;
+    timeLeft = SESSION_SEC;
+
+    resetPositions();
+    UI.timeFill.style.width = '100%';
+    UI.gripFill.style.width = '0%';
+    setBridge('Practice started — Left OPEN locks, Left FIST moves, Right FIST holds, Right OPEN releases');
+  }
+
+  // restore last mode
+  if(controllerMode === 'gesture' || controllerMode === 'keyboard'){
+    setMode(controllerMode);
+  }else{
+    setBridge('Controller: not selected');
+  }
+
+  // -------------------------
+  // Main loop
+  // -------------------------
+  let lastT = performance.now();
+  function frame(now){
+    const dt = clamp((now - lastT)/1000, 0, 0.05);
+    lastT = now;
+    perf += dt;
+
+    if(controllerMode === 'keyboard') pollKeyboard();
+
+    if(started && !paused){
+      updateTime(dt);
+      updatePlayer(dt);
+      updateAI(dt);
+      updateBall(dt);
+      tryPickupBall(); // right fist pickup if loose
+      updateParticles(dt);
+    }else{
+      updateParticles(dt);
+    }
+
+    drawGripIndicator();
+    drawAll();
+    updateHud();
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  // keep sane on resize
+  window.addEventListener('resize', ()=>{
+    if(ball.held) resetPositions();
+  }, { passive:true });
+
+})();
+</script>
+</body>
+</html>

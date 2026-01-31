@@ -1,0 +1,2343 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Gesture Basketball — Arcade Free Throws</title>
+
+  <style>
+    :root{ --uiText: rgba(255,255,255,.92); }
+    *{ box-sizing:border-box; }
+    html,body{
+      margin:0; padding:0; width:100%; height:100%;
+      background:#0b0b0b; overflow:hidden; touch-action:none;
+      -webkit-user-select:none; user-select:none;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+    #wrap{ position:relative; width:100%; height:100%; }
+    canvas{ display:block; }
+    #video{ position:fixed; left:-9999px; top:-9999px; width: 960px; height: 540px; opacity:0; pointer-events:none; }
+
+    #hud2d{
+      position:absolute; inset:0;
+      pointer-events:none; z-index: 5;
+    }
+
+    .topBtn{
+      pointer-events:auto;
+      position:fixed;
+      top: calc(env(safe-area-inset-top) + 10px);
+      padding:10px 12px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.10);
+      border: 1px solid rgba(255,255,255,.14);
+      color: rgba(255,255,255,.92);
+      font: 14px/1 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+      backdrop-filter: blur(8px);
+      z-index: 30;
+      display:none;
+    }
+    #menuBtn{ right: calc(env(safe-area-inset-right) + 250px); }
+    #panelBtn{ right: calc(env(safe-area-inset-right) + 172px); }
+    #levelBtn{ right: calc(env(safe-area-inset-right) + 94px); }
+    #pauseBtn{ right: calc(env(safe-area-inset-right) + 10px); }
+
+    #bridge{
+      position:fixed;
+      left: calc(env(safe-area-inset-left) + 10px);
+      bottom: calc(env(safe-area-inset-bottom) + 10px);
+      padding:8px 10px;
+      border-radius: 12px;
+      background: rgba(0,0,0,.28);
+      border:1px solid rgba(255,255,255,.10);
+      color: rgba(255,255,255,.72);
+      font: 12px/1.2 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+      pointer-events:none;
+      max-width: 92vw;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      z-index: 25;
+    }
+
+    /* ===== MENU / OVERLAY ===== */
+    #overlay{
+      position:fixed; inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding: calc(env(safe-area-inset-top) + 14px) 14px calc(env(safe-area-inset-bottom) + 14px);
+      background: radial-gradient(1200px 800px at 50% 25%, rgba(160,210,255,.10), rgba(0,0,0,.60));
+      backdrop-filter: blur(10px);
+      z-index: 80;
+      overflow:hidden;
+    }
+    #card{
+      width: min(1040px, 96vw);
+      max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 28px);
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 18px;
+      box-shadow: 0 30px 80px rgba(0,0,0,.35);
+      color: rgba(255,255,255,.90);
+      font: 13px/1.35 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+      display:flex;
+      flex-direction:column;
+      overflow:hidden;
+    }
+    #cardHeader{
+      padding: 14px 14px 10px;
+      border-bottom: 1px solid rgba(255,255,255,.10);
+      background: rgba(0,0,0,.14);
+    }
+    #titleRow{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap: 12px;
+    }
+    #titleRow h1{
+      margin: 0;
+      font: 900 18px/1.15 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+      letter-spacing: .2px;
+    }
+    #subtitle{ opacity:.82; margin-top: 6px; max-width: 100ch; }
+    #cardBody{
+      padding: 12px 14px 12px;
+      overflow:auto;
+      -webkit-overflow-scrolling: touch;
+      min-height: 0;
+    }
+    .grid{
+      display:grid;
+      grid-template-columns: minmax(0, 1.10fr) minmax(0, 0.90fr);
+      gap: 12px;
+    }
+    @media (max-width: 980px){ .grid{ grid-template-columns: 1fr; } }
+
+    .panel{
+      background: rgba(0,0,0,.22);
+      border: 1px solid rgba(255,255,255,.10);
+      border-radius: 14px;
+      padding: 10px 10px 8px;
+      min-width: 0;
+    }
+    .panel h3{
+      margin: 2px 0 8px;
+      font: 900 13px/1.15 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+      letter-spacing:.15px;
+    }
+    .row{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      margin: 7px 0;
+      min-width: 0;
+    }
+    .row label{ flex: 0 0 270px; opacity:.95; min-width: 0; }
+    .row input[type="range"]{ width:100%; min-width: 0; }
+    .row .v{
+      width: 120px;
+      text-align:right;
+      opacity:.85;
+      font-variant-numeric: tabular-nums;
+      flex: 0 0 auto;
+    }
+    .row input[type="checkbox"]{ transform: scale(1.05); }
+    .row select{
+      width:100%;
+      padding:10px 10px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.06);
+      color: rgba(255,255,255,.92);
+      outline: none;
+    }
+
+    @media (max-width: 560px){
+      #cardHeader{ padding: 12px 12px 10px; }
+      #cardBody{ padding: 10px 12px 12px; }
+      .row{ flex-direction:column; align-items:stretch; gap:6px; }
+      .row label{ flex: 0 0 auto; width:100%; }
+      .row .v{ width:100%; text-align:right; }
+    }
+
+    #cardFooter{
+      padding: 12px 14px 14px;
+      border-top: 1px solid rgba(255,255,255,.10);
+      background: rgba(0,0,0,.14);
+    }
+    .actions{ display:flex; gap:10px; justify-content:space-between; flex-wrap:wrap; align-items:center; }
+    .actionBtn{
+      padding: 12px 14px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.16);
+      background: rgba(255,255,255,.10);
+      color: rgba(255,255,255,.92);
+      cursor:pointer;
+      font: 800 13px/1 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+    }
+    .actionBtn.primary{
+      background: rgba(90,255,160,.22);
+      border-color: rgba(90,255,160,.26);
+    }
+    .actionBtn:disabled{ opacity:.45; cursor:not-allowed; }
+    .hint{ opacity:.80; font-size: 12px; margin-top: 6px; }
+
+    #statusLine{
+      opacity:.82;
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+      padding: 8px 10px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(0,0,0,.18);
+      max-width: 100%;
+    }
+
+    /* ===== STARTUP CALIBRATION ===== */
+    #startup{
+      position:fixed; inset:0;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding: calc(env(safe-area-inset-top) + 14px) 14px calc(env(safe-area-inset-bottom) + 14px);
+      background: radial-gradient(1100px 700px at 50% 35%, rgba(255,140,140,.08), rgba(0,0,0,.62));
+      backdrop-filter: blur(10px);
+      z-index: 90;
+      color: rgba(255,255,255,.92);
+      font: 14px/1.35 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+      overflow:hidden;
+    }
+    #startupCard{
+      width: min(900px, 96vw);
+      max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 28px);
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.08);
+      box-shadow: 0 30px 80px rgba(0,0,0,.35);
+      padding: 14px 14px 12px;
+      overflow:auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    #startupTop{ display:flex; align-items:flex-start; justify-content:space-between; gap: 12px; margin-bottom: 10px; }
+    #startupTop h2{ margin:0; font: 900 16px/1.15 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif; letter-spacing:.2px; }
+    #startupMsg{ opacity:.85; margin-top: 6px; }
+    #startupCount{ font: 900 56px/1 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif; opacity:.95; min-width: 80px; text-align:right; }
+    #startupStatus{ display:flex; gap:10px; flex-wrap:wrap; margin-top: 10px; }
+    .chip{
+      padding:8px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(0,0,0,.22);
+      opacity:.9;
+      font-variant-numeric: tabular-nums;
+      max-width: 100%;
+    }
+    .chip.ok{ border-color: rgba(90,255,160,.30); background: rgba(90,255,160,.14); }
+    .chip.bad{ border-color: rgba(255,120,120,.25); background: rgba(255,120,120,.10); }
+    #startupBars{ display:flex; gap:10px; margin-top: 12px; align-items:center; flex-wrap:wrap; }
+    .pbar{
+      flex: 1 1 260px;
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.12);
+      overflow:hidden;
+      border: 1px solid rgba(255,255,255,.10);
+    }
+    .pbar > i{ display:block; height:100%; width:0%; background: rgba(140,220,255,.95); }
+    #startupNote{ margin-top: 10px; opacity:.78; font-size: 12px; }
+    #startupActions{ display:flex; gap:10px; justify-content:flex-end; margin-top: 12px; flex-wrap:wrap; }
+
+    /* ===== LIVE PANEL ===== */
+    #liveTuner{
+      position:fixed;
+      top: calc(env(safe-area-inset-top) + 58px);
+      right: calc(env(safe-area-inset-right) + 10px);
+      width: min(440px, 92vw);
+      max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 80px);
+      background: rgba(10,14,20,.72);
+      border: 1px solid rgba(255,255,255,.14);
+      border-radius: 16px;
+      backdrop-filter: blur(10px);
+      z-index: 60;
+      display:none;
+      overflow:hidden;
+    }
+    #liveTunerHeader{
+      padding: 10px 10px 8px;
+      border-bottom: 1px solid rgba(255,255,255,.10);
+      display:flex;
+      gap:10px;
+      align-items:center;
+      justify-content:space-between;
+      color: rgba(255,255,255,.92);
+      font: 900 13px/1 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+    }
+    #liveTunerHeader small{ font-weight:700; opacity:.8; }
+    #liveTunerBody{
+      padding: 10px 10px 12px;
+      overflow:auto;
+      -webkit-overflow-scrolling: touch;
+      color: rgba(255,255,255,.90);
+      font: 13px/1.35 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+    }
+    .miniBtn{
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.16);
+      background: rgba(255,255,255,.10);
+      color: rgba(255,255,255,.92);
+      cursor:pointer;
+      font: 900 12px/1 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+    }
+    .kbdHint{
+      opacity:.75;
+      font-size:12px;
+      margin-top:6px;
+    }
+  </style>
+
+  <!-- Three.js -->
+  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+
+  <!-- MediaPipe Hands -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+</head>
+
+<body>
+<div id="wrap">
+  <video id="video" playsinline></video>
+  <canvas id="webgl"></canvas>
+  <canvas id="hud2d"></canvas>
+
+  <button id="menuBtn" class="topBtn">Menu</button>
+  <button id="panelBtn" class="topBtn">Panel</button>
+  <button id="levelBtn" class="topBtn">Level</button>
+  <button id="pauseBtn" class="topBtn">Pause</button>
+  <div id="bridge">Gesture: ready</div>
+
+  <!-- LIVE PANEL -->
+  <div id="liveTuner">
+    <div id="liveTunerHeader">
+      <div>Live Panel <small id="liveMode">(arcade free throws)</small></div>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <button id="levelCamBtn" class="miniBtn">Level Cam</button>
+        <button id="recenterBtn" class="miniBtn">Recenter</button>
+        <button id="recalBtn" class="miniBtn">Startup Scan</button>
+        <button id="closeLiveBtn" class="miniBtn">Close</button>
+      </div>
+    </div>
+    <div id="liveTunerBody">
+      <div class="panel">
+        <h3>Arcade Settings</h3>
+
+        <div class="row">
+          <label>Round Time</label>
+          <input id="roundSecLive" type="range" min="30" max="180" step="5" value="60">
+          <div class="v" id="roundSecLiveV">60s</div>
+        </div>
+
+        <div class="row">
+          <label>Shot Clock (per free throw)</label>
+          <input id="shotClockLive" type="range" min="3" max="12" step="1" value="8">
+          <div class="v" id="shotClockLiveV">8s</div>
+        </div>
+
+        <div class="row">
+          <label>Target Hoop</label>
+          <select id="targetHoopLive">
+            <option value="B">Near Hoop (z=+26)</option>
+            <option value="A">Far Hoop (z=-26)</option>
+          </select>
+          <div class="v"></div>
+        </div>
+
+        <div class="row">
+          <label>Aim Clamp (deg)</label>
+          <input id="aimClampLive" type="range" min="10" max="60" step="1" value="28">
+          <div class="v" id="aimClampLiveV">28°</div>
+        </div>
+
+        <div class="hint">
+          Move-hand pinch rotates left/right. Pitch is locked to keep the court stable. Free throw position is fixed.
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:10px;">
+        <h3>Gesture Alignment</h3>
+
+        <div class="row">
+          <label>Micro Range (inches → full speed)</label>
+          <input id="microInLive" type="range" min="0.25" max="3.00" step="0.05" value="0.75">
+          <div class="v" id="microInLiveV">0.75 in</div>
+        </div>
+
+        <div class="row">
+          <label>Deadzone (px)</label>
+          <input id="deadPxLive" type="range" min="0" max="140" step="1" value="18">
+          <div class="v" id="deadPxLiveV">18</div>
+        </div>
+
+        <div class="row">
+          <label>Smoothing</label>
+          <input id="smoothLive" type="range" min="0.00" max="0.92" step="0.01" value="0.22">
+          <div class="v" id="smoothLiveV">0.22</div>
+        </div>
+
+        <div class="row">
+          <label>Look Speed (yaw)</label>
+          <input id="lookSpeedLive" type="range" min="0.4" max="3.0" step="0.05" value="1.05">
+          <div class="v" id="lookSpeedLiveV">1.05</div>
+        </div>
+
+        <div class="row">
+          <label>Mirror X (Selfie)</label>
+          <input id="mirrorXLive" type="checkbox" checked>
+          <div class="v"></div>
+        </div>
+
+        <div class="row">
+          <label>Swap Hands</label>
+          <input id="swapHandsLive" type="checkbox">
+          <div class="v"></div>
+        </div>
+
+        <div class="row">
+          <label>Show HUD Markers</label>
+          <input id="showHudLive" type="checkbox" checked>
+          <div class="v"></div>
+        </div>
+
+        <div class="kbdHint">
+          Grab-hand pinch = hold ball. Release = throw. Ball is presented at your grab hand at the start of each attempt.
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:10px;">
+        <h3>Grab / Throw</h3>
+
+        <div class="row">
+          <label>Grab Pinch Threshold</label>
+          <input id="grabPinchLive" type="range" min="0.18" max="0.52" step="0.01" value="0.30">
+          <div class="v" id="grabPinchLiveV">0.30</div>
+        </div>
+
+        <div class="row">
+          <label>Look Pinch Threshold (Move hand)</label>
+          <input id="lookPinchLive" type="range" min="0.18" max="0.52" step="0.01" value="0.30">
+          <div class="v" id="lookPinchLiveV">0.30</div>
+        </div>
+
+        <div class="row">
+          <label>Throw Power</label>
+          <input id="throwPowLive" type="range" min="1" max="18" step="0.5" value="6.0">
+          <div class="v" id="throwPowLiveV">6.0</div>
+        </div>
+
+        <div class="row">
+          <label>Assist Forward Bias</label>
+          <input id="forwardAssistLive" type="range" min="0.0" max="3.0" step="0.05" value="1.15">
+          <div class="v" id="forwardAssistLiveV">1.15</div>
+        </div>
+
+        <div class="row">
+          <label>Auto-Grab Magnet (world units)</label>
+          <input id="autoGrabLive" type="range" min="0.20" max="2.50" step="0.05" value="0.90">
+          <div class="v" id="autoGrabLiveV">0.90</div>
+        </div>
+
+        <div class="row">
+          <label>Grab Offset X (px)</label>
+          <input id="grabOffXLive" type="range" min="-400" max="400" step="1" value="0">
+          <div class="v" id="grabOffXLiveV">0</div>
+        </div>
+        <div class="row">
+          <label>Grab Offset Y (px)</label>
+          <input id="grabOffYLive" type="range" min="-300" max="300" step="1" value="0">
+          <div class="v" id="grabOffYLiveV">0</div>
+        </div>
+
+        <div class="row">
+          <label>Move Offset X (px)</label>
+          <input id="moveOffXLive" type="range" min="-400" max="400" step="1" value="0">
+          <div class="v" id="moveOffXLiveV">0</div>
+        </div>
+        <div class="row">
+          <label>Move Offset Y (px)</label>
+          <input id="moveOffYLive" type="range" min="-300" max="300" step="1" value="0">
+          <div class="v" id="moveOffYLiveV">0</div>
+        </div>
+
+        <div class="row" style="justify-content:flex-end;">
+          <button id="defaultsLive" class="actionBtn">Defaults</button>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:10px;">
+        <h3>Readout</h3>
+        <div id="liveReadout" style="opacity:.82; font-size:12px; font-variant-numeric: tabular-nums; word-break: break-word;">—</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MENU OVERLAY -->
+  <div id="overlay">
+    <div id="card">
+      <div id="cardHeader">
+        <div id="titleRow">
+          <div>
+            <h1>Gesture Basketball — Arcade Free Throws</h1>
+            <div id="subtitle">
+              Objective: score as many free throws as possible before time runs out.<br/>
+              Each attempt has a shot clock. Pinch-and-throw with the grab hand; aim by rotating with the move-hand pinch.
+            </div>
+          </div>
+          <div style="opacity:.75; font-size:12px; text-align:right;">
+            Tip: after startup scan, shots begin automatically.
+          </div>
+        </div>
+      </div>
+
+      <div id="cardBody">
+        <div class="grid">
+          <div class="panel">
+            <h3>Arcade Mode</h3>
+
+            <div class="row">
+              <label>Round Time</label>
+              <input id="roundSec" type="range" min="30" max="180" step="5" value="60">
+              <div class="v" id="roundSecV">60s</div>
+            </div>
+
+            <div class="row">
+              <label>Shot Clock (per free throw)</label>
+              <input id="shotClock" type="range" min="3" max="12" step="1" value="8">
+              <div class="v" id="shotClockV">8s</div>
+            </div>
+
+            <div class="row">
+              <label>Target Hoop</label>
+              <select id="targetHoop">
+                <option value="B">Near Hoop (z=+26)</option>
+                <option value="A">Far Hoop (z=-26)</option>
+              </select>
+              <div class="v"></div>
+            </div>
+
+            <div class="row">
+              <label>Aim Clamp (deg)</label>
+              <input id="aimClamp" type="range" min="10" max="60" step="1" value="28">
+              <div class="v" id="aimClampV">28°</div>
+            </div>
+
+            <div class="hint">
+              Free throw position is fixed. Only yaw aim is allowed (pitch locked).
+            </div>
+
+            <div id="statusLine">Status: not started</div>
+          </div>
+
+          <div class="panel">
+            <h3>Gesture + Throw Tuning</h3>
+
+            <div class="row">
+              <label>Micro Range (inches → full speed)</label>
+              <input id="microIn" type="range" min="0.25" max="3.00" step="0.05" value="0.75">
+              <div class="v" id="microInV">0.75 in</div>
+            </div>
+
+            <div class="row">
+              <label>Deadzone (px)</label>
+              <input id="deadPx" type="range" min="0" max="140" step="1" value="18">
+              <div class="v" id="deadPxV">18</div>
+            </div>
+
+            <div class="row">
+              <label>Smoothing</label>
+              <input id="smooth" type="range" min="0.00" max="0.92" step="0.01" value="0.22">
+              <div class="v" id="smoothV">0.22</div>
+            </div>
+
+            <div class="row">
+              <label>Look Speed (yaw)</label>
+              <input id="lookSpeed" type="range" min="0.4" max="3.0" step="0.05" value="1.05">
+              <div class="v" id="lookSpeedV">1.05</div>
+            </div>
+
+            <div class="row">
+              <label>Mirror X (Selfie)</label>
+              <input id="mirrorX" type="checkbox" checked>
+              <div class="v"></div>
+            </div>
+
+            <div class="row">
+              <label>Swap Hands</label>
+              <input id="swapHands" type="checkbox">
+              <div class="v"></div>
+            </div>
+
+            <div class="row">
+              <label>Show HUD Markers</label>
+              <input id="showHud" type="checkbox" checked>
+              <div class="v"></div>
+            </div>
+
+            <div class="row">
+              <label>Grab Pinch Threshold</label>
+              <input id="grabPinch" type="range" min="0.18" max="0.52" step="0.01" value="0.30">
+              <div class="v" id="grabPinchV">0.30</div>
+            </div>
+
+            <div class="row">
+              <label>Look Pinch Threshold (Move hand)</label>
+              <input id="lookPinch" type="range" min="0.18" max="0.52" step="0.01" value="0.30">
+              <div class="v" id="lookPinchV">0.30</div>
+            </div>
+
+            <div class="row">
+              <label>Throw Power</label>
+              <input id="throwPow" type="range" min="1" max="18" step="0.5" value="6.0">
+              <div class="v" id="throwPowV">6.0</div>
+            </div>
+
+            <div class="row">
+              <label>Assist Forward Bias</label>
+              <input id="forwardAssist" type="range" min="0.0" max="3.0" step="0.05" value="1.15">
+              <div class="v" id="forwardAssistV">1.15</div>
+            </div>
+
+            <div class="row">
+              <label>Auto-Grab Magnet (world units)</label>
+              <input id="autoGrab" type="range" min="0.20" max="2.50" step="0.05" value="0.90">
+              <div class="v" id="autoGrabV">0.90</div>
+            </div>
+
+            <div class="row">
+              <label>Grab Offset X (px)</label>
+              <input id="grabOffX" type="range" min="-400" max="400" step="1" value="0">
+              <div class="v" id="grabOffXV">0</div>
+            </div>
+            <div class="row">
+              <label>Grab Offset Y (px)</label>
+              <input id="grabOffY" type="range" min="-300" max="300" step="1" value="0">
+              <div class="v" id="grabOffYV">0</div>
+            </div>
+
+            <div class="row">
+              <label>Move Offset X (px)</label>
+              <input id="moveOffX" type="range" min="-400" max="400" step="1" value="0">
+              <div class="v" id="moveOffXV">0</div>
+            </div>
+            <div class="row">
+              <label>Move Offset Y (px)</label>
+              <input id="moveOffY" type="range" min="-300" max="300" step="1" value="0">
+              <div class="v" id="moveOffYV">0</div>
+            </div>
+
+            <div class="hint">
+              Controls: Move-hand pinch rotates left/right (aim). Grab-hand pinch holds ball; release throws.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="cardFooter">
+        <div class="actions">
+          <button id="resetBtn" class="actionBtn">Reset</button>
+          <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end;">
+            <button id="resumeBtn" class="actionBtn">Resume</button>
+            <button id="startBtn" class="actionBtn primary">Start Arcade (Gesture Login)</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STARTUP CALIBRATION -->
+  <div id="startup">
+    <div id="startupCard">
+      <div id="startupTop">
+        <div>
+          <h2>Startup Scan — Neutral + Deadzone + Micro Range</h2>
+          <div id="startupMsg">Raise both hands. Hold steady for 3-2-1.</div>
+        </div>
+        <div id="startupCount"></div>
+      </div>
+
+      <div id="startupStatus">
+        <div id="chipMove" class="chip bad">Move hand: not seen</div>
+        <div id="chipGrab" class="chip bad">Grab hand: not seen</div>
+        <div id="chipInch" class="chip">Micro: —</div>
+      </div>
+
+      <div id="startupBars">
+        <div class="pbar"><i id="bar1"></i></div>
+        <div class="pbar"><i id="bar2"></i></div>
+      </div>
+
+      <div id="startupNote">
+        Step 1: steady hands for centering + jitter scan.<br/>
+        Step 2: move the <b>move hand</b> only a little (~0.5–1 inch) to confirm micro range.
+      </div>
+
+      <div id="startupActions">
+        <button id="skipStartup" class="actionBtn">Skip</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  // -----------------------
+  // Helpers
+  // -----------------------
+  const clamp = (v,a,b)=> Math.max(a, Math.min(b, v));
+  const hypot = Math.hypot;
+
+  function pxPerInch(){
+    const d = document.createElement("div");
+    d.style.width = "1in";
+    d.style.position = "absolute";
+    d.style.left = "-200%";
+    d.style.top = "0";
+    document.body.appendChild(d);
+    const p = d.getBoundingClientRect().width || 96;
+    d.remove();
+    return p;
+  }
+  let PX_IN = pxPerInch();
+  window.addEventListener("resize", ()=>{ PX_IN = pxPerInch(); }, { passive:true });
+
+  function distLm(a,b){
+    const dx = (a.x - b.x), dy = (a.y - b.y);
+    return Math.sqrt(dx*dx + dy*dy);
+  }
+  function avgLm(points){
+    let x=0,y=0,z=0;
+    for (const p of points){ x+=p.x; y+=p.y; z+=(p.z||0); }
+    const n = Math.max(1, points.length);
+    return { x:x/n, y:y/n, z:z/n };
+  }
+  function roundRectPath(ctx,x,y,w,h,r){
+    const rr = Math.min(r, w/2, h/2);
+    ctx.beginPath();
+    ctx.moveTo(x+rr,y);
+    ctx.arcTo(x+w,y,x+w,y+h,rr);
+    ctx.arcTo(x+w,y+h,x,y+h,rr);
+    ctx.arcTo(x,y+h,x,y,rr);
+    ctx.arcTo(x,y,x+w,y,rr);
+    ctx.closePath();
+  }
+  function fmtTime(s){
+    s = Math.max(0, s);
+    const m = Math.floor(s/60);
+    const r = Math.floor(s - m*60);
+    return `${m}:${String(r).padStart(2,"0")}`;
+  }
+
+  // -----------------------
+  // UI refs
+  // -----------------------
+  const webglCanvas = document.getElementById("webgl");
+  const hudCanvas = document.getElementById("hud2d");
+  const hud = hudCanvas.getContext("2d", { alpha:true });
+
+  const ui = {
+    bridge: document.getElementById("bridge"),
+    menuBtn: document.getElementById("menuBtn"),
+    panelBtn: document.getElementById("panelBtn"),
+    levelBtn: document.getElementById("levelBtn"),
+    pauseBtn: document.getElementById("pauseBtn"),
+
+    overlay: document.getElementById("overlay"),
+    startBtn: document.getElementById("startBtn"),
+    resumeBtn: document.getElementById("resumeBtn"),
+    resetBtn: document.getElementById("resetBtn"),
+    statusLine: document.getElementById("statusLine"),
+
+    startup: document.getElementById("startup"),
+    startupMsg: document.getElementById("startupMsg"),
+    startupCount: document.getElementById("startupCount"),
+    chipMove: document.getElementById("chipMove"),
+    chipGrab: document.getElementById("chipGrab"),
+    chipInch: document.getElementById("chipInch"),
+    bar1: document.getElementById("bar1"),
+    bar2: document.getElementById("bar2"),
+    skipStartup: document.getElementById("skipStartup"),
+
+    liveTuner: document.getElementById("liveTuner"),
+    closeLiveBtn: document.getElementById("closeLiveBtn"),
+    levelCamBtn: document.getElementById("levelCamBtn"),
+    recenterBtn: document.getElementById("recenterBtn"),
+    recalBtn: document.getElementById("recalBtn"),
+    defaultsLive: document.getElementById("defaultsLive"),
+    liveReadout: document.getElementById("liveReadout"),
+  };
+
+  function setBridge(t){ ui.bridge.textContent = t; }
+
+  // -----------------------
+  // Config
+  // -----------------------
+  const cfgDefaults = {
+    // Arcade
+    roundSeconds: 60,
+    shotClockSeconds: 8,
+    targetHoop: "B",          // "B" near hoop z=+26, "A" far hoop z=-26
+    aimClampDeg: 28,
+
+    // Gesture alignment
+    microRangeInches: 0.75,
+    deadzonePx: 18,
+    smoothing: 0.22,
+    lookSpeed: 1.05,
+
+    mirrorX: true,
+    swapHands: false,
+    showHud: true,
+
+    // Grab/throw
+    grabPinchThresh: 0.30,
+    lookPinchThresh: 0.30,
+    throwPower: 6.0,
+    forwardAssist: 1.15,
+    autoGrabRadius: 0.90,
+
+    grabOffX: 0,
+    grabOffY: 0,
+    moveOffX: 0,
+    moveOffY: 0,
+  };
+
+  const cfgKey = "gesture_basket_arcade_cfg_v2";
+  const cfg = { ...cfgDefaults };
+
+  function loadCfg(){
+    try{
+      const raw = localStorage.getItem(cfgKey);
+      if(!raw) return;
+      const o = JSON.parse(raw);
+      for(const k of Object.keys(cfgDefaults)){
+        const t = typeof cfgDefaults[k];
+        if(t === "boolean" && typeof o[k] === "boolean") cfg[k] = o[k];
+        if(t === "number"  && typeof o[k] === "number" && isFinite(o[k])) cfg[k] = o[k];
+        if(t === "string"  && typeof o[k] === "string") cfg[k] = o[k];
+      }
+    } catch {}
+  }
+  function saveCfg(){ try{ localStorage.setItem(cfgKey, JSON.stringify(cfg)); } catch {} }
+
+  const rangeBindings = [];
+  const checkBindings = [];
+  const selectBindings = [];
+
+  function bindRange(id, key, fmt){
+    const el = document.getElementById(id);
+    const vEl = document.getElementById(id + "V");
+    if(!el) return;
+    rangeBindings.push({ el, vEl, key, fmt });
+    el.addEventListener("input", ()=>{
+      cfg[key] = +el.value;
+      saveCfg();
+      syncControls();
+    }, { passive:true });
+  }
+  function bindCheck(id, key){
+    const el = document.getElementById(id);
+    if(!el) return;
+    checkBindings.push({ el, key });
+    el.addEventListener("change", ()=>{
+      cfg[key] = !!el.checked;
+      saveCfg();
+      syncControls();
+    }, { passive:true });
+  }
+  function bindSelect(id, key){
+    const el = document.getElementById(id);
+    if(!el) return;
+    selectBindings.push({ el, key });
+    el.addEventListener("change", ()=>{
+      cfg[key] = String(el.value);
+      saveCfg();
+      syncControls();
+    }, { passive:true });
+  }
+  function syncControls(){
+    for(const b of rangeBindings){
+      b.el.value = cfg[b.key];
+      if(b.vEl && b.fmt) b.vEl.textContent = b.fmt(cfg[b.key]);
+    }
+    for(const b of checkBindings){
+      b.el.checked = !!cfg[b.key];
+    }
+    for(const b of selectBindings){
+      b.el.value = cfg[b.key];
+    }
+    // reflect in menu status line
+    ui.statusLine.textContent =
+      game.over
+        ? `Game Over — points=${game.points}  made=${game.made}/${game.attempts}  bestStreak=${game.bestStreak}`
+        : (game.running
+            ? `In progress — points=${game.points}  time=${fmtTime(game.timeLeft)}`
+            : `Status: not started`);
+  }
+
+  // Menu bindings
+  bindRange("roundSec", "roundSeconds", v=>`${Math.round(v)}s`);
+  bindRange("shotClock", "shotClockSeconds", v=>`${Math.round(v)}s`);
+  bindSelect("targetHoop", "targetHoop");
+  bindRange("aimClamp", "aimClampDeg", v=>`${Math.round(v)}°`);
+
+  bindRange("microIn", "microRangeInches", v=>`${v.toFixed(2)} in`);
+  bindRange("deadPx", "deadzonePx", v=>String(Math.round(v)));
+  bindRange("smooth", "smoothing", v=>v.toFixed(2));
+  bindRange("lookSpeed", "lookSpeed", v=>v.toFixed(2));
+
+  bindCheck("mirrorX", "mirrorX");
+  bindCheck("swapHands", "swapHands");
+  bindCheck("showHud", "showHud");
+
+  bindRange("grabPinch", "grabPinchThresh", v=>v.toFixed(2));
+  bindRange("lookPinch", "lookPinchThresh", v=>v.toFixed(2));
+  bindRange("throwPow", "throwPower", v=>v.toFixed(1));
+  bindRange("forwardAssist", "forwardAssist", v=>v.toFixed(2));
+  bindRange("autoGrab", "autoGrabRadius", v=>v.toFixed(2));
+
+  bindRange("grabOffX","grabOffX", v=>String(Math.round(v)));
+  bindRange("grabOffY","grabOffY", v=>String(Math.round(v)));
+  bindRange("moveOffX","moveOffX", v=>String(Math.round(v)));
+  bindRange("moveOffY","moveOffY", v=>String(Math.round(v)));
+
+  // Live panel bindings
+  bindRange("roundSecLive", "roundSeconds", v=>`${Math.round(v)}s`);
+  bindRange("shotClockLive", "shotClockSeconds", v=>`${Math.round(v)}s`);
+  bindSelect("targetHoopLive", "targetHoop");
+  bindRange("aimClampLive", "aimClampDeg", v=>`${Math.round(v)}°`);
+
+  bindRange("microInLive", "microRangeInches", v=>`${v.toFixed(2)} in`);
+  bindRange("deadPxLive", "deadzonePx", v=>String(Math.round(v)));
+  bindRange("smoothLive", "smoothing", v=>v.toFixed(2));
+  bindRange("lookSpeedLive", "lookSpeed", v=>v.toFixed(2));
+
+  bindCheck("mirrorXLive", "mirrorX");
+  bindCheck("swapHandsLive", "swapHands");
+  bindCheck("showHudLive", "showHud");
+
+  bindRange("grabPinchLive", "grabPinchThresh", v=>v.toFixed(2));
+  bindRange("lookPinchLive", "lookPinchThresh", v=>v.toFixed(2));
+  bindRange("throwPowLive", "throwPower", v=>v.toFixed(1));
+  bindRange("forwardAssistLive", "forwardAssist", v=>v.toFixed(2));
+  bindRange("autoGrabLive", "autoGrabRadius", v=>v.toFixed(2));
+
+  bindRange("grabOffXLive","grabOffX", v=>String(Math.round(v)));
+  bindRange("grabOffYLive","grabOffY", v=>String(Math.round(v)));
+  bindRange("moveOffXLive","moveOffX", v=>String(Math.round(v)));
+  bindRange("moveOffYLive","moveOffY", v=>String(Math.round(v)));
+
+  loadCfg();
+  syncControls();
+
+  // -----------------------
+  // Three.js renderer / sizing
+  // -----------------------
+  const renderer = new THREE.WebGLRenderer({ canvas: webglCanvas, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+  // -----------------------
+  // Scene + camera
+  // -----------------------
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x050505);
+
+  const camera = new THREE.PerspectiveCamera(45, 16/9, 0.1, 320);
+
+  // Locked pitch (down) to keep court stable.
+  const CAMERA_Y = 1.55;
+  const CAMERA_PITCH_LOCK_DEG = -12.0;
+  camera.position.set(0, CAMERA_Y, 18.0);
+  camera.up.set(0,1,0);
+
+  function resize(){
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    webglCanvas.width = w; webglCanvas.height = h;
+    hudCanvas.width = w; hudCanvas.height = h;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
+  window.addEventListener("resize", resize);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  const keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
+  keyLight.position.set(8, 12, 5);
+  scene.add(keyLight);
+
+  // Ground (dark)
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(160, 160),
+    new THREE.MeshStandardMaterial({ color: 0x0f1216, roughness: 1.0, metalness: 0.0 })
+  );
+  ground.rotation.x = -Math.PI/2;
+  ground.position.y = -1.0;
+  scene.add(ground);
+
+  // Full-court texture (procedural)
+  function makeFullCourtTexture(size=2048){
+    const c = document.createElement("canvas");
+    c.width = c.height = size;
+    const ctx = c.getContext("2d");
+
+    ctx.fillStyle = "#7a4b1f";
+    ctx.fillRect(0,0,size,size);
+
+    const plankH = 38;
+    for(let y=0;y<size;y+=plankH){
+      ctx.fillStyle = (Math.floor(y/plankH)%2===0) ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)";
+      ctx.fillRect(0,y,size,plankH);
+    }
+
+    const img = ctx.getImageData(0,0,size,size);
+    for(let i=0;i<img.data.length;i+=4){
+      const n = (Math.random()*16 - 8);
+      img.data[i]   = Math.max(0, Math.min(255, img.data[i]   + n));
+      img.data[i+1] = Math.max(0, Math.min(255, img.data[i+1] + n));
+      img.data[i+2] = Math.max(0, Math.min(255, img.data[i+2] + n));
+    }
+    ctx.putImageData(img,0,0);
+
+    ctx.strokeStyle = "rgba(245,245,245,0.86)";
+    ctx.lineWidth = 10;
+
+    const pad = 120;
+    ctx.strokeRect(pad, pad, size - pad*2, size - pad*2);
+
+    ctx.beginPath();
+    ctx.moveTo(pad, size/2);
+    ctx.lineTo(size-pad, size/2);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(size/2, size/2, size*0.14, 0, Math.PI*2);
+    ctx.stroke();
+
+    const keyW = size*0.22;
+    const keyH = size*0.18;
+
+    ctx.strokeRect(size/2 - keyW/2, pad, keyW, keyH);
+    ctx.beginPath();
+    ctx.arc(size/2, pad + keyH, size*0.11, Math.PI, Math.PI*2);
+    ctx.stroke();
+
+    ctx.strokeRect(size/2 - keyW/2, size - pad - keyH, keyW, keyH);
+    ctx.beginPath();
+    ctx.arc(size/2, size - pad - keyH, size*0.11, 0, Math.PI);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(size/2, pad + size*0.06, size*0.34, 0.22*Math.PI, 0.78*Math.PI);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(size/2, size - pad - size*0.06, size*0.34, 1.22*Math.PI, 1.78*Math.PI);
+    ctx.stroke();
+
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.anisotropy = 4;
+    tex.needsUpdate = true;
+    return tex;
+  }
+
+  const courtTex = makeFullCourtTexture(2048);
+  const courtMat = new THREE.MeshStandardMaterial({ map: courtTex, roughness: 0.75, metalness: 0.0 });
+  const court = new THREE.Mesh(new THREE.PlaneGeometry(30, 56), courtMat);
+  court.rotation.x = -Math.PI/2;
+  court.position.set(0, -0.999, 0.0);
+  scene.add(court);
+
+  // Hoop factory (two ends)
+  function buildHoop(){
+    const hoop = new THREE.Group();
+
+    const pole = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.08, 0.10, 4.0, 24),
+      new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.7, metalness: 0.2 })
+    );
+    pole.position.set(0.0, -0.6, -1.2);
+    hoop.add(pole);
+
+    const arm = new THREE.Mesh(
+      new THREE.BoxGeometry(0.15, 0.15, 1.0),
+      new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.7, metalness: 0.2 })
+    );
+    arm.position.set(0, 1.0, -0.6);
+    hoop.add(arm);
+
+    const backboard = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.8, 1.2),
+      new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.85, metalness: 0.0 })
+    );
+    backboard.position.set(0, 1.0, -1.1);
+    hoop.add(backboard);
+
+    const boardFrame = new THREE.Mesh(
+      new THREE.BoxGeometry(1.86, 1.26, 0.05),
+      new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.6, metalness: 0.1 })
+    );
+    boardFrame.position.copy(backboard.position);
+    boardFrame.position.z -= 0.03;
+    hoop.add(boardFrame);
+
+    const rim = new THREE.Mesh(
+      new THREE.TorusGeometry(0.55, 0.05, 18, 48),
+      new THREE.MeshStandardMaterial({ color: 0xff2b2b, roughness: 0.35, metalness: 0.25 })
+    );
+    rim.rotation.x = Math.PI/2;
+    rim.position.set(0, 0.78, -0.55);
+    hoop.add(rim);
+
+    const netGroup = new THREE.Group();
+    netGroup.position.copy(rim.position);
+    const strandMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 });
+    const strands = 12;
+    for (let i = 0; i < strands; i++) {
+      const a = (i / strands) * Math.PI * 2;
+      const x = Math.cos(a) * 0.52;
+      const z = Math.sin(a) * 0.52;
+      const strand = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.007, 0.007, 0.62, 10),
+        strandMat
+      );
+      strand.position.set(x * 0.6, -0.31, z * 0.6);
+      netGroup.add(strand);
+    }
+    hoop.add(netGroup);
+
+    return { hoop, rim };
+  }
+
+  const hoops = [];
+  // Hoop A (far / negative Z)
+  {
+    const { hoop, rim } = buildHoop();
+    hoop.position.set(0, 1, -26);
+    hoop.rotation.y = 0;
+    scene.add(hoop);
+    hoops.push({ rim, side: "A" });
+  }
+  // Hoop B (near / positive Z)
+  {
+    const { hoop, rim } = buildHoop();
+    hoop.position.set(0, 1, 26);
+    hoop.rotation.y = Math.PI;
+    scene.add(hoop);
+    hoops.push({ rim, side: "B" });
+  }
+
+  // Tiger stripe texture for ball
+  function makeTigerTexture(size=512) {
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const ctx = c.getContext('2d');
+
+    ctx.fillStyle = '#d9761b';
+    ctx.fillRect(0,0,size,size);
+
+    const img = ctx.getImageData(0,0,size,size);
+    for (let i=0; i<img.data.length; i+=4) {
+      const n = (Math.random()*18 - 9);
+      img.data[i]   = Math.max(0, Math.min(255, img.data[i]   + n));
+      img.data[i+1] = Math.max(0, Math.min(255, img.data[i+1] + n));
+      img.data[i+2] = Math.max(0, Math.min(255, img.data[i+2] + n));
+    }
+    ctx.putImageData(img,0,0);
+
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = '#1b0d06';
+    for (let i=0; i<26; i++) {
+      const x = (i/26)*size + (Math.random()*30 - 15);
+      const w = 14 + Math.random()*26;
+      const skew = (Math.random()*0.7 - 0.35);
+      ctx.save();
+      ctx.translate(x, 0);
+      ctx.transform(1, skew, 0, 1, 0, 0);
+      ctx.beginPath();
+      ctx.moveTo(-w, 0);
+      ctx.bezierCurveTo(-w*0.2, size*0.25, -w*1.2, size*0.5, -w*0.2, size*0.75);
+      ctx.bezierCurveTo(w*0.5, size*0.9, w*0.2, size, w, size);
+      ctx.lineTo(w, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1.0;
+
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.anisotropy = 4;
+    tex.needsUpdate = true;
+    return tex;
+  }
+
+  const tigerTex = makeTigerTexture(512);
+  const ballMat = new THREE.MeshStandardMaterial({
+    map: tigerTex,
+    roughness: 0.55,
+    metalness: 0.05,
+    emissive: new THREE.Color(0x000000),
+    emissiveIntensity: 0.0
+  });
+
+  // -----------------------
+  // Physics + ball
+  // -----------------------
+  const GRAVITY = -9.5;
+  const FLOOR_Y = -1 + 0.4; // ball center on floor
+  const BALL_RADIUS = 0.4;
+
+  const ball = {
+    mesh: new THREE.Mesh(new THREE.SphereGeometry(BALL_RADIUS, 32, 32), ballMat.clone()),
+    velocity: new THREE.Vector3(0,0,0),
+    prevPos: new THREE.Vector3(0,0,0),
+    floorHits: 0,
+    resetTo(pos){
+      this.mesh.position.copy(pos);
+      this.velocity.set(0,0,0);
+      this.prevPos.copy(this.mesh.position);
+      this.floorHits = 0;
+    }
+  };
+  scene.add(ball.mesh);
+
+  // Helpful: make misses "complete" sooner
+  const FLIGHT_TIMEOUT = 2.9;     // sec; if ball hasn't scored by then => miss
+  const FLOOR_END_DELAY = 0.18;   // sec after shot release to allow rim/board hits before floor ends attempt
+
+  // Scoring radius: make 20% easier as requested earlier
+  const RIM_RADIUS = 0.55;
+  const SCORE_RADIUS = RIM_RADIUS * 1.20;
+
+  function checkBasketScore(){
+    for(const H of hoops){
+      const rimWorld = new THREE.Vector3();
+      H.rim.getWorldPosition(rimWorld);
+
+      const prev = ball.prevPos;
+      const cur  = ball.mesh.position;
+
+      // downward pass through rim area
+      const rimY = rimWorld.y;
+      const wasAbove = prev.y > (rimY + 0.18);
+      const nowBelow = cur.y <= (rimY + 0.10);
+      if(!(wasAbove && nowBelow)) continue;
+
+      const dx = cur.x - rimWorld.x;
+      const dz = cur.z - rimWorld.z;
+      const distXZ = Math.sqrt(dx*dx + dz*dz);
+
+      if(distXZ < SCORE_RADIUS){
+        return H.side; // "A" or "B"
+      }
+    }
+    return null;
+  }
+
+  // -----------------------
+  // Arcade game state
+  // -----------------------
+  const game = {
+    running: false,
+    over: false,
+    paused: true,
+
+    // timers
+    timeLeft: 0,
+    shotLeft: 0,
+
+    // stats
+    points: 0,
+    made: 0,
+    attempts: 0,
+    streak: 0,
+    bestStreak: 0,
+
+    // attempt state
+    attemptState: "idle", // "ready" | "flight" | "reset" | "idle"
+    attemptStartAt: 0,
+    flightStartAt: 0,
+    lastResult: "",       // "MAKE" | "MISS" | "VIOLATION"
+    lastResultAt: 0,
+
+    targetSide: "B",
+
+    // request flow
+    requestedStartAfterStartup: false,
+  };
+
+  function setStatusLine(){
+    ui.statusLine.textContent =
+      game.over
+        ? `Game Over — points=${game.points}  made=${game.made}/${game.attempts}  bestStreak=${game.bestStreak}`
+        : (game.running
+            ? `In progress — points=${game.points}  time=${fmtTime(game.timeLeft)}`
+            : `Status: not started`);
+  }
+
+  function getArcadeBaseYawDeg(){
+    // yaw 0 looks toward -Z (far hoop A). yaw 180 looks toward +Z (near hoop B).
+    return (game.targetSide === "B") ? 180 : 0;
+  }
+  function getFreeThrowCamPos(){
+    // approximate free-throw distance from hoop; tuned to feel good for gesture aiming
+    // hoop at z=+/-26; player around z=+/-18.5
+    const z = (game.targetSide === "B") ? 18.5 : -18.5;
+    return new THREE.Vector3(0, CAMERA_Y, z);
+  }
+
+  function resetStats(){
+    game.points = 0;
+    game.made = 0;
+    game.attempts = 0;
+    game.streak = 0;
+    game.bestStreak = 0;
+    game.lastResult = "";
+    game.lastResultAt = 0;
+  }
+
+  function startArcade(){
+    game.targetSide = cfg.targetHoop;
+    game.running = true;
+    game.over = false;
+    game.paused = false;
+
+    game.timeLeft = cfg.roundSeconds;
+    resetStats();
+
+    // lock camera to free-throw station
+    cameraYaw = getArcadeBaseYawDeg();
+    cameraPitch = CAMERA_PITCH_LOCK_DEG;
+    camera.position.copy(getFreeThrowCamPos());
+    updateCameraLook();
+
+    beginAttempt();
+    setBridge(`Arcade started • target=${game.targetSide} • round=${cfg.roundSeconds}s • shotClock=${cfg.shotClockSeconds}s`);
+    setStatusLine();
+    syncControls();
+  }
+
+  function endArcade(){
+    game.running = false;
+    game.over = true;
+    game.paused = true;
+    game.attemptState = "idle";
+    setBridge(`Game Over • points=${game.points} • made=${game.made}/${game.attempts} • bestStreak=${game.bestStreak}`);
+    setStatusLine();
+    showOverlay(true);
+    syncControls();
+  }
+
+  function beginAttempt(){
+    game.attemptState = "ready";
+    game.shotLeft = cfg.shotClockSeconds;
+    game.attemptStartAt = performance.now();
+    game.lastResult = "";
+    // present ball at a stable "hand-shelf" immediately
+    // if no hand seen, place at a rack position near the player
+    const rack = getFreeThrowCamPos().clone();
+    const baseYaw = THREE.MathUtils.degToRad(getArcadeBaseYawDeg());
+    // place rack slightly in front of camera on the court plane
+    rack.y = FLOOR_Y;
+    rack.x += Math.cos(baseYaw) * 0.0 + Math.sin(baseYaw) * 0.0;
+    rack.z += -Math.cos(baseYaw) * 2.0 + Math.sin(baseYaw) * 0.0;
+    ball.resetTo(rack);
+  }
+
+  function registerMake(){
+    game.made += 1;
+    game.attempts += 1;
+
+    // scoring: 1 point + streak bonus every 3 in a row
+    game.streak += 1;
+    game.bestStreak = Math.max(game.bestStreak, game.streak);
+
+    let add = 1;
+    if(game.streak > 0 && game.streak % 3 === 0) add += 1; // small arcade bonus
+    game.points += add;
+
+    game.lastResult = (add > 1) ? `MAKE +${add} (STREAK)` : "MAKE +1";
+    game.lastResultAt = performance.now();
+
+    setBridge(game.lastResult);
+    beginAttempt();
+  }
+
+  function registerMiss(reason){
+    game.attempts += 1;
+    game.streak = 0;
+    game.lastResult = reason ? `MISS (${reason})` : "MISS";
+    game.lastResultAt = performance.now();
+
+    setBridge(game.lastResult);
+    beginAttempt();
+  }
+
+  // -----------------------
+  // Hand -> world mapping (court plane + depth)
+  // -----------------------
+  const raycaster = new THREE.Raycaster();
+  const courtPlane = new THREE.Plane(new THREE.Vector3(0,1,0), -FLOOR_Y); // y = FLOOR_Y
+
+  const GRAB_DEPTH_SCALE = 18.0;
+  const HOLD_LIFT_Y = 0.85;
+  const HOLD_FORWARD = 0.35;
+
+  function screenToCourtWorld(xPx, yPx, mpZ, neutralMpZ){
+    const w = webglCanvas.width;
+    const h = webglCanvas.height;
+    const ndc = new THREE.Vector2(
+      (xPx / w) * 2 - 1,
+      -((yPx / h) * 2 - 1)
+    );
+    raycaster.setFromCamera(ndc, camera);
+
+    const out = new THREE.Vector3();
+    const hit = raycaster.ray.intersectPlane(courtPlane, out);
+
+    if(!hit){
+      const dir = new THREE.Vector3();
+      camera.getWorldDirection(dir);
+      out.copy(camera.position).addScaledVector(dir, 14);
+      out.y = FLOOR_Y;
+    }
+
+    const camDir = new THREE.Vector3();
+    camera.getWorldDirection(camDir);
+    camDir.normalize();
+
+    const nz = (neutralMpZ ?? mpZ);
+    const dz = clamp((nz - mpZ), -0.22, 0.22);
+    out.addScaledVector(camDir, dz * GRAB_DEPTH_SCALE);
+
+    return out;
+  }
+
+  // -----------------------
+  // Gesture state
+  // -----------------------
+  const g = {
+    rawMoveX: 0, rawMoveY: 0, rawMoveZ: 0,
+    rawGrabX: 0, rawGrabY: 0, rawGrabZ: 0,
+
+    neutralMove: null,
+    neutralGrab: null,
+
+    moveSeen: false,
+    grabSeen: false,
+    lastMoveAt: 0,
+    lastGrabAt: 0,
+    lastAnyAt: 0,
+
+    pinchMoveLatched: false,
+    pinchGrabLatched: false
+  };
+
+  function pinchLatch(prevLatched, pinchNorm, downT){
+    const upT = downT + 0.05;
+    if (!prevLatched){
+      return (pinchNorm <= downT);
+    } else {
+      return !(pinchNorm >= upT);
+    }
+  }
+
+  // -----------------------
+  // MediaPipe Hands
+  // -----------------------
+  const videoEl = document.getElementById("video");
+  let hands = null;
+  let cam = null;
+
+  function onHandsResults(results){
+    const now = performance.now();
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    const lms = results.multiHandLandmarks || [];
+    const handed = results.multiHandedness || [];
+
+    let sawMove = false;
+    let sawGrab = false;
+
+    for(let i=0;i<lms.length;i++){
+      const lm = lms[i];
+      const mpLabel = (handed[i] && handed[i].label) ? handed[i].label : "Right";
+      const effectiveLabel = cfg.swapHands ? (mpLabel==="Left" ? "Right" : "Left") : mpLabel;
+      const role = (effectiveLabel === "Left") ? "grab" : "move";
+
+      const idxTip   = lm[8];
+      const thumbTip = lm[4];
+      const wrist    = lm[0];
+      const idxMcp   = lm[5];
+      const midMcp   = lm[9];
+      const pinkMcp  = lm[17];
+
+      const palm = avgLm([wrist, idxMcp, midMcp, pinkMcp]);
+
+      const BLEND = 0.22;
+      let px = idxTip.x * (1-BLEND) + palm.x * BLEND;
+      let py = idxTip.y * (1-BLEND) + palm.y * BLEND;
+      let pz = (idxTip.z || 0) * (1-BLEND) + (palm.z || 0) * BLEND;
+
+      if (cfg.mirrorX) px = 1 - px;
+
+      let sx = px * w;
+      let sy = py * h;
+
+      if(role === "grab"){
+        sx += cfg.grabOffX;
+        sy += cfg.grabOffY;
+      } else {
+        sx += cfg.moveOffX;
+        sy += cfg.moveOffY;
+      }
+
+      const scaleA = distLm(wrist, midMcp);
+      const scaleB = distLm(idxMcp, pinkMcp);
+      const handScale = Math.max(0.0001, scaleA, scaleB);
+      const pinchNorm = distLm(thumbTip, idxTip) / handScale;
+
+      if(role === "move"){
+        g.rawMoveX = sx; g.rawMoveY = sy; g.rawMoveZ = pz;
+        g.pinchMoveLatched = pinchLatch(g.pinchMoveLatched, pinchNorm, cfg.lookPinchThresh);
+        g.moveSeen = true;
+        g.lastMoveAt = now;
+        sawMove = true;
+      } else {
+        g.rawGrabX = sx; g.rawGrabY = sy; g.rawGrabZ = pz;
+        g.pinchGrabLatched = pinchLatch(g.pinchGrabLatched, pinchNorm, cfg.grabPinchThresh);
+        g.grabSeen = true;
+        g.lastGrabAt = now;
+        sawGrab = true;
+      }
+    }
+
+    if(sawMove || sawGrab) g.lastAnyAt = now;
+
+    const HOLD_MS = 320;
+    g.moveSeen = (now - g.lastMoveAt) <= HOLD_MS;
+    g.grabSeen = (now - g.lastGrabAt) <= HOLD_MS;
+  }
+
+  async function startGesture(){
+    if (!window.Hands || !window.Camera) return false;
+    if (hands && cam) return true;
+
+    hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+    hands.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.65,
+      minTrackingConfidence: 0.65
+    });
+    hands.onResults(onHandsResults);
+
+    cam = new Camera(videoEl, {
+      onFrame: async () => { try { await hands.send({ image: videoEl }); } catch {} },
+      width: 960,
+      height: 540
+    });
+
+    try { await cam.start(); return true; }
+    catch { hands = null; cam = null; return false; }
+  }
+
+  // -----------------------
+  // Startup tuner
+  // -----------------------
+  const startup = {
+    active:false,
+    phase:"idle",
+    stableT:0,
+    countdownT:0,
+    rangeT:0,
+    rawMove: [],
+    rawGrab: [],
+    neutralMove:null,
+    neutralGrab:null,
+    jitterMove:0,
+    maxMove:0
+  };
+
+  function showStartup(show){
+    ui.startup.style.display = show ? "flex" : "none";
+    if(!show){
+      ui.startupCount.textContent = "";
+      ui.bar1.style.width = "0%";
+      ui.bar2.style.width = "0%";
+    }
+  }
+
+  function statsStd(points){
+    if(!points || points.length < 3) return { sx:0, sy:0 };
+    let mx=0,my=0;
+    for(const p of points){ mx += p.x; my += p.y; }
+    mx /= points.length; my /= points.length;
+    let vx=0, vy=0;
+    for(const p of points){
+      const dx = p.x - mx, dy = p.y - my;
+      vx += dx*dx; vy += dy*dy;
+    }
+    vx /= points.length; vy /= points.length;
+    return { sx: Math.sqrt(vx), sy: Math.sqrt(vy) };
+  }
+
+  function beginStartupTuner(){
+    startup.active = true;
+    startup.phase = "waitHands";
+    startup.stableT = 0;
+    startup.countdownT = 0;
+    startup.rangeT = 0;
+    startup.rawMove.length = 0;
+    startup.rawGrab.length = 0;
+    startup.neutralMove = null;
+    startup.neutralGrab = null;
+    startup.jitterMove = 0;
+    startup.maxMove = 0;
+
+    ui.chipInch.textContent = `Micro: ${cfg.microRangeInches.toFixed(2)} in`;
+    ui.startupMsg.innerHTML = `Raise both hands. Hold steady for <b>3-2-1</b>.`;
+    ui.startupCount.textContent = "";
+    ui.bar1.style.width = "0%";
+    ui.bar2.style.width = "0%";
+
+    showStartup(true);
+    setBridge("Startup Scan: raise both hands in view…");
+  }
+
+  function updateStartup(dt){
+    if(!startup.active) return;
+
+    const bothSeen = g.moveSeen && g.grabSeen;
+
+    ui.chipMove.className = "chip " + (g.moveSeen ? "ok" : "bad");
+    ui.chipGrab.className = "chip " + (g.grabSeen ? "ok" : "bad");
+    ui.chipMove.textContent = `Move hand: ${g.moveSeen ? "seen" : "not seen"}`;
+    ui.chipGrab.textContent = `Grab hand: ${g.grabSeen ? "seen" : "not seen"}`;
+    ui.chipInch.textContent = `Micro: ${cfg.microRangeInches.toFixed(2)} in`;
+
+    if(startup.phase === "waitHands"){
+      if(bothSeen){
+        startup.stableT += dt;
+        const pct = clamp(startup.stableT / 0.40, 0, 1);
+        ui.bar1.style.width = `${(pct*100).toFixed(0)}%`;
+        if(startup.stableT >= 0.40){
+          startup.phase = "countdown";
+          startup.countdownT = 3.0;
+          startup.rawMove.length = 0;
+          startup.rawGrab.length = 0;
+          ui.startupMsg.innerHTML = `Hold steady. Capturing neutral + jitter…`;
+        }
+      } else {
+        startup.stableT = 0;
+        ui.bar1.style.width = "0%";
+        ui.startupMsg.innerHTML = `Raise both hands in view. Hold steady.`;
+      }
+      return;
+    }
+
+    if(startup.phase === "countdown"){
+      if(!bothSeen){
+        startup.phase = "waitHands";
+        startup.stableT = 0;
+        ui.startupMsg.innerHTML = `Hands lost—raise both hands again.`;
+        return;
+      }
+
+      startup.countdownT -= dt;
+      const secondsLeft = Math.max(0, startup.countdownT);
+      ui.startupCount.textContent = String(Math.max(1, Math.ceil(secondsLeft)));
+
+      const pct = clamp((3.0 - secondsLeft) / 3.0, 0, 1);
+      ui.bar1.style.width = `${(pct*100).toFixed(0)}%`;
+
+      startup.rawMove.push({ x: g.rawMoveX, y: g.rawMoveY, z: g.rawMoveZ });
+      startup.rawGrab.push({ x: g.rawGrabX, y: g.rawGrabY, z: g.rawGrabZ });
+
+      if(startup.countdownT <= 0){
+        const mean = (arr)=>{
+          let x=0,y=0,z=0;
+          for(const p of arr){ x+=p.x; y+=p.y; z+=p.z; }
+          const n = Math.max(1, arr.length);
+          return { x:x/n, y:y/n, z:z/n };
+        };
+        startup.neutralMove = mean(startup.rawMove);
+        startup.neutralGrab = mean(startup.rawGrab);
+
+        const sM = statsStd(startup.rawMove);
+        startup.jitterMove = Math.sqrt(sM.sx*sM.sx + sM.sy*sM.sy);
+
+        g.neutralMove = { ...startup.neutralMove };
+        g.neutralGrab = { ...startup.neutralGrab };
+
+        startup.phase = "range";
+        startup.rangeT = 1.6;
+        startup.maxMove = 0;
+
+        ui.startupMsg.innerHTML =
+          `Now move the <b>move hand</b> only a little (<b>~0.5–1 inch</b>) for 1.6s.<br/>This confirms micro range & sets deadzone.`;
+        ui.startupCount.textContent = "";
+        ui.bar2.style.width = "0%";
+      }
+      return;
+    }
+
+    if(startup.phase === "range"){
+      startup.rangeT -= dt;
+
+      if(g.moveSeen && startup.neutralMove){
+        const d = hypot(g.rawMoveX - startup.neutralMove.x, g.rawMoveY - startup.neutralMove.y);
+        startup.maxMove = Math.max(startup.maxMove, d);
+      }
+
+      const pct = clamp((1.6 - Math.max(0, startup.rangeT)) / 1.6, 0, 1);
+      ui.bar2.style.width = `${(pct*100).toFixed(0)}%`;
+
+      if(startup.rangeT <= 0){
+        cfg.deadzonePx = Math.round(clamp(startup.jitterMove * 3.0 + 10, 0, 140));
+
+        if(startup.maxMove > 0){
+          const inferredIn = clamp(startup.maxMove / PX_IN, 0.25, 3.0);
+          cfg.microRangeInches = inferredIn;
+        }
+
+        saveCfg();
+        syncControls();
+
+        startup.phase = "done";
+        ui.startupMsg.innerHTML = `Calibrated ✔ — neutral locked, deadzone + micro range saved.`;
+        ui.bar1.style.width = "100%";
+        ui.bar2.style.width = "100%";
+
+        setTimeout(()=>{
+          startup.active = false;
+          showStartup(false);
+
+          // Start arcade after calibration if requested
+          if(game.requestedStartAfterStartup){
+            game.requestedStartAfterStartup = false;
+            startArcade();
+          } else {
+            setBridge("Startup done.");
+          }
+        }, 650);
+      }
+      return;
+    }
+  }
+
+  ui.skipStartup.addEventListener("pointerdown", (e)=>{
+    e.preventDefault();
+    startup.active = false;
+    showStartup(false);
+
+    if(!g.neutralMove && g.moveSeen) g.neutralMove = { x:g.rawMoveX, y:g.rawMoveY, z:g.rawMoveZ };
+    if(!g.neutralGrab && g.grabSeen) g.neutralGrab = { x:g.rawGrabX, y:g.rawGrabY, z:g.rawGrabZ };
+
+    if(game.requestedStartAfterStartup){
+      game.requestedStartAfterStartup = false;
+      startArcade();
+    } else {
+      setBridge("Startup skipped — neutrals seeded.");
+    }
+  }, { passive:false });
+
+  // -----------------------
+  // Camera control (yaw only, pitch locked)
+  // -----------------------
+  let cameraYaw = 0;
+  let cameraPitch = CAMERA_PITCH_LOCK_DEG;
+
+  const lookDrag = { active: false, lastX: 0, lastY: 0 };
+
+  function levelCamera(){
+    cameraPitch = CAMERA_PITCH_LOCK_DEG;
+    camera.up.set(0,1,0);
+    updateCameraLook();
+    setBridge("Camera leveled (pitch locked).");
+  }
+
+  function updateCameraLook(){
+    cameraPitch = CAMERA_PITCH_LOCK_DEG;
+
+    const yaw = THREE.MathUtils.degToRad(cameraYaw);
+    const pitch = THREE.MathUtils.degToRad(cameraPitch);
+
+    const dirX = Math.cos(pitch) * Math.sin(yaw);
+    const dirY = Math.sin(pitch);
+    const dirZ = -Math.cos(pitch) * Math.cos(yaw);
+
+    const target = camera.position.clone().add(new THREE.Vector3(dirX, dirY, dirZ));
+    camera.lookAt(target);
+  }
+
+  function applyLookDrag(){
+    if(!g.moveSeen) return;
+
+    // begin latch
+    if(!lookDrag.active){
+      lookDrag.active = true;
+      lookDrag.lastX = g.rawMoveX;
+      lookDrag.lastY = g.rawMoveY;
+      return;
+    }
+
+    const dxPx = (g.rawMoveX - lookDrag.lastX);
+    lookDrag.lastX = g.rawMoveX;
+    lookDrag.lastY = g.rawMoveY;
+
+    const w = Math.max(1, webglCanvas.width);
+    const yawDeltaDeg = (dxPx / w) * (cfg.lookSpeed * 360.0);
+    cameraYaw += yawDeltaDeg;
+
+    // clamp yaw around base yaw (arcade aim clamp)
+    const base = getArcadeBaseYawDeg();
+    const lo = base - cfg.aimClampDeg;
+    const hi = base + cfg.aimClampDeg;
+    cameraYaw = clamp(cameraYaw, lo, hi);
+  }
+
+  function endLookDrag(){ lookDrag.active = false; }
+
+  // -----------------------
+  // Grab / throw logic (pinch + toss)
+  // -----------------------
+  let heldBall = false;
+  let grabHandWorld = null;
+  let holdHandWorld = null;
+
+  let lastHoldWorld = null;
+  let smoothedHandVel = new THREE.Vector3(0,0,0);
+
+  let prevGrabLatched = false;
+
+  function setBallHighlight(colorHex, intensity){
+    ball.mesh.material.emissive.set(colorHex);
+    ball.mesh.material.emissiveIntensity = intensity;
+  }
+
+  function beginHold(){
+    heldBall = true;
+    ball.velocity.set(0,0,0);
+    lastHoldWorld = null;
+    smoothedHandVel.set(0,0,0);
+  }
+
+  function releaseHoldWithThrow(dt){
+    if(!heldBall) return;
+
+    const camDir = new THREE.Vector3();
+    camera.getWorldDirection(camDir);
+    camDir.y = 0;
+    if(camDir.length() > 1e-6) camDir.normalize();
+
+    let v = smoothedHandVel.clone();
+
+    // forward assist
+    const sp = v.length();
+    v.addScaledVector(camDir, cfg.forwardAssist + sp * 0.06);
+
+    v.multiplyScalar(cfg.throwPower);
+
+    const sp2 = v.length();
+    if(sp2 > 1.0) v.y += sp2 * 0.09;
+
+    const maxV = 42;
+    if(v.length() > maxV) v.multiplyScalar(maxV / v.length());
+
+    ball.velocity.copy(v);
+    heldBall = false;
+
+    // Start flight attempt
+    if(game.running && !game.paused && game.attemptState === "ready"){
+      game.attemptState = "flight";
+      game.flightStartAt = performance.now();
+      ball.floorHits = 0;
+    }
+
+    // prevent velocity memory persisting
+    lastHoldWorld = null;
+    smoothedHandVel.multiplyScalar(0.0);
+  }
+
+  // -----------------------
+  // Arcade: ball presentation at hand while ready
+  // -----------------------
+  function presentBallAtHand(){
+    // In "ready", show the ball at the grab hand shelf even before pinch.
+    if(game.attemptState !== "ready") return;
+
+    const camDir = new THREE.Vector3();
+    camera.getWorldDirection(camDir);
+    camDir.y = 0;
+    if(camDir.length() > 1e-6) camDir.normalize();
+
+    if(holdHandWorld){
+      // keep ball at hand-shelf
+      ball.mesh.position.lerp(holdHandWorld, 0.70);
+      ball.velocity.set(0,0,0);
+      ball.prevPos.copy(ball.mesh.position);
+    } else {
+      // if no hand, keep at rack spot near player
+      const rack = getFreeThrowCamPos().clone();
+      rack.y = FLOOR_Y;
+      rack.addScaledVector(camDir, 2.0);
+      ball.mesh.position.lerp(rack, 0.40);
+      ball.velocity.set(0,0,0);
+      ball.prevPos.copy(ball.mesh.position);
+    }
+  }
+
+  // -----------------------
+  // Physics step
+  // -----------------------
+  function stepPhysics(dt){
+    ball.prevPos.copy(ball.mesh.position);
+
+    ball.velocity.y += GRAVITY * dt;
+    ball.mesh.position.addScaledVector(ball.velocity, dt);
+
+    if (ball.mesh.position.y < FLOOR_Y) {
+      ball.mesh.position.y = FLOOR_Y;
+      if (ball.velocity.y < 0) ball.velocity.y *= -0.65;
+      ball.velocity.x *= 0.985;
+      ball.velocity.z *= 0.985;
+      ball.floorHits += 1;
+    }
+
+    // soft bounds
+    const p = ball.mesh.position;
+    if (p.y < -12 || Math.abs(p.x) > 24 || Math.abs(p.z) > 90) {
+      // out of play => treat as miss
+      if(game.running && game.attemptState === "flight"){
+        registerMiss("OUT");
+      } else {
+        beginAttempt();
+      }
+    }
+  }
+
+  // -----------------------
+  // HUD drawing
+  // -----------------------
+  function drawHUD(){
+    const w = hudCanvas.width;
+    const h = hudCanvas.height;
+    hud.clearRect(0,0,w,h);
+
+    if(!cfg.showHud) return;
+
+    // Top HUD bar
+    hud.save();
+    hud.globalAlpha = 0.92;
+    hud.fillStyle = "rgba(0,0,0,0.35)";
+    const boxW = Math.min(820, w*0.92);
+    const boxH = 44;
+    const bx = (w - boxW)/2;
+    const by = 12;
+    roundRectPath(hud, bx, by, boxW, boxH, 14);
+    hud.fill();
+
+    hud.fillStyle = "rgba(255,255,255,0.92)";
+    hud.font = "900 14px system-ui, sans-serif";
+    hud.textAlign = "center";
+    hud.textBaseline = "middle";
+
+    const t = game.running ? fmtTime(game.timeLeft) : "—";
+    const shot = game.running ? `${Math.max(0, game.shotLeft).toFixed(1)}s` : "—";
+    const acc = (game.attempts > 0) ? `${game.made}/${game.attempts}` : `0/0`;
+    const st = `${game.streak}`;
+    const tgt = cfg.targetHoop;
+
+    hud.fillText(
+      `PTS ${game.points}   TIME ${t}   SHOT ${shot}   MADE ${acc}   STREAK ${st}   TARGET ${tgt}`,
+      w/2, by + boxH/2
+    );
+    hud.restore();
+
+    // Last result center pop
+    if(game.lastResult){
+      const age = (performance.now() - game.lastResultAt) / 1000;
+      if(age < 1.0){
+        const a = 1.0 - age;
+        hud.save();
+        hud.globalAlpha = 0.75 * a;
+        hud.fillStyle = "rgba(0,0,0,0.35)";
+        const bw = Math.min(560, w*0.80);
+        const bh = 54;
+        const x = (w - bw)/2;
+        const y = h*0.26;
+        roundRectPath(hud, x, y, bw, bh, 14);
+        hud.fill();
+
+        hud.globalAlpha = 0.95 * a;
+        hud.fillStyle = "rgba(255,255,255,0.92)";
+        hud.font = "900 22px system-ui, sans-serif";
+        hud.textAlign = "center";
+        hud.textBaseline = "middle";
+        hud.fillText(game.lastResult, w/2, y + bh/2);
+        hud.restore();
+      }
+    }
+
+    // Markers
+    if(g.neutralMove){
+      hud.globalAlpha = 0.70;
+      hud.strokeStyle = "rgba(176,76,255,0.85)";
+      hud.lineWidth = 2;
+      hud.beginPath();
+      hud.arc(g.neutralMove.x, g.neutralMove.y, 22, 0, Math.PI*2);
+      hud.stroke();
+      hud.fillStyle = "rgba(176,76,255,0.95)";
+      hud.beginPath();
+      hud.arc(g.neutralMove.x, g.neutralMove.y, 4, 0, Math.PI*2);
+      hud.fill();
+    }
+
+    if(g.moveSeen){
+      const col = g.pinchMoveLatched ? "rgba(255,165,0,0.95)" : "rgba(255,255,0,0.85)";
+      hud.fillStyle = col;
+      hud.beginPath();
+      hud.arc(g.rawMoveX, g.rawMoveY, 9, 0, Math.PI*2);
+      hud.fill();
+    }
+    if(g.grabSeen){
+      hud.fillStyle = "rgba(0,255,0,0.90)";
+      hud.beginPath();
+      hud.arc(g.rawGrabX, g.rawGrabY, 9, 0, Math.PI*2);
+      hud.fill();
+    }
+  }
+
+  // -----------------------
+  // Live panel + menu controls
+  // -----------------------
+  function showOverlay(show){
+    ui.overlay.style.display = show ? "flex" : "none";
+    if(show){
+      game.paused = true;
+      ui.pauseBtn.textContent = "Resume";
+      ui.liveTuner.style.display = "none";
+      setStatusLine();
+    }
+  }
+  function togglePause(){
+    if(!game.running) return;
+    game.paused = !game.paused;
+    ui.pauseBtn.textContent = game.paused ? "Resume" : "Pause";
+  }
+  function toggleLiveTuner(force){
+    const show = (typeof force === "boolean") ? force : (ui.liveTuner.style.display === "none");
+    ui.liveTuner.style.display = show ? "block" : "none";
+  }
+
+  ui.menuBtn.addEventListener("pointerdown", (e)=>{ e.preventDefault(); showOverlay(true); }, { passive:false });
+  ui.pauseBtn.addEventListener("pointerdown",(e)=>{ e.preventDefault(); togglePause(); }, { passive:false });
+  ui.panelBtn.addEventListener("pointerdown",(e)=>{ e.preventDefault(); toggleLiveTuner(); }, { passive:false });
+  ui.closeLiveBtn.addEventListener("pointerdown",(e)=>{ e.preventDefault(); toggleLiveTuner(false); }, { passive:false });
+
+  ui.levelBtn.addEventListener("pointerdown",(e)=>{ e.preventDefault(); levelCamera(); }, { passive:false });
+  ui.levelCamBtn.addEventListener("pointerdown",(e)=>{ e.preventDefault(); levelCamera(); }, { passive:false });
+
+  ui.recenterBtn.addEventListener("pointerdown", (e)=>{
+    e.preventDefault();
+    if(g.moveSeen) g.neutralMove = { x:g.rawMoveX, y:g.rawMoveY, z:g.rawMoveZ };
+    if(g.grabSeen) g.neutralGrab = { x:g.rawGrabX, y:g.rawGrabY, z:g.rawGrabZ };
+
+    // also recenter aim yaw to base
+    cameraYaw = getArcadeBaseYawDeg();
+    updateCameraLook();
+
+    setBridge("Recentered neutrals + aim.");
+  }, { passive:false });
+
+  ui.recalBtn.addEventListener("pointerdown", (e)=>{
+    e.preventDefault();
+    if(!game.running && !game.over) return;
+    game.paused = true;
+    ui.pauseBtn.textContent = "Pause";
+    toggleLiveTuner(false);
+    beginStartupTuner();
+  }, { passive:false });
+
+  ui.defaultsLive.addEventListener("pointerdown", (e)=>{
+    e.preventDefault();
+    Object.assign(cfg, cfgDefaults);
+    saveCfg();
+    syncControls();
+    setBridge("Defaults restored.");
+  }, { passive:false });
+
+  ui.resetBtn.addEventListener("pointerdown", (e)=>{
+    e.preventDefault();
+    Object.assign(cfg, cfgDefaults);
+    saveCfg();
+    syncControls();
+    setBridge("Defaults restored.");
+  }, { passive:false });
+
+  ui.resumeBtn.addEventListener("pointerdown", (e)=>{
+    e.preventDefault();
+    showOverlay(false);
+    if(game.running && !game.over){
+      game.paused = false;
+      ui.pauseBtn.textContent = "Pause";
+      setBridge("Resumed.");
+    }
+  }, { passive:false });
+
+  window.addEventListener("keydown", (e)=>{
+    const k = e.key.toLowerCase();
+    if(k === "h"){
+      cfg.showHud = !cfg.showHud;
+      saveCfg(); syncControls();
+    }
+    if(k === "p"){
+      toggleLiveTuner();
+    }
+    if(k === "l"){
+      levelCamera();
+    }
+    if(e.code === "Escape"){
+      showOverlay(true);
+    }
+  }, { passive:true });
+
+  // -----------------------
+  // Start Arcade: Gesture login -> Startup scan -> Arcade begins
+  // -----------------------
+  ui.startBtn.addEventListener("pointerdown", async (e)=>{
+    e.preventDefault();
+
+    setBridge("Requesting camera…");
+    const ok = await startGesture();
+    if(!ok){
+      setBridge("Camera failed. Use HTTPS/localhost, allow permission.");
+      return;
+    }
+
+    // show top buttons
+    ui.menuBtn.style.display = "block";
+    ui.panelBtn.style.display = "block";
+    ui.levelBtn.style.display = "block";
+    ui.pauseBtn.style.display = "block";
+    ui.pauseBtn.textContent = "Pause";
+
+    // prepare game start after calibration
+    game.requestedStartAfterStartup = true;
+    game.over = false;
+    game.running = false;
+
+    showOverlay(false);
+
+    // lock camera to correct side now (so scan happens in correct view)
+    game.targetSide = cfg.targetHoop;
+    cameraYaw = getArcadeBaseYawDeg();
+    camera.position.copy(getFreeThrowCamPos());
+    updateCameraLook();
+
+    beginStartupTuner();
+  }, { passive:false });
+
+  // -----------------------
+  // Main loop & arcade logic
+  // -----------------------
+  let lastT = performance.now();
+
+  function animate(now){
+    const dt = Math.min(0.033, Math.max(0.001, (now - lastT)/1000));
+    lastT = now;
+
+    if(webglCanvas.width !== window.innerWidth || webglCanvas.height !== window.innerHeight){
+      resize();
+    }
+
+    if(startup.active){
+      updateStartup(dt);
+    }
+
+    // Hand world positions
+    grabHandWorld = null;
+    holdHandWorld = null;
+
+    if(g.grabSeen){
+      const nz = g.neutralGrab ? g.neutralGrab.z : g.rawGrabZ;
+      grabHandWorld = screenToCourtWorld(g.rawGrabX, g.rawGrabY, g.rawGrabZ, nz);
+
+      const camDir = new THREE.Vector3();
+      camera.getWorldDirection(camDir);
+      camDir.y = 0;
+      if(camDir.length() > 1e-6) camDir.normalize();
+
+      holdHandWorld = grabHandWorld.clone()
+        .add(new THREE.Vector3(0, HOLD_LIFT_Y, 0))
+        .addScaledVector(camDir, HOLD_FORWARD);
+    }
+
+    // Aim (move-hand pinch = rotate)
+    if(g.pinchMoveLatched && game.running && !game.paused && !startup.active){
+      applyLookDrag();
+    } else {
+      endLookDrag();
+    }
+
+    // Arcade timers
+    if(game.running && !game.paused && !startup.active){
+      game.timeLeft -= dt;
+      if(game.timeLeft <= 0){
+        game.timeLeft = 0;
+        endArcade();
+      }
+    }
+
+    // Attempt logic
+    if(game.running && !game.paused && !startup.active && !game.over){
+      if(game.attemptState === "ready"){
+        game.shotLeft -= dt;
+        // ball appears at hand during ready
+        presentBallAtHand();
+
+        // if pinch grab starts: hold ball
+        if(g.pinchGrabLatched && !heldBall){
+          beginHold();
+        }
+
+        // shot clock expired
+        if(game.shotLeft <= 0){
+          game.shotLeft = 0;
+          heldBall = false;
+          registerMiss("VIOLATION");
+        }
+      }
+
+      if(game.attemptState === "flight"){
+        // physics
+        stepPhysics(dt);
+
+        // score check
+        const side = checkBasketScore();
+        if(side && side === game.targetSide){
+          registerMake();
+        } else {
+          // end attempt on floor hit or timeout
+          const flightAge = (performance.now() - game.flightStartAt)/1000;
+
+          if(flightAge > FLIGHT_TIMEOUT){
+            registerMiss("TIMEOUT");
+          } else if(ball.floorHits > 0 && flightAge > FLOOR_END_DELAY){
+            registerMiss("FLOOR");
+          }
+        }
+      }
+
+      // Held ball follow while pinched (during ready) to capture toss velocity
+      if(heldBall && holdHandWorld){
+        ball.mesh.position.lerp(holdHandWorld, 0.60);
+        ball.velocity.set(0,0,0);
+        ball.prevPos.copy(ball.mesh.position);
+
+        if(lastHoldWorld){
+          const instVel = holdHandWorld.clone().sub(lastHoldWorld).multiplyScalar(1/Math.max(1e-6, dt));
+          smoothedHandVel.lerp(instVel, 0.35);
+        }
+        lastHoldWorld = holdHandWorld.clone();
+
+        setBallHighlight(0x3cff7a, 0.85);
+      } else {
+        // highlight ball in ready state
+        if(game.attemptState === "ready"){
+          setBallHighlight(0x44b7ff, 0.55);
+        } else {
+          setBallHighlight(0x000000, 0.0);
+        }
+      }
+
+      // Release edge -> throw
+      const grabLatched = !!g.pinchGrabLatched;
+      if(prevGrabLatched && !grabLatched){
+        // throw only if we were holding (or close enough)
+        releaseHoldWithThrow(dt);
+      }
+      prevGrabLatched = grabLatched;
+
+      // If pinch is down but no hand world, do not keep holding
+      if(heldBall && !holdHandWorld){
+        heldBall = false;
+      }
+
+    } else {
+      // not running: keep ball stable at rack
+      setBallHighlight(0x000000, 0.0);
+    }
+
+    // If game is running but paused, keep ball visible at rack and keep shot clock frozen
+    if(game.running && game.paused && !startup.active && !game.over){
+      const rack = getFreeThrowCamPos().clone();
+      const camDir = new THREE.Vector3();
+      camera.getWorldDirection(camDir);
+      camDir.y = 0;
+      if(camDir.length() > 1e-6) camDir.normalize();
+      rack.y = FLOOR_Y;
+      rack.addScaledVector(camDir, 2.0);
+      ball.resetTo(rack);
+      heldBall = false;
+    }
+
+    updateCameraLook();
+
+    // Render
+    renderer.render(scene, camera);
+    drawHUD();
+
+    // live readout
+    if(ui.liveTuner.style.display !== "none"){
+      const fresh = (performance.now() - g.lastAnyAt) < 450;
+      ui.liveReadout.textContent =
+        `fresh=${fresh} moveSeen=${g.moveSeen} grabSeen=${g.grabSeen} `+
+        `aimPinch=${g.pinchMoveLatched?"Y":"n"} grabLatch=${g.pinchGrabLatched?"Y":"n"} `+
+        `neutralMove=${g.neutralMove ? "Y" : "n"} `+
+        `game=${game.running?"RUN":"STOP"} paused=${game.paused?"Y":"n"} `+
+        `state=${game.attemptState} timeLeft=${game.timeLeft.toFixed(1)} shotLeft=${game.shotLeft.toFixed(1)} `+
+        `pts=${game.points} made=${game.made}/${game.attempts} streak=${game.streak} `+
+        `yaw=${cameraYaw.toFixed(1)} baseYaw=${getArcadeBaseYawDeg()} clamp=${cfg.aimClampDeg}`;
+    }
+
+    requestAnimationFrame(animate);
+  }
+
+  // -----------------------
+  // Overlay / pause buttons behavior
+  // -----------------------
+  ui.pauseBtn.addEventListener("pointerdown", (e)=>{
+    e.preventDefault();
+    if(!game.running) return;
+    togglePause();
+    setBridge(game.paused ? "Paused." : "Unpaused.");
+  }, { passive:false });
+
+  // -----------------------
+  // Boot
+  // -----------------------
+  resize();
+  levelCamera();
+  showOverlay(true);
+  setBridge("Ready • Configure arcade, then Start Arcade (Gesture Login).");
+
+  requestAnimationFrame(animate);
+})();
+</script>
+</body>
+</html>

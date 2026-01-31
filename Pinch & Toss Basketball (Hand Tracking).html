@@ -1,0 +1,1263 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Pinch & Toss Basketball (Hand Tracking)</title>
+
+  <!-- MediaPipe Tasks Vision bundle (globals: FilesetResolver, HandLandmarker, etc.) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js" crossorigin="anonymous"></script>
+
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: rgba(18, 24, 46, 0.85);
+      --panel2: rgba(10, 14, 28, 0.75);
+      --text: #e9edff;
+      --muted: rgba(233, 237, 255, 0.75);
+      --accent: #7aa7ff;
+      --good: #30d158;
+      --bad: #ff453a;
+      --warn: #ffd60a;
+      --line: rgba(255,255,255,0.12);
+    }
+    html, body { height: 100%; margin: 0; background: radial-gradient(1200px 800px at 50% 20%, #18245a, var(--bg)); color: var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    .wrap { display: grid; grid-template-columns: 1fr 360px; gap: 14px; height: 100%; padding: 14px; box-sizing: border-box; }
+    .stage {
+      position: relative;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      overflow: hidden;
+      background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+      box-shadow: 0 18px 60px rgba(0,0,0,0.35);
+    }
+    canvas { width: 100%; height: 100%; display: block; }
+    .hud {
+      position: absolute;
+      top: 10px; left: 10px;
+      display: flex; flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: var(--panel2);
+      border: 1px solid var(--line);
+      backdrop-filter: blur(10px);
+      user-select: none;
+    }
+    .pill {
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--line);
+      font-size: 13px;
+      color: var(--muted);
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      white-space: nowrap;
+    }
+    .pill b { color: var(--text); font-weight: 700; }
+    .hud .btn {
+      cursor: pointer;
+      padding: 7px 10px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: rgba(122,167,255,0.14);
+      color: var(--text);
+      font-weight: 700;
+      font-size: 13px;
+      transition: transform 0.05s ease, background 0.15s ease;
+    }
+    .hud .btn:hover { background: rgba(122,167,255,0.22); }
+    .hud .btn:active { transform: translateY(1px); }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--panel);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 18px 60px rgba(0,0,0,0.25);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+    .panel header {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 10px;
+    }
+    .panel header h2 {
+      margin: 0;
+      font-size: 15px;
+      letter-spacing: 0.2px;
+    }
+    .panel header .small { color: var(--muted); font-size: 12px; }
+    .controls {
+      padding: 12px 14px;
+      overflow: auto;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.07);
+    }
+    .row:last-child { border-bottom: 0; }
+    .row label { font-size: 13px; color: var(--muted); }
+    .row output { font-size: 12px; color: var(--text); opacity: 0.9; min-width: 64px; text-align: right; }
+    input[type="range"] { width: 100%; }
+    .note {
+      padding: 12px 14px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    .note code { color: var(--text); }
+
+    /* Small webcam preview */
+    .preview {
+      position: absolute;
+      right: 10px; bottom: 10px;
+      width: 220px; height: 140px;
+      border-radius: 14px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      background: rgba(0,0,0,0.25);
+      backdrop-filter: blur(8px);
+      box-shadow: 0 12px 35px rgba(0,0,0,0.35);
+      display: none;
+    }
+    .preview video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+    .toast {
+      position: absolute;
+      left: 50%;
+      bottom: 14px;
+      transform: translateX(-50%);
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: rgba(0,0,0,0.55);
+      border: 1px solid var(--line);
+      color: var(--text);
+      font-size: 13px;
+      display: none;
+      max-width: 85%;
+      text-align: center;
+      backdrop-filter: blur(10px);
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="stage">
+      <canvas id="game"></canvas>
+
+      <div class="hud">
+        <span class="pill">Score: <b id="score">0</b></span>
+        <span class="pill">Coins: <b id="coins">0</b></span>
+        <span class="pill">Held: <b id="held">None</b></span>
+        <button class="btn" id="start">Start Camera</button>
+        <button class="btn" id="reset">Reset</button>
+        <button class="btn" id="toggleDebug">Debug: ON</button>
+        <button class="btn" id="togglePreview">Preview: OFF</button>
+      </div>
+
+      <div class="preview" id="preview">
+        <video id="webcam" autoplay playsinline muted></video>
+      </div>
+
+      <div class="toast" id="toast"></div>
+    </div>
+
+    <aside class="panel">
+      <header>
+        <h2>Tuner</h2>
+        <div class="small">pinch/grab/throw + left-hand camera</div>
+      </header>
+
+      <div class="controls">
+        <div class="row">
+          <div>
+            <label>Right pinch threshold</label>
+            <input id="pinchThreshold" type="range" min="0.01" max="0.25" step="0.005" value="0.085">
+          </div>
+          <output id="pinchThresholdOut">0.085</output>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Left rotation threshold</label>
+            <input id="rotThreshold" type="range" min="0.01" max="0.25" step="0.005" value="0.085">
+          </div>
+          <output id="rotThresholdOut">0.085</output>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Rotation speed multiplier</label>
+            <input id="rotSpeed" type="range" min="0.005" max="1.0" step="0.005" value="0.12">
+          </div>
+          <output id="rotSpeedOut">0.12</output>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Throw multiplier</label>
+            <input id="throwMul" type="range" min="0.5" max="12" step="0.1" value="6.5">
+          </div>
+          <output id="throwMulOut">6.5</output>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Toss direction offset (deg)</label>
+            <input id="tossOffset" type="range" min="-45" max="45" step="1" value="0">
+          </div>
+          <output id="tossOffsetOut">0</output>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Gravity</label>
+            <input id="gravity" type="range" min="-30" max="-1" step="0.5" value="-14">
+          </div>
+          <output id="gravityOut">-14</output>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Floor bounce</label>
+            <input id="bounce" type="range" min="0.1" max="0.95" step="0.01" value="0.68">
+          </div>
+          <output id="bounceOut">0.68</output>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Left dot offset X (px)</label>
+            <input id="leftOffX" type="range" min="-500" max="500" step="1" value="70">
+          </div>
+          <output id="leftOffXOut">70</output>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Left dot offset Y (px)</label>
+            <input id="leftOffY" type="range" min="-500" max="500" step="1" value="-102">
+          </div>
+          <output id="leftOffYOut">-102</output>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Buy cost (coins)</label>
+            <input id="buyCost" type="range" min="1" max="25" step="1" value="5">
+          </div>
+          <output id="buyCostOut">5</output>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>WASD zone size (%)</label>
+            <input id="wasdSize" type="range" min="20" max="70" step="1" value="45">
+          </div>
+          <output id="wasdSizeOut">45%</output>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Camera move speed</label>
+            <input id="camSpeed" type="range" min="0.5" max="10" step="0.1" value="3.0">
+          </div>
+          <output id="camSpeedOut">3.0</output>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Zoom</label>
+            <input id="zoom" type="range" min="25" max="85" step="1" value="52">
+          </div>
+          <output id="zoomOut">52</output>
+        </div>
+      </div>
+
+      <div class="note">
+        <div><b>Controls</b></div>
+        <div>• <b>Right pinch</b> = grab a ball</div>
+        <div>• <b>Right open</b> = release / throw</div>
+        <div>• <b>Left pinch</b> = rotate camera (drag thumb)</div>
+        <div>• <b>Left open</b> in WASD zone = move camera</div>
+        <div style="margin-top:8px;">Tip: if hand tracking is flaky, increase thresholds slightly.</div>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    // -----------------------------
+    // Utilities
+    // -----------------------------
+    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+    const lerp  = (a, b, t) => a + (b - a) * t;
+    const len2  = (x, y) => Math.hypot(x, y);
+
+    function rotate2D(x, y, angRad) {
+      const c = Math.cos(angRad), s = Math.sin(angRad);
+      return { x: x*c - y*s, y: x*s + y*c };
+    }
+
+    // -----------------------------
+    // Game constants (world space)
+    // -----------------------------
+    const COURT = { w: 28, h: 15 };             // world units
+    const HOOP  = { x: COURT.w - 1.6, y: COURT.h / 2, r: 0.55 }; // right side hoop
+    const BACKBOARD = { x: COURT.w - 1.1, y: COURT.h / 2, w: 0.1, h: 2.6 };
+    const BALL_RADIUS = 0.28;
+
+    // -----------------------------
+    // DOM
+    // -----------------------------
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+
+    const video = document.getElementById("webcam");
+    const preview = document.getElementById("preview");
+    const toastEl = document.getElementById("toast");
+
+    const scoreEl = document.getElementById("score");
+    const coinsEl = document.getElementById("coins");
+    const heldEl  = document.getElementById("held");
+
+    const btnStart = document.getElementById("start");
+    const btnReset = document.getElementById("reset");
+    const btnDebug = document.getElementById("toggleDebug");
+    const btnPrev  = document.getElementById("togglePreview");
+
+    const sliders = {
+      pinchThreshold: document.getElementById("pinchThreshold"),
+      rotThreshold:   document.getElementById("rotThreshold"),
+      rotSpeed:       document.getElementById("rotSpeed"),
+      throwMul:       document.getElementById("throwMul"),
+      tossOffset:     document.getElementById("tossOffset"),
+      gravity:        document.getElementById("gravity"),
+      bounce:         document.getElementById("bounce"),
+      leftOffX:       document.getElementById("leftOffX"),
+      leftOffY:       document.getElementById("leftOffY"),
+      buyCost:        document.getElementById("buyCost"),
+      wasdSize:       document.getElementById("wasdSize"),
+      camSpeed:       document.getElementById("camSpeed"),
+      zoom:           document.getElementById("zoom"),
+    };
+
+    const outs = {
+      pinchThresholdOut: document.getElementById("pinchThresholdOut"),
+      rotThresholdOut:   document.getElementById("rotThresholdOut"),
+      rotSpeedOut:       document.getElementById("rotSpeedOut"),
+      throwMulOut:       document.getElementById("throwMulOut"),
+      tossOffsetOut:     document.getElementById("tossOffsetOut"),
+      gravityOut:        document.getElementById("gravityOut"),
+      bounceOut:         document.getElementById("bounceOut"),
+      leftOffXOut:       document.getElementById("leftOffXOut"),
+      leftOffYOut:       document.getElementById("leftOffYOut"),
+      buyCostOut:        document.getElementById("buyCostOut"),
+      wasdSizeOut:       document.getElementById("wasdSizeOut"),
+      camSpeedOut:       document.getElementById("camSpeedOut"),
+      zoomOut:           document.getElementById("zoomOut"),
+    };
+
+    function bindSlider(id, fmt = (v)=>v) {
+      sliders[id].addEventListener("input", () => {
+        outs[id+"Out"].textContent = fmt(sliders[id].value);
+      });
+      outs[id+"Out"].textContent = fmt(sliders[id].value);
+    }
+
+    bindSlider("pinchThreshold", v => Number(v).toFixed(3));
+    bindSlider("rotThreshold",   v => Number(v).toFixed(3));
+    bindSlider("rotSpeed",       v => Number(v).toFixed(3));
+    bindSlider("throwMul",       v => Number(v).toFixed(1));
+    bindSlider("tossOffset",     v => `${Number(v).toFixed(0)}`);
+    bindSlider("gravity",        v => `${Number(v).toFixed(1)}`);
+    bindSlider("bounce",         v => Number(v).toFixed(2));
+    bindSlider("leftOffX",       v => `${Number(v).toFixed(0)}`);
+    bindSlider("leftOffY",       v => `${Number(v).toFixed(0)}`);
+    bindSlider("buyCost",        v => `${Number(v).toFixed(0)}`);
+    bindSlider("wasdSize",       v => `${Number(v).toFixed(0)}%`);
+    bindSlider("camSpeed",       v => Number(v).toFixed(1));
+    bindSlider("zoom",           v => `${Number(v).toFixed(0)}`);
+
+    // -----------------------------
+    // Resize
+    // -----------------------------
+    function resize() {
+      const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = Math.floor(rect.width * dpr);
+      canvas.height = Math.floor(rect.height * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // draw in CSS pixels
+    }
+    window.addEventListener("resize", resize);
+    resize();
+
+    // -----------------------------
+    // Camera (world->screen transform)
+    // -----------------------------
+    const camera = {
+      pos: { x: COURT.w / 2, y: COURT.h / 2 },
+      yaw: 0,   // radians
+      zoom: 52  // slider-controlled (pixels per world unit in CSS pixels)
+    };
+
+    function applyCameraTransform() {
+      const w = canvas.getBoundingClientRect().width;
+      const h = canvas.getBoundingClientRect().height;
+      const cx = w / 2, cy = h / 2;
+
+      camera.zoom = Number(sliders.zoom.value);
+
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.translate(cx, cy);
+      ctx.scale(camera.zoom, -camera.zoom); // y-up world
+      ctx.rotate(-camera.yaw);
+      ctx.translate(-camera.pos.x, -camera.pos.y);
+    }
+
+    function screenToWorld(px, py) {
+      const w = canvas.getBoundingClientRect().width;
+      const h = canvas.getBoundingClientRect().height;
+      const cx = w / 2, cy = h / 2;
+
+      const zoom = Number(sliders.zoom.value);
+      // convert to camera space (y-up)
+      const dx = (px - cx) / zoom;
+      const dy = -(py - cy) / zoom;
+
+      // inverse rotation of (-yaw) is (+yaw)
+      const r = rotate2D(dx, dy, +camera.yaw);
+
+      return { x: r.x + camera.pos.x, y: r.y + camera.pos.y };
+    }
+
+    // -----------------------------
+    // Game State
+    // -----------------------------
+    let debug = true;
+    let showPreview = false;
+
+    let score = 0;
+    let coins = 0;
+
+    let balls = [];
+    let ballLoaded = false; // like your Python flag
+
+    function makeBall(opts = {}) {
+      return {
+        id: crypto.randomUUID(),
+        r: BALL_RADIUS,
+        pos: { x: opts.x ?? (COURT.w * 0.25 + Math.random() * (COURT.w * 0.35)), y: opts.y ?? (2 + Math.random() * (COURT.h - 4)) },
+        vel: { x: 0, y: 0 },
+        grabbed: false,
+        bought: !!opts.bought,
+        lastPosForScore: null,
+      };
+    }
+
+    function resetGame() {
+      score = 0;
+      coins = 0;
+      balls = Array.from({ length: 5 }, () => makeBall());
+      ballLoaded = false;
+
+      camera.pos = { x: COURT.w / 2, y: COURT.h / 2 };
+      camera.yaw = 0;
+
+      buyDwell.t = 0;
+      buyDwell.armed = false;
+
+      toast("Scene reset.");
+      syncHud();
+    }
+
+    function syncHud() {
+      scoreEl.textContent = String(score);
+      coinsEl.textContent = String(coins);
+      const heldBall = balls.find(b => b.grabbed);
+      heldEl.textContent = heldBall ? (heldBall.bought ? "Bought" : "Court") : "None";
+    }
+
+    // -----------------------------
+    // Hoop scoring
+    // -----------------------------
+    function checkScore(ball) {
+      // Score when ball crosses the vertical line at hoop.x from left->right,
+      // near hoop center (within hoop radius) and roughly around hoop.y.
+      if (!ball.lastPosForScore) {
+        ball.lastPosForScore = { x: ball.pos.x, y: ball.pos.y };
+        return false;
+      }
+      const prev = ball.lastPosForScore;
+      const curr = ball.pos;
+
+      const crossed = (prev.x < HOOP.x) && (curr.x >= HOOP.x);
+      if (!crossed) {
+        ball.lastPosForScore = { x: curr.x, y: curr.y };
+        return false;
+      }
+
+      const dy = Math.abs(curr.y - HOOP.y);
+      const inside = dy < (HOOP.r * 0.85);
+
+      if (inside) {
+        score += 1;
+        coins += 1; // earn coin per score (feel free to change)
+        ball.lastPosForScore = null;
+        return true;
+      }
+
+      ball.lastPosForScore = { x: curr.x, y: curr.y };
+      return false;
+    }
+
+    // -----------------------------
+    // Buy Ball (left dot dwell in screen-space button)
+    // -----------------------------
+    const buyDwell = { t: 0, armed: false };
+    function buyBallIfPossible() {
+      const cost = Number(sliders.buyCost.value);
+      if (ballLoaded) return false;
+      if (coins < cost) return false;
+
+      // create a bought ball and "auto-grab" it (it'll be pinned to right hand when that exists)
+      const b = makeBall({ x: camera.pos.x, y: camera.pos.y, bought: true });
+      b.grabbed = true;
+      balls.push(b);
+      coins -= cost;
+      ballLoaded = true;
+      toast(`Ball bought (-${cost} coins)`);
+      syncHud();
+      return true;
+    }
+
+    // -----------------------------
+    // Physics
+    // -----------------------------
+    function stepPhysics(dt) {
+      const g = Number(sliders.gravity.value);
+      const bounce = Number(sliders.bounce.value);
+
+      for (const b of balls) {
+        if (b.grabbed) continue;
+
+        // integrate
+        b.vel.y += g * dt;
+        b.pos.x += b.vel.x * dt;
+        b.pos.y += b.vel.y * dt;
+
+        // floor
+        const floorY = 0 + b.r;
+        if (b.pos.y < floorY) {
+          b.pos.y = floorY;
+          b.vel.y = Math.abs(b.vel.y) * bounce;
+          b.vel.x *= 0.985;
+        }
+
+        // backboard collision
+        // If ball overlaps the backboard vertical segment, bounce x
+        const bx = BACKBOARD.x;
+        const halfH = BACKBOARD.h / 2;
+        if (Math.abs(b.pos.x - bx) < (b.r + BACKBOARD.w) &&
+            b.pos.y > (BACKBOARD.y - halfH) &&
+            b.pos.y < (BACKBOARD.y + halfH)) {
+          // bounce away from board
+          if (b.pos.x > bx) {
+            b.pos.x = bx + (b.r + BACKBOARD.w);
+            b.vel.x = Math.abs(b.vel.x) * 0.8;
+          } else {
+            b.pos.x = bx - (b.r + BACKBOARD.w);
+            b.vel.x = -Math.abs(b.vel.x) * 0.8;
+          }
+        }
+
+        // mild drag
+        b.vel.x *= 0.998;
+
+        // out of bounds -> reset
+        const margin = 6;
+        if (b.pos.x < -margin || b.pos.x > COURT.w + margin || b.pos.y < -margin || b.pos.y > COURT.h + margin) {
+          // if it was a bought ball, clear "loaded" when it leaves play
+          if (b.bought) ballLoaded = false;
+          Object.assign(b, makeBall({}).pos ? makeBall({}) : makeBall({}));
+        }
+
+        // scoring check
+        if (checkScore(b)) {
+          toast("SWISH! +1 score, +1 coin");
+          // reset ball after score
+          if (b.bought) ballLoaded = false;
+          const nb = makeBall();
+          b.pos = nb.pos; b.vel = nb.vel; b.grabbed = false; b.bought = false; b.lastPosForScore = null;
+          syncHud();
+        }
+      }
+    }
+
+    // -----------------------------
+    // Rendering
+    // -----------------------------
+    function drawCourt() {
+      // court background
+      ctx.save();
+      applyCameraTransform();
+
+      // wood base
+      ctx.fillStyle = "#c58b4f";
+      ctx.fillRect(0, 0, COURT.w, COURT.h);
+
+      // subtle stripes
+      ctx.globalAlpha = 0.08;
+      ctx.fillStyle = "#000";
+      for (let i = 0; i < 40; i++) {
+        const x = (i / 40) * COURT.w;
+        ctx.fillRect(x, 0, 0.22, COURT.h);
+      }
+      ctx.globalAlpha = 1;
+
+      // border lines
+      ctx.strokeStyle = "rgba(255,255,255,0.85)";
+      ctx.lineWidth = 0.06;
+      ctx.strokeRect(0.2, 0.2, COURT.w - 0.4, COURT.h - 0.4);
+
+      // center line
+      ctx.beginPath();
+      ctx.moveTo(COURT.w / 2, 0.2);
+      ctx.lineTo(COURT.w / 2, COURT.h - 0.2);
+      ctx.stroke();
+
+      // center circle
+      ctx.beginPath();
+      ctx.arc(COURT.w / 2, COURT.h / 2, 1.8, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // key / paint area near hoop side
+      ctx.beginPath();
+      ctx.rect(COURT.w - 6.2, COURT.h / 2 - 2.8, 6.0, 5.6);
+      ctx.stroke();
+
+      // hoop + backboard
+      // backboard
+      ctx.fillStyle = "rgba(255,255,255,0.9)";
+      ctx.fillRect(BACKBOARD.x, BACKBOARD.y - BACKBOARD.h/2, BACKBOARD.w, BACKBOARD.h);
+
+      // rim
+      ctx.strokeStyle = "#ff3b30";
+      ctx.lineWidth = 0.10;
+      ctx.beginPath();
+      ctx.arc(HOOP.x, HOOP.y, HOOP.r, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // a "net hint" line
+      ctx.strokeStyle = "rgba(255,255,255,0.35)";
+      ctx.lineWidth = 0.03;
+      ctx.beginPath();
+      ctx.moveTo(HOOP.x + HOOP.r, HOOP.y);
+      ctx.lineTo(HOOP.x + HOOP.r + 0.4, HOOP.y);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    function drawBalls() {
+      ctx.save();
+      applyCameraTransform();
+
+      for (const b of balls) {
+        ctx.beginPath();
+        ctx.fillStyle = b.bought ? "#ffcc00" : "#ff8c2b";
+        ctx.arc(b.pos.x, b.pos.y, b.r, 0, Math.PI * 2);
+        ctx.fill();
+
+        // seams
+        ctx.strokeStyle = "rgba(70,40,15,0.55)";
+        ctx.lineWidth = 0.03;
+        ctx.beginPath();
+        ctx.arc(b.pos.x, b.pos.y, b.r * 0.92, 0.2, Math.PI + 0.2);
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    }
+
+    // UI overlay elements drawn in screen-space
+    function drawOverlay(leftDot, rightDot, handsDebug) {
+      const w = canvas.getBoundingClientRect().width;
+      const h = canvas.getBoundingClientRect().height;
+
+      // WASD zone + Buy button regions (screen coords)
+      const sizePct = Number(sliders.wasdSize.value) / 100;
+      const zoneW = w * sizePct;
+      const zoneH = h * sizePct;
+      const zone = {
+        left: 18,
+        top: h - zoneH - 18,
+        right: 18 + zoneW,
+        bottom: h - 18
+      };
+
+      // Buy button rectangle
+      const buy = {
+        left: w * 0.5 - 120,
+        top:  18,
+        right: w * 0.5 + 120,
+        bottom: 18 + 56
+      };
+
+      // zone box
+      ctx.save();
+      ctx.setTransform(1,0,0,1,0,0);
+
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgba(48,209,88,0.75)";
+      ctx.strokeRect(zone.left, zone.top, zone.right-zone.left, zone.bottom-zone.top);
+
+      ctx.fillStyle = "rgba(48,209,88,0.12)";
+      ctx.fillRect(zone.left, zone.top, zone.right-zone.left, zone.bottom-zone.top);
+
+      ctx.fillStyle = "rgba(255,255,255,0.7)";
+      ctx.font = "bold 14px ui-sans-serif,system-ui";
+      ctx.fillText("W", zone.left + (zone.right-zone.left)/2 - 5, zone.top + 16);
+      ctx.fillText("S", zone.left + (zone.right-zone.left)/2 - 5, zone.bottom - 8);
+      ctx.fillText("A", zone.left + 8, zone.top + (zone.bottom-zone.top)/2 + 5);
+      ctx.fillText("D", zone.right - 16, zone.top + (zone.bottom-zone.top)/2 + 5);
+
+      // buy button
+      const canAfford = coins >= Number(sliders.buyCost.value) && !ballLoaded;
+      ctx.strokeStyle = canAfford ? "rgba(122,167,255,0.95)" : "rgba(255,255,255,0.18)";
+      ctx.fillStyle   = canAfford ? "rgba(122,167,255,0.15)" : "rgba(255,255,255,0.06)";
+      ctx.strokeRect(buy.left, buy.top, buy.right-buy.left, buy.bottom-buy.top);
+      ctx.fillRect(buy.left, buy.top, buy.right-buy.left, buy.bottom-buy.top);
+      ctx.fillStyle = canAfford ? "rgba(233,237,255,0.95)" : "rgba(233,237,255,0.55)";
+      ctx.font = "700 15px ui-sans-serif,system-ui";
+      ctx.fillText(`Buy Ball (${Number(sliders.buyCost.value)} coins)`, buy.left + 16, buy.top + 34);
+
+      // dwell bar if armed
+      if (buyDwell.armed) {
+        const t = clamp(buyDwell.t / 0.28, 0, 1);
+        ctx.fillStyle = "rgba(48,209,88,0.65)";
+        ctx.fillRect(buy.left + 6, buy.bottom - 6, (buy.right-buy.left - 12) * t, 3);
+      }
+
+      // draw dots
+      if (leftDot) {
+        ctx.fillStyle = "rgba(0,255,255,0.9)";
+        ctx.beginPath();
+        ctx.arc(leftDot.x, leftDot.y, 8, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = "rgba(0,255,255,0.35)";
+        ctx.beginPath();
+        ctx.arc(leftDot.x, leftDot.y, 18, 0, Math.PI*2);
+        ctx.fill();
+      }
+      if (rightDot) {
+        ctx.fillStyle = "rgba(48,209,88,0.95)";
+        ctx.beginPath();
+        ctx.arc(rightDot.x, rightDot.y, 7, 0, Math.PI*2);
+        ctx.fill();
+      }
+
+      // debug skeleton (screen-space)
+      if (debug && handsDebug && handsDebug.length) {
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "rgba(255,80,80,0.9)";
+        for (const hand of handsDebug) {
+          // simple connector list (subset to keep it fast)
+          const C = [
+            [0,1],[1,2],[2,3],[3,4],
+            [0,5],[5,6],[6,7],[7,8],
+            [5,9],[9,10],[10,11],[11,12],
+            [9,13],[13,14],[14,15],[15,16],
+            [13,17],[17,18],[18,19],[19,20],
+            [0,17]
+          ];
+          for (const [a,b] of C) {
+            const pa = hand[a], pb = hand[b];
+            if (!pa || !pb) continue;
+            ctx.beginPath();
+            ctx.moveTo(pa.x, pa.y);
+            ctx.lineTo(pb.x, pb.y);
+            ctx.stroke();
+          }
+        }
+      }
+
+      ctx.restore();
+
+      return { zone, buy };
+    }
+
+    // -----------------------------
+    // Hand Tracking (MediaPipe Tasks)
+    // -----------------------------
+    let handLandmarker = null;
+    let running = false;
+    let stream = null;
+
+    // Right hand tracking state for throw velocity
+    const rightHand = {
+      present: false,
+      pinching: false,
+      open: false,
+      screen: null,
+      world: null,
+      history: [], // {t, x, y} in world coords
+    };
+
+    const leftHand = {
+      present: false,
+      pinching: false, // rotation mode
+      screenThumb: null,
+      lastThumb: null, // for rotation delta
+      dot: null,       // adjusted dot in screen-space for WASD + buy
+    };
+
+    function dist3(a, b) {
+      const dx = a.x - b.x, dy = a.y - b.y, dz = (a.z||0) - (b.z||0);
+      return Math.hypot(dx, dy, dz);
+    }
+
+    function isOpenHand(landmarks) {
+      // quick heuristic: finger tips above wrist in image coords (y smaller means higher)
+      // 0=wrist, 4=thumb tip, 8=index tip, 12=middle tip, 16=ring tip, 20=pinky tip
+      const wrist = landmarks[0];
+      const tips = [4,8,12,16,20].map(i => landmarks[i]);
+      const upCount = tips.filter(t => t.y < wrist.y).length;
+      return upCount >= 4;
+    }
+
+    async function initHandLandmarker() {
+      // FilesetResolver is global from vision_bundle.js
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm"
+      );
+
+      handLandmarker = await HandLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
+        },
+        runningMode: "VIDEO",
+        numHands: 2,
+        minHandDetectionConfidence: 0.5,
+        minHandPresenceConfidence: 0.5,
+        minTrackingConfidence: 0.5
+      });
+    }
+
+    async function startCamera() {
+      if (running) return;
+      if (!handLandmarker) {
+        toast("Loading hand model…");
+        await initHandLandmarker();
+      }
+
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+      video.srcObject = stream;
+      await video.play();
+
+      running = true;
+      toast("Camera started. Right pinch grabs, right open throws.");
+    }
+
+    function stopCamera() {
+      running = false;
+      if (stream) {
+        stream.getTracks().forEach(t => t.stop());
+        stream = null;
+      }
+    }
+
+    // -----------------------------
+    // Camera control via left hand
+    // -----------------------------
+    function updateCameraFromLeftHand(dt, zoneRect) {
+      const moveSpeed = Number(sliders.camSpeed.value);
+
+      if (!leftHand.present || !leftHand.dot) return;
+
+      // Left pinch => rotation mode
+      if (leftHand.pinching && leftHand.screenThumb) {
+        if (!leftHand.lastThumb) leftHand.lastThumb = { ...leftHand.screenThumb };
+        const dx = leftHand.screenThumb.x - leftHand.lastThumb.x;
+        const rotMul = Number(sliders.rotSpeed.value);
+        camera.yaw += dx * rotMul * 0.0025; // pixel->radians scale
+        leftHand.lastThumb = { ...leftHand.screenThumb };
+        return;
+      } else {
+        leftHand.lastThumb = null;
+      }
+
+      // Otherwise, move camera based on dot position in zone
+      const { x, y } = leftHand.dot;
+      const inside =
+        x >= zoneRect.left && x <= zoneRect.right &&
+        y >= zoneRect.top  && y <= zoneRect.bottom;
+
+      if (!inside) return;
+
+      // split into thirds like your Python controller
+      const topBound = zoneRect.top + (zoneRect.bottom - zoneRect.top) / 3;
+      const botBound = zoneRect.bottom - (zoneRect.bottom - zoneRect.top) / 3;
+      const leftBound = zoneRect.left + (zoneRect.right - zoneRect.left) / 3;
+      const rightBound = zoneRect.right - (zoneRect.right - zoneRect.left) / 3;
+
+      let moveX = 0, moveY = 0;
+
+      if (y < topBound) moveY += 1;       // up in world
+      else if (y > botBound) moveY -= 1;
+
+      if (x < leftBound) moveX -= 1;
+      else if (x > rightBound) moveX += 1;
+
+      if (!moveX && !moveY) return;
+
+      // move relative to camera yaw (like strafing)
+      const mv = rotate2D(moveX, moveY, camera.yaw);
+      camera.pos.x = clamp(camera.pos.x + mv.x * moveSpeed * dt, -6, COURT.w + 6);
+      camera.pos.y = clamp(camera.pos.y + mv.y * moveSpeed * dt, -6, COURT.h + 6);
+    }
+
+    // -----------------------------
+    // Ball interaction via right hand
+    // -----------------------------
+    function grabLogic(rightWorld, pinching) {
+      // If currently holding a ball, keep it grabbed while pinching
+      const held = balls.find(b => b.grabbed);
+
+      if (pinching) {
+        if (held) return;
+
+        // otherwise grab nearest ball within reach
+        let best = null;
+        let bestD = 999;
+
+        for (const b of balls) {
+          if (b.grabbed) continue;
+          const d = len2(b.pos.x - rightWorld.x, b.pos.y - rightWorld.y);
+          if (d < (b.r + 0.7) && d < bestD) {
+            best = b; bestD = d;
+          }
+        }
+        if (best) {
+          best.grabbed = true;
+          best.vel.x = 0; best.vel.y = 0;
+          best.lastPosForScore = null;
+        }
+      } else {
+        // on release, throw the held ball (if any)
+        if (!held) return;
+
+        // compute velocity from history
+        const hist = rightHand.history;
+        if (hist.length >= 2) {
+          const first = hist[0];
+          const last  = hist[hist.length - 1];
+          const dt = Math.max(0.001, (last.t - first.t) / 1000);
+          let vx = (last.x - first.x) / dt;
+          let vy = (last.y - first.y) / dt;
+
+          const mul = Number(sliders.throwMul.value);
+          vx *= mul;
+          vy *= mul;
+
+          const ang = (Number(sliders.tossOffset.value) * Math.PI) / 180;
+          const r = rotate2D(vx, vy, ang);
+          vx = r.x; vy = r.y;
+
+          held.vel.x = vx;
+          held.vel.y = vy;
+        }
+
+        held.grabbed = false;
+        if (held.bought) {
+          // allow buying again after you throw the bought ball
+          ballLoaded = false;
+          held.bought = false;
+        }
+        rightHand.history = [];
+      }
+    }
+
+    // -----------------------------
+    // Toast helper
+    // -----------------------------
+    let toastTimer = null;
+    function toast(msg) {
+      toastEl.textContent = msg;
+      toastEl.style.display = "block";
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        toastEl.style.display = "none";
+      }, 1600);
+    }
+
+    // -----------------------------
+    // Mouse fallback (helps test without hands)
+    // -----------------------------
+    let mouseHeld = null;
+    let mousePrev = null;
+    canvas.addEventListener("pointerdown", (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      const wpos = screenToWorld(sx, sy);
+
+      let best = null, bestD = 999;
+      for (const b of balls) {
+        const d = len2(b.pos.x - wpos.x, b.pos.y - wpos.y);
+        if (d < (b.r + 0.8) && d < bestD) { best = b; bestD = d; }
+      }
+      if (best) {
+        best.grabbed = true;
+        best.vel.x = best.vel.y = 0;
+        mouseHeld = best;
+        mousePrev = { t: performance.now(), x: wpos.x, y: wpos.y };
+        canvas.setPointerCapture(e.pointerId);
+      }
+    });
+
+    canvas.addEventListener("pointermove", (e) => {
+      if (!mouseHeld) return;
+      const rect = canvas.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      const wpos = screenToWorld(sx, sy);
+
+      mouseHeld.pos.x = wpos.x;
+      mouseHeld.pos.y = wpos.y;
+
+      // keep small history
+      const now = performance.now();
+      if (mousePrev && (now - mousePrev.t) > 10) {
+        mousePrev = { t: now, x: wpos.x, y: wpos.y };
+      }
+    });
+
+    canvas.addEventListener("pointerup", (e) => {
+      if (!mouseHeld) return;
+
+      // simple toss based on last delta
+      // (not as rich as hand history, but enough for testing)
+      mouseHeld.grabbed = false;
+      mouseHeld.vel.x = (Math.random()*2 - 1) * 4;
+      mouseHeld.vel.y = (Math.random()*2 - 0.2) * 6;
+
+      mouseHeld = null;
+      mousePrev = null;
+      try { canvas.releasePointerCapture(e.pointerId); } catch {}
+    });
+
+    // -----------------------------
+    // Main Loop
+    // -----------------------------
+    let lastT = performance.now();
+
+    async function loop() {
+      const now = performance.now();
+      const dt = clamp((now - lastT) / 1000, 0, 1/20); // clamp to avoid huge jumps
+      lastT = now;
+
+      // clear hand state each frame
+      rightHand.present = false;
+      leftHand.present = false;
+
+      let handsDebug = []; // array of arrays of screen points (21)
+
+      // Detect hands
+      if (running && handLandmarker && video.readyState >= 2) {
+        let res = null;
+        try {
+          // some versions accept (video, timestamp), some accept (video)
+          try {
+            res = handLandmarker.detectForVideo(video, now);
+          } catch (e) {
+            res = handLandmarker.detectForVideo(video);
+          }
+        } catch (e) {
+          // if a version mismatch occurs, stop spamming
+          running = false;
+          toast("Hand detection error. Refresh or try a different browser.");
+          console.error(e);
+        }
+
+        if (res && res.landmarks && res.landmarks.length) {
+          // res.handedness is array of arrays, get top categoryName
+          for (let i = 0; i < res.landmarks.length; i++) {
+            const lm = res.landmarks[i];
+            const handed = res.handedness?.[i]?.[0]?.categoryName || "Unknown";
+
+            // collect debug screen points
+            const rect = canvas.getBoundingClientRect();
+            const pts = lm.map(p => ({
+              x: p.x * rect.width,
+              y: p.y * rect.height,
+              z: p.z
+            }));
+            handsDebug.push(pts);
+
+            // Identify left/right as MediaPipe reports (categoryName "Left"/"Right")
+            if (handed === "Left") {
+              leftHand.present = true;
+
+              const thumb = lm[4];
+              const idx = lm[8];
+              const pinchD = dist3(thumb, idx);
+              leftHand.pinching = pinchD < Number(sliders.rotThreshold.value);
+
+              const rect = canvas.getBoundingClientRect();
+              const thumbScreen = { x: thumb.x * rect.width, y: thumb.y * rect.height };
+              leftHand.screenThumb = thumbScreen;
+
+              // offset dot (like your Python offsets)
+              const offX = Number(sliders.leftOffX.value);
+              const offY = Number(sliders.leftOffY.value);
+              leftHand.dot = { x: thumbScreen.x + offX, y: thumbScreen.y + offY };
+
+            } else if (handed === "Right") {
+              rightHand.present = true;
+
+              const thumb = lm[4];
+              const idx = lm[8]; // index tip as "cursor"
+              const pinchD = dist3(thumb, idx);
+              const pinching = pinchD < Number(sliders.pinchThreshold.value);
+
+              // open heuristic
+              const open = isOpenHand(lm);
+
+              const rect = canvas.getBoundingClientRect();
+              const screen = { x: idx.x * rect.width, y: idx.y * rect.height };
+              const world  = screenToWorld(screen.x, screen.y);
+
+              rightHand.pinching = pinching;
+              rightHand.open = open;
+              rightHand.screen = screen;
+              rightHand.world = world;
+
+              // history for throw velocity (world coords)
+              if (pinching) {
+                rightHand.history.push({ t: now, x: world.x, y: world.y });
+                // keep ~120ms window
+                while (rightHand.history.length > 0 && (now - rightHand.history[0].t) > 120) {
+                  rightHand.history.shift();
+                }
+              }
+
+              // grab/release logic
+              grabLogic(world, pinching);
+
+              // if holding a ball, snap it to hand
+              const held = balls.find(b => b.grabbed);
+              if (held) {
+                held.pos.x = world.x;
+                held.pos.y = world.y;
+                held.vel.x = 0; held.vel.y = 0;
+              }
+            }
+          }
+        }
+      }
+
+      // render + UI overlay
+      ctx.setTransform(1,0,0,1,0,0);
+      ctx.clearRect(0, 0, canvas.getBoundingClientRect().width, canvas.getBoundingClientRect().height);
+
+      drawCourt();
+      drawBalls();
+
+      // Screen-space overlay regions + dots
+      const leftDot = leftHand.present ? leftHand.dot : null;
+      const rightDot = rightHand.present ? rightHand.screen : null;
+      const { zone, buy } = drawOverlay(leftDot, rightDot, handsDebug);
+
+      // Buy dwell check
+      if (leftHand.present && leftHand.dot) {
+        const insideBuy =
+          leftHand.dot.x >= buy.left && leftHand.dot.x <= buy.right &&
+          leftHand.dot.y >= buy.top  && leftHand.dot.y <= buy.bottom;
+
+        const canAfford = coins >= Number(sliders.buyCost.value) && !ballLoaded;
+
+        if (insideBuy && canAfford) {
+          buyDwell.armed = true;
+          buyDwell.t += dt;
+          if (buyDwell.t >= 0.28) {
+            buyBallIfPossible();
+            buyDwell.t = 0;
+            buyDwell.armed = false;
+          }
+        } else {
+          buyDwell.armed = false;
+          buyDwell.t = 0;
+        }
+      } else {
+        buyDwell.armed = false;
+        buyDwell.t = 0;
+      }
+
+      // left-hand camera controls
+      updateCameraFromLeftHand(dt, zone);
+
+      // physics
+      stepPhysics(dt);
+
+      // HUD sync occasionally (cheap)
+      syncHud();
+
+      requestAnimationFrame(loop);
+    }
+
+    // -----------------------------
+    // Buttons
+    // -----------------------------
+    btnStart.addEventListener("click", async () => {
+      try {
+        await startCamera();
+        btnStart.textContent = "Camera Running";
+        btnStart.disabled = true;
+      } catch (e) {
+        toast("Could not start camera. Check permissions.");
+        console.error(e);
+      }
+    });
+
+    btnReset.addEventListener("click", () => resetGame());
+
+    btnDebug.addEventListener("click", () => {
+      debug = !debug;
+      btnDebug.textContent = `Debug: ${debug ? "ON" : "OFF"}`;
+    });
+
+    btnPrev.addEventListener("click", () => {
+      showPreview = !showPreview;
+      preview.style.display = showPreview ? "block" : "none";
+      btnPrev.textContent = `Preview: ${showPreview ? "ON" : "OFF"}`;
+    });
+
+    // Keyboard
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "r" || e.key === "R") resetGame();
+    });
+
+    // -----------------------------
+    // Boot
+    // -----------------------------
+    resetGame();
+    toast("Click “Start Camera” to begin. Mouse drag also works for testing.");
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>

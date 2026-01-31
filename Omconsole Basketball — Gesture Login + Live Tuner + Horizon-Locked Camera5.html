@@ -1,0 +1,2204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Omconsole Basketball — Gesture Login + Live Tuner + Horizon-Locked Camera</title>
+
+<style>
+  :root{ --uiText: rgba(255,255,255,.92); }
+  *{ box-sizing:border-box; }
+  html,body{
+    margin:0; padding:0;
+    width:100%;
+    height:100%;
+    background:#0b0f14;
+    overflow:hidden;
+    touch-action:none;
+    -webkit-user-select:none;
+    user-select:none;
+  }
+  body{ height:100dvh; }
+
+  canvas{
+    display:block;
+    width:100vw;
+    height:100dvh;
+    background:#0b0f14;
+  }
+
+  #video{
+    position:fixed;
+    left:-9999px;
+    top:-9999px;
+    width: 640px;
+    height: 480px;
+    opacity:0;
+    pointer-events:none;
+  }
+
+  /* ===== HUD ===== */
+  #hud{
+    position:fixed;
+    top: calc(env(safe-area-inset-top) + 10px);
+    left: calc(env(safe-area-inset-left) + 10px);
+    right: calc(env(safe-area-inset-right) + 10px);
+    display:none;
+    gap:10px;
+    align-items:center;
+    pointer-events:none;
+    color:var(--uiText);
+    font: 14px/1.2 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+    text-shadow: 0 1px 0 rgba(0,0,0,.35);
+    flex-wrap:wrap;
+    z-index: 10;
+  }
+  .pill{
+    padding:10px 12px;
+    border-radius:999px;
+    background: rgba(255,255,255,.10);
+    border:1px solid rgba(255,255,255,.14);
+    backdrop-filter: blur(8px);
+    display:flex;
+    align-items:center;
+    gap:10px;
+    min-width: 88px;
+    max-width: 100%;
+  }
+  .bar{
+    width: 160px; max-width: 38vw;
+    height: 10px;
+    background: rgba(255,255,255,.12);
+    border-radius: 999px;
+    overflow:hidden;
+    border: 1px solid rgba(255,255,255,.10);
+  }
+  .bar > i{ display:block; height:100%; width:100%; background: rgba(80,255,140,.95); }
+  #hud .spacer{ flex:1; min-width: 8px; }
+
+  /* ===== Top buttons ===== */
+  .topBtn{
+    pointer-events:auto;
+    position:fixed;
+    top: calc(env(safe-area-inset-top) + 10px);
+    padding:10px 12px;
+    border-radius: 999px;
+    background: rgba(255,255,255,.10);
+    border: 1px solid rgba(255,255,255,.14);
+    color: rgba(255,255,255,.92);
+    font: 14px/1 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+    backdrop-filter: blur(8px);
+    z-index: 12;
+  }
+  #menuBtn{ right: calc(env(safe-area-inset-right) + 246px); display:none; }
+  #tunerBtn{ right: calc(env(safe-area-inset-right) + 168px); display:none; }
+  #levelBtn{ right: calc(env(safe-area-inset-right) + 94px); display:none; }
+  #pauseBtn{ right: calc(env(safe-area-inset-right) + 10px); display:none; }
+
+  #bridge{
+    position:fixed;
+    left: calc(env(safe-area-inset-left) + 10px);
+    bottom: calc(env(safe-area-inset-bottom) + 10px);
+    padding:8px 10px;
+    border-radius: 12px;
+    background: rgba(0,0,0,.25);
+    border:1px solid rgba(255,255,255,.10);
+    color: rgba(255,255,255,.70);
+    font: 12px/1.2 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+    pointer-events:none;
+    max-width: 92vw;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    z-index: 10;
+  }
+
+  /* ===== LOGIN / MENU OVERLAY ===== */
+  #overlay{
+    position:fixed; inset:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding: calc(env(safe-area-inset-top) + 14px) 14px calc(env(safe-area-inset-bottom) + 14px);
+    background: radial-gradient(1200px 800px at 50% 25%, rgba(160,210,255,.10), rgba(0,0,0,.55));
+    backdrop-filter: blur(8px);
+    z-index: 50;
+    overflow:hidden;
+  }
+  #card{
+    width: min(980px, 96vw);
+    max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 28px);
+    background: rgba(255,255,255,.08);
+    border: 1px solid rgba(255,255,255,.12);
+    border-radius: 18px;
+    box-shadow: 0 30px 80px rgba(0,0,0,.35);
+    color: rgba(255,255,255,.90);
+    font: 13px/1.35 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+    display:flex;
+    flex-direction:column;
+    overflow:hidden;
+  }
+  #cardHeader{
+    padding: 14px 14px 10px;
+    border-bottom: 1px solid rgba(255,255,255,.10);
+    background: rgba(0,0,0,.14);
+  }
+  #titleRow{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap: 12px;
+  }
+  #titleRow h1{
+    margin: 0;
+    font: 900 18px/1.15 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+    letter-spacing: .2px;
+  }
+  #subtitle{ opacity:.8; margin-top: 6px; max-width: 95ch; }
+
+  .modeRow{ display:flex; flex-wrap:wrap; gap:10px; margin-top: 12px; }
+  .modeBtn{
+    flex: 1 1 260px;
+    padding: 14px 12px;
+    border-radius: 14px;
+    background: rgba(255,255,255,.08);
+    border: 1px solid rgba(255,255,255,.14);
+    color: rgba(255,255,255,.92);
+    cursor:pointer;
+    text-align:left;
+    max-width: 100%;
+  }
+  .modeBtn strong{ display:block; font-size: 14px; margin-bottom: 2px; letter-spacing:.2px; }
+  .modeBtn span{ opacity:.8; display:block; font-size: 12px; }
+  .modeBtn.selected{
+    border-color: rgba(140,220,255,.40);
+    background: rgba(140,220,255,.12);
+  }
+
+  #cardBody{
+    padding: 12px 14px 12px;
+    overflow:auto;
+    -webkit-overflow-scrolling: touch;
+    min-height: 0;
+  }
+  .grid{
+    display:grid;
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr);
+    gap: 12px;
+  }
+  @media (max-width: 980px){ .grid{ grid-template-columns: 1fr; } }
+
+  .panel{
+    background: rgba(0,0,0,.22);
+    border: 1px solid rgba(255,255,255,.10);
+    border-radius: 14px;
+    padding: 10px 10px 8px;
+    min-width: 0;
+  }
+  .panel h3{
+    margin: 2px 0 8px;
+    font: 900 13px/1.15 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+    letter-spacing:.15px;
+  }
+  .row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    margin: 7px 0;
+    min-width: 0;
+  }
+  .row label{ flex: 0 0 260px; opacity:.95; min-width: 0; }
+  .row input[type="range"]{ width:100%; min-width: 0; }
+  .row .v{
+    width: 120px;
+    text-align:right;
+    opacity:.85;
+    font-variant-numeric: tabular-nums;
+    flex: 0 0 auto;
+  }
+  .row input[type="checkbox"]{ transform: scale(1.05); }
+  .hint{ opacity:.78; font-size: 12px; margin-top: 6px; }
+
+  #cardFooter{
+    padding: 12px 14px 14px;
+    border-top: 1px solid rgba(255,255,255,.10);
+    background: rgba(0,0,0,.14);
+  }
+  .actions{ display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap; }
+  .actionBtn{
+    padding: 12px 14px;
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,.16);
+    background: rgba(255,255,255,.10);
+    color: rgba(255,255,255,.92);
+    cursor:pointer;
+    font: 800 13px/1 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+  }
+  .actionBtn.primary{
+    background: rgba(90,255,160,.22);
+    border-color: rgba(90,255,160,.26);
+  }
+  .actionBtn:disabled{ opacity:.45; cursor:not-allowed; }
+
+  @media (max-width: 560px){
+    #cardHeader{ padding: 12px 12px 10px; }
+    #cardBody{ padding: 10px 12px 12px; }
+    .row{ flex-direction:column; align-items:stretch; gap:6px; }
+    .row label{ flex: 0 0 auto; width:100%; }
+    .row .v{ width:100%; text-align:right; }
+    .modeBtn{ flex: 1 1 100%; }
+  }
+
+  /* ===== STARTUP (LOGIN + CALIBRATION) ===== */
+  #startup{
+    position:fixed; inset:0;
+    display:none;
+    align-items:center;
+    justify-content:center;
+    padding: calc(env(safe-area-inset-top) + 14px) 14px calc(env(safe-area-inset-bottom) + 14px);
+    background: radial-gradient(1100px 700px at 50% 35%, rgba(255,140,140,.08), rgba(0,0,0,.62));
+    backdrop-filter: blur(10px);
+    z-index: 60;
+    color: rgba(255,255,255,.92);
+    font: 14px/1.35 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+    overflow:hidden;
+  }
+  #startupCard{
+    width: min(900px, 96vw);
+    max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 28px);
+    border-radius: 18px;
+    border: 1px solid rgba(255,255,255,.14);
+    background: rgba(255,255,255,.08);
+    box-shadow: 0 30px 80px rgba(0,0,0,.35);
+    padding: 14px 14px 12px;
+    overflow:auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  #startupTop{ display:flex; align-items:flex-start; justify-content:space-between; gap: 12px; margin-bottom: 10px; }
+  #startupTop h2{ margin:0; font: 900 16px/1.15 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif; letter-spacing:.2px; }
+  #startupMsg{ opacity:.85; margin-top: 6px; }
+  #startupCount{ font: 900 56px/1 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif; opacity:.95; min-width: 80px; text-align:right; }
+  #startupStatus{ display:flex; gap:10px; flex-wrap:wrap; margin-top: 10px; }
+  .chip{
+    padding:8px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,.14);
+    background: rgba(0,0,0,.22);
+    opacity:.9;
+    font-variant-numeric: tabular-nums;
+    max-width: 100%;
+  }
+  .chip.ok{ border-color: rgba(90,255,160,.30); background: rgba(90,255,160,.14); }
+  .chip.bad{ border-color: rgba(255,120,120,.25); background: rgba(255,120,120,.10); }
+  #startupBars{ display:flex; gap:10px; margin-top: 12px; align-items:center; flex-wrap:wrap; }
+  .pbar{
+    flex: 1 1 260px;
+    height: 10px;
+    border-radius: 999px;
+    background: rgba(255,255,255,.12);
+    overflow:hidden;
+    border: 1px solid rgba(255,255,255,.10);
+  }
+  .pbar > i{ display:block; height:100%; width:0%; background: rgba(140,220,255,.95); }
+  #startupNote{ margin-top: 10px; opacity:.78; font-size: 12px; }
+  #startupActions{ display:flex; gap:10px; justify-content:flex-end; margin-top: 12px; flex-wrap:wrap; }
+
+  /* ===== LIVE TUNER ===== */
+  #liveTuner{
+    position:fixed;
+    top: calc(env(safe-area-inset-top) + 58px);
+    right: calc(env(safe-area-inset-right) + 10px);
+    width: min(420px, 92vw);
+    max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 80px);
+    background: rgba(10,14,20,.72);
+    border: 1px solid rgba(255,255,255,.14);
+    border-radius: 16px;
+    backdrop-filter: blur(10px);
+    z-index: 20;
+    display:none;
+    overflow:hidden;
+  }
+  #liveTunerHeader{
+    padding: 10px 10px 8px;
+    border-bottom: 1px solid rgba(255,255,255,.10);
+    display:flex;
+    gap:10px;
+    align-items:center;
+    justify-content:space-between;
+    color: rgba(255,255,255,.92);
+    font: 900 13px/1 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+  }
+  #liveTunerHeader small{ font-weight:700; opacity:.8; }
+  #liveTunerBody{
+    padding: 10px 10px 12px;
+    overflow:auto;
+    -webkit-overflow-scrolling: touch;
+    color: rgba(255,255,255,.90);
+    font: 13px/1.35 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+  }
+  #liveReadout{
+    margin-top: 8px;
+    opacity:.82;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    word-break: break-word;
+  }
+  .miniBtn{
+    padding: 8px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,.16);
+    background: rgba(255,255,255,.10);
+    color: rgba(255,255,255,.92);
+    cursor:pointer;
+    font: 900 12px/1 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+  }
+</style>
+</head>
+
+<body>
+<canvas id="c"></canvas>
+<video id="video" playsinline></video>
+
+<div id="hud">
+  <div class="pill">
+    <span>Stamina</span>
+    <div class="bar"><i id="stamFill"></i></div>
+  </div>
+
+  <div class="pill"><span id="scoreTxt">Score 0</span></div>
+  <div class="pill"><span id="shotsTxt">Shots 0</span></div>
+  <div class="pill"><span id="makeTxt">Makes 0</span></div>
+  <div class="pill"><span id="modeTxt">—</span></div>
+  <div class="spacer"></div>
+  <div class="pill"><span id="hiTxt">Best 0</span></div>
+</div>
+
+<button id="menuBtn" class="topBtn">Menu</button>
+<button id="tunerBtn" class="topBtn">Tuner</button>
+<button id="levelBtn" class="topBtn">Level</button>
+<button id="pauseBtn" class="topBtn">Pause</button>
+<div id="bridge">Controller: not selected</div>
+
+<!-- LIVE TUNER -->
+<div id="liveTuner">
+  <div id="liveTunerHeader">
+    <div>
+      Live Tuner <small id="liveTunerMode">(—)</small>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <button id="collapseLiveBtn" class="miniBtn">Hide</button>
+      <button id="recenterBtn" class="miniBtn">Recenter</button>
+      <button id="recalBtn" class="miniBtn">Startup</button>
+      <button id="closeLiveBtn" class="miniBtn">Close</button>
+    </div>
+  </div>
+  <div id="liveTunerBody">
+    <div class="panel">
+      <h3>Micro Mapping</h3>
+      <div class="row">
+        <label>Movement Range (inches)</label>
+        <input id="microInLive" type="range" min="0.25" max="3.00" step="0.05" value="0.75">
+        <div class="v" id="microInLiveV">0.75 in</div>
+      </div>
+      <div class="row">
+        <label>Throttle Range (inches)</label>
+        <input id="thrInLive" type="range" min="0.25" max="4.00" step="0.05" value="0.75">
+        <div class="v" id="thrInLiveV">0.75 in</div>
+      </div>
+      <div class="row">
+        <label>Drive Sensitivity (×)</label>
+        <input id="drvSensLive" type="range" min="-10" max="10" step="0.1" value="1">
+        <div class="v" id="drvSensLiveV">1.0×</div>
+      </div>
+      <div class="row">
+        <label>Cursor Smoothing</label>
+        <input id="smoothLive" type="range" min="0.00" max="0.92" step="0.01" value="0.22">
+        <div class="v" id="smoothLiveV">0.22</div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:10px;">
+      <h3>Deadzones / Pinch / Camera</h3>
+      <div class="row">
+        <label>Drive Deadzone (px)</label>
+        <input id="drvDeadLive" type="range" min="0" max="140" step="1" value="18">
+        <div class="v" id="drvDeadLiveV">18</div>
+      </div>
+      <div class="row">
+        <label>Pinch Threshold</label>
+        <input id="pinchTLive" type="range" min="0.18" max="0.52" step="0.01" value="0.30">
+        <div class="v" id="pinchTLiveV">0.30</div>
+      </div>
+
+      <div class="row">
+        <label>Pinch Tap Max (ms) (shoot)</label>
+        <input id="pinchTapMsLive" type="range" min="60" max="260" step="5" value="140">
+        <div class="v" id="pinchTapMsLiveV">140 ms</div>
+      </div>
+
+      <div class="row">
+        <label>Yaw Rotate Sensitivity</label>
+        <input id="yawSensLive" type="range" min="0.3" max="3.0" step="0.05" value="1.25">
+        <div class="v" id="yawSensLiveV">1.25</div>
+      </div>
+
+      <div class="hint">
+        Horizon lock: vertical camera tilt is disabled. Hold pinch to rotate view (yaw only), release to lock. Quick pinch-tap shoots.
+      </div>
+
+      <div id="liveReadout">—</div>
+    </div>
+  </div>
+</div>
+
+<!-- MENU / LOGIN OVERLAY -->
+<div id="overlay">
+  <div id="card">
+    <div id="cardHeader">
+      <div id="titleRow">
+        <div>
+          <h1>Omconsole Basketball</h1>
+          <div id="subtitle">
+            <b>Move</b> with right hand (micro-joystick). <b>Auto-grab</b> the ball when near.<br/>
+            <b>Camera:</b> horizon-locked (no up/down tilt). Hold <b>pinch</b> to rotate view (left/right), release to lock. <b>Quick pinch tap</b> to shoot.
+          </div>
+        </div>
+        <div style="opacity:.75; font-size:12px; text-align:right;">
+          Best score saves locally
+        </div>
+      </div>
+
+      <div class="modeRow">
+        <button id="pickGesture" class="modeBtn">
+          <strong>Gesture Controller</strong>
+          <span>Camera required (HTTPS/localhost). Gesture login + startup scan + live tuner.</span>
+        </button>
+        <button id="pickKeyboard" class="modeBtn">
+          <strong>Keyboard Controller</strong>
+          <span>Move: WASD • Rotate: Q/E • Shoot: Space • Level: C</span>
+        </button>
+      </div>
+    </div>
+
+    <div id="cardBody">
+      <div class="grid">
+        <div class="panel" id="gesturePanel">
+          <h3>Startup Tuners</h3>
+
+          <div class="row">
+            <label>Movement Range (inches → full travel)</label>
+            <input id="microIn" type="range" min="0.25" max="3.00" step="0.05" value="0.75">
+            <div class="v" id="microInV">0.75 in</div>
+          </div>
+
+          <div class="row">
+            <label>Throttle Range (inches)</label>
+            <input id="thrIn" type="range" min="0.25" max="4.00" step="0.05" value="0.75">
+            <div class="v" id="thrInV">0.75 in</div>
+          </div>
+
+          <div class="row">
+            <label>Drive Sensitivity (× extra gain)</label>
+            <input id="drvSens" type="range" min="-10" max="10" step="0.1" value="1">
+            <div class="v" id="drvSensV">1.0×</div>
+          </div>
+
+          <div class="row">
+            <label>Drive Deadzone (raw px)</label>
+            <input id="drvDead" type="range" min="0" max="140" step="1" value="18">
+            <div class="v" id="drvDeadV">18</div>
+          </div>
+
+          <div class="row">
+            <label>Cursor Smoothing</label>
+            <input id="smooth" type="range" min="0.00" max="0.92" step="0.01" value="0.22">
+            <div class="v" id="smoothV">0.22</div>
+          </div>
+
+          <div class="row">
+            <label>Pinch Threshold</label>
+            <input id="pinchT" type="range" min="0.18" max="0.52" step="0.01" value="0.30">
+            <div class="v" id="pinchTV">0.30</div>
+          </div>
+
+          <div class="row">
+            <label>Pinch Tap Max (ms)</label>
+            <input id="pinchTapMs" type="range" min="60" max="260" step="5" value="140">
+            <div class="v" id="pinchTapMsV">140 ms</div>
+          </div>
+
+          <div class="row">
+            <label>Yaw Rotate Sensitivity</label>
+            <input id="yawSens" type="range" min="0.3" max="3.0" step="0.05" value="1.25">
+            <div class="v" id="yawSensV">1.25</div>
+          </div>
+
+          <div class="row">
+            <label>Mirror X (Selfie)</label>
+            <input id="mirrorX" type="checkbox" checked>
+            <div class="v"></div>
+          </div>
+          <div class="row">
+            <label>Swap Hands</label>
+            <input id="swapHands" type="checkbox">
+            <div class="v"></div>
+          </div>
+
+          <div class="hint">
+            Gesture login: show both hands, then pinch both hands together to confirm.
+          </div>
+        </div>
+
+        <div class="panel" id="keyboardPanel">
+          <h3>Notes</h3>
+          <div class="hint">
+            <b>Move:</b> WASD<br/>
+            <b>Rotate view (yaw):</b> Q/E (hold)<br/>
+            <b>Shoot:</b> Space<br/>
+            <b>Level camera:</b> C (or click Level button)<br/><br/>
+            Camera pitch is locked (always horizon-aligned).
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="cardFooter">
+      <div class="actions">
+        <button id="resetBtn" class="actionBtn">Reset Tuners</button>
+        <button id="startBtn" class="actionBtn primary" disabled>Start</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- STARTUP (LOGIN + CALIBRATION) -->
+<div id="startup">
+  <div id="startupCard">
+    <div id="startupTop">
+      <div>
+        <h2 id="startupTitle">Gesture Login + Startup Scan</h2>
+        <div id="startupMsg">Raise both hands for detection.</div>
+      </div>
+      <div id="startupCount"></div>
+    </div>
+
+    <div id="startupStatus">
+      <div id="chipAim" class="chip bad">Left hand: not seen</div>
+      <div id="chipDrv" class="chip bad">Right hand: not seen</div>
+      <div id="chipPinch" class="chip">Pinch: —</div>
+      <div id="chipInch" class="chip">Micro: —</div>
+    </div>
+
+    <div id="startupBars">
+      <div class="pbar"><i id="bar1"></i></div>
+      <div class="pbar"><i id="bar2"></i></div>
+    </div>
+
+    <div id="startupNote">
+      Login: pinch both hands briefly to confirm.<br/>
+      Calibration: steady hands for 3-2-1, then micro movement scan.
+    </div>
+
+    <div id="startupActions">
+      <button id="skipStartup" class="actionBtn">Skip</button>
+    </div>
+  </div>
+</div>
+
+<!-- MediaPipe Hands (CDN) -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+<script>
+(() => {
+  // ===== helpers =====
+  const clamp = (v,a,b)=> Math.max(a, Math.min(b, v));
+  const rand  = (a,b)=> a + Math.random()*(b-a);
+  const hypot = Math.hypot;
+
+  function normAngle(a){
+    while (a > Math.PI) a -= Math.PI*2;
+    while (a < -Math.PI) a += Math.PI*2;
+    return a;
+  }
+
+  function pxPerInch(){
+    const d = document.createElement("div");
+    d.style.width = "1in";
+    d.style.position = "absolute";
+    d.style.left = "-200%";
+    d.style.top = "0";
+    document.body.appendChild(d);
+    const p = d.getBoundingClientRect().width || 96;
+    d.remove();
+    return p;
+  }
+  let PX_IN = pxPerInch();
+  window.addEventListener("resize", () => { PX_IN = pxPerInch(); }, { passive:true });
+
+  // ===== canvas =====
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d", { alpha: false });
+  function resize(){
+    const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    canvas.width  = Math.floor(window.innerWidth  * dpr);
+    canvas.height = Math.floor(window.innerHeight * dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  window.addEventListener("resize", resize, { passive: true });
+  resize();
+
+  // ===== audio =====
+  let audio = { ctx:null, unlocked:false };
+  function ensureAudio(){
+    if (audio.unlocked) return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    audio.ctx = new AC();
+    const osc = audio.ctx.createOscillator();
+    const gain = audio.ctx.createGain();
+    gain.gain.value = 0.0001;
+    osc.frequency.value = 220;
+    osc.connect(gain); gain.connect(audio.ctx.destination);
+    osc.start();
+    osc.stop(audio.ctx.currentTime + 0.01);
+    audio.unlocked = true;
+  }
+  function beep(type="tap"){
+    if (!audio.unlocked || !audio.ctx) return;
+    const t0 = audio.ctx.currentTime;
+    const osc = audio.ctx.createOscillator();
+    const gain = audio.ctx.createGain();
+    const filter = audio.ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = (type==="score") ? 2000 : (type==="shoot" ? 1400 : 900);
+    osc.type = (type==="score") ? "sine" : "square";
+    osc.frequency.setValueAtTime(type==="score" ? 820 : (type==="shoot"?520:420), t0);
+    osc.frequency.exponentialRampToValueAtTime(type==="score" ? 1280 : (type==="shoot"?760:520), t0 + 0.07);
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(type==="score" ? 0.14 : 0.09, t0 + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + (type==="score"?0.18:0.12));
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(audio.ctx.destination);
+    osc.start(t0);
+    osc.stop(t0 + (type==="score"?0.2:0.14));
+  }
+
+  // ===== UI refs =====
+  const ui = {
+    hud: document.getElementById("hud"),
+    stamFill: document.getElementById("stamFill"),
+    scoreTxt: document.getElementById("scoreTxt"),
+    shotsTxt: document.getElementById("shotsTxt"),
+    makeTxt: document.getElementById("makeTxt"),
+    hiTxt: document.getElementById("hiTxt"),
+    modeTxt: document.getElementById("modeTxt"),
+    bridge: document.getElementById("bridge"),
+
+    overlay: document.getElementById("overlay"),
+    pickGesture: document.getElementById("pickGesture"),
+    pickKeyboard: document.getElementById("pickKeyboard"),
+    startBtn: document.getElementById("startBtn"),
+    resetBtn: document.getElementById("resetBtn"),
+
+    menuBtn: document.getElementById("menuBtn"),
+    tunerBtn: document.getElementById("tunerBtn"),
+    pauseBtn: document.getElementById("pauseBtn"),
+    levelBtn: document.getElementById("levelBtn"),
+
+    liveTuner: document.getElementById("liveTuner"),
+    closeLiveBtn: document.getElementById("closeLiveBtn"),
+    collapseLiveBtn: document.getElementById("collapseLiveBtn"),
+    liveTunerMode: document.getElementById("liveTunerMode"),
+    liveReadout: document.getElementById("liveReadout"),
+    recenterBtn: document.getElementById("recenterBtn"),
+    recalBtn: document.getElementById("recalBtn"),
+
+    startup: document.getElementById("startup"),
+    startupTitle: document.getElementById("startupTitle"),
+    startupMsg: document.getElementById("startupMsg"),
+    startupCount: document.getElementById("startupCount"),
+    chipAim: document.getElementById("chipAim"),
+    chipDrv: document.getElementById("chipDrv"),
+    chipPinch: document.getElementById("chipPinch"),
+    chipInch: document.getElementById("chipInch"),
+    bar1: document.getElementById("bar1"),
+    bar2: document.getElementById("bar2"),
+    skipStartup: document.getElementById("skipStartup"),
+  };
+
+  function setModeTxt(t){ ui.modeTxt.textContent = t; }
+  function setBridge(t){ ui.bridge.textContent = t; }
+
+  // ===== config =====
+  const cfgDefaults = {
+    microRangeInches: 0.75,
+    throttleRangeInches: 0.75,
+    driveSensitivity: 1.0,
+    driveDeadzonePx: 18,
+    smoothing: 0.22,
+
+    pinchThresh: 0.30,
+    pinchTapMaxMs: 140,
+    yawSensitivity: 1.25, // yaw rotate sensitivity
+
+    mirrorX: true,
+    swapHands: false
+  };
+
+  const cfgKey  = "om_bball_cfg_horizon_v1";
+  const modeKey = "om_bball_mode_horizon_v1";
+  const bestKey = "om_bball_best_horizon_v1";
+  const cfg = { ...cfgDefaults };
+
+  function loadCfg(){
+    try{
+      const raw = localStorage.getItem(cfgKey);
+      if (!raw) return;
+      const o = JSON.parse(raw);
+      for (const k of Object.keys(cfgDefaults)){
+        if (typeof cfgDefaults[k] === "boolean"){
+          if (typeof o[k] === "boolean") cfg[k] = o[k];
+        } else if (typeof cfgDefaults[k] === "number"){
+          if (typeof o[k] === "number" && isFinite(o[k])) cfg[k] = o[k];
+        }
+      }
+    } catch {}
+  }
+  function saveCfg(){ try{ localStorage.setItem(cfgKey, JSON.stringify(cfg)); } catch {} }
+
+  // ===== bind controls (overlay + live) with sync =====
+  const rangeBindings = [];
+  const checkBindings = [];
+
+  function bindRange(id, key, fmt){
+    const el = document.getElementById(id);
+    const vEl = document.getElementById(id + "V");
+    if (!el) return;
+
+    rangeBindings.push({ el, vEl, key, fmt });
+
+    const onInput = () => {
+      cfg[key] = +el.value;
+      saveCfg();
+      syncControls();
+    };
+    el.addEventListener("input", onInput, { passive:true });
+  }
+  function bindCheck(id, key){
+    const el = document.getElementById(id);
+    if (!el) return;
+
+    checkBindings.push({ el, key });
+
+    const onChange = () => {
+      cfg[key] = !!el.checked;
+      saveCfg();
+      syncControls();
+    };
+    el.addEventListener("change", onChange, { passive:true });
+  }
+
+  function syncControls(){
+    for (const b of rangeBindings){
+      b.el.value = cfg[b.key];
+      if (b.vEl && b.fmt) b.vEl.textContent = b.fmt(cfg[b.key]);
+    }
+    for (const b of checkBindings){
+      b.el.checked = !!cfg[b.key];
+    }
+  }
+
+  // Overlay
+  bindRange("microIn","microRangeInches",(v)=>`${v.toFixed(2)} in`);
+  bindRange("thrIn","throttleRangeInches",(v)=>`${v.toFixed(2)} in`);
+  bindRange("drvSens","driveSensitivity",(v)=>`${v.toFixed(1)}×`);
+  bindRange("drvDead","driveDeadzonePx",(v)=>String(Math.round(v)));
+  bindRange("smooth","smoothing",(v)=>v.toFixed(2));
+  bindRange("pinchT","pinchThresh",(v)=>v.toFixed(2));
+  bindRange("pinchTapMs","pinchTapMaxMs",(v)=>`${Math.round(v)} ms`);
+  bindRange("yawSens","yawSensitivity",(v)=>v.toFixed(2));
+
+  bindCheck("mirrorX","mirrorX");
+  bindCheck("swapHands","swapHands");
+
+  // Live
+  bindRange("microInLive","microRangeInches",(v)=>`${v.toFixed(2)} in`);
+  bindRange("thrInLive","throttleRangeInches",(v)=>`${v.toFixed(2)} in`);
+  bindRange("drvSensLive","driveSensitivity",(v)=>`${v.toFixed(1)}×`);
+  bindRange("drvDeadLive","driveDeadzonePx",(v)=>String(Math.round(v)));
+  bindRange("smoothLive","smoothing",(v)=>v.toFixed(2));
+  bindRange("pinchTLive","pinchThresh",(v)=>v.toFixed(2));
+  bindRange("pinchTapMsLive","pinchTapMaxMs",(v)=>`${Math.round(v)} ms`);
+  bindRange("yawSensLive","yawSensitivity",(v)=>v.toFixed(2));
+
+  loadCfg();
+  syncControls();
+
+  ui.resetBtn.addEventListener("pointerdown", (e)=> {
+    e.preventDefault();
+    ensureAudio();
+    Object.assign(cfg, cfgDefaults);
+    saveCfg();
+    syncControls();
+    setBridge("Tuners reset to defaults.");
+  }, { passive:false });
+
+  // ===== controller selection =====
+  let controllerMode = null; // "gesture" | "keyboard"
+  function selectMode(m){
+    controllerMode = m;
+    ui.pickGesture.classList.toggle("selected", m==="gesture");
+    ui.pickKeyboard.classList.toggle("selected", m==="keyboard");
+    ui.startBtn.disabled = !controllerMode;
+    setBridge(m ? `Controller selected: ${m}` : "Controller: not selected");
+  }
+
+  const savedMode = localStorage.getItem(modeKey);
+  if (savedMode === "gesture" || savedMode === "keyboard") selectMode(savedMode);
+
+  // ===== input state =====
+  const input = {
+    // movement (local to camera yaw)
+    moveX:0, moveY:0,
+    dash:false,
+
+    // gestures
+    pinchLeft:false,
+    pinchRight:false,
+    pinchLeftNorm:  1,
+    pinchRightNorm: 1,
+
+    aimCursor:  { x: window.innerWidth*0.25, y: window.innerHeight*0.5, seen:false },
+    driveCursor:{ x: window.innerWidth*0.75, y: window.innerHeight*0.5, seen:false },
+
+    _gestureThrottle: 0
+  };
+
+  // ===== keyboard =====
+  const key = {};
+  const keyPrev = {};
+  window.addEventListener("keydown", (e) => { key[e.code] = true; }, { passive:true });
+  window.addEventListener("keyup",   (e) => { key[e.code] = false; }, { passive:true });
+
+  function pollKeyboard(){
+    let mx=0,my=0;
+    if (key["KeyA"]) mx -= 1;
+    if (key["KeyD"]) mx += 1;
+    if (key["KeyW"]) my -= 1;
+    if (key["KeyS"]) my += 1;
+    const m = hypot(mx,my) || 1;
+    input.moveX = mx / m;
+    input.moveY = my / m;
+  }
+
+  // ===== MediaPipe Hands =====
+  const videoEl = document.getElementById("video");
+  let hands = null;
+  let cam = null;
+
+  const g = {
+    // smoothed screen-space cursors (for debug/feel)
+    aimX: window.innerWidth*0.25, aimY: window.innerHeight*0.5,
+    drvX: window.innerWidth*0.75, drvY: window.innerHeight*0.5,
+
+    rawAimX: 0, rawAimY: 0, rawAimZ: 0,
+    rawDrvX: 0, rawDrvY: 0, rawDrvZ: 0,
+
+    neutralAim: null, // {x,y,z}
+    neutralDrv: null,
+
+    aimSeen:false, drvSeen:false,
+    lastAimAt:0, lastDrvAt:0, lastAnyAt:0,
+
+    pinchLeftLatched:false,
+    pinchRightLatched:false
+  };
+
+  function distLm(a,b){
+    const dx = (a.x - b.x), dy = (a.y - b.y);
+    return Math.sqrt(dx*dx + dy*dy);
+  }
+  function avgLm(points){
+    let x=0,y=0,z=0;
+    for (const p of points){ x += p.x; y += p.y; z += (p.z || 0); }
+    const n = Math.max(1, points.length);
+    return { x: x/n, y: y/n, z: z/n };
+  }
+  function slerpPos(oldV, newV){
+    const a = clamp(cfg.smoothing, 0, 0.98);
+    return oldV + (newV - oldV) * (1 - a);
+  }
+
+  function updatePinchLatch(isLeft, pinchNorm){
+    const downT = cfg.pinchThresh;
+    const upT   = cfg.pinchThresh + 0.05;
+    if (isLeft){
+      if (!g.pinchLeftLatched){
+        if (pinchNorm <= downT) g.pinchLeftLatched = true;
+      } else {
+        if (pinchNorm >= upT) g.pinchLeftLatched = false;
+      }
+    } else {
+      if (!g.pinchRightLatched){
+        if (pinchNorm <= downT) g.pinchRightLatched = true;
+      } else {
+        if (pinchNorm >= upT) g.pinchRightLatched = false;
+      }
+    }
+  }
+
+  function mapMicro(rawX, rawY, neutral, center, regionX0, regionX1, regionY0, regionY1, baseSens){
+    const microRangePx = Math.max(8, cfg.microRangeInches * PX_IN);
+    const regionW = (regionX1 - regionX0);
+    const regionH = (regionY1 - regionY0);
+
+    const pad = 16;
+    const maxDX = Math.max(20, (regionW * 0.5) - pad);
+    const maxDY = Math.max(20, (regionH * 0.5) - pad);
+
+    const scaleX = (maxDX / microRangePx) * baseSens;
+    const scaleY = (maxDY / microRangePx) * baseSens;
+
+    const dx = rawX - neutral.x;
+    const dy = rawY - neutral.y;
+
+    let sx = center.x + dx * scaleX;
+    let sy = center.y + dy * scaleY;
+
+    sx = clamp(sx, regionX0, regionX1);
+    sy = clamp(sy, regionY0, regionY1);
+    return { x:sx, y:sy };
+  }
+
+  function onHandsResults(results){
+    const w = window.innerWidth, h = window.innerHeight;
+    const half = w * 0.5;
+    const now = performance.now();
+
+    const lms = results.multiHandLandmarks || [];
+    const handed = results.multiHandedness || [];
+
+    let sawAny = false;
+
+    // reset seen each frame; re-assert below
+    let sawLeft = false, sawRight = false;
+
+    for (let i=0;i<lms.length;i++){
+      const landmarks = lms[i];
+      const label = handed[i] && handed[i].label ? handed[i].label : "Right";
+      const handLabel = cfg.swapHands ? (label==="Left"?"Right":"Left") : label;
+
+      const idxTip   = landmarks[8];
+      const thumbTip = landmarks[4];
+      const wrist    = landmarks[0];
+      const idxMcp   = landmarks[5];
+      const midMcp   = landmarks[9];
+      const ringMcp  = landmarks[13];
+      const pinkMcp  = landmarks[17];
+
+      const palm = avgLm([wrist, idxMcp, midMcp, ringMcp, pinkMcp]);
+
+      const BLEND = 0.22;
+      let px = idxTip.x * (1-BLEND) + palm.x * BLEND;
+      let py = idxTip.y * (1-BLEND) + palm.y * BLEND;
+      let pz = (idxTip.z || 0) * (1-BLEND) + (palm.z || 0) * BLEND;
+
+      if (cfg.mirrorX) px = 1 - px;
+
+      const scaleA = distLm(wrist, midMcp);
+      const scaleB = distLm(idxMcp, pinkMcp);
+      const handScale = Math.max(0.0001, scaleA, scaleB);
+      const pinchNorm = distLm(thumbTip, idxTip) / handScale;
+
+      updatePinchLatch(handLabel === "Left", pinchNorm);
+
+      if (handLabel === "Left"){
+        let rawX = px * half;
+        let rawY = py * h;
+        g.rawAimX = rawX; g.rawAimY = rawY; g.rawAimZ = pz;
+
+        if (!g.neutralAim && isFinite(rawX) && isFinite(rawY)){
+          g.neutralAim = { x: rawX, y: rawY, z: pz };
+        }
+
+        if (g.neutralAim){
+          const mapped = mapMicro(
+            rawX, rawY,
+            g.neutralAim,
+            { x: w*0.25, y: h*0.5 },
+            0, half,
+            0, h,
+            1.0
+          );
+          g.aimX = slerpPos(g.aimX, mapped.x);
+          g.aimY = slerpPos(g.aimY, mapped.y);
+        }
+        g.aimSeen = true;
+        g.lastAimAt = now;
+        input.pinchLeft = g.pinchLeftLatched;
+        input.pinchLeftNorm = pinchNorm;
+
+        sawLeft = true;
+        sawAny = true;
+      } else {
+        let rawX = half + px * half;
+        let rawY = py * h;
+        g.rawDrvX = rawX; g.rawDrvY = rawY; g.rawDrvZ = pz;
+
+        if (!g.neutralDrv && isFinite(rawX) && isFinite(rawY)){
+          g.neutralDrv = { x: rawX, y: rawY, z: pz };
+        }
+
+        if (g.neutralDrv){
+          const mapped = mapMicro(
+            rawX, rawY,
+            g.neutralDrv,
+            { x: w*0.75, y: h*0.5 },
+            half, w,
+            0, h,
+            1.0
+          );
+          g.drvX = slerpPos(g.drvX, mapped.x);
+          g.drvY = slerpPos(g.drvY, mapped.y);
+        }
+
+        g.drvSeen = true;
+        g.lastDrvAt = now;
+        input.pinchRight = g.pinchRightLatched;
+        input.pinchRightNorm = pinchNorm;
+
+        sawRight = true;
+        sawAny = true;
+      }
+    }
+
+    if (sawAny) g.lastAnyAt = now;
+
+    const HOLD_MS = 320;
+    g.aimSeen = sawLeft  && ((now - g.lastAimAt) <= HOLD_MS);
+    g.drvSeen = sawRight && ((now - g.lastDrvAt) <= HOLD_MS);
+
+    input.aimCursor.x = g.aimX; input.aimCursor.y = g.aimY; input.aimCursor.seen = g.aimSeen;
+    input.driveCursor.x = g.drvX; input.driveCursor.y = g.drvY; input.driveCursor.seen = g.drvSeen;
+  }
+
+  async function startGesture(){
+    if (!window.Hands || !window.Camera) return false;
+    if (hands && cam) return true;
+
+    hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+    hands.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.55,
+      minTrackingConfidence: 0.55
+    });
+    hands.onResults(onHandsResults);
+
+    cam = new Camera(videoEl, {
+      onFrame: async () => { try { await hands.send({ image: videoEl }); } catch {} },
+      width: 640,
+      height: 480
+    });
+
+    try{ await cam.start(); return true; }
+    catch { hands = null; cam = null; return false; }
+  }
+  function stopGesture(){
+    try{ if (cam && cam.stop) cam.stop(); } catch {}
+    cam = null;
+    hands = null;
+  }
+
+  // ===== startup: gesture login + calibration =====
+  const startup = {
+    active:false,
+    phase:"idle",     // login_wait, login_pinch, steady, countdown, range, done
+    t:0,
+    countdownT:0,
+    rangeT:0,
+    rawDrv: [],
+    neutralDrv: null,
+    jitterDrv: 0,
+    maxDrv: 0,
+    pinchHold: 0
+  };
+
+  function showStartup(show){
+    ui.startup.style.display = show ? "flex" : "none";
+    if (!show){
+      ui.startupCount.textContent = "";
+      ui.bar1.style.width = "0%";
+      ui.bar2.style.width = "0%";
+    }
+  }
+
+  function statsStd(points){
+    if (!points || points.length < 3) return { sx: 0, sy: 0 };
+    let mx=0,my=0;
+    for (const p of points){ mx += p.x; my += p.y; }
+    mx /= points.length; my /= points.length;
+    let vx=0, vy=0;
+    for (const p of points){
+      const dx = p.x - mx, dy = p.y - my;
+      vx += dx*dx; vy += dy*dy;
+    }
+    vx /= points.length; vy /= points.length;
+    return { sx: Math.sqrt(vx), sy: Math.sqrt(vy) };
+  }
+
+  function beginStartup(){
+    startup.active = true;
+    startup.phase = "login_wait";
+    startup.t = 0;
+    startup.countdownT = 0;
+    startup.rangeT = 0;
+    startup.rawDrv.length = 0;
+    startup.neutralDrv = null;
+    startup.jitterDrv = 0;
+    startup.maxDrv = 0;
+    startup.pinchHold = 0;
+
+    ui.startupTitle.textContent = "Gesture Login + Startup Scan";
+    ui.startupMsg.innerHTML = `Raise <b>both hands</b> in view.`;
+    ui.startupCount.textContent = "";
+    ui.bar1.style.width = "0%";
+    ui.bar2.style.width = "0%";
+    ui.chipInch.textContent = `Micro: ${cfg.microRangeInches.toFixed(2)} in`;
+
+    showStartup(true);
+  }
+
+  function updateStartup(dt){
+    if (!startup.active) return;
+
+    const leftSeen = input.aimCursor.seen;
+    const rightSeen = input.driveCursor.seen;
+    const bothSeen = leftSeen && rightSeen;
+
+    ui.chipAim.className = "chip " + (leftSeen ? "ok" : "bad");
+    ui.chipDrv.className = "chip " + (rightSeen ? "ok" : "bad");
+    ui.chipAim.textContent = `Left hand: ${leftSeen ? "seen" : "not seen"}`;
+    ui.chipDrv.textContent = `Right hand: ${rightSeen ? "seen" : "not seen"}`;
+    ui.chipPinch.textContent = `Pinch: L=${input.pinchLeft?"Y":"n"} R=${input.pinchRight?"Y":"n"}`;
+    ui.chipInch.textContent = `Micro: ${cfg.microRangeInches.toFixed(2)} in`;
+
+    // --- Login: require both hands + both pinched briefly
+    if (startup.phase === "login_wait"){
+      if (bothSeen){
+        startup.t += dt;
+        const pct = clamp(startup.t / 0.40, 0, 1);
+        ui.bar1.style.width = `${(pct*100).toFixed(0)}%`;
+        ui.startupMsg.innerHTML = `Hands detected. Now <b>pinch both hands</b> briefly to login.`;
+        if (startup.t >= 0.40){
+          startup.phase = "login_pinch";
+          startup.pinchHold = 0;
+        }
+      } else {
+        startup.t = 0;
+        ui.bar1.style.width = "0%";
+        ui.startupMsg.innerHTML = `Raise <b>both hands</b> in view.`;
+      }
+      return;
+    }
+
+    if (startup.phase === "login_pinch"){
+      if (!bothSeen){
+        startup.phase = "login_wait";
+        startup.t = 0;
+        startup.pinchHold = 0;
+        ui.startupMsg.innerHTML = `Hands lost—raise both hands again.`;
+        return;
+      }
+      const bothPinched = !!(input.pinchLeft && input.pinchRight);
+      startup.pinchHold = bothPinched ? (startup.pinchHold + dt) : 0;
+
+      const pct = clamp(startup.pinchHold / 0.35, 0, 1);
+      ui.bar1.style.width = `${(pct*100).toFixed(0)}%`;
+
+      if (startup.pinchHold >= 0.35){
+        beep("tap");
+        startup.phase = "steady";
+        startup.t = 0;
+        ui.startupMsg.innerHTML = `Login ✔ — now hold steady for <b>3-2-1</b> (neutral + jitter).`;
+        ui.startupCount.textContent = "";
+        ui.bar1.style.width = "0%";
+        startup.countdownT = 3.0;
+        startup.rawDrv.length = 0;
+      }
+      return;
+    }
+
+    // --- Calibration
+    if (startup.phase === "steady"){
+      if (!rightSeen){
+        ui.startupMsg.innerHTML = `Keep right hand visible for movement calibration.`;
+        ui.bar1.style.width = "0%";
+        return;
+      }
+      // immediately go into countdown
+      startup.phase = "countdown";
+      return;
+    }
+
+    if (startup.phase === "countdown"){
+      if (!rightSeen){
+        startup.phase = "steady";
+        ui.startupMsg.innerHTML = `Right hand lost—hold it in view again.`;
+        return;
+      }
+      startup.countdownT -= dt;
+      const secondsLeft = Math.max(0, startup.countdownT);
+      ui.startupCount.textContent = String(Math.max(1, Math.ceil(secondsLeft)));
+
+      const pct = clamp((3.0 - secondsLeft) / 3.0, 0, 1);
+      ui.bar1.style.width = `${(pct*100).toFixed(0)}%`;
+
+      startup.rawDrv.push({ x: g.rawDrvX, y: g.rawDrvY, z: g.rawDrvZ });
+
+      if (startup.countdownT <= 0){
+        const mean = (arr) => {
+          let x=0,y=0,z=0;
+          for (const p of arr){ x+=p.x; y+=p.y; z+=p.z; }
+          const n = Math.max(1, arr.length);
+          return { x:x/n, y:y/n, z:z/n };
+        };
+        startup.neutralDrv = mean(startup.rawDrv);
+
+        const sD = statsStd(startup.rawDrv);
+        startup.jitterDrv = Math.sqrt(sD.sx*sD.sx + sD.sy*sD.sy);
+
+        g.neutralDrv = { ...startup.neutralDrv };
+
+        startup.phase = "range";
+        startup.rangeT = 1.3;
+        startup.maxDrv = 0;
+
+        ui.startupMsg.innerHTML =
+          `Now move right hand only a little (<b>~0.5–1 inch</b>) for 1.3s.<br/>This confirms micro range & sets deadzone.`;
+        ui.startupCount.textContent = "";
+        ui.bar2.style.width = "0%";
+      }
+      return;
+    }
+
+    if (startup.phase === "range"){
+      startup.rangeT -= dt;
+
+      if (rightSeen && startup.neutralDrv){
+        const dD = hypot(g.rawDrvX - startup.neutralDrv.x, g.rawDrvY - startup.neutralDrv.y);
+        startup.maxDrv = Math.max(startup.maxDrv, dD);
+      }
+      const pct = clamp((1.3 - Math.max(0, startup.rangeT)) / 1.3, 0, 1);
+      ui.bar2.style.width = `${(pct*100).toFixed(0)}%`;
+
+      if (startup.rangeT <= 0){
+        cfg.driveDeadzonePx = Math.round(clamp(startup.jitterDrv * 3.0 + 10, 0, 140));
+
+        const moved = startup.maxDrv || 0;
+        if (moved > 0){
+          const inferredIn = clamp(moved / PX_IN, 0.25, 2.0);
+          cfg.microRangeInches = Math.min(cfg.microRangeInches, inferredIn);
+          cfg.throttleRangeInches = Math.min(cfg.throttleRangeInches, cfg.microRangeInches);
+        }
+
+        saveCfg();
+        syncControls();
+
+        startup.phase = "done";
+        ui.startupMsg.innerHTML = `Calibrated ✔ — deadzone saved, micro range confirmed.`;
+        ui.startupCount.textContent = "";
+        ui.bar1.style.width = "100%";
+        ui.bar2.style.width = "100%";
+
+        setTimeout(() => {
+          startup.active = false;
+          showStartup(false);
+          paused = false;
+          ui.pauseBtn.textContent = "Pause";
+          setBridge(`Gesture ready • Micro ${cfg.microRangeInches.toFixed(2)}in • Deadzone ${cfg.driveDeadzonePx}px`);
+        }, 650);
+      }
+      return;
+    }
+  }
+
+  ui.skipStartup.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    ensureAudio();
+    startup.active = false;
+    showStartup(false);
+    paused = false;
+    ui.pauseBtn.textContent = "Pause";
+    setBridge("Gesture ON — Startup skipped (neutral auto-seeds).");
+  }, { passive:false });
+
+  // ===== overlays/buttons =====
+  let started = false;
+  let paused = true;
+
+  function showOverlay(show){
+    ui.overlay.style.display = show ? "flex" : "none";
+    if (show){
+      paused = true;
+      ui.pauseBtn.textContent = "Resume";
+      ui.liveTuner.style.display = "none";
+    }
+  }
+  function togglePause(){
+    paused = !paused;
+    ui.pauseBtn.textContent = paused ? "Resume" : "Pause";
+  }
+  function toggleLiveTuner(force){
+    const show = (typeof force === "boolean") ? force : (ui.liveTuner.style.display === "none");
+    ui.liveTuner.style.display = show ? "block" : "none";
+  }
+
+  ui.menuBtn.addEventListener("pointerdown", (e)=>{ e.preventDefault(); ensureAudio(); showOverlay(true); }, { passive:false });
+  ui.pauseBtn.addEventListener("pointerdown",(e)=>{ e.preventDefault(); ensureAudio(); togglePause(); }, { passive:false });
+  ui.tunerBtn.addEventListener("pointerdown",(e)=>{ e.preventDefault(); ensureAudio(); toggleLiveTuner(); }, { passive:false });
+  ui.closeLiveBtn.addEventListener("pointerdown",(e)=>{ e.preventDefault(); ensureAudio(); toggleLiveTuner(false); }, { passive:false });
+
+  // live tuner collapse
+  let liveCollapsed = false;
+  ui.collapseLiveBtn.addEventListener("pointerdown",(e)=>{
+    e.preventDefault();
+    ensureAudio();
+    liveCollapsed = !liveCollapsed;
+    document.getElementById("liveTunerBody").style.display = liveCollapsed ? "none" : "block";
+    ui.collapseLiveBtn.textContent = liveCollapsed ? "Show" : "Hide";
+  }, { passive:false });
+
+  // recenter: movement neutral only (right hand)
+  ui.recenterBtn.addEventListener("pointerdown",(e)=>{
+    e.preventDefault();
+    ensureAudio();
+    if (controllerMode !== "gesture") return;
+    if (isFinite(g.rawDrvX) && isFinite(g.rawDrvY)) g.neutralDrv = { x:g.rawDrvX, y:g.rawDrvY, z:g.rawDrvZ };
+    setBridge("Recentered movement neutral (right hand).");
+  }, { passive:false });
+
+  ui.recalBtn.addEventListener("pointerdown",(e)=>{
+    e.preventDefault();
+    ensureAudio();
+    if (controllerMode !== "gesture") return;
+    paused = true;
+    ui.pauseBtn.textContent = "Pause";
+    toggleLiveTuner(false);
+    beginStartup();
+  }, { passive:false });
+
+  // ===== controller selection =====
+  ui.pickGesture.addEventListener("pointerdown", async (e) => {
+    e.preventDefault();
+    ensureAudio();
+    selectMode("gesture");
+    const ok = await startGesture();
+    setBridge(ok ? "Gesture preview ON — adjust tuners, then Start." : "Gesture preview ERROR — need camera permission + HTTPS/localhost");
+    setModeTxt("Gesture (preview)");
+  }, { passive:false });
+
+  ui.pickKeyboard.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    ensureAudio();
+    selectMode("keyboard");
+    stopGesture();
+    setModeTxt("Keyboard (preview)");
+    setBridge("Keyboard selected — press Start");
+  }, { passive:false });
+
+  // ===== camera (HORIZON-LOCKED) =====
+  const cam3 = {
+    yaw: 0,                   // yaw can change
+    pitch: -0.58,             // fixed pitch (downward tilt); NO up/down changes
+    dist: 920,
+    height: 520,
+    fov: 72 * Math.PI/180
+  };
+  function resetCameraLevel(){
+    // "Level" = horizon aligned (pitch fixed) + yaw reset
+    cam3.yaw = 0;
+    cam3.pitch = -0.58;
+    setBridge("Camera leveled (yaw reset, horizon locked).");
+  }
+
+  ui.levelBtn.addEventListener("pointerdown",(e)=>{
+    e.preventDefault();
+    ensureAudio();
+    resetCameraLevel();
+  }, { passive:false });
+
+  // ===== game: simple 3D court + physics =====
+  // coordinate system:
+  // X = court width axis, Z = court length axis, Y = up (height)
+  const COURT = { w: 2800, l: 1500 };
+  const GRAV =  -2200; // units/s^2
+
+  const state = {
+    time: 0,
+    score: 0,
+    shots: 0,
+    makes: 0,
+    best: Number(localStorage.getItem(bestKey) || "0") || 0,
+    msgT: 0
+  };
+  ui.hiTxt.textContent = `Best ${state.best}`;
+
+  const player = {
+    x: COURT.w*0.50,
+    z: COURT.l*0.78,
+    r: 44,
+    stamina: 1.0,
+    speed: 540
+  };
+
+  const ball = {
+    x: player.x + 60,
+    y: 120,
+    z: player.z - 70,
+    vx: 0, vy: 0, vz: 0,
+    r: 22,
+    held: false,
+    lastY: 0
+  };
+
+  const hoop = {
+    x: COURT.w*0.50,
+    y: 305,
+    z: 120,
+    rimR: 52,
+    backZ: 70
+  };
+
+  function addScore(n){
+    state.score += n;
+    ui.scoreTxt.textContent = `Score ${state.score}`;
+    if (state.score > state.best){
+      state.best = state.score;
+      try{ localStorage.setItem(bestKey, String(state.best)); } catch {}
+      ui.hiTxt.textContent = `Best ${state.best}`;
+    }
+  }
+  function updateHUD(){
+    ui.shotsTxt.textContent = `Shots ${state.shots}`;
+    ui.makeTxt.textContent = `Makes ${state.makes}`;
+    ui.stamFill.style.width = `${(clamp(player.stamina,0,1)*100).toFixed(0)}%`;
+    ui.stamFill.style.background = player.stamina > 0.35 ? "rgba(80,255,140,.95)" : "rgba(255,110,110,.95)";
+  }
+  updateHUD();
+
+  function clampCourtXZ(x,z){
+    x = clamp(x, 120, COURT.w - 120);
+    z = clamp(z, 120, COURT.l - 120);
+    return {x,z};
+  }
+
+  function resetBallNearPlayer(){
+    ball.held = false;
+    ball.vx = ball.vy = ball.vz = 0;
+    ball.x = player.x + rand(-140,140);
+    ball.z = player.z + rand(-140,140);
+    const p = clampCourtXZ(ball.x, ball.z);
+    ball.x = p.x; ball.z = p.z;
+    ball.y = 80;
+    ball.lastY = ball.y;
+  }
+
+  // ===== shooting + camera pinch logic (HORIZON LOCK) =====
+  const pinchCam = {
+    rotating: false,
+    startYaw: 0,
+    startX: 0,
+    startT: 0,
+    lastDX: 0
+  };
+
+  function tryShoot(){
+    if (!ball.held) return false;
+
+    state.shots += 1;
+
+    // compute target from camera ray through screen center (crosshair)
+    const w = window.innerWidth, h = window.innerHeight;
+    const cx = w*0.5, cy = h*0.47; // slightly above center feels better
+
+    // camera position around player
+    const yaw = cam3.yaw;
+    const pitch = cam3.pitch; // fixed
+
+    const forward = { x: Math.cos(yaw), z: Math.sin(yaw) };
+    const camPos = {
+      x: player.x - forward.x * cam3.dist,
+      y: cam3.height,
+      z: player.z - forward.z * cam3.dist
+    };
+
+    const f = (0.5*h) / Math.tan(cam3.fov*0.5);
+
+    // Convert screen point to a direction in camera space
+    // camera space: +Z forward, +X right, +Y up
+    const ndcX = (cx - w*0.5) / f;
+    const ndcY = (cy - h*0.5) / f;
+    let dirCam = { x: ndcX, y: -ndcY, z: 1 };
+
+    // normalize
+    const dl = Math.hypot(dirCam.x, dirCam.y, dirCam.z) || 1;
+    dirCam.x/=dl; dirCam.y/=dl; dirCam.z/=dl;
+
+    // rotate from camera space to world space: first pitch then yaw
+    // world up axis = Y
+    // apply pitch around camera X: since pitch is fixed and camera looks downward, invert usage accordingly
+    const cp = Math.cos(pitch), sp = Math.sin(pitch);
+    // rotate around X:
+    let dy = dirCam.y*cp - dirCam.z*sp;
+    let dz = dirCam.y*sp + dirCam.z*cp;
+    let dx = dirCam.x;
+
+    // rotate around Y by yaw:
+    const cyaw = Math.cos(yaw), syaw = Math.sin(yaw);
+    const wx = dx*cyaw + dz*syaw;
+    const wz = -dx*syaw + dz*cyaw;
+    const wy = dy;
+
+    const dirW = { x: wx, y: wy, z: wz };
+
+    // choose an aim plane in front of player; try to naturally land near hoop distance
+    const distToHoop = Math.hypot(hoop.x - player.x, hoop.z - player.z);
+    const aimDist = clamp(distToHoop, 680, 1500);
+
+    const target = {
+      x: player.x + dirW.x * aimDist,
+      y: hoop.y, // aim around rim height (easy)
+      z: player.z + dirW.z * aimDist
+    };
+
+    // assist: softly pull target toward hoop center based on closeness of view to hoop
+    const hoopDx = hoop.x - target.x;
+    const hoopDz = hoop.z - target.z;
+    const hoopD = Math.hypot(hoopDx, hoopDz);
+    const assist = clamp(1 - (hoopD / 900), 0, 1) * 0.65; // 0..0.65
+    target.x = target.x + (hoop.x - target.x) * assist;
+    target.z = target.z + (hoop.z - target.z) * assist;
+
+    // projectile solve with chosen time
+    const dxW = target.x - player.x;
+    const dzW = target.z - player.z;
+    const dyW = target.y - 140; // release height
+    const dist = Math.hypot(dxW, dzW);
+
+    const t = clamp(dist / 900, 0.72, 1.12);
+
+    // initial velocity so that y hits target with gravity
+    const vx = dxW / t;
+    const vz = dzW / t;
+    const vy = (dyW - 0.5*GRAV*t*t) / t;
+
+    ball.held = false;
+    ball.x = player.x + forward.x*64;
+    ball.z = player.z + forward.z*64;
+    ball.y = 140;
+    ball.vx = vx;
+    ball.vy = vy;
+    ball.vz = vz;
+    ball.lastY = ball.y;
+
+    beep("shoot");
+    updateHUD();
+    setBridge(`Shot #${state.shots} — rotate view with pinch (hold), quick pinch-tap to shoot.`);
+    return true;
+  }
+
+  function autoGrabBall(){
+    if (ball.held) return;
+    const d = Math.hypot(ball.x - player.x, ball.z - player.z);
+    if (d < player.r + 70 && ball.y < 140){
+      ball.held = true;
+      ball.vx = ball.vy = ball.vz = 0;
+      beep("tap");
+      setBridge("Ball grabbed (auto). Quick pinch tap to shoot. Hold pinch to rotate view.");
+    }
+  }
+
+  function isScoreCrossing(){
+    // score when ball crosses downward through rim height and is within rim radius in XZ
+    const prevY = ball.lastY;
+    const curY  = ball.y;
+
+    if (prevY > hoop.y && curY <= hoop.y){
+      const dx = ball.x - hoop.x;
+      const dz = ball.z - hoop.z;
+      const d = Math.hypot(dx,dz);
+      if (d <= hoop.rimR){
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function ballPhysics(dt){
+    ball.lastY = ball.y;
+
+    if (ball.held){
+      // carry in front of player
+      const yaw = cam3.yaw;
+      const forward = { x: Math.cos(yaw), z: Math.sin(yaw) };
+      ball.x = player.x + forward.x * 66;
+      ball.z = player.z + forward.z * 66;
+      ball.y = 120;
+      return;
+    }
+
+    // integrate
+    ball.vy += GRAV * dt;
+    ball.x += ball.vx * dt;
+    ball.y += ball.vy * dt;
+    ball.z += ball.vz * dt;
+
+    // ground bounce
+    const floorY = ball.r;
+    if (ball.y < floorY){
+      ball.y = floorY;
+      ball.vy = -ball.vy * 0.55;
+      ball.vx *= 0.86;
+      ball.vz *= 0.86;
+      if (Math.abs(ball.vy) < 85) ball.vy = 0;
+    }
+
+    // simple backboard plane (z ~ hoop.backZ behind hoop)
+    if (ball.z < hoop.backZ && ball.y < hoop.y + 240){
+      ball.z = hoop.backZ;
+      ball.vz = Math.abs(ball.vz) * 0.6;
+      ball.vx *= 0.9;
+      ball.vy *= 0.92;
+    }
+
+    // rim collision (very light)
+    const dx = ball.x - hoop.x;
+    const dz = ball.z - hoop.z;
+    const ringD = Math.hypot(dx,dz);
+    if (Math.abs(ball.y - hoop.y) < 26 && ringD < hoop.rimR + ball.r && ringD > hoop.rimR - ball.r){
+      const nx = dx / (ringD || 1);
+      const nz = dz / (ringD || 1);
+      ball.vx += nx * 180;
+      ball.vz += nz * 180;
+      ball.vy *= 0.92;
+    }
+
+    // out of bounds -> reset near player
+    if (ball.x < 40 || ball.x > COURT.w-40 || ball.z < 40 || ball.z > COURT.l-40){
+      resetBallNearPlayer();
+      setBridge("Ball reset (out of bounds).");
+    }
+
+    // score check
+    if (isScoreCrossing()){
+      state.makes += 1;
+      addScore(2);
+      beep("score");
+      setBridge(`Swish! Makes ${state.makes}/${state.shots} • Score ${state.score}`);
+      resetBallNearPlayer();
+    }
+  }
+
+  // ===== projection/rendering (fixed pitch = horizon aligned) =====
+  function projectPoint(px,py,pz, camPos, yaw, pitch, w, h){
+    // translate
+    let x = px - camPos.x;
+    let y = py - camPos.y;
+    let z = pz - camPos.z;
+
+    // rotate yaw around Y (world up), by -yaw to bring into camera frame
+    const cy = Math.cos(-yaw), sy = Math.sin(-yaw);
+    const x1 = x*cy + z*sy;
+    const z1 = -x*sy + z*cy;
+    const y1 = y;
+
+    // rotate pitch around X by -pitch
+    const cp = Math.cos(-pitch), sp = Math.sin(-pitch);
+    const y2 = y1*cp - z1*sp;
+    const z2 = y1*sp + z1*cp;
+    const x2 = x1;
+
+    // perspective
+    const f = (0.5*h) / Math.tan(cam3.fov*0.5);
+    if (z2 <= 10) return null;
+    const sx = (x2 / z2) * f + w*0.5;
+    const sy2 = (y2 / z2) * f + h*0.5;
+    return { x:sx, y:sy2, z:z2 };
+  }
+
+  function drawLine3D(a,b, camPos, yaw, pitch, w, h){
+    const pa = projectPoint(a.x,a.y,a.z, camPos, yaw, pitch, w, h);
+    const pb = projectPoint(b.x,b.y,b.z, camPos, yaw, pitch, w, h);
+    if (!pa || !pb) return;
+    ctx.beginPath();
+    ctx.moveTo(pa.x, pa.y);
+    ctx.lineTo(pb.x, pb.y);
+    ctx.stroke();
+  }
+
+  function drawCourt(camPos, yaw, pitch, w, h){
+    // floor gradient
+    ctx.fillStyle = "#0b0f14";
+    ctx.fillRect(0,0,w,h);
+
+    // subtle horizon glow (visual confirmation of "level")
+    ctx.globalAlpha = 0.06;
+    ctx.fillStyle = "#d7e7ff";
+    ctx.fillRect(0, h*0.5 - 1, w, 2);
+    ctx.globalAlpha = 1;
+
+    // court outline + center line
+    ctx.strokeStyle = "rgba(255,255,255,.16)";
+    ctx.lineWidth = 2;
+
+    const corners = [
+      {x:120,y:0,z:120},
+      {x:COURT.w-120,y:0,z:120},
+      {x:COURT.w-120,y:0,z:COURT.l-120},
+      {x:120,y:0,z:COURT.l-120}
+    ];
+    for (let i=0;i<4;i++){
+      drawLine3D(corners[i], corners[(i+1)%4], camPos, yaw, pitch, w, h);
+    }
+
+    // center circle (approx with segments)
+    ctx.strokeStyle = "rgba(255,255,255,.12)";
+    ctx.lineWidth = 2;
+    const cx = COURT.w*0.5, cz = COURT.l*0.5;
+    const r = 170;
+    const seg = 26;
+    for (let i=0;i<seg;i++){
+      const a0 = (i/seg)*Math.PI*2;
+      const a1 = ((i+1)/seg)*Math.PI*2;
+      drawLine3D(
+        {x:cx+Math.cos(a0)*r, y:0, z:cz+Math.sin(a0)*r},
+        {x:cx+Math.cos(a1)*r, y:0, z:cz+Math.sin(a1)*r},
+        camPos,yaw,pitch,w,h
+      );
+    }
+
+    // key / free throw line (simple)
+    const keyW = 520, keyL = 520;
+    ctx.strokeStyle = "rgba(255,255,255,.10)";
+    const k0 = {x:cx-keyW/2, y:0, z:120};
+    const k1 = {x:cx+keyW/2, y:0, z:120};
+    const k2 = {x:cx+keyW/2, y:0, z:120+keyL};
+    const k3 = {x:cx-keyW/2, y:0, z:120+keyL};
+    drawLine3D(k0,k1,camPos,yaw,pitch,w,h);
+    drawLine3D(k1,k2,camPos,yaw,pitch,w,h);
+    drawLine3D(k2,k3,camPos,yaw,pitch,w,h);
+    drawLine3D(k3,k0,camPos,yaw,pitch,w,h);
+  }
+
+  function drawHoop(camPos, yaw, pitch, w, h){
+    // pole
+    ctx.strokeStyle = "rgba(255,255,255,.22)";
+    ctx.lineWidth = 2;
+    drawLine3D(
+      {x:hoop.x, y:0, z:hoop.backZ},
+      {x:hoop.x, y:hoop.y+180, z:hoop.backZ},
+      camPos,yaw,pitch,w,h
+    );
+
+    // backboard
+    ctx.strokeStyle = "rgba(255,255,255,.18)";
+    ctx.lineWidth = 2;
+    const bw=320, bh=220;
+    const z = hoop.backZ;
+    drawLine3D({x:hoop.x-bw/2,y:hoop.y+200,z},{x:hoop.x+bw/2,y:hoop.y+200,z},camPos,yaw,pitch,w,h);
+    drawLine3D({x:hoop.x+bw/2,y:hoop.y+200,z},{x:hoop.x+bw/2,y:hoop.y+200-bh,z},camPos,yaw,pitch,w,h);
+    drawLine3D({x:hoop.x+bw/2,y:hoop.y+200-bh,z},{x:hoop.x-bw/2,y:hoop.y+200-bh,z},camPos,yaw,pitch,w,h);
+    drawLine3D({x:hoop.x-bw/2,y:hoop.y+200-bh,z},{x:hoop.x-bw/2,y:hoop.y+200,z},camPos,yaw,pitch,w,h);
+
+    // rim circle
+    ctx.strokeStyle = "rgba(255,150,120,.65)";
+    ctx.lineWidth = 3;
+    const seg = 26;
+    for (let i=0;i<seg;i++){
+      const a0 = (i/seg)*Math.PI*2;
+      const a1 = ((i+1)/seg)*Math.PI*2;
+      drawLine3D(
+        {x:hoop.x+Math.cos(a0)*hoop.rimR, y:hoop.y, z:hoop.z+Math.sin(a0)*hoop.rimR},
+        {x:hoop.x+Math.cos(a1)*hoop.rimR, y:hoop.y, z:hoop.z+Math.sin(a1)*hoop.rimR},
+        camPos,yaw,pitch,w,h
+      );
+    }
+  }
+
+  function drawPlayer(camPos, yaw, pitch, w, h){
+    const p = projectPoint(player.x, 0, player.z, camPos, yaw, pitch, w, h);
+    if (!p) return;
+
+    // shadow
+    ctx.globalAlpha = 0.25;
+    ctx.fillStyle = "#000";
+    ctx.beginPath();
+    ctx.ellipse(p.x, p.y+18, 40, 18, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // body marker
+    ctx.fillStyle = "rgba(90,255,160,.92)";
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 26, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.strokeStyle = "rgba(255,255,255,.22)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 34, 0, Math.PI*2);
+    ctx.stroke();
+  }
+
+  function drawBall(camPos, yaw, pitch, w, h){
+    const p = projectPoint(ball.x, ball.y, ball.z, camPos, yaw, pitch, w, h);
+    if (!p) return;
+
+    // scale with depth
+    const s = clamp(920 / p.z, 0.35, 1.35);
+    const r = ball.r * s;
+
+    // shadow on floor
+    const floorP = projectPoint(ball.x, 0, ball.z, camPos, yaw, pitch, w, h);
+    if (floorP){
+      ctx.globalAlpha = 0.18;
+      ctx.fillStyle = "#000";
+      ctx.beginPath();
+      ctx.ellipse(floorP.x, floorP.y+12, r*1.05, r*0.55, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+
+    // ball
+    ctx.fillStyle = "rgba(255,165,90,.92)";
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.strokeStyle = "rgba(255,255,255,.14)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, 0, Math.PI*2);
+    ctx.stroke();
+
+    // seams
+    ctx.strokeStyle = "rgba(0,0,0,.22)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r*0.78, 0, Math.PI*2);
+    ctx.stroke();
+  }
+
+  function drawCrosshair(){
+    const w = window.innerWidth, h = window.innerHeight;
+    const x = w*0.5, y = h*0.47;
+
+    ctx.save();
+    ctx.translate(x,y);
+
+    ctx.globalAlpha = 0.9;
+    ctx.strokeStyle = "rgba(255,255,255,.24)";
+    ctx.lineWidth = 2;
+
+    ctx.beginPath();
+    ctx.arc(0,0, 14, 0, Math.PI*2);
+    ctx.stroke();
+
+    ctx.strokeStyle = "rgba(255,255,255,.65)";
+    ctx.beginPath();
+    ctx.moveTo(-18,0); ctx.lineTo(-6,0);
+    ctx.moveTo(18,0);  ctx.lineTo(6,0);
+    ctx.moveTo(0,-18); ctx.lineTo(0,-6);
+    ctx.moveTo(0,18);  ctx.lineTo(0,6);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  // ===== gameplay update =====
+  function update(dt){
+    state.time += dt;
+
+    if (!started) return;
+
+    if (controllerMode === "gesture" && startup.active){
+      updateStartup(dt);
+      return;
+    }
+
+    // stamina regen
+    player.stamina = clamp(player.stamina + dt*0.14, 0, 1);
+
+    // input
+    if (controllerMode === "keyboard"){
+      pollKeyboard();
+
+      // yaw rotate (no pitch - horizon lock)
+      const rot = (key["KeyQ"] ? -1 : 0) + (key["KeyE"] ? 1 : 0);
+      if (rot !== 0) cam3.yaw = normAngle(cam3.yaw + rot * dt * 1.8);
+
+      // level
+      const cDown = !!key["KeyC"];
+      const cPrev = !!keyPrev["KeyC"];
+      if (cDown && !cPrev) resetCameraLevel();
+      keyPrev["KeyC"] = cDown;
+
+      // shoot
+      const sp = !!key["Space"];
+      const spPrev = !!keyPrev["Space"];
+      if (sp && !spPrev){
+        tryShoot();
+      }
+      keyPrev["Space"] = sp;
+    } else {
+      // gesture movement: right hand relative to neutral
+      const fresh = (performance.now() - g.lastAnyAt) < 500;
+      const throttleRangePx = Math.max(8, cfg.throttleRangeInches * PX_IN);
+
+      if (fresh && input.driveCursor.seen && g.neutralDrv){
+        const dx = g.rawDrvX - g.neutralDrv.x;
+        const dy = g.rawDrvY - g.neutralDrv.y;
+        const len = hypot(dx,dy);
+        const dead = cfg.driveDeadzonePx;
+
+        if (len > (dead + 2)){
+          const dirx = dx / (len || 1);
+          const diry = dy / (len || 1);
+          const effLen = Math.max(0, len - dead);
+          let throttle = clamp(effLen / throttleRangePx, 0, 1);
+          throttle = throttle * throttle;
+          input.moveX = dirx;
+          input.moveY = diry;
+          input._gestureThrottle = throttle;
+        } else {
+          input.moveX = 0;
+          input.moveY = 0;
+          input._gestureThrottle = 0;
+        }
+      } else {
+        input.moveX = 0;
+        input.moveY = 0;
+        input._gestureThrottle = 0;
+      }
+
+      // --- PINCH CONTROLS FOR HORIZON-LOCKED CAMERA + SHOOT
+      // Hold pinch => rotate yaw only (no up/down pitch). Release locks.
+      // Quick pinch tap => shoot (if holding ball).
+      const aimPinched = !!input.pinchLeft; // left hand controls camera/shoot
+
+      if (aimPinched && !pinchCam.rotating){
+        pinchCam.rotating = true;
+        pinchCam.startYaw = cam3.yaw;
+        pinchCam.startX = input.aimCursor.x;  // use horizontal only
+        pinchCam.startT = performance.now();
+        pinchCam.lastDX = 0;
+      }
+
+      if (aimPinched && pinchCam.rotating){
+        const dx = (input.aimCursor.x - pinchCam.startX);
+        pinchCam.lastDX = dx;
+
+        // sensitivity: scaled so full-screen drag ~ multiple turns at higher sens
+        const pxNorm = dx / Math.max(1, window.innerWidth);
+        cam3.yaw = normAngle(pinchCam.startYaw + pxNorm * (Math.PI*2) * cfg.yawSensitivity);
+      }
+
+      if (!aimPinched && pinchCam.rotating){
+        const dur = performance.now() - pinchCam.startT;
+        const moved = Math.abs(pinchCam.lastDX);
+
+        pinchCam.rotating = false;
+
+        // tap-to-shoot if quick and not a big rotation gesture
+        if (dur <= cfg.pinchTapMaxMs && moved <= 18){
+          tryShoot();
+        } else {
+          // release locks current yaw (no action needed)
+        }
+      }
+
+      ui.liveReadout.textContent =
+        `Seen(L:${input.aimCursor.seen?"Y":"n"} R:${input.driveCursor.seen?"Y":"n"}) ` +
+        `Pinch(L:${input.pinchLeft?"Y":"n"}:${input.pinchLeftNorm.toFixed(2)} R:${input.pinchRight?"Y":"n"}:${input.pinchRightNorm.toFixed(2)}) ` +
+        `Throttle=${(input._gestureThrottle||0).toFixed(2)} ` +
+        `Yaw=${cam3.yaw.toFixed(2)} Pitch(fixed)=${cam3.pitch.toFixed(2)} ` +
+        `Ball=${ball.held?"held":"free"}`;
+    }
+
+    // movement vector in camera-local space (up/down = forward/back) -> world XZ
+    let mvx = input.moveX, mvy = input.moveY;
+    const mLen = hypot(mvx, mvy);
+    if (mLen > 1) { mvx /= mLen; mvy /= mLen; }
+
+    // map input axes to world using camera yaw
+    // forward = (cos(yaw), sin(yaw)) on XZ, right = perpendicular
+    const yaw = cam3.yaw;
+    const fx = Math.cos(yaw), fz = Math.sin(yaw);
+    const rx = -fz, rz = fx;
+
+    // note: input.moveY is vertical on screen; treat negative as forward (similar to joystick)
+    const forwardAmt = -mvy;
+    const rightAmt = mvx;
+
+    let vxW = (fx * forwardAmt + rx * rightAmt);
+    let vzW = (fz * forwardAmt + rz * rightAmt);
+
+    const wLen = hypot(vxW, vzW);
+    if (wLen > 1){ vxW/=wLen; vzW/=wLen; }
+
+    let speedScale = 1.0;
+    if (controllerMode === "gesture"){
+      speedScale = 0.20 + 0.80 * clamp(input._gestureThrottle ?? 0, 0, 1);
+    }
+    const sp = player.speed * speedScale * (0.55 + 0.45*player.stamina);
+
+    player.x += vxW * sp * dt;
+    player.z += vzW * sp * dt;
+
+    const cp = clampCourtXZ(player.x, player.z);
+    player.x = cp.x; player.z = cp.z;
+
+    // stamina drain when moving fast
+    if (wLen > 0.15 && speedScale > 0.6){
+      player.stamina = clamp(player.stamina - dt*0.22*speedScale, 0, 1);
+    }
+
+    // ball
+    autoGrabBall();
+    ballPhysics(dt);
+
+    updateHUD();
+  }
+
+  function draw(){
+    const w = window.innerWidth, h = window.innerHeight;
+
+    // camera position (horizon-locked pitch)
+    const yaw = cam3.yaw;
+    const pitch = cam3.pitch; // fixed, never changed by vertical movement
+    const forward = { x: Math.cos(yaw), z: Math.sin(yaw) };
+    const camPos = {
+      x: player.x - forward.x * cam3.dist,
+      y: cam3.height,
+      z: player.z - forward.z * cam3.dist
+    };
+
+    drawCourt(camPos, yaw, pitch, w, h);
+    drawHoop(camPos, yaw, pitch, w, h);
+    drawPlayer(camPos, yaw, pitch, w, h);
+    drawBall(camPos, yaw, pitch, w, h);
+
+    // crosshair always center-ish; horizon lock means it behaves consistently
+    drawCrosshair();
+
+    // optional: show hand cursors in gesture mode (minimal)
+    if (controllerMode === "gesture" && started){
+      ctx.globalAlpha = 0.75;
+      if (input.driveCursor.seen){
+        ctx.fillStyle = "rgba(120,210,255,.55)";
+        ctx.beginPath();
+        ctx.arc(input.driveCursor.x, input.driveCursor.y, 10, 0, Math.PI*2);
+        ctx.fill();
+      }
+      if (input.aimCursor.seen){
+        const pin = input.pinchLeft;
+        ctx.strokeStyle = pin ? "rgba(255,160,120,.75)" : "rgba(255,255,255,.18)";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(input.aimCursor.x, input.aimCursor.y, 12, 0, Math.PI*2);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // ===== start =====
+  ui.startBtn.addEventListener("pointerdown", async (e) => {
+    e.preventDefault();
+    ensureAudio();
+    if (!controllerMode) return;
+
+    try{ localStorage.setItem(modeKey, controllerMode); } catch {}
+
+    if (controllerMode === "gesture"){
+      const ok = await startGesture();
+      if (!ok){
+        setBridge("Gesture ERROR — camera denied or not HTTPS/localhost.");
+        return;
+      }
+      setModeTxt("Gesture");
+      setBridge("Gesture: starting login + startup scan…");
+    } else {
+      stopGesture();
+      setModeTxt("Keyboard");
+      setBridge("Keyboard: WASD move • Q/E rotate • Space shoot • C level camera");
+      paused = false;
+      ui.pauseBtn.textContent = "Pause";
+    }
+
+    ui.hud.style.display = "flex";
+    ui.pauseBtn.style.display = "block";
+    ui.menuBtn.style.display = "block";
+    ui.tunerBtn.style.display = "block";
+    ui.levelBtn.style.display = "block";
+    ui.liveTunerMode.textContent = `(${controllerMode})`;
+
+    started = true;
+    showOverlay(false);
+
+    // reset gameplay
+    state.score = 0; state.shots = 0; state.makes = 0;
+    ui.scoreTxt.textContent = `Score 0`;
+    updateHUD();
+    resetBallNearPlayer();
+
+    // camera: keep horizon lock, start level
+    resetCameraLevel();
+
+    if (controllerMode === "gesture"){
+      paused = true;
+      ui.pauseBtn.textContent = "Pause";
+      beginStartup();
+    }
+  }, { passive:false });
+
+  // ESC opens menu
+  window.addEventListener("keydown", (e) => {
+    if (e.code === "Escape" && started){ showOverlay(true); }
+  }, { passive:true });
+
+  // ===== loop =====
+  let last = performance.now();
+  function frame(now){
+    const dt = Math.min(0.033, Math.max(0.001, (now - last)/1000));
+    last = now;
+
+    if (!paused){
+      update(dt);
+    } else {
+      if (controllerMode === "gesture" && startup.active){
+        updateStartup(dt);
+      }
+    }
+
+    draw();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  // ===== initial UI =====
+  setModeTxt("—");
+  showOverlay(true);
+  setBridge("Controller: not selected • Choose Gesture or Keyboard");
+  ui.startBtn.disabled = !controllerMode;
+
+  // pause toggles
+  ui.pauseBtn.addEventListener("pointerdown",(e)=>{ e.preventDefault(); ensureAudio(); togglePause(); }, { passive:false });
+
+})();
+</script>
+</body>
+</html>

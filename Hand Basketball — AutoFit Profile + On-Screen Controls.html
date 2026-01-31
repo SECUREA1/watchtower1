@@ -1,0 +1,1299 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Hand Basketball — AutoFit Profile + On-Screen Controls</title>
+  <style>
+    :root{
+      --bg:#070910;
+      --panel: rgba(0,0,0,.40);
+      --stroke: rgba(255,255,255,.14);
+      --txt: rgba(255,255,255,.92);
+      --muted: rgba(255,255,255,.72);
+      --cyan:#20ffe6;
+      --violet:#b04cff;
+      --amber:#ffcf55;
+      --red:#ff4646;
+      --green:#46ff87;
+      --shadow: 0 14px 42px rgba(0,0,0,.40);
+    }
+    html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); overflow: hidden; color: var(--txt); font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
+    #wrap { position: relative; width: 100%; height: 100%; }
+    canvas { display:block; }
+    #hud2d { position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none; }
+    #video { display:none; }
+
+    /* Right panel */
+    #ui {
+      position: absolute; top: 12px; right: 12px;
+      width: min(520px, calc(100vw - 24px));
+      background: var(--panel);
+      border: 1px solid var(--stroke);
+      backdrop-filter: blur(10px);
+      border-radius: 16px;
+      padding: 10px;
+      box-shadow: var(--shadow);
+      user-select:none;
+      max-height: calc(100vh - 24px);
+      overflow:auto;
+      z-index: 20;
+    }
+    .head{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
+    .brand{ font-weight:1000; letter-spacing:.6px; text-transform:uppercase; font-size:12px; display:flex; align-items:center; gap:8px; }
+    .spark{
+      width:10px;height:10px;border-radius:50%;
+      background: radial-gradient(circle at 30% 30%, #fff, var(--cyan));
+      box-shadow: 0 0 16px rgba(32,255,230,.26);
+    }
+    .btn{
+      border:1px solid rgba(255,255,255,.16);
+      background:
+        radial-gradient(circle at 30% 20%, rgba(32,255,230,.18), transparent 55%),
+        linear-gradient(180deg, rgba(176,76,255,.28), rgba(0,0,0,.25));
+      color: rgba(255,255,255,.95);
+      padding: 9px 12px;
+      border-radius: 12px;
+      cursor:pointer;
+      font-weight: 950;
+      transition: transform .08s ease, filter .12s ease;
+      white-space:nowrap;
+    }
+    .btn:hover{ filter: brightness(1.06) drop-shadow(0 0 12px rgba(32,255,230,.18)); }
+    .btn:active{ transform: translateY(1px); }
+    .btn.secondary{ background: rgba(0,0,0,.28); }
+    .btn.danger{ background: linear-gradient(180deg, rgba(255,70,70,.30), rgba(0,0,0,.25)); }
+
+    .group{
+      margin-top: 10px;
+      padding: 10px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(0,0,0,.20);
+    }
+    .gtitle{ font-weight:1000; font-size:12px; letter-spacing:.4px; text-transform:uppercase; margin-bottom:8px; color:rgba(255,255,255,.92); }
+    .row { font-size: 13px; line-height: 1.35; color: var(--txt); }
+    .muted{ color: var(--muted); }
+    .setting{ margin-bottom: 10px; }
+    .setting label{
+      display:flex; justify-content:space-between; gap:10px; align-items:center;
+      font-size:12px; font-weight:950; color:rgba(255,255,255,.92);
+      margin-bottom: 6px;
+    }
+    .val{ color: var(--cyan); }
+    input[type="range"]{ width:100%; }
+
+    /* Top-left status */
+    #hudTop{
+      position:absolute; left:12px; top:12px; z-index: 20;
+      display:flex; gap:10px; flex-wrap:wrap;
+      pointer-events:none;
+    }
+    .card{
+      pointer-events:none;
+      background: var(--panel);
+      border: 1px solid var(--stroke);
+      backdrop-filter: blur(8px);
+      border-radius: 14px;
+      padding: 10px 12px;
+      box-shadow: var(--shadow);
+      min-width: 260px;
+    }
+    .title{
+      font-weight: 950; letter-spacing:.4px; text-transform: uppercase; font-size: 12px;
+      display:flex; align-items:center; justify-content:space-between; gap:8px;
+      margin-bottom:6px;
+    }
+    .pill{
+      display:inline-flex; align-items:center; gap:6px;
+      border: 1px solid rgba(255,255,255,.18);
+      background: rgba(0,0,0,.22);
+      padding: 4px 9px;
+      border-radius: 999px;
+      font-size: 12px;
+      color: var(--muted);
+      white-space:nowrap;
+    }
+    .pill b{ color: var(--txt); }
+    .dot{ width:9px; height:9px; border-radius:50%; background: var(--red); box-shadow: 0 0 14px rgba(255,59,59,.35); }
+    .dot.ok{ background: var(--green); box-shadow: 0 0 14px rgba(55,255,116,.28); }
+    .dot.warn{ background: var(--amber); box-shadow: 0 0 14px rgba(255,207,85,.22); }
+
+    /* Overlay */
+    #overlay{
+      position:absolute; inset:0; z-index: 50;
+      display:flex; align-items:center; justify-content:center;
+      padding:16px;
+      background: rgba(0,0,0,.55);
+      backdrop-filter: blur(10px);
+    }
+    #overlay.hidden{ display:none; }
+    #overlayCard{
+      width:min(980px, 98vw);
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,.18);
+      background:
+        radial-gradient(900px 500px at 20% 0%, rgba(32,255,230,.12), transparent 60%),
+        radial-gradient(900px 600px at 90% 10%, rgba(176,76,255,.12), transparent 60%),
+        rgba(8,12,34,.70);
+      box-shadow: 0 18px 64px rgba(0,0,0,.55);
+      overflow:hidden;
+      padding: 14px;
+    }
+    #overlayCard h1{ margin:0 0 8px; font-size:18px; font-weight:1000; letter-spacing:.4px; text-transform:uppercase; }
+    #overlayCard p{ margin:0 0 10px; color:rgba(255,255,255,.85); line-height:1.35; }
+    .grid{ display:grid; grid-template-columns: 1.2fr .8fr; gap: 12px; align-items:start; }
+    @media (max-width: 860px){ .grid{ grid-template-columns: 1fr; } }
+    .warnBox{
+      background: rgba(0,0,0,.28);
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 14px;
+      padding: 10px;
+      color: rgba(255,255,255,.88);
+    }
+    .warnBox b{ color: var(--amber); }
+    .progress{
+      height:10px; width:100%;
+      background: rgba(255,255,255,.12);
+      border: 1px solid rgba(255,255,255,.14);
+      border-radius: 999px;
+      overflow:hidden;
+    }
+    .bar{
+      height:100%;
+      width:0%;
+      background: linear-gradient(90deg, rgba(32,255,230,.95), rgba(176,76,255,.95));
+      transition: width .08s linear;
+    }
+    .statusLine{
+      margin-top:8px; padding:10px;
+      background: rgba(0,0,0,.22);
+      border: 1px solid rgba(255,255,255,.14);
+      border-radius: 14px;
+      font-size: 13px; line-height: 1.35;
+    }
+
+    /* On-screen control pad (visual replacement for WASD box) */
+    #pad {
+      position:absolute;
+      left: 16px;
+      bottom: 16px;
+      width: 220px;
+      height: 220px;
+      border-radius: 26px;
+      background: rgba(0,0,0,.26);
+      border: 1px solid rgba(255,255,255,.14);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+      z-index: 15;
+      pointer-events:none;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    #pad .ring{
+      width: 160px; height: 160px;
+      border-radius: 999px;
+      border: 2px solid rgba(32,255,230,.22);
+      position: relative;
+    }
+    #pad .dot2{
+      width: 18px; height: 18px;
+      border-radius: 999px;
+      position:absolute;
+      left: 50%; top: 50%;
+      transform: translate(-50%,-50%);
+      background: radial-gradient(circle at 30% 30%, rgba(255,255,255,.35), rgba(32,255,230,.10));
+      border: 2px solid rgba(32,255,230,.75);
+      box-shadow: 0 0 16px rgba(32,255,230,.18), 0 0 26px rgba(176,76,255,.12);
+    }
+    #pad .label{
+      position:absolute;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 12px;
+      color: rgba(255,255,255,.75);
+      letter-spacing:.3px;
+      text-transform:uppercase;
+      font-weight: 900;
+    }
+  </style>
+
+  <!-- Three.js -->
+  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+
+  <!-- MediaPipe Hands -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+</head>
+<body>
+<div id="wrap">
+  <video id="video" playsinline></video>
+  <canvas id="webgl"></canvas>
+  <canvas id="hud2d"></canvas>
+
+  <div id="pad">
+    <div class="ring">
+      <div class="dot2" id="padDot"></div>
+      <div class="label">Move Hand</div>
+    </div>
+  </div>
+
+  <div id="hudTop">
+    <div class="card">
+      <div class="title">
+        <span>Basketball</span>
+        <span class="pill">AutoFit <b id="fitStat">off</b></span>
+      </div>
+      <div class="row"><b>Grab/Toss hand:</b> pinch to grab, open hand to throw.</div>
+      <div class="row"><b>Move hand:</b> tilt in air to go forward/back/left/right. Pinch to rotate view.</div>
+      <div class="row muted" id="hintLine">Open Start/Profile to enable camera.</div>
+    </div>
+
+    <div class="card" style="min-width:320px">
+      <div class="title">
+        <span>Status</span>
+        <span class="pill"><span class="dot warn" id="dotCam"></span> <b id="camStat">camera</b></span>
+      </div>
+      <div class="row"><span class="pill"><span class="dot warn" id="dotMP"></span> <b id="mpStat">mediapipe</b></span></div>
+      <div class="row"><span class="pill"><span class="dot warn" id="dotPF"></span> <b id="pfStat">profile</b></span></div>
+      <div class="row" style="margin-top:6px">
+        <span class="pill">Profile <b id="profileStat">none</b></span>
+      </div>
+    </div>
+  </div>
+
+  <div id="ui">
+    <div class="head">
+      <div class="brand"><span class="spark"></span> Hand Basketball Controls</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn secondary" id="openOverlay">Start / Profile</button>
+        <button class="btn secondary" id="resetBalls">Reset Balls</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gtitle">HandScan AutoFit Profile</div>
+      <div class="row muted">AutoFit stores your natural hand position + distance so movement and grabbing feel centered.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap; margin-top:10px;">
+        <button class="btn" id="createProfile">Create / Overwrite Profile</button>
+        <button class="btn secondary" id="loginProfile">Login + Apply AutoFit</button>
+        <button class="btn danger" id="deleteProfile">Delete</button>
+      </div>
+      <div class="row muted" style="margin-top:8px">Tip: during scan, hold both hands where you want “neutral”.</div>
+    </div>
+
+    <div class="group">
+      <div class="gtitle">Gameplay Tuning</div>
+
+      <div class="setting">
+        <label><span>Grab pinch threshold</span><span class="val" id="pinchVal">0.080</span></label>
+        <input id="pinchThr" type="range" min="0.01" max="0.20" step="0.005" value="0.08" />
+      </div>
+
+      <div class="setting">
+        <label><span>Rotate pinch threshold (move hand)</span><span class="val" id="rotVal">0.080</span></label>
+        <input id="rotThr" type="range" min="0.01" max="0.20" step="0.005" value="0.08" />
+      </div>
+
+      <div class="setting">
+        <label><span>Throw power</span><span class="val" id="throwVal">6.0</span></label>
+        <input id="throwPow" type="range" min="1" max="18" step="0.5" value="6.0" />
+      </div>
+
+      <div class="setting" style="margin-bottom:0;">
+        <label><span>Move sensitivity</span><span class="val" id="moveVal">1.00</span></label>
+        <input id="moveSens" type="range" min="0.35" max="2.00" step="0.05" value="1.00" />
+        <div class="row muted">Scaled by AutoFit distance. Raise this if motion feels slow.</div>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gtitle">Extra Per-hand Cursor Offsets (px)</div>
+
+      <div class="setting">
+        <label><span>Grab/Toss X</span><span class="val" id="grabOffXVal">0</span></label>
+        <input id="grabOffX" type="range" min="-500" max="500" step="1" value="0" />
+      </div>
+      <div class="setting">
+        <label><span>Grab/Toss Y</span><span class="val" id="grabOffYVal">0</span></label>
+        <input id="grabOffY" type="range" min="-350" max="350" step="1" value="0" />
+      </div>
+
+      <div class="setting">
+        <label><span>Move X</span><span class="val" id="moveOffXVal">0</span></label>
+        <input id="moveOffX" type="range" min="-500" max="500" step="1" value="0" />
+      </div>
+      <div class="setting" style="margin-bottom:0;">
+        <label><span>Move Y</span><span class="val" id="moveOffYVal">0</span></label>
+        <input id="moveOffY" type="range" min="-350" max="350" step="1" value="0" />
+      </div>
+    </div>
+  </div>
+
+  <!-- Overlay -->
+  <div id="overlay">
+    <div id="overlayCard">
+      <h1>Start + HandScan AutoFit</h1>
+      <div class="grid">
+        <div>
+          <p>
+            1) Press <b>Start</b> to enable camera.<br/>
+            2) <b>Create Profile</b> to store your neutral hand position + distance.<br/>
+            3) <b>Login</b> anytime to re-apply AutoFit.
+          </p>
+          <div class="warnBox" id="secureBox"><b>Important:</b> Camera requires HTTPS or localhost.</div>
+
+          <div style="margin-top:10px">
+            <div class="row"><b>Scan progress</b></div>
+            <div class="progress"><div class="bar" id="scanBar"></div></div>
+            <div class="statusLine" id="overlayStatus">Ready.</div>
+          </div>
+
+          <div class="row muted" style="margin-top:8px">
+            During scan: hold both hands steady at your natural play position.
+          </div>
+        </div>
+
+        <div>
+          <button class="btn" id="startBtn" style="width:100%; font-size:14px;">Start Camera + Tracking</button>
+          <div style="height:10px"></div>
+          <button class="btn secondary" id="closeOverlay" style="width:100%;">Close Overlay</button>
+
+          <div style="height:14px"></div>
+
+          <button class="btn" id="overlayCreate" style="width:100%;">Create / Overwrite Profile (Scan)</button>
+          <div style="height:10px"></div>
+          <button class="btn secondary" id="overlayLogin" style="width:100%;">Login + Apply AutoFit (Scan)</button>
+
+          <div class="row muted" style="margin-top:12px">
+            If your hands feel “off center”, create a new profile at the position you prefer.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  // -----------------------
+  // Helpers
+  // -----------------------
+  const el = (id) => document.getElementById(id);
+  const clamp = (n,a,b)=>Math.max(a,Math.min(b,n));
+  const lerp = (a,b,t)=>a+(b-a)*t;
+
+  function setDot(dotId, state){
+    const d = el(dotId);
+    d.classList.remove("ok","warn");
+    if(state==="ok") d.classList.add("ok");
+    else if(state==="warn") d.classList.add("warn");
+  }
+
+  // -----------------------
+  // UI state
+  // -----------------------
+  const statusHint = el("hintLine");
+
+  const pinchThrEl = el("pinchThr");
+  const rotThrEl = el("rotThr");
+  const throwPowEl = el("throwPow");
+  const moveSensEl = el("moveSens");
+
+  const pinchValEl = el("pinchVal");
+  const rotValEl = el("rotVal");
+  const throwValEl = el("throwVal");
+  const moveValEl = el("moveVal");
+
+  const grabOffXEl = el("grabOffX");
+  const grabOffYEl = el("grabOffY");
+  const moveOffXEl = el("moveOffX");
+  const moveOffYEl = el("moveOffY");
+
+  const grabOffXValEl = el("grabOffXVal");
+  const grabOffYValEl = el("grabOffYVal");
+  const moveOffXValEl = el("moveOffXVal");
+  const moveOffYValEl = el("moveOffYVal");
+
+  let pinch_threshold = parseFloat(pinchThrEl.value);
+  let rotation_threshold = parseFloat(rotThrEl.value);
+  let throwing_factor = parseFloat(throwPowEl.value);
+  let baseMoveSensitivity = parseFloat(moveSensEl.value);
+
+  let manualGrabOffset = { x: parseInt(grabOffXEl.value, 10), y: parseInt(grabOffYEl.value, 10) };
+  let manualMoveOffset = { x: parseInt(moveOffXEl.value, 10), y: parseInt(moveOffYEl.value, 10) };
+
+  function updateBadges(){
+    pinchValEl.textContent = pinch_threshold.toFixed(3);
+    rotValEl.textContent = rotation_threshold.toFixed(3);
+    throwValEl.textContent = throwing_factor.toFixed(1);
+    moveValEl.textContent = baseMoveSensitivity.toFixed(2);
+
+    grabOffXValEl.textContent = String(manualGrabOffset.x);
+    grabOffYValEl.textContent = String(manualGrabOffset.y);
+    moveOffXValEl.textContent = String(manualMoveOffset.x);
+    moveOffYValEl.textContent = String(manualMoveOffset.y);
+  }
+  updateBadges();
+
+  pinchThrEl.addEventListener("input", ()=>{ pinch_threshold = parseFloat(pinchThrEl.value); updateBadges(); });
+  rotThrEl.addEventListener("input", ()=>{ rotation_threshold = parseFloat(rotThrEl.value); updateBadges(); });
+  throwPowEl.addEventListener("input", ()=>{ throwing_factor = parseFloat(throwPowEl.value); updateBadges(); });
+  moveSensEl.addEventListener("input", ()=>{ baseMoveSensitivity = parseFloat(moveSensEl.value); updateBadges(); });
+
+  function bindOffset(elm, which, axis){
+    elm.addEventListener("input", ()=>{
+      const v = parseInt(elm.value, 10);
+      if(which==="grab") manualGrabOffset[axis]=v;
+      if(which==="move") manualMoveOffset[axis]=v;
+      updateBadges();
+    });
+  }
+  bindOffset(grabOffXEl, "grab", "x");
+  bindOffset(grabOffYEl, "grab", "y");
+  bindOffset(moveOffXEl, "move", "x");
+  bindOffset(moveOffYEl, "move", "y");
+
+  // -----------------------
+  // Canvases
+  // -----------------------
+  const webglCanvas = document.getElementById("webgl");
+  const hudCanvas = document.getElementById("hud2d");
+  const hud = hudCanvas.getContext("2d", { alpha:true });
+
+  function resize(){
+    const w = window.innerWidth, h = window.innerHeight;
+    webglCanvas.width = w; webglCanvas.height = h;
+    hudCanvas.width = w; hudCanvas.height = h;
+    renderer.setSize(w, h, false);
+    camera.aspect = w/h;
+    camera.updateProjectionMatrix();
+  }
+  window.addEventListener("resize", resize);
+
+  // -----------------------
+  // Three.js scene
+  // -----------------------
+  const renderer = new THREE.WebGLRenderer({ canvas: webglCanvas, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x050505);
+
+  const camera = new THREE.PerspectiveCamera(45, 16/9, 0.1, 200);
+  camera.position.set(0, 1.2, 4);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  const key = new THREE.DirectionalLight(0xffffff, 1.2);
+  key.position.set(8, 12, 5);
+  scene.add(key);
+
+  // Ground
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(80, 80),
+    new THREE.MeshStandardMaterial({ color: 0x111316, roughness: 1.0, metalness: 0.0 })
+  );
+  ground.rotation.x = -Math.PI/2;
+  ground.position.y = -1;
+  scene.add(ground);
+
+  // Hoop assembly
+  const hoop = new THREE.Group();
+  hoop.position.set(-3, 1, -10);
+
+  const pole = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.08, 0.10, 4.0, 24),
+    new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.7, metalness: 0.2 })
+  );
+  pole.position.set(0.0, -0.6, -1.2);
+  hoop.add(pole);
+
+  const arm = new THREE.Mesh(
+    new THREE.BoxGeometry(0.15, 0.15, 1.0),
+    new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.7, metalness: 0.2 })
+  );
+  arm.position.set(0, 1.0, -0.6);
+  hoop.add(arm);
+
+  const backboard = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.8, 1.2),
+    new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.85, metalness: 0.0 })
+  );
+  backboard.position.set(0, 1.0, -1.1);
+  hoop.add(backboard);
+
+  const boardFrame = new THREE.Mesh(
+    new THREE.BoxGeometry(1.86, 1.26, 0.05),
+    new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.6, metalness: 0.1 })
+  );
+  boardFrame.position.copy(backboard.position);
+  boardFrame.position.z -= 0.03;
+  hoop.add(boardFrame);
+
+  const rim = new THREE.Mesh(
+    new THREE.TorusGeometry(0.55, 0.05, 18, 48),
+    new THREE.MeshStandardMaterial({ color: 0xff2b2b, roughness: 0.35, metalness: 0.25 })
+  );
+  rim.rotation.x = Math.PI/2;
+  rim.position.set(0, 0.78, -0.55);
+  hoop.add(rim);
+
+  const netGroup = new THREE.Group();
+  netGroup.position.copy(rim.position);
+  const strandMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 });
+  for (let i=0;i<16;i++){
+    const a=(i/16)*Math.PI*2;
+    const x=Math.cos(a)*0.52, z=Math.sin(a)*0.52;
+    const strand=new THREE.Mesh(new THREE.CylinderGeometry(0.008,0.008,0.7,10), strandMat);
+    strand.position.set(x*0.6, -0.35, z*0.6);
+    netGroup.add(strand);
+  }
+  hoop.add(netGroup);
+  scene.add(hoop);
+
+  // Tiger ball texture
+  function makeTigerTexture(size=512){
+    const c=document.createElement("canvas"); c.width=c.height=size;
+    const ctx=c.getContext("2d");
+    ctx.fillStyle="#d9761b"; ctx.fillRect(0,0,size,size);
+
+    const img=ctx.getImageData(0,0,size,size);
+    for(let i=0;i<img.data.length;i+=4){
+      const n=(Math.random()*18-9);
+      img.data[i]=Math.max(0,Math.min(255,img.data[i]+n));
+      img.data[i+1]=Math.max(0,Math.min(255,img.data[i+1]+n));
+      img.data[i+2]=Math.max(0,Math.min(255,img.data[i+2]+n));
+    }
+    ctx.putImageData(img,0,0);
+
+    ctx.globalAlpha=0.85;
+    ctx.fillStyle="#1b0d06";
+    for(let i=0;i<26;i++){
+      const x=(i/26)*size+(Math.random()*30-15);
+      const w=14+Math.random()*26;
+      const skew=(Math.random()*0.7-0.35);
+      ctx.save();
+      ctx.translate(x,0);
+      ctx.transform(1,skew,0,1,0,0);
+      ctx.beginPath();
+      ctx.moveTo(-w,0);
+      ctx.bezierCurveTo(-w*0.2,size*0.25,-w*1.2,size*0.5,-w*0.2,size*0.75);
+      ctx.bezierCurveTo(w*0.5,size*0.9,w*0.2,size,w,size);
+      ctx.lineTo(w,0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.globalAlpha=1;
+
+    const tex=new THREE.CanvasTexture(c);
+    tex.wrapS=tex.wrapT=THREE.RepeatWrapping;
+    tex.anisotropy=4;
+    tex.needsUpdate=true;
+    return tex;
+  }
+  const tigerTex = makeTigerTexture(512);
+  const baseBallMat = new THREE.MeshStandardMaterial({ map: tigerTex, roughness: 0.55, metalness: 0.05 });
+
+  // Balls + physics
+  const BALL_COUNT = 5;
+  const balls = [];
+  function randomBallPos(){
+    return new THREE.Vector3(
+      THREE.MathUtils.randFloat(-2, 2),
+      -0.6,
+      THREE.MathUtils.randFloat(-6.5, -4.5)
+    );
+  }
+  function makeBall(){
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.4, 32, 32), baseBallMat.clone());
+    const ball = {
+      mesh,
+      radius: 0.4,
+      velocity: new THREE.Vector3(),
+      grabbed:false,
+      reset(){
+        this.mesh.position.copy(randomBallPos());
+        this.velocity.set(0,0,0);
+        this.grabbed=false;
+      }
+    };
+    ball.reset();
+    scene.add(mesh);
+    return ball;
+  }
+  for(let i=0;i<BALL_COUNT;i++) balls.push(makeBall());
+
+  el("resetBalls").addEventListener("click", ()=> balls.forEach(b=>b.reset()));
+
+  const GRAVITY = -9.5;
+  const FLOOR_Y = -1 + 0.4;
+
+  function checkBasketScore(ball){
+    const p = ball.mesh.position;
+    const rimWorld = new THREE.Vector3(); rim.getWorldPosition(rimWorld);
+    const dx=p.x-rimWorld.x, dz=p.z-rimWorld.z;
+    const distXZ=Math.sqrt(dx*dx+dz*dz);
+    const rimRadius=0.55;
+    return (distXZ < rimRadius && Math.abs(p.y - rimWorld.y) < 0.22);
+  }
+
+  function stepPhysics(dt){
+    for(const ball of balls){
+      if(ball.grabbed) continue;
+      ball.velocity.y += GRAVITY*dt;
+      ball.mesh.position.addScaledVector(ball.velocity, dt);
+
+      if(ball.mesh.position.y < FLOOR_Y){
+        ball.mesh.position.y = FLOOR_Y;
+        if(ball.velocity.y < 0) ball.velocity.y *= -0.65;
+        ball.velocity.x *= 0.985;
+        ball.velocity.z *= 0.985;
+      }
+
+      const p=ball.mesh.position;
+      if(p.y < -12 || Math.abs(p.x) > 18 || Math.abs(p.z) > 30) ball.reset();
+      if(checkBasketScore(ball)) ball.reset();
+    }
+  }
+
+  // -----------------------
+  // Ray / plane mapping
+  // -----------------------
+  const raycaster = new THREE.Raycaster();
+  const interactionPlane = new THREE.Plane(new THREE.Vector3(0,0,1), 8.0); // z=-8
+
+  function screenToWorld(xPx, yPx){
+    const w=webglCanvas.width, h=webglCanvas.height;
+    const ndc = new THREE.Vector2((xPx/w)*2-1, -((yPx/h)*2-1));
+    raycaster.setFromCamera(ndc, camera);
+    const out = new THREE.Vector3();
+    raycaster.ray.intersectPlane(interactionPlane, out);
+    return out;
+  }
+
+  // -----------------------
+  // Gesture helpers
+  // -----------------------
+  function dist3(a,b){
+    const dx=a.x-b.x, dy=a.y-b.y, dz=(a.z||0)-(b.z||0);
+    return Math.sqrt(dx*dx+dy*dy+dz*dz);
+  }
+  function pinchDistance(lm){
+    return dist3(lm[8], lm[4]);
+  }
+  function isHandOpen(lm){
+    const wrist=lm[0];
+    return (lm[4].y < wrist.y && lm[8].y < wrist.y && lm[20].y < wrist.y);
+  }
+
+  // -----------------------
+  // AutoFit profile (same idea as guitar, but for basketball controls)
+  // -----------------------
+  const LS_KEY = "basketball_hand_profile_v1";
+
+  function loadProfile(){
+    try{ const raw=localStorage.getItem(LS_KEY); return raw?JSON.parse(raw):null; }catch(_){ return null; }
+  }
+  function saveProfile(p){
+    localStorage.setItem(LS_KEY, JSON.stringify(p));
+    updateProfileUI();
+  }
+  function deleteProfile(){
+    localStorage.removeItem(LS_KEY);
+    updateProfileUI();
+  }
+
+  function updateProfileUI(){
+    const p=loadProfile();
+    el("profileStat").textContent = p ? "saved" : "none";
+    el("pfStat").textContent = p ? "saved" : "none";
+    setDot("dotPF", p ? "ok" : "warn");
+  }
+  updateProfileUI();
+
+  // capture: (a) palm scale proxy, (b) neutral cursor centers for both roles
+  function calcHandMetrics(lm){
+    // palm width proxy (index mcp to pinky mcp)
+    const palmW = dist3(lm[5], lm[17]);
+    // mid point for stable center (wrist + middle mcp)
+    const midX = (lm[0].x + lm[9].x) * 0.5;
+    const midY = (lm[0].y + lm[9].y) * 0.5;
+    return { palmW, midX, midY };
+  }
+
+  // Scan state
+  let scanMode="idle"; // idle|create|login
+  let scanStart=0;
+  const scanDurMs=1600;
+  const samples = []; // each: { move:{sx,sy,palmW}, grab:{sx,sy,palmW} }
+
+  const overlay = el("overlay");
+  const scanBar = el("scanBar");
+  const overlayStatus = el("overlayStatus");
+
+  function startScan(mode){
+    scanMode=mode;
+    scanStart=performance.now();
+    samples.length=0;
+    scanBar.style.width="0%";
+    overlayStatus.textContent = (mode==="create")
+      ? "Creating profile: hold both hands steady at your neutral..."
+      : "Logging in: hold both hands steady at your neutral...";
+  }
+  function stopScan(){
+    scanMode="idle";
+    scanBar.style.width="0%";
+  }
+
+  function vecMean2(arr){
+    if(!arr.length) return null;
+    let sx=0, sy=0;
+    for(const p of arr){ sx+=p.sx; sy+=p.sy; }
+    return { sx: sx/arr.length, sy: sy/arr.length };
+  }
+
+  function scanTick(latestHands, w, h){
+    if(scanMode==="idle") return;
+
+    const now=performance.now();
+    const t=clamp((now-scanStart)/scanDurMs,0,1);
+    scanBar.style.width=(t*100).toFixed(1)+"%";
+
+    // We need both roles present:
+    // INVERTED mapping remains:
+    // - MP Left => Grab/Toss role
+    // - MP Right => Move role
+    if(!latestHands || !latestHands.multiHandLandmarks || !latestHands.multiHandedness) return;
+
+    let grab=null, move=null;
+
+    for(let i=0;i<latestHands.multiHandLandmarks.length;i++){
+      const lm=latestHands.multiHandLandmarks[i];
+      const label=latestHands.multiHandedness[i].label; // Left/Right
+      const idxTip=lm[8];
+      const sx = idxTip.x * w;
+      const sy = idxTip.y * h;
+      const m = calcHandMetrics(lm);
+
+      if(label==="Left"){ // grab role
+        grab = { sx, sy, palmW: m.palmW };
+      } else if(label==="Right"){ // move role
+        move = { sx, sy, palmW: m.palmW };
+      }
+    }
+
+    if(!grab || !move) return;
+
+    // must be steady: minimal jitter across time (simple)
+    samples.push({ grab, move });
+    if(samples.length > 90) samples.shift();
+
+    if(t >= 1){
+      // compute means
+      const grabPts = samples.map(s => ({ sx:s.grab.sx, sy:s.grab.sy }));
+      const movePts = samples.map(s => ({ sx:s.move.sx, sy:s.move.sy }));
+
+      const mg = vecMean2(grabPts);
+      const mm = vecMean2(movePts);
+
+      // compute jitter (RMS)
+      function rms(pts, mean){
+        let sum=0;
+        for(const p of pts){
+          const dx=p.sx-mean.sx, dy=p.sy-mean.sy;
+          sum += dx*dx+dy*dy;
+        }
+        return Math.sqrt(sum/Math.max(1,pts.length));
+      }
+      const grabJ = rms(grabPts, mg);
+      const moveJ = rms(movePts, mm);
+
+      if(grabJ > 14 || moveJ > 14){
+        overlayStatus.textContent = "Too much movement. Hold steadier; scanning again…";
+        scanStart = performance.now();
+        samples.length = 0;
+        scanBar.style.width = "0%";
+        return;
+      }
+
+      const grabScale = samples.reduce((a,s)=>a+s.grab.palmW,0)/samples.length;
+      const moveScale = samples.reduce((a,s)=>a+s.move.palmW,0)/samples.length;
+
+      // signature for login (simple: scales + center ratio)
+      const signature = {
+        grabScale: +grabScale.toFixed(4),
+        moveScale: +moveScale.toFixed(4),
+        grabCenter: { x: +(mg.sx/w).toFixed(4), y: +(mg.sy/h).toFixed(4) },
+        moveCenter: { x: +(mm.sx/w).toFixed(4), y: +(mm.sy/h).toFixed(4) }
+      };
+
+      if(scanMode==="create"){
+        saveProfile({ createdAt: Date.now(), signature });
+        applyAutoFitFromSignature(signature);
+        overlayStatus.textContent = "✅ Profile saved. AutoFit applied.";
+        overlay.classList.add("hidden");
+        stopScan();
+        statusHint.textContent = "Profile created + AutoFit applied.";
+        return;
+      }
+
+      if(scanMode==="login"){
+        const p = loadProfile();
+        if(!p){
+          overlayStatus.textContent = "No profile saved. Create one first.";
+          stopScan();
+          return;
+        }
+
+        // distance check
+        const d =
+          Math.abs(signature.grabScale - p.signature.grabScale) +
+          Math.abs(signature.moveScale - p.signature.moveScale) +
+          Math.abs(signature.grabCenter.x - p.signature.grabCenter.x) +
+          Math.abs(signature.moveCenter.x - p.signature.moveCenter.x);
+
+        if(d <= 0.12){
+          applyAutoFitFromSignature(signature); // apply current distance too
+          overlayStatus.textContent = "✅ Login matched. AutoFit applied for current distance.";
+          overlay.classList.add("hidden");
+          stopScan();
+          statusHint.textContent = "Logged in + AutoFit applied.";
+        }else{
+          overlayStatus.textContent = `❌ Login mismatch (delta=${d.toFixed(3)}). Try again or recreate profile.`;
+          stopScan();
+        }
+      }
+    }
+  }
+
+  // AutoFit state used live
+  let autoFitOn = false;
+
+  // We store a neutral center for each role, and a scale => sensitivity mapping.
+  const fit = {
+    grabCenter: { x: 0.5, y: 0.5 }, // normalized
+    moveCenter: { x: 0.5, y: 0.5 }, // normalized
+    grabScale: 0.18,
+    moveScale: 0.18,
+
+    // derived each apply
+    grabOffsetPx: { x: 0, y: 0 },
+    moveOffsetPx: { x: 0, y: 0 },
+    moveGain: 1.0, // multiplier on baseMoveSensitivity
+    deadzonePx: 28,
+    maxRadiusPx: 120
+  };
+
+  function applyAutoFitFromSignature(sig){
+    fit.grabCenter = { x: sig.grabCenter.x, y: sig.grabCenter.y };
+    fit.moveCenter = { x: sig.moveCenter.x, y: sig.moveCenter.y };
+    fit.grabScale = sig.grabScale;
+    fit.moveScale = sig.moveScale;
+
+    // Convert neutral center into offsets that re-center control around screen center.
+    // This is the key: neutral hand becomes "no movement".
+    const w = webglCanvas.width, h = webglCanvas.height;
+    const grabNeutralPx = { x: fit.grabCenter.x * w, y: fit.grabCenter.y * h };
+    const moveNeutralPx = { x: fit.moveCenter.x * w, y: fit.moveCenter.y * h };
+
+    fit.grabOffsetPx.x = Math.round((w*0.5) - grabNeutralPx.x);
+    fit.grabOffsetPx.y = Math.round((h*0.5) - grabNeutralPx.y);
+
+    fit.moveOffsetPx.x = Math.round((w*0.5) - moveNeutralPx.x);
+    fit.moveOffsetPx.y = Math.round((h*0.5) - moveNeutralPx.y);
+
+    // sensitivity scaling from distance proxy:
+    // smaller palmW => further away => raise gain a bit so you don’t have to over-move
+    // larger palmW => closer => reduce gain slightly to prevent overshoot
+    const s = clamp((fit.moveScale - 0.13) / (0.26 - 0.13), 0, 1);
+    fit.moveGain = lerp(1.25, 0.85, s);
+
+    // deadzone + radius also scale with distance
+    fit.deadzonePx = Math.round(lerp(34, 22, s));
+    fit.maxRadiusPx = Math.round(lerp(150, 105, s));
+
+    autoFitOn = true;
+    el("fitStat").textContent = "on";
+    statusHint.textContent = "AutoFit active.";
+  }
+
+  function clearAutoFit(){
+    autoFitOn = false;
+    el("fitStat").textContent = "off";
+  }
+
+  // -----------------------
+  // Movement + rotation (inverted hands)
+  // -----------------------
+  let camera_yaw = 0;
+  let camera_pitch = 0;
+
+  function applyCameraControls(moveVec, rotDelta, dt){
+    const speed = 3.0 * dt;
+    const mv = moveVec.clone().multiplyScalar(speed);
+
+    camera_yaw += rotDelta.x * 180/Math.PI;
+    camera_pitch += rotDelta.y * 180/Math.PI;
+    camera_pitch = clamp(camera_pitch, -75, 75);
+
+    const yawRad = THREE.MathUtils.degToRad(camera_yaw);
+    const forward = new THREE.Vector3(Math.sin(yawRad), 0, -Math.cos(yawRad));
+    const right = new THREE.Vector3(Math.cos(yawRad), 0, Math.sin(yawRad));
+
+    const worldMove = new THREE.Vector3();
+    worldMove.addScaledVector(right, mv.x);
+    worldMove.addScaledVector(forward, -mv.z);
+    camera.position.add(worldMove);
+
+    const pitchRad = THREE.MathUtils.degToRad(camera_pitch);
+    const dirX = Math.cos(pitchRad) * Math.sin(yawRad);
+    const dirY = Math.sin(pitchRad);
+    const dirZ = -Math.cos(pitchRad) * Math.cos(yawRad);
+    const target = camera.position.clone().add(new THREE.Vector3(dirX, dirY, dirZ));
+    camera.lookAt(target);
+  }
+
+  // Use a radial “stick” derived from fitted neutral point instead of a WASD box.
+  // This matches your request: hide WASD, replace with on-screen controls.
+  let lastMoveScreen = null;
+  function moveHandControl(screen_x, screen_y, lm){
+    const pinch = pinchDistance(lm);
+
+    // rotation mode
+    let rot = new THREE.Vector2(0,0);
+    let move = new THREE.Vector3(0,0,0);
+
+    if(pinch < rotation_threshold){
+      const cur = new THREE.Vector2(screen_x, screen_y);
+      if(!lastMoveScreen) lastMoveScreen = cur;
+      else{
+        const d = cur.clone().sub(lastMoveScreen);
+        rot.set(d.x * 0.0025, d.y * 0.0025);
+        lastMoveScreen = cur;
+      }
+      return { move, rot, stick:{x:0,y:0, active:true, rotating:true} };
+    }
+    lastMoveScreen = null;
+
+    // stick vector from screen center (after offsets)
+    const w = webglCanvas.width, h = webglCanvas.height;
+    const cx = w*0.5, cy = h*0.5;
+    const dx = screen_x - cx;
+    const dy = screen_y - cy;
+
+    // deadzone + normalization
+    const r = Math.hypot(dx, dy);
+    const dead = fit.deadzonePx;
+    const maxR = Math.max(dead + 1, fit.maxRadiusPx);
+
+    let nx=0, ny=0;
+    if(r > dead){
+      const rr = clamp((r - dead) / (maxR - dead), 0, 1);
+      const ux = dx / r;
+      const uy = dy / r;
+      nx = ux * rr;
+      ny = uy * rr;
+    }
+
+    // Map to movement: nx -> left/right, ny -> forward/back (screen up = forward)
+    const gain = baseMoveSensitivity * (autoFitOn ? fit.moveGain : 1.0);
+    move.x = nx * gain;
+    move.z = ny * gain;
+
+    return { move, rot, stick:{x:nx, y:ny, active:true, rotating:false} };
+  }
+
+  // -----------------------
+  // Grab / toss
+  // -----------------------
+  let grabHandWorld = null;
+  let lastGrabHandWorld = null;
+
+  function tryGrabBall(handWorld){
+    let best=null, bestD=Infinity;
+    for(const ball of balls){
+      const d = ball.mesh.position.distanceTo(handWorld);
+      if(d < (ball.radius + 0.6) && d < bestD){ bestD=d; best=ball; }
+    }
+    if(best) best.grabbed = true;
+  }
+
+  function moveGrabbedBalls(handWorld){
+    for(const ball of balls){
+      if(ball.grabbed){
+        ball.mesh.position.copy(handWorld);
+        ball.velocity.set(0,0,0);
+      }
+    }
+  }
+
+  function releaseBallsWithThrow(){
+    if(!grabHandWorld || !lastGrabHandWorld) return;
+    const delta = grabHandWorld.clone().sub(lastGrabHandWorld);
+    const v = delta.multiplyScalar(throwing_factor);
+    v.z = -v.z;
+    for(const ball of balls){
+      if(ball.grabbed){
+        ball.grabbed = false;
+        ball.velocity.copy(v);
+      }
+    }
+  }
+
+  // -----------------------
+  // HUD drawing (simple dots + pad)
+  // -----------------------
+  const padDot = el("padDot");
+  function updatePadDot(nx, ny, rotating){
+    const ring = 160;
+    const r = (ring/2) - 18;
+    const x = nx * r;
+    const y = ny * r;
+    padDot.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
+    padDot.style.borderColor = rotating ? "rgba(255,207,85,.95)" : "rgba(32,255,230,.75)";
+  }
+
+  function drawHUDMarkers(grabPt, movePt){
+    hud.clearRect(0,0,hudCanvas.width,hudCanvas.height);
+
+    // grab marker
+    if(grabPt){
+      hud.fillStyle = "rgba(32,255,230,0.95)";
+      hud.beginPath(); hud.arc(grabPt.x, grabPt.y, 10, 0, Math.PI*2); hud.fill();
+    }
+    // move marker
+    if(movePt){
+      hud.fillStyle = "rgba(255,207,85,0.95)";
+      hud.beginPath(); hud.arc(movePt.x, movePt.y, 10, 0, Math.PI*2); hud.fill();
+    }
+
+    // held ball indicator
+    const anyGrabbed = balls.some(b=>b.grabbed);
+    if(anyGrabbed){
+      const w=hudCanvas.width, h=hudCanvas.height;
+      const t = performance.now()/500;
+      const flash=(Math.sin(t)+1)/2;
+      hud.fillStyle = flash>0.5 ? "rgba(0,255,0,0.9)" : "rgba(255,165,0,0.9)";
+      hud.beginPath(); hud.arc(w*0.84, h*0.86, Math.min(w,h)*0.05, 0, Math.PI*2); hud.fill();
+    }
+  }
+
+  // -----------------------
+  // MediaPipe setup
+  // -----------------------
+  const videoEl = document.getElementById("video");
+  const hands = new Hands({ locateFile: (file)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+
+  hands.setOptions({
+    maxNumHands: 2,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.8,
+    minTrackingConfidence: 0.8
+  });
+
+  let latestHands = null;
+  hands.onResults((results)=>{ latestHands = results; });
+
+  const mpCamera = new Camera(videoEl, {
+    onFrame: async ()=>{ await hands.send({ image: videoEl }); },
+    width: 960,
+    height: 540
+  });
+
+  // -----------------------
+  // Overlay wiring
+  // -----------------------
+  const secure = window.isSecureContext || location.hostname==="localhost" || location.hostname==="127.0.0.1";
+  el("secureBox").innerHTML = secure
+    ? "<b>Good:</b> secure context detected. Camera should work if permissions are granted."
+    : "<b>Important:</b> Camera requires HTTPS or localhost (secure context).";
+
+  let started = false;
+
+  el("openOverlay").addEventListener("click", ()=>{
+    overlay.classList.remove("hidden");
+    overlayStatus.textContent = started ? "Ready. Choose Create/Login scan." : "Ready. Press Start.";
+    stopScan();
+  });
+  el("closeOverlay").addEventListener("click", ()=> overlay.classList.add("hidden"));
+
+  function applySavedProfileIfAny(){
+    const p = loadProfile();
+    if(p?.signature){
+      applyAutoFitFromSignature(p.signature);
+    } else {
+      clearAutoFit();
+    }
+  }
+
+  el("startBtn").addEventListener("click", async ()=>{
+    try{
+      el("camStat").textContent="starting"; setDot("dotCam","warn");
+      el("mpStat").textContent="starting"; setDot("dotMP","warn");
+      statusHint.textContent = "Requesting camera…";
+
+      resize();
+      await mpCamera.start();
+
+      el("camStat").textContent="ready"; setDot("dotCam","ok");
+      el("mpStat").textContent="ready"; setDot("dotMP","ok");
+
+      started = true;
+      statusHint.textContent = "Running. Create profile for best control centering.";
+
+      applySavedProfileIfAny();
+
+      overlay.classList.add("hidden");
+      requestAnimationFrame(animate);
+    }catch(err){
+      console.error(err);
+      statusHint.textContent = "Camera failed. Use HTTPS or localhost and allow camera permission.";
+      el("camStat").textContent="error"; setDot("dotCam","warn");
+      el("mpStat").textContent="error"; setDot("dotMP","warn");
+    }
+  });
+
+  function attachProfileButtons(){
+    const pStat = () => updateProfileUI();
+
+    el("overlayCreate").addEventListener("click", ()=>{
+      if(!started){ overlayStatus.textContent="Start first."; return; }
+      startScan("create");
+    });
+    el("overlayLogin").addEventListener("click", ()=>{
+      if(!started){ overlayStatus.textContent="Start first."; return; }
+      if(!loadProfile()){ overlayStatus.textContent="No profile saved. Create one first."; return; }
+      startScan("login");
+    });
+
+    el("createProfile").addEventListener("click", ()=>{
+      overlay.classList.remove("hidden");
+      if(!started){ overlayStatus.textContent="Start first."; return; }
+      startScan("create");
+    });
+    el("loginProfile").addEventListener("click", ()=>{
+      overlay.classList.remove("hidden");
+      if(!started){ overlayStatus.textContent="Start first."; return; }
+      if(!loadProfile()){ overlayStatus.textContent="No profile saved. Create one first."; return; }
+      startScan("login");
+    });
+    el("deleteProfile").addEventListener("click", ()=>{
+      deleteProfile();
+      clearAutoFit();
+      overlayStatus.textContent = "Profile deleted.";
+      statusHint.textContent = "Profile deleted.";
+      pStat();
+    });
+
+    pStat();
+  }
+  attachProfileButtons();
+
+  // -----------------------
+  // Main loop
+  // -----------------------
+  let lastT = performance.now();
+
+  // invert mapping remains:
+  // MP Left => grab/toss
+  // MP Right => move/rotate
+  let markers = { grab:null, move:null };
+
+  function animate(now){
+    const dt = Math.min(0.033, (now-lastT)/1000);
+    lastT = now;
+
+    let moveVec = new THREE.Vector3(0,0,0);
+    let rotVec = new THREE.Vector2(0,0);
+    let stickNX=0, stickNY=0, rotating=false;
+
+    markers.grab = null;
+    markers.move = null;
+
+    // keep scan alive
+    scanTick(latestHands, hudCanvas.width, hudCanvas.height);
+
+    if(latestHands && latestHands.multiHandLandmarks && latestHands.multiHandedness){
+      for(let i=0;i<latestHands.multiHandLandmarks.length;i++){
+        const lm = latestHands.multiHandLandmarks[i];
+        const mpLabel = latestHands.multiHandedness[i].label; // Left / Right
+        const idxTip = lm[8];
+
+        let sx = idxTip.x * hudCanvas.width;
+        let sy = idxTip.y * hudCanvas.height;
+
+        if(mpLabel === "Left"){
+          // Grab/Toss role
+          const fitOffX = autoFitOn ? fit.grabOffsetPx.x : 0;
+          const fitOffY = autoFitOn ? fit.grabOffsetPx.y : 0;
+
+          sx += fitOffX + manualGrabOffset.x;
+          sy += fitOffY + manualGrabOffset.y;
+
+          markers.grab = { x: Math.round(sx), y: Math.round(sy) };
+
+          grabHandWorld = screenToWorld(sx, sy);
+          const pinch = pinchDistance(lm);
+          const open = isHandOpen(lm);
+
+          if(pinch < pinch_threshold && grabHandWorld){
+            tryGrabBall(grabHandWorld);
+          } else if(open) {
+            releaseBallsWithThrow();
+          }
+
+          if(grabHandWorld) moveGrabbedBalls(grabHandWorld);
+
+          if(grabHandWorld){
+            if(!lastGrabHandWorld) lastGrabHandWorld = grabHandWorld.clone();
+            else lastGrabHandWorld.copy(grabHandWorld);
+          }
+
+        } else if(mpLabel === "Right"){
+          // Move role
+          const fitOffX = autoFitOn ? fit.moveOffsetPx.x : 0;
+          const fitOffY = autoFitOn ? fit.moveOffsetPx.y : 0;
+
+          sx += fitOffX + manualMoveOffset.x;
+          sy += fitOffY + manualMoveOffset.y;
+
+          markers.move = { x: Math.round(sx), y: Math.round(sy) };
+
+          const r = moveHandControl(Math.round(sx), Math.round(sy), lm);
+          moveVec.add(r.move);
+          rotVec.add(r.rot);
+
+          stickNX = r.stick.x;
+          stickNY = r.stick.y;
+          rotating = r.stick.rotating;
+        }
+      }
+    }
+
+    // update on-screen pad dot
+    updatePadDot(stickNX, stickNY, rotating);
+
+    applyCameraControls(moveVec, rotVec, dt);
+    stepPhysics(dt);
+
+    renderer.render(scene, camera);
+    drawHUDMarkers(markers.grab, markers.move);
+
+    requestAnimationFrame(animate);
+  }
+
+  // -----------------------
+  // Start with overlay open + dots initial
+  // -----------------------
+  el("camStat").textContent="idle"; setDot("dotCam","warn");
+  el("mpStat").textContent="idle"; setDot("dotMP","warn");
+  updateProfileUI();
+
+  // Also apply any saved profile immediately (offsets will finalize once we know size)
+  // (We re-apply after start camera too).
+})();
+</script>
+</body>
+</html>

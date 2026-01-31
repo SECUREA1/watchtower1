@@ -1,0 +1,518 @@
+import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
+
+// ---- Canvas + UI ----
+const game = document.getElementById("game");
+const ctx = game.getContext("2d");
+
+const pipCanvas = document.getElementById("pipCanvas");
+const pipCtx = pipCanvas.getContext("2d");
+
+const scoreEl = document.getElementById("score");
+const stateEl = document.getElementById("state");
+const startBtn = document.getElementById("startBtn");
+
+const pinchThreshEl = document.getElementById("pinchThresh");
+const pinchValEl = document.getElementById("pinchVal");
+
+const throwMulEl = document.getElementById("throwMul");
+const throwValEl = document.getElementById("throwVal");
+
+const dirOffEl = document.getElementById("dirOff");
+const dirValEl = document.getElementById("dirVal");
+
+const gravEl = document.getElementById("grav");
+const gravValEl = document.getElementById("gravVal");
+
+const debugEl = document.getElementById("debug");
+
+function resize() {
+  const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  game.width = Math.floor(window.innerWidth * dpr);
+  game.height = Math.floor(window.innerHeight * dpr);
+  game.style.width = `${window.innerWidth}px`;
+  game.style.height = `${window.innerHeight}px`;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  pipCanvas.width = 240 * dpr;
+  pipCanvas.height = Math.floor(240 * 0.75 * dpr);
+  pipCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+window.addEventListener("resize", resize);
+resize();
+
+function uiNumber(el, fmt = (v) => v.toFixed(3)) {
+  return () => fmt(parseFloat(el.value));
+}
+const getPinchThresh = () => parseFloat(pinchThreshEl.value);
+const getThrowMul = () => parseFloat(throwMulEl.value);
+const getDirOffsetRad = () => (parseFloat(dirOffEl.value) * Math.PI) / 180;
+const getGravity = () => parseFloat(gravEl.value);
+
+function syncUI() {
+  pinchValEl.textContent = uiNumber(pinchThreshEl, (v) => v.toFixed(3))();
+  throwValEl.textContent = uiNumber(throwMulEl, (v) => v.toFixed(1))();
+  dirValEl.textContent = `${parseFloat(dirOffEl.value).toFixed(1)}`;
+  gravValEl.textContent = uiNumber(gravEl, (v) => v.toFixed(1))();
+}
+["input", "change"].forEach((evt) => {
+  pinchThreshEl.addEventListener(evt, syncUI);
+  throwMulEl.addEventListener(evt, syncUI);
+  dirOffEl.addEventListener(evt, syncUI);
+  gravEl.addEventListener(evt, syncUI);
+});
+syncUI();
+
+// ---- Hand landmark connections (for debug skeleton drawing) ----
+const HAND_CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],        // thumb
+  [0,5],[5,6],[6,7],[7,8],        // index
+  [5,9],[9,10],[10,11],[11,12],   // middle
+  [9,13],[13,14],[14,15],[15,16], // ring
+  [13,17],[17,18],[18,19],[19,20],// pinky
+  [0,17]
+];
+
+// ---- Game world in normalized coords (0..1) ----
+let score = 0;
+
+const hoop = {
+  x: 0.5,
+  y: 0.83,
+  rimR: 0.055,
+  backboardW: 0.20,
+  backboardH: 0.12
+};
+
+const ball = {
+  x: 0.25,
+  y: 0.22,
+  vx: 0,
+  vy: 0,
+  r: 0.03,
+  grabbed: false,
+  inFlight: false
+};
+
+function resetBall() {
+  ball.x = 0.25;
+  ball.y = 0.22;
+  ball.vx = 0;
+  ball.vy = 0;
+  ball.grabbed = false;
+  ball.inFlight = false;
+}
+
+// ---- Hand state / toss velocity estimation ----
+let lastTs = performance.now();
+let handLandmarker = null;
+
+let pinchActive = false;
+let pinchHysteresis = { on: 1.00, off: 1.25 }; // end pinch when dist > threshold*1.25
+let handPos = null; // {x,y} in normalized game coords
+let handHistory = []; // {x,y,t}
+const HISTORY_MS = 140; // window used for velocity estimate
+
+function pushHandHistory(p) {
+  const t = performance.now();
+  handHistory.push({ x: p.x, y: p.y, t });
+  const cutoff = t - HISTORY_MS;
+  while (handHistory.length && handHistory[0].t < cutoff) handHistory.shift();
+}
+
+function estimateVelocity() {
+  if (handHistory.length < 2) return { vx: 0, vy: 0 };
+  const a = handHistory[0];
+  const b = handHistory[handHistory.length - 1];
+  const dt = (b.t - a.t) / 1000;
+  if (dt <= 0.0001) return { vx: 0, vy: 0 };
+  return { vx: (b.x - a.x) / dt, vy: (b.y - a.y) / dt };
+}
+
+// ---- Court rendering ----
+function drawCourt() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+
+  // background
+  ctx.fillStyle = "#0b0f14";
+  ctx.fillRect(0, 0, w, h);
+
+  // court slab
+  const pad = Math.min(w, h) * 0.06;
+  const cx1 = pad, cy1 = pad, cx2 = w - pad, cy2 = h - pad;
+
+  // wood-ish gradient
+  const g = ctx.createLinearGradient(cx1, cy1, cx2, cy2);
+  g.addColorStop(0, "#7a4c2a");
+  g.addColorStop(1, "#5c351c");
+  ctx.fillStyle = g;
+  ctx.fillRect(cx1, cy1, cx2 - cx1, cy2 - cy1);
+
+  // boundary lines
+  ctx.strokeStyle = "rgba(255,255,255,0.75)";
+  ctx.lineWidth = 3;
+  ctx.strokeRect(cx1, cy1, cx2 - cx1, cy2 - cy1);
+
+  // center line + circle
+  ctx.beginPath();
+  ctx.moveTo((cx1 + cx2) / 2, cy1);
+  ctx.lineTo((cx1 + cx2) / 2, cy2);
+  ctx.strokeStyle = "rgba(255,255,255,0.35)";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  const midx = (cx1 + cx2) / 2;
+  const midy = (cy1 + cy2) / 2;
+  const midR = Math.min(cx2 - cx1, cy2 - cy1) * 0.12;
+  ctx.beginPath();
+  ctx.arc(midx, midy, midR, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // hoop + backboard (top side)
+  const hx = cx1 + hoop.x * (cx2 - cx1);
+  const hy = cy1 + hoop.y * (cy2 - cy1);
+
+  // backboard
+  const bw = hoop.backboardW * (cx2 - cx1);
+  const bh = hoop.backboardH * (cy2 - cy1);
+  ctx.fillStyle = "rgba(245,245,245,0.85)";
+  ctx.fillRect(hx - bw / 2, hy - bh - 18, bw, bh);
+
+  // rim
+  const rr = hoop.rimR * (cx2 - cx1);
+  ctx.strokeStyle = "#ff3b30";
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.arc(hx, hy, rr, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // paint zone hint
+  ctx.strokeStyle = "rgba(255,255,255,0.25)";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(hx - (cx2 - cx1) * 0.18, cy1 + (cy2 - cy1) * 0.55, (cx2 - cx1) * 0.36, (cy2 - cy1) * 0.40);
+}
+
+function toScreen(nx, ny) {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const pad = Math.min(w, h) * 0.06;
+  const cx1 = pad, cy1 = pad, cx2 = w - pad, cy2 = h - pad;
+  return {
+    x: cx1 + nx * (cx2 - cx1),
+    y: cy1 + ny * (cy2 - cy1)
+  };
+}
+
+function drawBall() {
+  const p = toScreen(ball.x, ball.y);
+  const r = ball.r * (window.innerWidth - Math.min(window.innerWidth, window.innerHeight) * 0.12);
+
+  // shadow
+  ctx.fillStyle = "rgba(0,0,0,0.25)";
+  ctx.beginPath();
+  ctx.ellipse(p.x, p.y + r * 0.65, r * 0.9, r * 0.35, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // ball
+  ctx.fillStyle = "#ff9f0a";
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+  ctx.fill();
+
+  // seams
+  ctx.strokeStyle = "rgba(0,0,0,0.35)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, r * 0.95, -Math.PI / 2, Math.PI / 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, r * 0.95, 0, Math.PI);
+  ctx.stroke();
+}
+
+function drawHandDebug(landmarks) {
+  if (!debugEl.checked || !landmarks) return;
+
+  // draw cursor at index tip
+  const idx = landmarks[8];
+  const hp = { x: idx.x, y: 1 - idx.y };
+  const s = toScreen(hp.x, hp.y);
+
+  ctx.fillStyle = "rgba(0,255,120,0.95)";
+  ctx.beginPath();
+  ctx.arc(s.x, s.y, 6, 0, Math.PI * 2);
+  ctx.fill();
+
+  // skeleton lines
+  ctx.strokeStyle = "rgba(255,255,255,0.85)";
+  ctx.lineWidth = 2;
+  for (const [a, b] of HAND_CONNECTIONS) {
+    const pa = landmarks[a];
+    const pb = landmarks[b];
+    const sa = toScreen(pa.x, 1 - pa.y);
+    const sb = toScreen(pb.x, 1 - pb.y);
+    ctx.beginPath();
+    ctx.moveTo(sa.x, sa.y);
+    ctx.lineTo(sb.x, sb.y);
+    ctx.stroke();
+  }
+}
+
+// ---- Physics + scoring ----
+let prevBallY = ball.y;
+
+function step(dt) {
+  prevBallY = ball.y;
+
+  if (ball.grabbed && handPos) {
+    ball.x = handPos.x;
+    ball.y = handPos.y;
+    ball.vx = 0;
+    ball.vy = 0;
+    ball.inFlight = false;
+    return;
+  }
+
+  if (!ball.inFlight) return;
+
+  // gravity (normalized units)
+  ball.vy -= getGravity() * dt * 0.06; // tuned for normalized space
+  ball.x += ball.vx * dt * 0.10;
+  ball.y += ball.vy * dt * 0.10;
+
+  // walls
+  if (ball.x - ball.r < 0) { ball.x = ball.r; ball.vx *= -0.65; }
+  if (ball.x + ball.r > 1) { ball.x = 1 - ball.r; ball.vx *= -0.65; }
+
+  // floor
+  if (ball.y - ball.r < 0.08) { // “floor” line a bit above bottom border
+    ball.y = 0.08 + ball.r;
+    ball.vy *= -0.55;
+    ball.vx *= 0.92;
+    if (Math.abs(ball.vy) < 0.08) { ball.vy = 0; }
+  }
+
+  // backboard collision (simple AABB)
+  const bb = {
+    x1: hoop.x - hoop.backboardW / 2,
+    x2: hoop.x + hoop.backboardW / 2,
+    y1: hoop.y - hoop.backboardH - 0.03,
+    y2: hoop.y - 0.03
+  };
+  if (ball.x > bb.x1 && ball.x < bb.x2 && ball.y > bb.y1 && ball.y < bb.y2) {
+    // bounce downward a bit
+    ball.vy *= -0.35;
+    ball.vx *= 0.85;
+    // push the ball away from the board (down)
+    ball.y = bb.y1 - ball.r;
+  }
+
+  // score: ball crosses rim plane from above and is near rim center
+  const dx = ball.x - hoop.x;
+  const dy = ball.y - hoop.y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+
+  const crossedDown = prevBallY > hoop.y && ball.y <= hoop.y;
+  if (crossedDown && dist < hoop.rimR * 0.85) {
+    score++;
+    scoreEl.textContent = String(score);
+    resetBall();
+  }
+
+  // out-of-bounds reset (optional)
+  if (ball.y > 1.2 || ball.y < -0.4) resetBall();
+}
+
+// ---- MediaPipe: webcam + hand landmarker ----
+const video = document.getElementById("webcam");
+
+async function createLandmarker() {
+  // This follows the official Tasks Vision setup (FilesetResolver + HandLandmarker),
+  // and uses the hosted hand_landmarker.task model used by MediaPipe demos. :contentReference[oaicite:1]{index=1}
+  const vision = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
+  );
+
+  handLandmarker = await HandLandmarker.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+      delegate: "GPU"
+    },
+    runningMode: "VIDEO",
+    numHands: 2
+  });
+
+  return handLandmarker;
+}
+
+async function startCamera() {
+  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+  video.srcObject = stream;
+  await video.play();
+}
+
+function selectBestHand(result) {
+  // Prefer Right hand if present; else take first.
+  if (!result?.landmarks?.length) return null;
+
+  // result.handednesses is an array of arrays of Categories
+  let bestIdx = 0;
+  for (let i = 0; i < result.landmarks.length; i++) {
+    const handed = result.handednesses?.[i]?.[0]?.categoryName;
+    if (handed === "Right") { bestIdx = i; break; }
+  }
+  return result.landmarks[bestIdx];
+}
+
+function pinchDistance(landmarks) {
+  // Thumb tip = 4, Index tip = 8
+  const t = landmarks[4];
+  const i = landmarks[8];
+  const dx = t.x - i.x;
+  const dy = t.y - i.y;
+  const dz = (t.z ?? 0) - (i.z ?? 0);
+  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+function applyDirectionOffset(vx, vy) {
+  const a = getDirOffsetRad();
+  const cos = Math.cos(a);
+  const sin = Math.sin(a);
+  return {
+    vx: vx * cos - vy * sin,
+    vy: vx * sin + vy * cos
+  };
+}
+
+// ---- Main loop ----
+let running = false;
+
+function drawPipPreview(landmarks) {
+  const w = pipCanvas.clientWidth || 240;
+  const h = Math.floor(w * 0.75);
+  pipCtx.clearRect(0, 0, w, h);
+
+  // draw the webcam frame into pip (letterbox-ish)
+  if (video.videoWidth > 0) {
+    pipCtx.drawImage(video, 0, 0, w, h);
+  }
+
+  if (!debugEl.checked || !landmarks) return;
+
+  pipCtx.strokeStyle = "rgba(0,255,0,0.9)";
+  pipCtx.lineWidth = 2;
+
+  for (const [a, b] of HAND_CONNECTIONS) {
+    const pa = landmarks[a];
+    const pb = landmarks[b];
+    pipCtx.beginPath();
+    pipCtx.moveTo(pa.x * w, pa.y * h);
+    pipCtx.lineTo(pb.x * w, pb.y * h);
+    pipCtx.stroke();
+  }
+}
+
+async function loop() {
+  if (!running) return;
+
+  const now = performance.now();
+  const dt = Math.min(0.033, (now - lastTs) / 1000);
+  lastTs = now;
+
+  // Detect hands
+  let landmarks = null;
+  if (handLandmarker && video.readyState >= 2) {
+    const result = handLandmarker.detectForVideo(video, now);
+    landmarks = selectBestHand(result);
+
+    if (landmarks) {
+      // Hand position from index tip (8)
+      const idx = landmarks[8];
+      const p = { x: idx.x, y: 1 - idx.y }; // invert y into "up"
+      // clamp
+      p.x = Math.max(0, Math.min(1, p.x));
+      p.y = Math.max(0, Math.min(1, p.y));
+      handPos = p;
+      pushHandHistory(p);
+
+      // Pinch state with hysteresis
+      const d = pinchDistance(landmarks);
+      const thresh = getPinchThresh();
+
+      const wantOn = d < thresh * pinchHysteresis.on;
+      const wantOff = d > thresh * pinchHysteresis.off;
+
+      if (!pinchActive && wantOn) {
+        pinchActive = true;
+        stateEl.textContent = "pinch";
+        // grab if close to ball
+        const dx = ball.x - p.x;
+        const dy = ball.y - p.y;
+        if (Math.sqrt(dx * dx + dy * dy) < ball.r * 2.2) {
+          ball.grabbed = true;
+          ball.inFlight = false;
+        }
+      } else if (pinchActive && wantOff) {
+        pinchActive = false;
+
+        // release => toss if ball was grabbed
+        if (ball.grabbed) {
+          const v = estimateVelocity(); // normalized/sec
+          const mul = getThrowMul();
+
+          // base toss velocity
+          let vx = v.vx * mul * 0.012;
+          let vy = v.vy * mul * 0.012;
+
+          // small “up” assist so most throws arc
+          vy += 0.06;
+
+          // apply direction offset (rotates the velocity vector)
+          const rotated = applyDirectionOffset(vx, vy);
+          ball.vx = rotated.vx;
+          ball.vy = rotated.vy;
+
+          ball.grabbed = false;
+          ball.inFlight = true;
+          stateEl.textContent = "throw";
+        } else {
+          stateEl.textContent = "open";
+        }
+
+        // clear history after release for cleaner next throw
+        handHistory = [];
+      } else {
+        stateEl.textContent = pinchActive ? "pinch" : "open";
+      }
+    } else {
+      handPos = null;
+      pinchActive = false;
+      stateEl.textContent = "no hand";
+      handHistory = [];
+    }
+  }
+
+  // Physics
+  step(dt);
+
+  // Render
+  drawCourt();
+  drawBall();
+  drawHandDebug(landmarks);
+  drawPipPreview(landmarks);
+
+  requestAnimationFrame(loop);
+}
+
+startBtn.addEventListener("click", async () => {
+  startBtn.disabled = true;
+  stateEl.textContent = "loading…";
+
+  await startCamera();
+  await createLandmarker();
+
+  running = true;
+  stateEl.textContent = "open";
+  lastTs = performance.now();
+  requestAnimationFrame(loop);
+});

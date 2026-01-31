@@ -1,0 +1,1216 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Hand Pinch Basketball (Web) — Gesture AutoFit + Tiger Balls</title>
+  <style>
+    html, body { margin:0; padding:0; height:100%; background:#0b0b0b; overflow:hidden; }
+    #wrap{ position:relative; width:100%; height:100%; }
+    canvas{ display:block; }
+    #hud2d{
+      position:absolute; left:0; top:0; width:100%; height:100%;
+      pointer-events:none;
+    }
+    #ui{
+      position:absolute; top:12px; left:12px;
+      background: rgba(20,20,20,0.78);
+      color:#eaeaea;
+      font: 14px/1.3 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      padding: 12px; border-radius: 12px; width: 390px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+      user-select:none;
+    }
+    #ui h3{ margin:0 0 8px 0; font-size:14px; font-weight:800; letter-spacing:.2px; }
+    .row{ display:flex; align-items:center; gap:10px; margin: 8px 0; }
+    .row label{ width: 190px; opacity:0.92; font-weight:650; font-size:12px; }
+    .row input[type="range"]{ width: 155px; }
+    .row input[type="checkbox"]{ transform: scale(1.15); }
+    .badge{
+      display:inline-block; padding: 2px 8px; border-radius: 999px;
+      background: rgba(255,255,255,0.08); margin-left: 6px;
+      font-size: 12px; opacity:0.95;
+    }
+    #status{ margin-top:8px; font-size:12px; opacity:0.88; }
+    #video{ display:none; }
+    .hr{ height:1px; background: rgba(255,255,255,0.08); margin: 10px 0; }
+    .btnRow{ display:flex; gap:8px; flex-wrap:wrap; margin: 8px 0 0; }
+    .btn{
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(0,0,0,0.25);
+      color:#f2f2f2;
+      padding: 8px 10px;
+      border-radius: 10px;
+      font-weight: 800;
+      cursor:pointer;
+      transition: transform .08s ease, filter .12s ease;
+    }
+    .btn:hover{ filter: brightness(1.08); }
+    .btn:active{ transform: translateY(1px); }
+    .btn.primary{
+      background:
+        radial-gradient(circle at 30% 20%, rgba(32,255,230,.16), transparent 55%),
+        linear-gradient(180deg, rgba(176,76,255,.22), rgba(0,0,0,.20));
+    }
+    .btn.danger{
+      background: linear-gradient(180deg, rgba(255,70,70,.22), rgba(0,0,0,.20));
+    }
+    .muted{ opacity:.82; }
+  </style>
+
+  <!-- Three.js -->
+  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+
+  <!-- MediaPipe Hands -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+</head>
+
+<body>
+<div id="wrap">
+  <video id="video" playsinline></video>
+  <canvas id="webgl"></canvas>
+  <canvas id="hud2d"></canvas>
+
+  <div id="ui">
+    <h3>Gesture AutoFit Basketball <span class="badge">MP Left→Grab/Toss • MP Right→Move/Look</span></h3>
+
+    <div class="row">
+      <label>Show HUD</label>
+      <input id="showHud" type="checkbox" checked />
+      <span class="badge">toggle</span>
+    </div>
+
+    <div class="row">
+      <label>Show Panel</label>
+      <input id="showPanel" type="checkbox" checked />
+      <span class="badge">toggle</span>
+    </div>
+
+    <div class="hr"></div>
+
+    <h3 style="margin:0 0 8px 0;">AutoFit Scan (Comfort Center)</h3>
+
+    <div class="row">
+      <label>Scan Duration (ms)</label>
+      <input id="scanMs" type="range" min="1400" max="5200" step="100" value="3200" />
+      <span id="scanMsVal" class="badge">3200</span>
+    </div>
+
+    <div class="btnRow">
+      <button class="btn primary" id="btnCreate">Create / Overwrite Profile</button>
+      <button class="btn" id="btnLogin">Login + Apply</button>
+      <button class="btn danger" id="btnDelete">Delete Profile</button>
+    </div>
+
+    <div class="row">
+      <label>Profile</label>
+      <span class="badge" id="profileState">none</span>
+      <span class="badge" id="fitState">fit: off</span>
+    </div>
+
+    <div class="hr"></div>
+
+    <h3 style="margin:0 0 8px 0;">Move/Look Tuning</h3>
+
+    <div class="row">
+      <label>Deadzone</label>
+      <input id="deadzone" type="range" min="0.02" max="0.30" step="0.01" value="0.12" />
+      <span id="deadzoneVal" class="badge">0.12</span>
+    </div>
+
+    <div class="row">
+      <label>Smoothing</label>
+      <input id="smooth" type="range" min="0.05" max="0.65" step="0.01" value="0.22" />
+      <span id="smoothVal" class="badge">0.22</span>
+    </div>
+
+    <div class="row">
+      <label>Move Speed</label>
+      <input id="moveSpeed" type="range" min="0.8" max="6.0" step="0.1" value="3.0" />
+      <span id="moveSpeedVal" class="badge">3.0</span>
+    </div>
+
+    <div class="row">
+      <label>Look Speed</label>
+      <input id="lookSpeed" type="range" min="0.4" max="3.0" step="0.05" value="1.05" />
+      <span id="lookSpeedVal" class="badge">1.05</span>
+    </div>
+
+    <div class="row">
+      <label>Look Mode Pinch (Move hand)</label>
+      <input id="lookPinch" type="range" min="0.01" max="0.20" step="0.005" value="0.08" />
+      <span id="lookPinchVal" class="badge">0.080</span>
+    </div>
+
+    <div class="hr"></div>
+
+    <h3 style="margin:0 0 8px 0;">Grab / Throw (Grab hand)</h3>
+
+    <div class="row">
+      <label>Pinch Threshold (Grab)</label>
+      <input id="pinchThr" type="range" min="0.01" max="0.20" step="0.005" value="0.08" />
+      <span id="pinchVal" class="badge">0.080</span>
+    </div>
+
+    <div class="row">
+      <label>Throw Power</label>
+      <input id="throwPow" type="range" min="1" max="18" step="0.5" value="6.0" />
+      <span id="throwVal" class="badge">6.0</span>
+    </div>
+
+    <div class="hr"></div>
+
+    <h3 style="margin:0 0 8px 0;">Per-hand Cursor Offsets (px)</h3>
+
+    <div class="row">
+      <label>Grab Hand X</label>
+      <input id="grabOffX" type="range" min="-400" max="400" step="1" value="0" />
+      <span id="grabOffXVal" class="badge">0</span>
+    </div>
+    <div class="row">
+      <label>Grab Hand Y</label>
+      <input id="grabOffY" type="range" min="-300" max="300" step="1" value="0" />
+      <span id="grabOffYVal" class="badge">0</span>
+    </div>
+
+    <div class="row">
+      <label>Move Hand X</label>
+      <input id="moveOffX" type="range" min="-400" max="400" step="1" value="0" />
+      <span id="moveOffXVal" class="badge">0</span>
+    </div>
+    <div class="row">
+      <label>Move Hand Y</label>
+      <input id="moveOffY" type="range" min="-300" max="300" step="1" value="0" />
+      <span id="moveOffYVal" class="badge">0</span>
+    </div>
+
+    <div id="status">Initializing…</div>
+  </div>
+</div>
+
+<script>
+(() => {
+  // -----------------------
+  // Canvas + HUD
+  // -----------------------
+  const webglCanvas = document.getElementById('webgl');
+  const hudCanvas = document.getElementById('hud2d');
+  const hud = hudCanvas.getContext('2d', { alpha: true });
+
+  // -----------------------
+  // UI wiring
+  // -----------------------
+  const ui = document.getElementById('ui');
+  const statusEl = document.getElementById('status');
+
+  const showHudEl = document.getElementById('showHud');
+  const showPanelEl = document.getElementById('showPanel');
+
+  const scanMsEl = document.getElementById('scanMs');
+  const scanMsValEl = document.getElementById('scanMsVal');
+  const btnCreate = document.getElementById('btnCreate');
+  const btnLogin  = document.getElementById('btnLogin');
+  const btnDelete = document.getElementById('btnDelete');
+  const profileStateEl = document.getElementById('profileState');
+  const fitStateEl = document.getElementById('fitState');
+
+  const deadzoneEl = document.getElementById('deadzone');
+  const smoothEl = document.getElementById('smooth');
+  const moveSpeedEl = document.getElementById('moveSpeed');
+  const lookSpeedEl = document.getElementById('lookSpeed');
+  const lookPinchEl = document.getElementById('lookPinch');
+
+  const deadzoneValEl = document.getElementById('deadzoneVal');
+  const smoothValEl = document.getElementById('smoothVal');
+  const moveSpeedValEl = document.getElementById('moveSpeedVal');
+  const lookSpeedValEl = document.getElementById('lookSpeedVal');
+  const lookPinchValEl = document.getElementById('lookPinchVal');
+
+  const pinchThrEl = document.getElementById('pinchThr');
+  const throwPowEl = document.getElementById('throwPow');
+  const pinchValEl = document.getElementById('pinchVal');
+  const throwValEl = document.getElementById('throwVal');
+
+  const grabOffXEl = document.getElementById('grabOffX');
+  const grabOffYEl = document.getElementById('grabOffY');
+  const moveOffXEl = document.getElementById('moveOffX');
+  const moveOffYEl = document.getElementById('moveOffY');
+  const grabOffXValEl = document.getElementById('grabOffXVal');
+  const grabOffYValEl = document.getElementById('grabOffYVal');
+  const moveOffXValEl = document.getElementById('moveOffXVal');
+  const moveOffYValEl = document.getElementById('moveOffYVal');
+
+  // config
+  let showHud = true;
+  let scanMs = parseInt(scanMsEl.value, 10);
+
+  let deadzone = parseFloat(deadzoneEl.value);
+  let smooth = parseFloat(smoothEl.value);
+  let moveSpeed = parseFloat(moveSpeedEl.value);
+  let lookSpeed = parseFloat(lookSpeedEl.value);
+  let lookPinchThr = parseFloat(lookPinchEl.value);
+
+  let pinch_threshold = parseFloat(pinchThrEl.value);
+  let throwing_factor = parseFloat(throwPowEl.value);
+
+  let grabOffset = { x: parseInt(grabOffXEl.value, 10), y: parseInt(grabOffYEl.value, 10) };
+  let moveOffset = { x: parseInt(moveOffXEl.value, 10), y: parseInt(moveOffYEl.value, 10) };
+
+  function clamp(n,a,b){ return Math.max(a, Math.min(b, n)); }
+  function lerp(a,b,t){ return a + (b-a)*t; }
+
+  function updateBadges() {
+    scanMsValEl.textContent = String(scanMs);
+
+    deadzoneValEl.textContent = deadzone.toFixed(2);
+    smoothValEl.textContent = smooth.toFixed(2);
+    moveSpeedValEl.textContent = moveSpeed.toFixed(1);
+    lookSpeedValEl.textContent = lookSpeed.toFixed(2);
+    lookPinchValEl.textContent = lookPinchThr.toFixed(3);
+
+    pinchValEl.textContent = pinch_threshold.toFixed(3);
+    throwValEl.textContent = throwing_factor.toFixed(1);
+
+    grabOffXValEl.textContent = String(grabOffset.x);
+    grabOffYValEl.textContent = String(grabOffset.y);
+    moveOffXValEl.textContent = String(moveOffset.x);
+    moveOffYValEl.textContent = String(moveOffset.y);
+  }
+
+  scanMsEl.addEventListener('input', () => { scanMs = parseInt(scanMsEl.value, 10); updateBadges(); });
+
+  deadzoneEl.addEventListener('input', ()=>{ deadzone = parseFloat(deadzoneEl.value); updateBadges(); });
+  smoothEl.addEventListener('input', ()=>{ smooth = parseFloat(smoothEl.value); updateBadges(); });
+  moveSpeedEl.addEventListener('input', ()=>{ moveSpeed = parseFloat(moveSpeedEl.value); updateBadges(); });
+  lookSpeedEl.addEventListener('input', ()=>{ lookSpeed = parseFloat(lookSpeedEl.value); updateBadges(); });
+  lookPinchEl.addEventListener('input', ()=>{ lookPinchThr = parseFloat(lookPinchEl.value); updateBadges(); });
+
+  pinchThrEl.addEventListener('input', ()=>{ pinch_threshold = parseFloat(pinchThrEl.value); updateBadges(); });
+  throwPowEl.addEventListener('input', ()=>{ throwing_factor = parseFloat(throwPowEl.value); updateBadges(); });
+
+  function bindOffset(el, key, axis) {
+    el.addEventListener('input', () => {
+      if (key === 'grab') grabOffset[axis] = parseInt(el.value, 10);
+      if (key === 'move') moveOffset[axis] = parseInt(el.value, 10);
+      updateBadges();
+    });
+  }
+  bindOffset(grabOffXEl, 'grab', 'x');
+  bindOffset(grabOffYEl, 'grab', 'y');
+  bindOffset(moveOffXEl, 'move', 'x');
+  bindOffset(moveOffYEl, 'move', 'y');
+
+  showHudEl.addEventListener('change', ()=>{
+    showHud = !!showHudEl.checked;
+  });
+  showPanelEl.addEventListener('change', ()=>{
+    ui.style.display = showPanelEl.checked ? 'block' : 'none';
+    // keep ability to restore by keyboard "P"
+  });
+
+  updateBadges();
+
+  // Keyboard quick toggles
+  window.addEventListener('keydown', (e)=>{
+    if(e.key.toLowerCase()==='h'){
+      showHud = !showHud;
+      showHudEl.checked = showHud;
+    }
+    if(e.key.toLowerCase()==='p'){
+      const next = (ui.style.display === 'none');
+      ui.style.display = next ? 'block' : 'none';
+      showPanelEl.checked = next;
+    }
+  });
+
+  // -----------------------
+  // Three.js scene
+  // -----------------------
+  const renderer = new THREE.WebGLRenderer({ canvas: webglCanvas, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x050505);
+
+  const camera = new THREE.PerspectiveCamera(45, 16/9, 0.1, 200);
+  camera.position.set(0, 1.2, 4);
+
+  // Lights
+  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  const key = new THREE.DirectionalLight(0xffffff, 1.2);
+  key.position.set(8, 12, 5);
+  scene.add(key);
+
+  // Ground
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(80, 80),
+    new THREE.MeshStandardMaterial({ color: 0x111316, roughness: 1.0, metalness: 0.0 })
+  );
+  ground.rotation.x = -Math.PI/2;
+  ground.position.y = -1;
+  scene.add(ground);
+
+  // Simple environment box
+  const box = new THREE.Mesh(
+    new THREE.BoxGeometry(2, 2, 2),
+    new THREE.MeshStandardMaterial({ color: 0x2244ff, roughness: 0.6 })
+  );
+  box.position.set(2, 0, -8);
+  scene.add(box);
+
+  // -----------------------
+  // Hoop assembly
+  // -----------------------
+  const hoop = new THREE.Group();
+  hoop.position.set(-3, 1, -10);
+
+  const pole = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.08, 0.10, 4.0, 24),
+    new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.7, metalness: 0.2 })
+  );
+  pole.position.set(0.0, -0.6, -1.2);
+  hoop.add(pole);
+
+  const arm = new THREE.Mesh(
+    new THREE.BoxGeometry(0.15, 0.15, 1.0),
+    new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.7, metalness: 0.2 })
+  );
+  arm.position.set(0, 1.0, -0.6);
+  hoop.add(arm);
+
+  const backboard = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.8, 1.2),
+    new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.85, metalness: 0.0 })
+  );
+  backboard.position.set(0, 1.0, -1.1);
+  hoop.add(backboard);
+
+  const boardFrame = new THREE.Mesh(
+    new THREE.BoxGeometry(1.86, 1.26, 0.05),
+    new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.6, metalness: 0.1 })
+  );
+  boardFrame.position.copy(backboard.position);
+  boardFrame.position.z -= 0.03;
+  hoop.add(boardFrame);
+
+  const rim = new THREE.Mesh(
+    new THREE.TorusGeometry(0.55, 0.05, 18, 48),
+    new THREE.MeshStandardMaterial({ color: 0xff2b2b, roughness: 0.35, metalness: 0.25 })
+  );
+  rim.rotation.x = Math.PI/2;
+  rim.position.set(0, 0.78, -0.55);
+  hoop.add(rim);
+
+  const netGroup = new THREE.Group();
+  netGroup.position.copy(rim.position);
+
+  const strandMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 });
+  const strands = 16;
+  for (let i = 0; i < strands; i++) {
+    const a = (i / strands) * Math.PI * 2;
+    const x = Math.cos(a) * 0.52;
+    const z = Math.sin(a) * 0.52;
+    const strand = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.008, 0.008, 0.7, 10),
+      strandMat
+    );
+    strand.position.set(x * 0.6, -0.35, z * 0.6);
+    netGroup.add(strand);
+  }
+  hoop.add(netGroup);
+  scene.add(hoop);
+
+  // -----------------------
+  // Tiger stripe texture for balls (procedural)
+  // -----------------------
+  function makeTigerTexture(size=512) {
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const ctx = c.getContext('2d');
+
+    ctx.fillStyle = '#d9761b';
+    ctx.fillRect(0,0,size,size);
+
+    const img = ctx.getImageData(0,0,size,size);
+    for (let i=0; i<img.data.length; i+=4) {
+      const n = (Math.random()*18 - 9);
+      img.data[i]   = Math.max(0, Math.min(255, img.data[i]   + n));
+      img.data[i+1] = Math.max(0, Math.min(255, img.data[i+1] + n));
+      img.data[i+2] = Math.max(0, Math.min(255, img.data[i+2] + n));
+    }
+    ctx.putImageData(img,0,0);
+
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = '#1b0d06';
+    for (let i=0; i<26; i++) {
+      const x = (i/26)*size + (Math.random()*30 - 15);
+      const w = 14 + Math.random()*26;
+      const skew = (Math.random()*0.7 - 0.35);
+      ctx.save();
+      ctx.translate(x, 0);
+      ctx.transform(1, skew, 0, 1, 0, 0);
+      ctx.beginPath();
+      ctx.moveTo(-w, 0);
+      ctx.bezierCurveTo(-w*0.2, size*0.25, -w*1.2, size*0.5, -w*0.2, size*0.75);
+      ctx.bezierCurveTo(w*0.5, size*0.9, w*0.2, size, w, size);
+      ctx.lineTo(w, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1.0;
+
+    ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.arc(size/2, size/2, size*0.38, 0, Math.PI*2);
+    ctx.stroke();
+
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.anisotropy = 4;
+    tex.needsUpdate = true;
+    return tex;
+  }
+
+  const tigerTex = makeTigerTexture(512);
+  const ballMaterial = new THREE.MeshStandardMaterial({
+    map: tigerTex,
+    roughness: 0.55,
+    metalness: 0.05
+  });
+
+  // -----------------------
+  // Balls + physics
+  // -----------------------
+  const BALL_COUNT = 5;
+  const balls = [];
+
+  function randomBallPos() {
+    return new THREE.Vector3(
+      THREE.MathUtils.randFloat(-2, 2),
+      -0.6,
+      THREE.MathUtils.randFloat(-6.5, -4.5)
+    );
+  }
+
+  function makeBall() {
+    const mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.4, 32, 32),
+      ballMaterial.clone()
+    );
+    const ball = {
+      mesh,
+      radius: 0.4,
+      velocity: new THREE.Vector3(0,0,0),
+      grabbed: false,
+      lastReleasePos: null,
+      reset() {
+        this.mesh.position.copy(randomBallPos());
+        this.velocity.set(0,0,0);
+        this.grabbed = false;
+        this.lastReleasePos = null;
+      }
+    };
+    ball.reset();
+    scene.add(mesh);
+    return ball;
+  }
+  for (let i=0; i<BALL_COUNT; i++) balls.push(makeBall());
+
+  function checkBasketScore(ball) {
+    const p = ball.mesh.position;
+    const rimWorld = new THREE.Vector3();
+    rim.getWorldPosition(rimWorld);
+
+    const dx = p.x - rimWorld.x;
+    const dz = p.z - rimWorld.z;
+    const distXZ = Math.sqrt(dx*dx + dz*dz);
+
+    const rimRadius = 0.55;
+    return (distXZ < rimRadius && Math.abs(p.y - rimWorld.y) < 0.22);
+  }
+
+  const GRAVITY = -9.5;
+  const FLOOR_Y = -1 + 0.4;
+
+  function stepPhysics(dt) {
+    for (const ball of balls) {
+      if (ball.grabbed) continue;
+      ball.velocity.y += GRAVITY * dt;
+      ball.mesh.position.addScaledVector(ball.velocity, dt);
+
+      if (ball.mesh.position.y < FLOOR_Y) {
+        ball.mesh.position.y = FLOOR_Y;
+        if (ball.velocity.y < 0) ball.velocity.y *= -0.65;
+        ball.velocity.x *= 0.985;
+        ball.velocity.z *= 0.985;
+      }
+
+      const p = ball.mesh.position;
+      if (p.y < -12 || Math.abs(p.x) > 18 || Math.abs(p.z) > 30) ball.reset();
+      if (checkBasketScore(ball)) ball.reset();
+    }
+  }
+
+  // -----------------------
+  // Screen sizing
+  // -----------------------
+  function resize() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    webglCanvas.width = w; webglCanvas.height = h;
+    hudCanvas.width = w; hudCanvas.height = h;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
+  window.addEventListener('resize', resize);
+
+  // -----------------------
+  // Hand -> world mapping (grab hand)
+  // -----------------------
+  const raycaster = new THREE.Raycaster();
+  const interactionPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 8.0); // z = -8
+
+  function screenToWorld(xPx, yPx) {
+    const w = webglCanvas.width;
+    const h = webglCanvas.height;
+    const ndc = new THREE.Vector2(
+      (xPx / w) * 2 - 1,
+      -((yPx / h) * 2 - 1)
+    );
+    raycaster.setFromCamera(ndc, camera);
+    const out = new THREE.Vector3();
+    raycaster.ray.intersectPlane(interactionPlane, out);
+    return out;
+  }
+
+  // -----------------------
+  // Gesture helpers
+  // -----------------------
+  function pinchDistance(lm) {
+    const thumb = lm[4], index = lm[8];
+    const dx = thumb.x - index.x;
+    const dy = thumb.y - index.y;
+    const dz = (thumb.z || 0) - (index.z || 0);
+    return Math.sqrt(dx*dx + dy*dy + dz*dz);
+  }
+  function isHandOpen(lm) {
+    const wrist = lm[0];
+    return (lm[4].y < wrist.y && lm[8].y < wrist.y && lm[20].y < wrist.y);
+  }
+
+  // -----------------------
+  // AutoFit profile (MOVE hand)
+  // -----------------------
+  const LS_KEY = "basket_gesture_profile_v1";
+
+  function loadProfile(){
+    try{ const raw = localStorage.getItem(LS_KEY); return raw ? JSON.parse(raw) : null; }
+    catch(_){ return null; }
+  }
+  function saveProfile(p){
+    localStorage.setItem(LS_KEY, JSON.stringify(p));
+    syncProfileUI();
+  }
+  function deleteProfile(){
+    localStorage.removeItem(LS_KEY);
+    syncProfileUI();
+  }
+
+  function handMidPx(lm){
+    const idx = lm[8], th = lm[4];
+    // mirrored
+    return { x: (1-((idx.x+th.x)*0.5))*hudCanvas.width, y: (((idx.y+th.y)*0.5))*hudCanvas.height };
+  }
+
+  function calcHandMetrics(lm){
+    // signature: ratios stable across distance
+    const wrist = lm[0];
+    const iMCP  = lm[5];
+    const mMCP  = lm[9];
+    const pMCP  = lm[17];
+
+    const palmW = Math.hypot(iMCP.x - pMCP.x, iMCP.y - pMCP.y);
+    const palmL = Math.hypot(wrist.x - mMCP.x, wrist.y - mMCP.y);
+    const span  = Math.hypot(lm[4].x - lm[20].x, lm[4].y - lm[20].y);
+
+    const iLen = Math.hypot(lm[5].x - lm[8].x, lm[5].y - lm[8].y);
+    const mLen = Math.hypot(lm[9].x - lm[12].x, lm[9].y - lm[12].y);
+    const rLen = Math.hypot(lm[13].x - lm[16].x, lm[13].y - lm[16].y);
+    const pLen = Math.hypot(lm[17].x - lm[20].x, lm[17].y - lm[20].y);
+
+    const eps = 1e-6;
+    const wOverL = palmW / Math.max(eps, palmL);
+    const spanOverL = span / Math.max(eps, palmL);
+    const fingers = [
+      iLen / Math.max(eps, palmL),
+      mLen / Math.max(eps, palmL),
+      rLen / Math.max(eps, palmL),
+      pLen / Math.max(eps, palmL)
+    ];
+
+    // screenScale: palmW in landmark space (distance proxy)
+    const screenScale = palmW;
+
+    const mid = handMidPx(lm);
+    const cxNorm = clamp(mid.x / Math.max(1, hudCanvas.width), 0.05, 0.95);
+    const cyNorm = clamp(mid.y / Math.max(1, hudCanvas.height), 0.05, 0.95);
+
+    return {
+      signature: [wOverL, spanOverL, ...fingers],
+      screenScale,
+      cxNorm,
+      cyNorm
+    };
+  }
+
+  function vecMean(vs){
+    const n=vs.length; if(!n) return null;
+    const m=new Array(vs[0].length).fill(0);
+    for(const v of vs) for(let i=0;i<m.length;i++) m[i]+=v[i];
+    for(let i=0;i<m.length;i++) m[i]/=n;
+    return m;
+  }
+  function vecVar(vs, mean){
+    const n=vs.length; if(!n) return null;
+    const v=new Array(mean.length).fill(0);
+    for(const x of vs) for(let i=0;i<v.length;i++){
+      const d=x[i]-mean[i]; v[i]+=d*d;
+    }
+    for(let i=0;i<v.length;i++) v[i]/=n;
+    return v;
+  }
+  function vecDist(a,b){
+    let s=0;
+    for(let i=0;i<a.length;i++){ const d=a[i]-b[i]; s+=d*d; }
+    return Math.sqrt(s);
+  }
+
+  const fit = {
+    on: false,
+    cx: 0.5,
+    cy: 0.5,
+    radiusN: 0.18,
+    gain: 1.0,
+    scale: 0.18
+  };
+
+  function applyAutoFit(meanScale, cxNorm, cyNorm){
+    // meanScale typically ~0.14..0.26 depending on distance
+    const s = clamp((meanScale - 0.14) / (0.26 - 0.14), 0, 1);
+    fit.scale = meanScale;
+    fit.cx = clamp(cxNorm ?? 0.5, 0.05, 0.95);
+    fit.cy = clamp(cyNorm ?? 0.5, 0.05, 0.95);
+
+    // closer hand -> smaller radius
+    fit.radiusN = clamp(lerp(0.22, 0.14, s), 0.10, 0.30);
+
+    // a mild gain normalization
+    fit.gain = lerp(0.95, 1.35, s);
+
+    fit.on = true;
+    syncProfileUI();
+  }
+
+  function syncProfileUI(){
+    const p = loadProfile();
+    profileStateEl.textContent = p ? "saved" : "none";
+    fitStateEl.textContent = fit.on ? "fit: on" : "fit: off";
+  }
+  syncProfileUI();
+
+  // Scan state
+  let scanMode = "idle"; // "idle" | "create" | "login"
+  let scanStart = 0;
+  const sigFrames = [];
+  const scaleFrames = [];
+  const cxFrames = [];
+  const cyFrames = [];
+  let scanProgress = 0;
+
+  function startScan(mode){
+    scanMode = mode;
+    scanStart = performance.now();
+    sigFrames.length = 0;
+    scaleFrames.length = 0;
+    cxFrames.length = 0;
+    cyFrames.length = 0;
+    scanProgress = 0;
+    statusEl.textContent = (mode==="create")
+      ? "Scanning (Create): hold MOVE hand steady at your neutral center…"
+      : "Scanning (Login): hold MOVE hand steady at your neutral center…";
+  }
+  function stopScan(){
+    scanMode = "idle";
+    scanProgress = 0;
+  }
+
+  btnCreate.addEventListener('click', ()=> startScan("create"));
+  btnLogin.addEventListener('click', ()=>{
+    if(!loadProfile()){
+      statusEl.textContent = "No profile saved. Create one first.";
+      return;
+    }
+    startScan("login");
+  });
+  btnDelete.addEventListener('click', ()=>{
+    deleteProfile();
+    fit.on = false;
+    statusEl.textContent = "Profile deleted. Fit turned off.";
+  });
+
+  // -----------------------
+  // Move / Look control (MOVE hand = MP Right)
+  // -----------------------
+  let camera_yaw = 0;
+  let camera_pitch = 0;
+
+  // Smoothed analog vector (-1..1)
+  const mv = { x:0, y:0 };
+  const mvSm = { x:0, y:0 };
+
+  function computeMoveVectorFromHand(screen_x, screen_y){
+    // normalize
+    const nx = screen_x / Math.max(1, hudCanvas.width);
+    const ny = screen_y / Math.max(1, hudCanvas.height);
+
+    const cx = fit.on ? fit.cx : 0.5;
+    const cy = fit.on ? fit.cy : 0.5;
+    const r  = fit.on ? fit.radiusN : 0.18;
+
+    let dx = (nx - cx) / Math.max(0.001, r);
+    let dy = (ny - cy) / Math.max(0.001, r);
+
+    dx = clamp(dx, -1, 1);
+    dy = clamp(dy, -1, 1);
+
+    // deadzone
+    const mag = Math.hypot(dx,dy);
+    let sx=0, sy=0;
+    if(mag > deadzone){
+      const m2 = (mag - deadzone) / Math.max(1e-6, (1 - deadzone));
+      const k = m2 / Math.max(1e-6, mag);
+      sx = dx * k;
+      sy = dy * k;
+    }
+
+    // smoothing
+    mvSm.x = mvSm.x*(1-smooth) + sx*smooth;
+    mvSm.y = mvSm.y*(1-smooth) + sy*smooth;
+
+    const g = (fit.on ? fit.gain : 1.0);
+    mv.x = clamp(mvSm.x * g, -1, 1);
+    mv.y = clamp(mvSm.y * g, -1, 1);
+  }
+
+  function applyCameraControls(moveVec, lookVec, dt) {
+    // MoveVec: strafe (x), forward/back (y)
+    const speed = moveSpeed;
+    const yawRad = THREE.MathUtils.degToRad(camera_yaw);
+
+    const forward = new THREE.Vector3(Math.sin(yawRad), 0, -Math.cos(yawRad));
+    const right   = new THREE.Vector3(Math.cos(yawRad), 0,  Math.sin(yawRad));
+
+    // move
+    const worldMove = new THREE.Vector3();
+    worldMove.addScaledVector(right, moveVec.x * speed * dt);
+    worldMove.addScaledVector(forward, -moveVec.y * speed * dt);
+    camera.position.add(worldMove);
+
+    // look
+    camera_yaw += lookVec.x * (lookSpeed * 120) * dt;   // degrees/sec-ish
+    camera_pitch += lookVec.y * (lookSpeed * 120) * dt; // degrees/sec-ish
+    camera_pitch = clamp(camera_pitch, -75, 75);
+
+    const yaw = THREE.MathUtils.degToRad(camera_yaw);
+    const pitch = THREE.MathUtils.degToRad(camera_pitch);
+    const dirX = Math.cos(pitch) * Math.sin(yaw);
+    const dirY = Math.sin(pitch);
+    const dirZ = -Math.cos(pitch) * Math.cos(yaw);
+    const target = camera.position.clone().add(new THREE.Vector3(dirX, dirY, dirZ));
+    camera.lookAt(target);
+  }
+
+  // -----------------------
+  // Grab / Throw (GRAB hand = MP Left)
+  // -----------------------
+  let grabHandWorld = null;
+  let lastGrabHandWorld = null;
+
+  function tryGrabBall(handWorld) {
+    let best = null, bestD = Infinity;
+    for (const ball of balls) {
+      const d = ball.mesh.position.distanceTo(handWorld);
+      if (d < (ball.radius + 0.6) && d < bestD) { bestD = d; best = ball; }
+    }
+    if (best) best.grabbed = true;
+  }
+
+  function moveGrabbedBalls(handWorld) {
+    for (const ball of balls) {
+      if (ball.grabbed) {
+        ball.mesh.position.copy(handWorld);
+        ball.velocity.set(0,0,0);
+      }
+    }
+  }
+
+  function releaseBallsWithThrow() {
+    if (!grabHandWorld || !lastGrabHandWorld) return;
+    const delta = grabHandWorld.clone().sub(lastGrabHandWorld);
+
+    // Throw vector
+    const v = delta.multiplyScalar(throwing_factor);
+    v.z = -v.z; // keep your original inversion
+
+    for (const ball of balls) {
+      if (ball.grabbed) {
+        ball.grabbed = false;
+        ball.velocity.copy(v);
+        ball.lastReleasePos = grabHandWorld.clone();
+      }
+    }
+  }
+
+  // -----------------------
+  // HUD (fit ring + markers)
+  // -----------------------
+  const markers = { move: null, grab: null };
+  function drawHUD() {
+    const w = hudCanvas.width, h = hudCanvas.height;
+    hud.clearRect(0,0,w,h);
+    if(!showHud) return;
+
+    // Move marker & fit ring
+    if (fit.on) {
+      const cx = fit.cx * w;
+      const cy = fit.cy * h;
+      const r  = fit.radiusN * Math.min(w,h);
+
+      hud.globalAlpha = 0.85;
+      hud.strokeStyle = 'rgba(176,76,255,0.85)';
+      hud.lineWidth = 2;
+      hud.beginPath();
+      hud.arc(cx, cy, r, 0, Math.PI*2);
+      hud.stroke();
+
+      hud.fillStyle = 'rgba(176,76,255,0.95)';
+      hud.beginPath();
+      hud.arc(cx, cy, 4, 0, Math.PI*2);
+      hud.fill();
+
+      hud.globalAlpha = 1.0;
+      hud.fillStyle = 'rgba(255,255,255,0.80)';
+      hud.font = '12px system-ui, sans-serif';
+      hud.fillText('NEUTRAL', cx + 8, cy - 8);
+    }
+
+    // Move marker (move hand)
+    if (markers.move) {
+      hud.fillStyle = markers.move.color;
+      hud.beginPath();
+      hud.arc(markers.move.x, markers.move.y, 9, 0, Math.PI*2);
+      hud.fill();
+    }
+
+    // Grab marker
+    if (markers.grab) {
+      hud.fillStyle = markers.grab.color;
+      hud.beginPath();
+      hud.arc(markers.grab.x, markers.grab.y, 9, 0, Math.PI*2);
+      hud.fill();
+    }
+
+    // Held indicator
+    const anyGrabbed = balls.some(b => b.grabbed);
+    if (anyGrabbed) {
+      const t = performance.now() / 500;
+      const flash = (Math.sin(t) + 1) / 2;
+      const col = flash > 0.5 ? 'rgb(0,255,0)' : 'rgb(255,165,0)';
+      const x = Math.round(w * 0.82);
+      const y = Math.round(h * 0.86);
+      const r = Math.round(Math.min(w,h) * 0.045);
+      hud.fillStyle = col;
+      hud.beginPath();
+      hud.arc(x, y, r, 0, Math.PI*2);
+      hud.fill();
+      hud.fillStyle = 'rgba(0,0,0,0.55)';
+      hud.font = '900 12px system-ui, sans-serif';
+      hud.fillText('HOLD', x - 16, y + 4);
+    }
+
+    // Scan progress (if active)
+    if (scanMode !== "idle") {
+      const barW = Math.round(w * 0.30);
+      const barH = 10;
+      const x = 14, y = h - 18;
+      hud.globalAlpha = 0.9;
+      hud.fillStyle = 'rgba(0,0,0,0.35)';
+      hud.fillRect(x, y - barH, barW, barH);
+      hud.fillStyle = 'rgba(32,255,230,0.90)';
+      hud.fillRect(x, y - barH, Math.round(barW * scanProgress), barH);
+      hud.strokeStyle = 'rgba(255,255,255,0.18)';
+      hud.strokeRect(x, y - barH, barW, barH);
+      hud.globalAlpha = 1.0;
+    }
+  }
+
+  // -----------------------
+  // MediaPipe Hands
+  // -----------------------
+  const videoEl = document.getElementById('video');
+
+  const hands = new Hands({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+  });
+
+  hands.setOptions({
+    maxNumHands: 2,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.8,
+    minTrackingConfidence: 0.8
+  });
+
+  let latestHands = null;
+  hands.onResults((results) => { latestHands = results; });
+
+  const mpCamera = new Camera(videoEl, {
+    onFrame: async () => { await hands.send({ image: videoEl }); },
+    width: 960,
+    height: 540
+  });
+
+  // -----------------------
+  // Scan tick (uses MOVE hand = MP Right)
+  // -----------------------
+  function scanTick(moveLm, moveScreenX, moveScreenY, moveMotion){
+    if(scanMode === "idle") return;
+
+    const now = performance.now();
+    const t = clamp((now - scanStart) / Math.max(800, scanMs), 0, 1);
+    scanProgress = t;
+
+    // Require stability (low motion)
+    const steady = (moveMotion || 0) < 0.40;
+    if(!steady){
+      // Don’t punish; just don’t add frames
+      return;
+    }
+
+    const m = calcHandMetrics(moveLm);
+    sigFrames.push(m.signature);
+    scaleFrames.push(m.screenScale);
+    cxFrames.push(m.cxNorm);
+    cyFrames.push(m.cyNorm);
+
+    if(t >= 1){
+      const meanSig = vecMean(sigFrames);
+      const varSig = vecVar(sigFrames, meanSig);
+      const instability = Math.sqrt(varSig.reduce((a,b)=>a+b,0) / Math.max(1, varSig.length));
+
+      if(instability > 0.022 || sigFrames.length < 14){
+        statusEl.textContent = "Scan too noisy. Hold steadier; scanning again…";
+        scanStart = performance.now();
+        sigFrames.length = 0; scaleFrames.length = 0; cxFrames.length = 0; cyFrames.length = 0;
+        scanProgress = 0;
+        return;
+      }
+
+      const meanScale = scaleFrames.reduce((a,b)=>a+b,0) / Math.max(1, scaleFrames.length);
+      const meanCX = cxFrames.reduce((a,b)=>a+b,0) / Math.max(1, cxFrames.length);
+      const meanCY = cyFrames.reduce((a,b)=>a+b,0) / Math.max(1, cyFrames.length);
+
+      if(scanMode === "create"){
+        saveProfile({ createdAt: Date.now(), signature: meanSig });
+        applyAutoFit(meanScale, meanCX, meanCY);
+        statusEl.textContent = "✅ Profile saved. AutoFit applied.";
+        stopScan();
+        return;
+      }
+
+      if(scanMode === "login"){
+        const p = loadProfile();
+        if(!p){
+          statusEl.textContent = "No profile saved. Create one first.";
+          stopScan();
+          return;
+        }
+        const d = vecDist(meanSig, p.signature);
+        const ok = d <= 0.085;
+        if(ok){
+          applyAutoFit(meanScale, meanCX, meanCY);
+          statusEl.textContent = "✅ Login matched. AutoFit applied.";
+        }else{
+          statusEl.textContent = `❌ Login failed (distance=${d.toFixed(3)}). Try again or recreate profile.`;
+        }
+        stopScan();
+      }
+    }
+  }
+
+  // -----------------------
+  // Motion estimation (per hand)
+  // -----------------------
+  const handTrack = new Map();
+  function handKey(label, idx){ return (label && label!=="Unknown") ? label : ("H"+idx); }
+  function updateHandMotion(label, idx, midX, midY){
+    const key = handKey(label, idx);
+    const now = performance.now();
+    const prev = handTrack.get(key);
+    let v = 0;
+    if(prev){
+      const dt = Math.max(1, now - prev.ts);
+      v = Math.hypot(midX - prev.x, midY - prev.y) / dt; // px/ms
+    }
+    handTrack.set(key, { x: midX, y: midY, ts: now });
+    return v;
+  }
+
+  // -----------------------
+  // Main loop
+  // -----------------------
+  let lastT = performance.now();
+  function animate(now) {
+    const dt = Math.min(0.033, (now - lastT) / 1000);
+    lastT = now;
+
+    // Defaults
+    markers.move = null;
+    markers.grab = null;
+
+    let moveVec = new THREE.Vector2(0,0);  // movement (x,y)
+    let lookVec = new THREE.Vector2(0,0);  // look delta (x,y)
+    let hasMoveHand = false;
+    let hasGrabHand = false;
+
+    // Inverted mapping (kept as you requested originally):
+    // MP Left  => Grab/Toss
+    // MP Right => Move/Look
+    if (latestHands && latestHands.multiHandLandmarks && latestHands.multiHandedness) {
+      for (let i = 0; i < latestHands.multiHandLandmarks.length; i++) {
+        const lm = latestHands.multiHandLandmarks[i];
+        const mpLabel = latestHands.multiHandedness[i].label; // 'Left' / 'Right'
+
+        // index fingertip for cursor point
+        const idxTip = lm[8];
+        let sx = idxTip.x * hudCanvas.width;
+        let sy = idxTip.y * hudCanvas.height;
+
+        if (mpLabel === 'Left') {
+          // Grab/Toss hand
+          sx += grabOffset.x;
+          sy += grabOffset.y;
+
+          hasGrabHand = true;
+          markers.grab = { x: Math.round(sx), y: Math.round(sy), color: 'rgb(0,255,0)' };
+
+          grabHandWorld = screenToWorld(sx, sy);
+
+          const pinch = pinchDistance(lm);
+          const open = isHandOpen(lm);
+
+          if (pinch < pinch_threshold && grabHandWorld) {
+            tryGrabBall(grabHandWorld);
+          } else if (open) {
+            releaseBallsWithThrow();
+          }
+
+          if (grabHandWorld) moveGrabbedBalls(grabHandWorld);
+
+          if (grabHandWorld) {
+            if (!lastGrabHandWorld) lastGrabHandWorld = grabHandWorld.clone();
+            else lastGrabHandWorld.copy(grabHandWorld);
+          }
+
+        } else if (mpLabel === 'Right') {
+          // Move/Look hand
+          sx += moveOffset.x;
+          sy += moveOffset.y;
+
+          hasMoveHand = true;
+
+          // Use midpoint of index/thumb for motion tracking + fit logic
+          const mid = handMidPx(lm);
+          const v = updateHandMotion(mpLabel, i, mid.x, mid.y);
+
+          // Scan tick uses MOVE hand only
+          scanTick(lm, sx, sy, v);
+
+          // Determine look-mode by pinch on MOVE hand
+          const pinch = pinchDistance(lm);
+          const lookMode = (pinch < lookPinchThr);
+
+          // Compute analog vector around fit center using the move point (use index tip)
+          computeMoveVectorFromHand(sx, sy);
+
+          // Marker color tells mode
+          markers.move = {
+            x: Math.round(sx),
+            y: Math.round(sy),
+            color: lookMode ? 'rgb(255,165,0)' : 'rgb(255,255,0)'
+          };
+
+          if(lookMode){
+            // look with hand motion; map mv vector to look deltas
+            lookVec.set(mv.x, mv.y);
+            moveVec.set(0,0);
+          }else{
+            moveVec.set(mv.x, mv.y);
+            lookVec.set(0,0);
+          }
+        }
+      }
+    }
+
+    // If no move hand, gently decay
+    if(!hasMoveHand){
+      mvSm.x *= 0.90;
+      mvSm.y *= 0.90;
+      mv.x = mvSm.x; mv.y = mvSm.y;
+      moveVec.set(0,0);
+      lookVec.set(0,0);
+    }
+
+    applyCameraControls(moveVec, lookVec, dt);
+    stepPhysics(dt);
+
+    renderer.render(scene, camera);
+    drawHUD();
+
+    requestAnimationFrame(animate);
+  }
+
+  // -----------------------
+  // Start
+  // -----------------------
+  async function start() {
+    statusEl.textContent = 'Requesting camera…';
+    try {
+      resize();
+      await mpCamera.start();
+
+      // Try auto-apply fit if profile exists (but do not force login match)
+      const p = loadProfile();
+      if(p){
+        profileStateEl.textContent = "saved";
+        fitStateEl.textContent = fit.on ? "fit: on" : "fit: off";
+        statusEl.textContent = 'Running. Tip: press “Login + Apply” to re-fit quickly.';
+      }else{
+        statusEl.textContent = 'Running. Tip: press “Create Profile” and hold MOVE hand steady at neutral.';
+      }
+
+      requestAnimationFrame(animate);
+    } catch (err) {
+      console.error(err);
+      statusEl.textContent = 'Camera failed. Use HTTPS or localhost, and allow camera permission.';
+    }
+  }
+
+  start();
+})();
+</script>
+</body>
+</html>

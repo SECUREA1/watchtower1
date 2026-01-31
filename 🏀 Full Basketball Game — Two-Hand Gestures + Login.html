@@ -1,0 +1,2397 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>🏀 Full Basketball Game — Two-Hand Gestures + Login</title>
+  <style>
+    html, body { margin:0; height:100%; background:#06070b; overflow:hidden; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    canvas { display:block; }
+
+    /* ---------- Login Overlay ---------- */
+    #loginOverlay{
+      position:fixed; inset:0; z-index:9999;
+      display:flex; align-items:center; justify-content:center;
+      background: radial-gradient(1200px 700px at 30% 20%, rgba(120,180,255,.10), transparent 55%),
+                  radial-gradient(1000px 700px at 70% 80%, rgba(255,120,120,.09), transparent 60%),
+                  rgba(5,6,10,.92);
+      backdrop-filter: blur(10px);
+    }
+    #loginCard{
+      width:min(520px, calc(100vw - 28px));
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(10,12,18,.78);
+      box-shadow: 0 18px 70px rgba(0,0,0,.65);
+      padding: 16px;
+      color: rgba(255,255,255,.92);
+    }
+    #loginCard h1{
+      margin:0 0 8px;
+      font-size: 16px;
+      font-weight: 950;
+      letter-spacing:.4px;
+    }
+    #loginCard p{
+      margin: 0 0 12px;
+      opacity:.82;
+      font-size: 12px;
+      line-height:1.35;
+    }
+    .loginRow{
+      display:flex; gap:10px; flex-wrap:wrap;
+      align-items:center;
+      margin: 10px 0;
+    }
+    .loginRow label{
+      font-size: 12px; opacity:.85;
+      flex: 0 0 120px;
+    }
+    .loginRow input, .loginRow select{
+      flex: 1 1 220px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.06);
+      color: rgba(255,255,255,.92);
+      outline: none;
+    }
+    .loginActions{
+      display:flex; gap:10px; flex-wrap:wrap;
+      margin-top: 12px;
+    }
+    .loginActions button{
+      flex: 1 1 160px;
+    }
+
+    /* ---------- HUD ---------- */
+    #hud{
+      position:absolute; top:14px; left:14px; z-index:10;
+      width: 440px; max-width: calc(100vw - 28px);
+      background: rgba(10,12,18,.76); border: 1px solid rgba(255,255,255,.10);
+      backdrop-filter: blur(10px);
+      border-radius: 14px; padding: 12px;
+      box-shadow: 0 10px 40px rgba(0,0,0,.45);
+      color: rgba(255,255,255,.92);
+      user-select: none;
+    }
+    #hud h1{ margin:0 0 8px; font-size: 14px; font-weight: 900; letter-spacing:.4px; }
+    .row{ display:flex; gap:10px; align-items:center; margin: 7px 0; flex-wrap:wrap; }
+    .row label{ flex: 1 1 auto; font-size: 12px; opacity: .85; }
+    .row input[type="range"]{ width: 100%; }
+
+    .btnrow{
+      display:flex; gap:10px; margin-top:10px;
+      flex-wrap: wrap;               /* ✅ wraps on small screens */
+    }
+    button{
+      appearance:none; border: 1px solid rgba(255,255,255,.16);
+      background: rgba(255,255,255,.08);
+      color: rgba(255,255,255,.92);
+      padding: 8px 10px;
+      border-radius: 12px;
+      cursor: pointer;
+      font-weight: 800;
+      flex: 1 1 140px;               /* ✅ flex-fit */
+      min-width: 120px;
+    }
+    button:hover{ background: rgba(255,255,255,.12); }
+    button.primary{ background: rgba(120,180,255,.18); border-color: rgba(120,180,255,.30); }
+    button.primary:hover{ background: rgba(120,180,255,.24); }
+
+    #stats{
+      margin-top:10px; padding-top:10px;
+      border-top: 1px solid rgba(255,255,255,.10);
+      font-size: 12px; line-height: 1.35;
+      color: rgba(255,255,255,.88);
+    }
+    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New"; }
+    .small{ font-size:11px; opacity:.82; }
+
+    #rightStack{
+      position:absolute; right:14px; top:14px; z-index:10;
+      display:flex; flex-direction:column; gap:12px;
+      width: 320px; max-width: calc(100vw - 28px);
+    }
+    #camPanel, #logPanel{
+      background: rgba(10,12,18,.72);
+      border: 1px solid rgba(255,255,255,.10);
+      backdrop-filter: blur(10px);
+      border-radius: 14px; padding: 10px;
+      box-shadow: 0 10px 40px rgba(0,0,0,.45);
+      color: rgba(255,255,255,.92);
+      user-select: none;
+    }
+    #camPanel h2, #logPanel h2{
+      margin:0 0 8px;
+      font-size: 12px; letter-spacing:.3px; opacity:.92;
+      display:flex; justify-content:space-between; align-items:center;
+    }
+    #camWrap{
+      width: 100%;
+      border-radius: 12px;
+      overflow:hidden;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.04);
+      position: relative;
+      aspect-ratio: 4 / 3;
+    }
+    #video{
+      position:absolute; inset:0;
+      width:100%; height:100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+      opacity: 0.92;
+    }
+    #overlay{
+      position:absolute; inset:0;
+      width:100%; height:100%;
+      transform: scaleX(-1);
+      pointer-events:none;
+    }
+    #statusLine{ margin-top: 8px; font-size: 12px; opacity: .86; }
+    #log{
+      font-size:12px; line-height:1.35; opacity:.92;
+      max-height: 240px; overflow:auto;
+      border-radius: 10px;
+      padding: 8px;
+      background: rgba(255,255,255,.04);
+      border: 1px solid rgba(255,255,255,.08);
+    }
+    .evt{ margin: 6px 0; }
+    .evt b{ opacity:.97; }
+
+    #bottomHint{
+      position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(10,12,18,.55);
+      border: 1px solid rgba(255,255,255,.10);
+      color: rgba(255,255,255,.78);
+      font-size: 12px;
+      z-index: 10;
+      backdrop-filter: blur(10px);
+      pointer-events: none;
+      white-space: nowrap;
+      max-width: calc(100vw - 28px);
+      overflow:hidden;
+      text-overflow: ellipsis;
+    }
+
+    #topClocks{
+      position:absolute;
+      left:50%; top:14px;
+      transform: translateX(-50%);
+      z-index:10;
+      display:flex; gap:10px;
+      user-select:none;
+      flex-wrap: wrap;              /* ✅ wraps */
+      width: min(520px, calc(100vw - 28px));
+      justify-content:center;
+    }
+    .pill{
+      background: rgba(10,12,18,.68);
+      border: 1px solid rgba(255,255,255,.10);
+      backdrop-filter: blur(10px);
+      border-radius: 14px;
+      padding: 8px 12px;
+      color: rgba(255,255,255,.92);
+      font-weight: 900;
+      letter-spacing: .6px;
+      font-size: 16px;
+      box-shadow: 0 10px 40px rgba(0,0,0,.45);
+      display:flex; gap:8px; align-items:baseline;
+      flex: 1 1 160px;
+      justify-content:center;
+    }
+    .pill span{ font-weight: 800; font-size: 12px; opacity:.82; letter-spacing:.4px; }
+
+    /* Reticle + Shot meter */
+    #reticle{
+      position:absolute; left:50%; top:50%;
+      transform: translate(-50%,-50%);
+      width: 12px; height: 12px;
+      border: 2px solid rgba(255,255,255,.85);
+      border-radius: 999px;
+      box-shadow: 0 0 16px rgba(120,180,255,.24);
+      z-index: 9;
+      pointer-events:none;
+      opacity: 0.0;
+    }
+
+    #meterWrap{
+      position:absolute;
+      left:50%; bottom:48px;
+      transform: translateX(-50%);
+      z-index: 9;
+      width: 240px;
+      padding: 8px 10px;
+      border-radius: 14px;
+      background: rgba(10,12,18,.62);
+      border: 1px solid rgba(255,255,255,.10);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 10px 40px rgba(0,0,0,.45);
+      opacity: 0.0;
+      pointer-events:none;
+    }
+    #meterTitle{ font-size: 11px; opacity: .82; font-weight: 800; letter-spacing:.4px; margin-bottom: 6px; display:flex; justify-content:space-between; }
+    #meterBar{
+      position: relative;
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.08);
+      overflow:hidden;
+      border: 1px solid rgba(255,255,255,.10);
+    }
+    #meterFill{
+      position:absolute; left:0; top:0; bottom:0;
+      width: 0%;
+      background: rgba(120,180,255,.55);
+    }
+    #greenZone{
+      position:absolute; top:-2px; bottom:-2px;
+      width: 12%;
+      left: 70%;
+      border-radius: 999px;
+      border: 1px solid rgba(110,255,160,.95);
+      box-shadow: 0 0 12px rgba(110,255,160,.25);
+      background: rgba(110,255,160,.08);
+    }
+    #meterTick{
+      position:absolute; top:-4px; bottom:-4px;
+      width: 3px;
+      background: rgba(255,255,255,.9);
+      box-shadow: 0 0 10px rgba(255,255,255,.25);
+      left: 0%;
+      transform: translateX(-50%);
+    }
+
+    /* Mobile: stack right panels */
+    @media (max-width: 920px){
+      #rightStack{
+        position: static;
+        width: calc(100vw - 28px);
+        margin: 10px 14px 0;
+      }
+      #bottomHint{
+        bottom: 8px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- LOGIN -->
+  <div id="loginOverlay">
+    <div id="loginCard">
+      <h1>🏀 Login to Start</h1>
+      <p>
+        Your name is stored locally (no server). After login, hit <b>Start / Reset</b>.
+        <br><span class="small">Gestures: LEFT open = lock, LEFT fist = move (up=forward / down=back). RIGHT fist = ball in front, RIGHT open + velocity = throw (upward = shot).</span>
+      </p>
+
+      <div class="loginRow">
+        <label for="loginName">Player name</label>
+        <input id="loginName" type="text" placeholder="e.g., Jodel" maxlength="24" />
+      </div>
+
+      <div class="loginRow">
+        <label for="loginDiff">Difficulty</label>
+        <select id="loginDiff">
+          <option value="EASY">EASY</option>
+          <option value="NORMAL" selected>NORMAL</option>
+          <option value="HARD">HARD</option>
+        </select>
+      </div>
+
+      <div class="loginActions">
+        <button class="primary" id="loginBtn">Login & Start</button>
+        <button id="guestBtn">Play as Guest</button>
+      </div>
+
+      <div class="small" style="margin-top:10px; opacity:.78;">
+        Camera needs <b>https</b> or <b>localhost</b>. You can still play with keyboard if camera is off.
+      </div>
+    </div>
+  </div>
+
+  <div id="topClocks">
+    <div class="pill"><span>SHOT</span><div id="shotClock">24.0</div></div>
+    <div class="pill"><span>GAME</span><div id="gameClock">2:00</div></div>
+  </div>
+
+  <div id="reticle"></div>
+  <div id="meterWrap">
+    <div id="meterTitle">
+      <div>SHOT METER</div>
+      <div class="mono" id="meterQual">—</div>
+    </div>
+    <div id="meterBar">
+      <div id="meterFill"></div>
+      <div id="greenZone"></div>
+      <div id="meterTick"></div>
+    </div>
+  </div>
+
+  <div id="hud">
+    <h1>🏀 Full Basketball Game — Two-Hand Gestures + Login</h1>
+
+    <div class="row">
+      <label>Pinch threshold <span class="mono" id="pinchLabel">0.085</span></label>
+      <input id="pinchThresh" type="range" min="0.03" max="0.18" step="0.001" value="0.085"/>
+    </div>
+
+    <div class="row">
+      <label>Fist threshold <span class="mono" id="fistLabel">0.56</span></label>
+      <input id="fistThresh" type="range" min="0.35" max="0.85" step="0.01" value="0.56"/>
+    </div>
+
+    <div class="row">
+      <label>Throw / Shot gain <span class="mono" id="tossLabel">1.15</span></label>
+      <input id="tossGain" type="range" min="0.4" max="2.5" step="0.01" value="1.15"/>
+    </div>
+
+    <div class="row">
+      <label>Gravity <span class="mono" id="gLabel">-9.81</span></label>
+      <input id="gravity" type="range" min="-16" max="-4" step="0.1" value="-9.81"/>
+    </div>
+
+    <div class="btnrow">
+      <button class="primary" id="startGameBtn">Start / Reset Game</button>
+      <button id="toggleCamBtn">Camera: OFF</button>
+      <button id="pauseBtn">Pause: OFF</button>
+    </div>
+
+    <div class="btnrow">
+      <button id="camModeBtn">View: FP</button>
+      <button id="autoSwitchBtn">Auto-switch: ON</button>
+      <button id="difficultyBtn">AI: NORMAL</button>
+    </div>
+
+    <div id="stats">
+      <div><b>User:</b> <span class="mono" id="userLine">—</span></div>
+      <div style="margin-top:6px">
+        <b>Score:</b> <span class="mono" id="score">HOME 0 — 0 AWAY</span> &nbsp; <b>Poss:</b> <span class="mono" id="poss">HOME</span>
+      </div>
+      <div style="margin-top:6px">
+        <b>Controlled:</b> <span class="mono" id="ctrl">HOME #1</span><br/>
+        <b>Mode:</b> <span class="mono" id="mode">DRIBBLE</span><br/>
+        <b>Hands:</b> <span class="mono" id="handRead">L=— R=—</span><br/>
+        <b>Ball:</b> <span class="mono" id="ballRead">state=—</span>
+      </div>
+      <div class="small" style="margin-top:8px;">
+        <b>Keyboard:</b> Click canvas (mouse-look yaw). WASD move. Hold E = shot meter, release to shoot. Q pass. SPACE steal. TAB switch teammate. F aim-lock (travel risk).<br/>
+        <b>Gestures:</b> LEFT open = lock (no move). LEFT fist = forward/back by hand height. RIGHT fist = ball “ready”. RIGHT open + velocity = throw (upward = shot, else pass). Pinch-release still passes (optional).
+      </div>
+    </div>
+  </div>
+
+  <div id="rightStack">
+    <div id="camPanel">
+      <h2>Hand Tracking <span class="small">two-hand</span></h2>
+      <div id="camWrap">
+        <video id="video" playsinline muted></video>
+        <canvas id="overlay"></canvas>
+      </div>
+      <div id="statusLine" class="mono">Status: camera OFF</div>
+    </div>
+
+    <div id="logPanel">
+      <h2>Play-by-play <span class="small">latest on top</span></h2>
+      <div id="log"></div>
+    </div>
+  </div>
+
+  <div id="bottomHint">LEVEL camera (no pitch). LEFT open=LOCK. LEFT fist=move (up=forward). RIGHT fist=ready. RIGHT open + velocity=throw (upward=shot).</div>
+
+  <!-- Three.js -->
+  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+
+  <!-- MediaPipe Hands -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+
+  <script>
+    // ============================================================
+    // Utility
+    // ============================================================
+    const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+    const lerp=(a,b,t)=>a+(b-a)*t;
+    const el=id=>document.getElementById(id);
+    const V3=(x=0,y=0,z=0)=>new THREE.Vector3(x,y,z);
+
+    function dist3(a,b){
+      const dx=a.x-b.x, dy=a.y-b.y, dz=a.z-b.z;
+      return Math.hypot(dx,dy,dz);
+    }
+    function formatTime(sec){
+      sec=Math.max(0,sec);
+      const m=Math.floor(sec/60);
+      const s=Math.floor(sec%60);
+      return `${m}:${String(s).padStart(2,'0')}`;
+    }
+
+    // ============================================================
+    // Login
+    // ============================================================
+    const loginOverlay = el('loginOverlay');
+    const loginBtn = el('loginBtn');
+    const guestBtn = el('guestBtn');
+    const loginName = el('loginName');
+    const loginDiff = el('loginDiff');
+    const userLine = el('userLine');
+
+    const USER = {
+      name: null
+    };
+
+    function setUser(name){
+      USER.name = name || "Guest";
+      userLine.textContent = USER.name;
+      try{ localStorage.setItem("bb_user_name", USER.name); }catch(e){}
+    }
+
+    function showLogin(){
+      loginOverlay.style.display = "flex";
+      loginName.focus?.();
+    }
+    function hideLogin(){
+      loginOverlay.style.display = "none";
+    }
+
+    function bootLogin(){
+      let saved=null;
+      try{ saved = localStorage.getItem("bb_user_name"); }catch(e){}
+      if(saved && saved.trim()){
+        setUser(saved.trim());
+        hideLogin();
+      }else{
+        showLogin();
+      }
+    }
+
+    loginBtn.addEventListener('click', ()=>{
+      const name = (loginName.value||"").trim();
+      setUser(name || "Guest");
+      GAME.difficulty = loginDiff.value;
+      difficultyBtn.textContent = `AI: ${GAME.difficulty}`;
+      hideLogin();
+      resetGame();
+    });
+
+    guestBtn.addEventListener('click', ()=>{
+      setUser("Guest");
+      GAME.difficulty = loginDiff.value;
+      difficultyBtn.textContent = `AI: ${GAME.difficulty}`;
+      hideLogin();
+      resetGame();
+    });
+
+    loginName.addEventListener('keydown', (e)=>{
+      if(e.key==="Enter"){ loginBtn.click(); }
+    });
+
+    // ============================================================
+    // UI
+    // ============================================================
+    const pinchThreshEl=el('pinchThresh');
+    const fistThreshEl=el('fistThresh');
+    const tossGainEl=el('tossGain');
+    const gravityEl=el('gravity');
+
+    const pinchLabel=el('pinchLabel');
+    const fistLabel=el('fistLabel');
+    const tossLabel=el('tossLabel');
+    const gLabel=el('gLabel');
+
+    const startGameBtn=el('startGameBtn');
+    const toggleCamBtn=el('toggleCamBtn');
+    const pauseBtn=el('pauseBtn');
+    const camModeBtn=el('camModeBtn');
+    const autoSwitchBtn=el('autoSwitchBtn');
+    const difficultyBtn=el('difficultyBtn');
+
+    const scoreEl=el('score');
+    const possEl=el('poss');
+    const ctrlEl=el('ctrl');
+    const modeEl=el('mode');
+    const handReadEl=el('handRead');
+    const ballReadEl=el('ballRead');
+
+    const shotClockEl=el('shotClock');
+    const gameClockEl=el('gameClock');
+
+    const logEl=el('log');
+    const reticleEl=el('reticle');
+
+    const meterWrap=el('meterWrap');
+    const meterFill=el('meterFill');
+    const meterTick=el('meterTick');
+    const meterQual=el('meterQual');
+    const greenZone=el('greenZone');
+
+    function syncHud(){
+      pinchLabel.textContent=Number(pinchThreshEl.value).toFixed(3);
+      fistLabel.textContent=Number(fistThreshEl.value).toFixed(2);
+      tossLabel.textContent=Number(tossGainEl.value).toFixed(2);
+      gLabel.textContent=Number(gravityEl.value).toFixed(2);
+    }
+    [pinchThreshEl,fistThreshEl,tossGainEl,gravityEl].forEach(x=>x.addEventListener('input',syncHud));
+    syncHud();
+
+    function logEvent(text){
+      const div=document.createElement('div');
+      div.className='evt';
+      const t=new Date();
+      const ts=`${String(t.getMinutes()).padStart(2,'0')}:${String(t.getSeconds()).padStart(2,'0')}`;
+      div.innerHTML=`<b>${ts}</b> ${text}`;
+      logEl.prepend(div);
+      while(logEl.children.length>18) logEl.removeChild(logEl.lastChild);
+    }
+
+    // ============================================================
+    // Three.js Scene
+    // ============================================================
+    const scene=new THREE.Scene();
+    scene.fog=new THREE.Fog(0x06070b,18,140);
+
+    const renderer=new THREE.WebGLRenderer({antialias:true});
+    renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+    renderer.setSize(innerWidth,innerHeight);
+    renderer.outputColorSpace=THREE.SRGBColorSpace;
+    document.body.appendChild(renderer.domElement);
+
+    const camera=new THREE.PerspectiveCamera(60,innerWidth/innerHeight,0.05,300);
+
+    scene.add(new THREE.AmbientLight(0xffffff,0.55));
+    const key=new THREE.DirectionalLight(0xffffff,1.05);
+    key.position.set(10,16,8);
+    scene.add(key);
+    const rimLight=new THREE.DirectionalLight(0x9bd0ff,0.25);
+    rimLight.position.set(-14,10,-16);
+    scene.add(rimLight);
+
+    // ============================================================
+    // Court
+    // ============================================================
+    const courtW=15, courtL=28;
+    const xMin=-courtW/2, xMax=courtW/2;
+    const zMin=-courtL/2, zMax=courtL/2;
+
+    const floor=new THREE.Mesh(
+      new THREE.PlaneGeometry(courtW,courtL),
+      new THREE.MeshStandardMaterial({color:0x6b4b2a,roughness:0.92,metalness:0})
+    );
+    floor.rotation.x=-Math.PI/2;
+    scene.add(floor);
+
+    function addLine(points,color=0xffffff){
+      const geo=new THREE.BufferGeometry().setFromPoints(points);
+      const mat=new THREE.LineBasicMaterial({color});
+      const line=new THREE.Line(geo,mat);
+      scene.add(line);
+      return line;
+    }
+
+    // boundary + midline + center circle
+    addLine([V3(xMin,0.01,zMin),V3(xMax,0.01,zMin),V3(xMax,0.01,zMax),V3(xMin,0.01,zMax),V3(xMin,0.01,zMin)]);
+    addLine([V3(xMin,0.01,0),V3(xMax,0.01,0)]);
+    {
+      const r=1.8, pts=[];
+      for(let i=0;i<=64;i++){
+        const t=(i/64)*Math.PI*2;
+        pts.push(V3(Math.cos(t)*r,0.01,Math.sin(t)*r));
+      }
+      addLine(pts);
+    }
+
+    // 3pt arcs (decorative)
+    function arc(centerZ,radius,a0,a1){
+      const pts=[];
+      for(let i=0;i<=60;i++){
+        const t=lerp(a0,a1,i/60);
+        pts.push(V3(Math.sin(t)*radius,0.01,centerZ+Math.cos(t)*radius));
+      }
+      addLine(pts);
+    }
+    arc(zMin+3.0,6.75,-0.55,0.55);
+    arc(zMax-3.0,6.75,Math.PI-0.55,Math.PI+0.55);
+
+    // ✅ Upgrade: keys/paint, free-throw circles, restricted arcs
+    function addCourtMarkings(){
+      const laneW = 4.9;     // approx 16 ft
+      const laneL = 5.8;     // approx 19 ft
+      const ftR   = 1.8;     // free throw circle radius
+      const raR   = 1.25;    // restricted arc radius
+
+      function rect(x0,z0,x1,z1){
+        addLine([V3(x0,0.01,z0),V3(x1,0.01,z0),V3(x1,0.01,z1),V3(x0,0.01,z1),V3(x0,0.01,z0)]);
+      }
+
+      function circle(cx,cz,r,half=null){
+        const pts=[];
+        const steps=64;
+        let a0=0, a1=Math.PI*2;
+        if(half==="nearZMin"){ a0 = -Math.PI/2; a1 = Math.PI/2; }
+        if(half==="nearZMax"){ a0 = Math.PI/2; a1 = 3*Math.PI/2; }
+        for(let i=0;i<=steps;i++){
+          const t=lerp(a0,a1,i/steps);
+          pts.push(V3(cx+Math.cos(t)*r,0.01,cz+Math.sin(t)*r));
+        }
+        addLine(pts);
+      }
+
+      // Home end (near zMin)
+      const homeBaseline = zMin;
+      const homeLaneEnd  = zMin + laneL;
+      rect(-laneW/2, homeBaseline, laneW/2, homeLaneEnd);
+      // FT line + circle (top half)
+      addLine([V3(-laneW/2,0.01,homeLaneEnd), V3(laneW/2,0.01,homeLaneEnd)]);
+      circle(0, homeLaneEnd, ftR);
+
+      // Away end (near zMax)
+      const awayBaseline = zMax;
+      const awayLaneEnd  = zMax - laneL;
+      rect(-laneW/2, awayLaneEnd, laneW/2, awayBaseline);
+      addLine([V3(-laneW/2,0.01,awayLaneEnd), V3(laneW/2,0.01,awayLaneEnd)]);
+      circle(0, awayLaneEnd, ftR);
+
+      // Restricted arcs around hoop centers (approx)
+      // Hoop z positions are set later; we’ll draw around where hoops are: zMin+1.25 and zMax-1.25
+      circle(0, zMin+1.25, raR, "nearZMin");
+      circle(0, zMax-1.25, raR, "nearZMax");
+    }
+    addCourtMarkings();
+
+    // ============================================================
+    // Hoops
+    // ============================================================
+    const rimY=3.05;
+    const rimR=0.23;
+    const boardZOffset=0.55;
+
+    const TEAM_HOME=0, TEAM_AWAY=1;
+
+    const HOOPS=[
+      {team:TEAM_HOME,x:0,z:zMin+1.25},
+      {team:TEAM_AWAY,x:0,z:zMax-1.25}
+    ];
+
+    function createHoop(hoop){
+      const g=new THREE.Group();
+
+      const board=new THREE.Mesh(
+        new THREE.BoxGeometry(1.8,1.05,0.07),
+        new THREE.MeshStandardMaterial({color:0xe6e6e6,roughness:0.6})
+      );
+      const boardZ = hoop.team===TEAM_HOME ? hoop.z+boardZOffset : hoop.z-boardZOffset;
+      board.position.set(0,3.35,boardZ);
+      g.add(board);
+
+      const pole=new THREE.Mesh(
+        new THREE.CylinderGeometry(0.08,0.10,4.2,18),
+        new THREE.MeshStandardMaterial({color:0x22262e,roughness:0.85})
+      );
+      pole.position.set(0,2.1,boardZ + (hoop.team===TEAM_HOME ? 1.0 : -1.0));
+      g.add(pole);
+
+      const rimMesh=new THREE.Mesh(
+        new THREE.TorusGeometry(rimR,0.02,10,48),
+        new THREE.MeshStandardMaterial({color:0xff6a3d,roughness:0.35,metalness:0.3})
+      );
+      rimMesh.rotation.x=Math.PI/2;
+      rimMesh.position.set(0,rimY,hoop.z);
+      g.add(rimMesh);
+
+      // net lines
+      const net=new THREE.Group();
+      const netH=0.45, ring=16;
+      for(let i=0;i<ring;i++){
+        const a=(i/ring)*Math.PI*2;
+        const x=Math.cos(a)*rimR;
+        const z=hoop.z + Math.sin(a)*rimR;
+        const geo=new THREE.BufferGeometry().setFromPoints([
+          V3(x,rimY,z),
+          V3(x*0.55,rimY-netH,hoop.z + (Math.sin(a)*rimR)*0.55)
+        ]);
+        net.add(new THREE.Line(geo,new THREE.LineBasicMaterial({color:0xffffff,transparent:true,opacity:0.65})));
+      }
+      g.add(net);
+
+      g.userData.boardZ=boardZ;
+      g.userData.hoopZ=hoop.z;
+      g.userData.team=hoop.team;
+      scene.add(g);
+      return g;
+    }
+    const hoopMeshes=HOOPS.map(createHoop);
+
+    function offenseHoopFor(team){ return (team===TEAM_HOME)?HOOPS[1]:HOOPS[0]; }
+    function defenseHoopFor(team){ return (team===TEAM_HOME)?HOOPS[0]:HOOPS[1]; }
+
+    // ============================================================
+    // Player Meshes + Cursor Sprite
+    // ============================================================
+    function makePlayerMesh(color){
+      const group=new THREE.Group();
+      const body=new THREE.Mesh(
+        new THREE.CapsuleGeometry(0.22,0.72,8,16),
+        new THREE.MeshStandardMaterial({color,roughness:0.75})
+      );
+      body.position.y=0.72;
+      group.add(body);
+
+      const head=new THREE.Mesh(
+        new THREE.SphereGeometry(0.18,16,12),
+        new THREE.MeshStandardMaterial({color:0xf1d7c2,roughness:0.65})
+      );
+      head.position.y=1.55;
+      group.add(head);
+
+      return group;
+    }
+
+    function makeCursorSprite(){
+      const svg = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128">
+          <defs>
+            <filter id="g" x="-40%" y="-40%" width="180%" height="180%">
+              <feGaussianBlur stdDeviation="3" result="b"/>
+              <feMerge>
+                <feMergeNode in="b"/>
+                <feMergeNode in="SourceGraphic"/>
+              </feMerge>
+            </filter>
+          </defs>
+          <path filter="url(#g)" d="M18 16 L18 88 L34 74 L44 114 L58 108 L48 68 L76 68 Z"
+            fill="rgba(255,255,255,0.95)" stroke="rgba(120,180,255,0.9)" stroke-width="4" />
+        </svg>`;
+      const url='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
+      const tex=new THREE.TextureLoader().load(url);
+      tex.colorSpace=THREE.SRGBColorSpace;
+      const mat=new THREE.SpriteMaterial({map:tex,transparent:true,opacity:0.95,depthTest:false});
+      const spr=new THREE.Sprite(mat);
+      spr.scale.set(0.8,0.8,0.8);
+      spr.position.set(0,2.4,0);
+      return spr;
+    }
+
+    // ============================================================
+    // Game State
+    // ============================================================
+    const GAME={
+      loggedIn:false,
+      running:true,
+      paused:false,
+      camMode:"FP",           // FP or TP
+      autoSwitch:true,
+      difficulty:"NORMAL",    // EASY/NORMAL/HARD
+      gameClock:120,
+      shotClock:24.0,
+      possTeam:TEAM_HOME,
+      homeScore:0,
+      awayScore:0
+    };
+
+    function difficultyParams(){
+      if(GAME.difficulty==="EASY")   return {aiSpeed:0.88, steal:0.55, shoot:0.70, react:0.88, laneIQ:0.70};
+      if(GAME.difficulty==="HARD")   return {aiSpeed:1.12, steal:0.78, shoot:0.92, react:1.10, laneIQ:0.95};
+      return {aiSpeed:1.00, steal:0.68, shoot:0.82, react:1.00, laneIQ:0.85};
+    }
+
+    // ============================================================
+    // Players
+    // ============================================================
+    const players=[];
+    let controlledId=null;
+    let userYaw=0;
+
+    function playerName(p){ return `${p.team===TEAM_HOME?"HOME":"AWAY"} #${p.num}`; }
+    function getPlayerById(id){ return players.find(p=>p.id===id)||null; }
+
+    function spawnPlayers(){
+      for(const p of players){ if(p.mesh.parent) scene.remove(p.mesh); }
+      players.length=0;
+
+      let idCounter=1;
+      const homeColor=0x7ab4ff;
+      const awayColor=0xff7a7a;
+
+      function add(team,num,x,z){
+        const mesh=makePlayerMesh(team===TEAM_HOME?homeColor:awayColor);
+        mesh.position.set(x,0,z);
+        scene.add(mesh);
+
+        const isBig = (num===4 || num===5);
+        const reach = isBig ? 0.78 : 0.62;
+
+        const p={
+          id:idCounter++,
+          team,num,
+          ai: team===TEAM_AWAY,
+          mesh,
+          pos: mesh.position,
+          vel: V3(),
+          yaw: 0,
+          hasBall:false,
+          dribbleT:0,
+          lockAim:false,
+          lockStartPos: V3(),
+          lockStartTime: 0,
+          _stealCd: 0,
+          reach,
+          aiTarget: V3(),
+          aiCooldown: 0,
+          aiRole: (num===1)?"PG":(num===2)?"SG":(num===3)?"SF":(num===4)?"PF":"C",
+          aiLaneX: 0,
+          aiState: "IDLE",
+          // ✅ gesture throw state
+          handThrowHold:false,
+          handThrowCd:0
+        };
+        players.push(p);
+        return p;
+      }
+
+      // HOME
+      add(TEAM_HOME,1, 0.0,-2.0);
+      add(TEAM_HOME,2,-2.8,-1.0);
+      add(TEAM_HOME,3, 2.8,-1.0);
+      add(TEAM_HOME,4,-1.8,-5.0);
+      add(TEAM_HOME,5, 1.8,-5.0);
+
+      // AWAY
+      add(TEAM_AWAY,1, 0.0, 2.0);
+      add(TEAM_AWAY,2,-2.8, 1.0);
+      add(TEAM_AWAY,3, 2.8, 1.0);
+      add(TEAM_AWAY,4,-1.8, 5.0);
+      add(TEAM_AWAY,5, 1.8, 5.0);
+
+      controlledId=players.find(p=>p.team===TEAM_HOME && p.num===1).id;
+
+      for(const p of players){
+        if(p.cursorSprite){ p.mesh.remove(p.cursorSprite); p.cursorSprite=null; }
+      }
+      const ctrl=getPlayerById(controlledId);
+      ctrl.cursorSprite=makeCursorSprite();
+      ctrl.mesh.add(ctrl.cursorSprite);
+
+      assignLaneXs();
+
+      for(const p of players){
+        if(p.team===TEAM_HOME) p.ai = (p.id!==controlledId);
+      }
+
+      userYaw = 0;
+    }
+
+    function assignLaneXs(){
+      for(const p of players){
+        if(p.aiRole==="PG") p.aiLaneX = 0.0;
+        if(p.aiRole==="SG") p.aiLaneX = -4.2;
+        if(p.aiRole==="SF") p.aiLaneX =  4.2;
+        if(p.aiRole==="PF") p.aiLaneX = -2.2;
+        if(p.aiRole==="C")  p.aiLaneX =  2.2;
+      }
+    }
+
+    // ============================================================
+    // Ball
+    // ============================================================
+    const ballRadius=0.12;
+    const ballMesh=new THREE.Mesh(
+      new THREE.SphereGeometry(ballRadius,28,20),
+      new THREE.MeshStandardMaterial({color:0xf28c28,roughness:0.55})
+    );
+    scene.add(ballMesh);
+
+    const ball={
+      held:false,
+      heldBy:null,
+      thrown:false,
+      shotActive:false,
+      scoredThisShot:false,
+      pos: V3(0,ballRadius,0),
+      vel: V3(),
+      prevPos: V3(),
+      targetPlayerId:null,
+      lastTouchTeam: TEAM_HOME,
+      shotStartT: 0,
+      reboundLive:false,
+      reboundSpot: V3(0,0,0),
+      lastCollision: "none"
+    };
+
+    function setBallFree(pos,vel){
+      ball.held=false; ball.heldBy=null;
+      ball.thrown=true;
+      ball.pos.copy(pos);
+      ball.vel.copy(vel);
+      ballMesh.position.copy(ball.pos);
+      ball.targetPlayerId=null;
+      ball.reboundLive=false;
+      ball.lastCollision="none";
+    }
+
+    function attachBallToPlayer(p){
+      ball.held=true;
+      ball.heldBy=p.id;
+      ball.thrown=false;
+      ball.shotActive=false;
+      ball.scoredThisShot=false;
+      ball.targetPlayerId=null;
+      ball.reboundLive=false;
+      ball.lastCollision="none";
+      ball.lastTouchTeam=p.team;
+      ball.vel.set(0,0,0);
+      ball.pos.set(p.pos.x,1.1,p.pos.z);
+      ballMesh.position.copy(ball.pos);
+
+      for(const q of players) q.hasBall=false;
+      p.hasBall=true;
+
+      GAME.possTeam=p.team;
+      GAME.shotClock=24.0;
+    }
+
+    function resetBallToTeam(team){
+      const z = team===TEAM_HOME ? -2.0 : 2.0;
+      const p = players.find(x=>x.team===team && x.num===1) || players.find(x=>x.team===team);
+      p.pos.set(0,0,z);
+      p.vel.set(0,0,0);
+      p.mesh.position.copy(p.pos);
+      attachBallToPlayer(p);
+      logEvent(`<span class="mono">${team===TEAM_HOME?"HOME":"AWAY"}</span> possession.`);
+    }
+
+    // ============================================================
+    // Shot Meter (keyboard + optional)
+    // ============================================================
+    const meter = {
+      active:false,
+      phase:0,
+      value:0,
+      greenCenter:0.76,
+      greenWidth:0.06,
+      lastQuality: 0,
+      ownerId:null
+    };
+
+    function meterPingPong(phase){
+      const t = phase % 2;
+      return t <= 1 ? t : (2 - t);
+    }
+
+    function startShotMeter(owner){
+      if (!owner) return;
+      meter.active=true;
+      meter.ownerId=owner.id;
+      if (meter.phase < 0.01) meter.phase = Math.random()*0.15;
+      meterWrap.style.opacity = 0.95;
+      reticleEl.style.opacity = 0.85;
+    }
+
+    function stopShotMeter(){
+      meter.active=false;
+      meter.ownerId=null;
+      meterWrap.style.opacity = 0.0;
+      reticleEl.style.opacity = 0.0;
+      meterQual.textContent = "—";
+    }
+
+    function updateShotMeter(dt){
+      if (!meter.active) return;
+      const speed = (GAME.difficulty==="HARD") ? 1.85 : (GAME.difficulty==="EASY" ? 1.45 : 1.65);
+      meter.phase += dt * speed;
+
+      meter.value = meterPingPong(meter.phase);
+      const pct = clamp(meter.value,0,1) * 100;
+      meterFill.style.width = `${pct}%`;
+      meterTick.style.left = `${pct}%`;
+
+      const d = Math.abs(meter.value - meter.greenCenter);
+      const q = clamp(1 - (d / meter.greenWidth), 0, 1);
+      meter.lastQuality = q;
+
+      if (q > 0.95) meterQual.textContent = "GREEN";
+      else if (q > 0.75) meterQual.textContent = "GREAT";
+      else if (q > 0.45) meterQual.textContent = "OK";
+      else meterQual.textContent = "LATE/EARLY";
+
+      if (q > 0.92){
+        meterFill.style.background = "rgba(110,255,160,.55)";
+      }else{
+        meterFill.style.background = "rgba(120,180,255,.55)";
+      }
+    }
+
+    function finalizeUserShotParams(){
+      const v = meter.value;
+      const q = meter.lastQuality;
+      const power = clamp(0.62 + v*0.42, 0.58, 1.0);
+      const accuracy = clamp(0.20 + q*0.80, 0.20, 1.0);
+      return { power, accuracy, label: (q>0.92?"GREEN":(q>0.75?"GREAT":(q>0.45?"OK":"OFF"))) };
+    }
+
+    function finalizeAIShotParams(shooter){
+      const diff = difficultyParams();
+      const baseSkill = diff.shoot;
+      const roleBoost = (shooter.aiRole==="PG"||shooter.aiRole==="SG"||shooter.aiRole==="SF") ? 0.05 : -0.04;
+      const skill = clamp(baseSkill + roleBoost, 0.55, 0.98);
+
+      const sigma = (1 - skill) * 0.12;
+      const release = clamp(meter.greenCenter + (Math.random()*2-1)*sigma, 0, 1);
+
+      const d = Math.abs(release - meter.greenCenter);
+      const q = clamp(1 - (d / (meter.greenWidth*1.2)), 0, 1);
+
+      const power = clamp(0.66 + release*0.38, 0.60, 1.0);
+      const accuracy = clamp(0.30 + q*0.70, 0.30, 0.98);
+
+      return { power, accuracy, label: (q>0.92?"GREEN":(q>0.75?"GREAT":(q>0.45?"OK":"OFF"))) };
+    }
+
+    function syncGreenZone(){
+      const leftPct = (meter.greenCenter - meter.greenWidth) * 100;
+      const widthPct = (meter.greenWidth*2) * 100;
+      greenZone.style.left = `${clamp(leftPct,0,100)}%`;
+      greenZone.style.width = `${clamp(widthPct,2,30)}%`;
+    }
+    syncGreenZone();
+
+    // ============================================================
+    // Scoring + end play
+    // ============================================================
+    function updateScoreUI(){
+      scoreEl.textContent = `HOME ${GAME.homeScore} — ${GAME.awayScore} AWAY`;
+      possEl.textContent = GAME.possTeam===TEAM_HOME ? "HOME" : "AWAY";
+      shotClockEl.textContent = GAME.shotClock.toFixed(1);
+      gameClockEl.textContent = formatTime(GAME.gameClock);
+    }
+
+    function endPlayAndReset(nextTeam, reason){
+      GAME.shotClock = 24.0;
+
+      ball.shotActive=false;
+      ball.thrown=false;
+      ball.held=false;
+      ball.heldBy=null;
+      ball.targetPlayerId=null;
+      ball.reboundLive=false;
+
+      for(const p of players){ p.hasBall=false; p.handThrowHold=false; }
+
+      if(reason==="score") logEvent(`<b>BUCKET!</b> ${nextTeam===TEAM_HOME?"AWAY":"HOME"} ball.`);
+      if(reason==="shotclock") logEvent(`<b>Shot clock violation.</b> Turnover.`);
+      if(reason==="travel") logEvent(`<b>Travel.</b> Turnover.`);
+      if(reason==="oob") logEvent(`<b>Out of bounds.</b> Turnover.`);
+
+      resetBallToTeam(nextTeam);
+      setFormation(nextTeam);
+    }
+
+    // ============================================================
+    // Formations
+    // ============================================================
+    function setFormation(possTeam){
+      const zBaseHome=-4.0, zBaseAway=4.0;
+      for(const p of players){
+        const isHome=p.team===TEAM_HOME;
+        const zBase=isHome?zBaseHome:zBaseAway;
+        let x=0, z=zBase;
+        if(p.num===1){ x=0; z = isHome ? -2.0 : 2.0; }
+        if(p.num===2){ x=-3.2; z = zBase + (isHome? 1:-1); }
+        if(p.num===3){ x= 3.2; z = zBase + (isHome? 1:-1); }
+        if(p.num===4){ x=-2.0; z = zBase + (isHome? -2:2); }
+        if(p.num===5){ x= 2.0; z = zBase + (isHome? -2:2); }
+        p.pos.set(x,0,z);
+        p.vel.set(0,0,0);
+        p.mesh.position.copy(p.pos);
+        p.lockAim=false;
+        p.handThrowHold=false;
+      }
+    }
+
+    // ============================================================
+    // Ball collisions / scoring / oob (unchanged core)
+    // ============================================================
+    function collideBackboard(hoopGroup){
+      const boardZ = hoopGroup.userData.boardZ;
+      const towardCenter = Math.sign(0 - boardZ) || 1;
+      const faceZ = boardZ + towardCenter*0.04;
+
+      const prevSide = (ball.prevPos.z - faceZ);
+      const currSide = (ball.pos.z - faceZ);
+
+      if(prevSide * currSide <= 0 && Math.abs(prevSide) < 0.6 && Math.abs(currSide) < 0.6){
+        const halfW=0.9, halfH=0.52;
+        const bx = ball.pos.x - hoopGroup.position.x;
+        const by = ball.pos.y - 3.35;
+        if(Math.abs(bx)<=halfW && Math.abs(by)<=halfH){
+          ball.vel.z *= -0.75;
+          ball.vel.x *= 0.90;
+          ball.vel.y *= 0.85;
+          ball.pos.z = faceZ + (currSide>0 ? 0.03 : -0.03);
+          ball.lastCollision="board";
+        }
+      }
+    }
+
+    function collideRim(hoop){
+      const dx = ball.pos.x - hoop.x;
+      const dz = ball.pos.z - hoop.z;
+      const d = Math.hypot(dx,dz);
+
+      const tube = 0.03 + ballRadius;
+      const yClose = Math.abs(ball.pos.y - rimY) < (tube*1.35);
+      if(!yClose) return;
+
+      if(Math.abs(d - rimR) < tube){
+        const nx = dx / (d||1);
+        const nz = dz / (d||1);
+        const v = ball.vel;
+        const vn = v.x*nx + v.z*nz;
+        if(vn < 0){
+          v.x -= 1.7 * vn * nx;
+          v.z -= 1.7 * vn * nz;
+          v.y *= 0.92;
+          v.y += 0.35;
+        }
+        ball.pos.x += nx * (tube - Math.abs(d - rimR)) * 0.6;
+        ball.pos.z += nz * (tube - Math.abs(d - rimR)) * 0.6;
+        ball.lastCollision="rim";
+      }
+    }
+
+    function checkScore(){
+      if(!ball.shotActive || ball.scoredThisShot) return;
+      const offHoop = offenseHoopFor(ball.lastTouchTeam);
+
+      const prevY=ball.prevPos.y, currY=ball.pos.y;
+      const inside = (Math.hypot(ball.pos.x-offHoop.x, ball.pos.z-offHoop.z) < (rimR - ballRadius*0.25));
+      const nearHoop = Math.abs(ball.pos.z - offHoop.z) < (rimR*1.35);
+
+      if(prevY > rimY && currY <= rimY && inside && nearHoop){
+        ball.scoredThisShot = true;
+
+        if(ball.lastTouchTeam===TEAM_HOME) GAME.homeScore += 2;
+        else GAME.awayScore += 2;
+
+        logEvent(`<b>SWISH!</b> ${ball.lastTouchTeam===TEAM_HOME?"HOME":"AWAY"} scores 2.`);
+        const nextTeam = (ball.lastTouchTeam===TEAM_HOME) ? TEAM_AWAY : TEAM_HOME;
+        endPlayAndReset(nextTeam, "score");
+      }
+    }
+
+    function outOfBounds(){
+      return (
+        ball.pos.x < xMin-0.2 || ball.pos.x > xMax+0.2 ||
+        ball.pos.z < zMin-0.2 || ball.pos.z > zMax+0.2
+      );
+    }
+
+    // Rebound prediction
+    function computeReboundSpot(){
+      const g = Number(gravityEl.value);
+      const y0 = ball.pos.y;
+      const vy = ball.vel.y;
+
+      const a = 0.5*g;
+      const b = vy;
+      const c = y0 - ballRadius;
+
+      let t = 0.6;
+      const disc = b*b - 4*a*c;
+      if (disc >= 0 && Math.abs(a) > 1e-6){
+        const s = Math.sqrt(disc);
+        const t1 = (-b - s) / (2*a);
+        const t2 = (-b + s) / (2*a);
+        const cand = [t1,t2].filter(x=>x>0.02).sort((p,q)=>p-q);
+        if (cand.length) t = cand[0];
+      }
+      t = clamp(t, 0.1, 1.6);
+
+      const x = clamp(ball.pos.x + ball.vel.x*t, xMin+0.4, xMax-0.4);
+      const z = clamp(ball.pos.z + ball.vel.z*t, zMin+0.4, zMax-0.4);
+
+      ball.reboundSpot.set(x, 0, z);
+    }
+
+    function stepBallPhysics(dt){
+      ball.prevPos.copy(ball.pos);
+
+      const g = Number(gravityEl.value);
+
+      ball.vel.y += g * dt;
+      ball.vel.multiplyScalar(1 - clamp(dt*0.18, 0, 0.06));
+      ball.pos.addScaledVector(ball.vel, dt);
+
+      let hitFloor = false;
+      if(ball.pos.y < ballRadius){
+        ball.pos.y = ballRadius;
+        if(ball.vel.y < 0) ball.vel.y *= -0.62;
+        ball.vel.x *= 0.85;
+        ball.vel.z *= 0.85;
+        hitFloor = true;
+        ball.lastCollision = "floor";
+      }
+
+      for(const hm of hoopMeshes) collideBackboard(hm);
+      for(const hoop of HOOPS) collideRim(hoop);
+
+      if(ball.shotActive){
+        computeReboundSpot();
+        if(ball.vel.y < 0 || ball.lastCollision==="rim" || ball.lastCollision==="board" || hitFloor){
+          ball.reboundLive = true;
+        }
+      }
+
+      checkScore();
+
+      if(outOfBounds()){
+        const nextTeam = (ball.lastTouchTeam===TEAM_HOME) ? TEAM_AWAY : TEAM_HOME;
+        endPlayAndReset(nextTeam, "oob");
+        return;
+      }
+
+      ballMesh.position.copy(ball.pos);
+    }
+
+    // ============================================================
+    // Input (keyboard + pointer lock yaw)
+    // ============================================================
+    const keys={};
+    addEventListener('keydown', e=>{
+      keys[e.code]=true;
+      if(e.code==="Tab"){ e.preventDefault(); switchControlledTeammate(); }
+    });
+    addEventListener('keyup', e=> keys[e.code]=false);
+
+    renderer.domElement.addEventListener('click', ()=>{
+      if(loginOverlay.style.display !== "none") return;
+      renderer.domElement.requestPointerLock?.();
+    });
+
+    addEventListener('mousemove', e=>{
+      if(document.pointerLockElement===renderer.domElement){
+        userYaw -= e.movementX * 0.0026;
+        if(userYaw > Math.PI) userYaw -= Math.PI*2;
+        if(userYaw < -Math.PI) userYaw += Math.PI*2;
+      }
+    });
+
+    function forwardFromYaw(y){ return V3(Math.sin(y),0,Math.cos(y)); }
+    function rightFromYaw(y){ return V3(Math.cos(y),0,-Math.sin(y)); }
+
+    // ============================================================
+    // Hand Tracking (TWO HANDS) ✅
+    // ============================================================
+    const video=el('video');
+    const overlay=el('overlay');
+    const octx=overlay.getContext('2d');
+    const statusLine=el('statusLine');
+
+    let cam=null, hands=null, cameraRunning=false;
+
+    function makeHandSlot(){
+      return {
+        present:false,
+        pinch:false,
+        fist:false,
+        prevPinch:false,
+        prevFist:false,
+        wrist:{x:0,y:0,z:0},
+        prevWrist:{x:0,y:0,z:0},
+        vel:{x:0,y:0,z:0},
+        speed:0,
+        lastT:0
+      };
+    }
+
+    const handLR = {
+      left: makeHandSlot(),
+      right: makeHandSlot()
+    };
+
+    function drawLandmarksOnOverlay(results){
+      octx.clearRect(0,0,overlay.width,overlay.height);
+      const lms=results.multiHandLandmarks||[];
+      for(let i=0;i<lms.length;i++){
+        const lm=lms[i];
+        drawConnectors(octx,lm,HAND_CONNECTIONS,{color:'#5df',lineWidth:2});
+        drawLandmarks(octx,lm,{color:'#f55',lineWidth:1,radius:2});
+      }
+    }
+
+    function isPinching(lm){
+      const th=lm[4], ix=lm[8];
+      return dist3(th,ix) < Number(pinchThreshEl.value);
+    }
+    function isFist(lm){
+      const w=lm[0], mcp=lm[9];
+      const palm=Math.max(0.01, dist3(w,mcp));
+      const tips=[8,12,16,20].map(i=>dist3(lm[i],w)/palm);
+      const avg=tips.reduce((a,b)=>a+b,0)/tips.length;
+      return avg < Number(fistThreshEl.value);
+    }
+
+    function handedLabelFor(results, i){
+      const mh = results.multiHandedness?.[i];
+      if(!mh) return null;
+      if(mh.label) return mh.label;
+      const c = mh.classification?.[0];
+      return c?.label || null;
+    }
+
+    function setHandSlot(slot, lm, nowS){
+      slot.present = true;
+      slot.pinch = isPinching(lm);
+      slot.fist  = isFist(lm);
+
+      const w = lm[0]; // wrist
+      slot.wrist.x = w.x; slot.wrist.y = w.y; slot.wrist.z = w.z;
+
+      if(slot.lastT > 0){
+        const dt = Math.max(1e-3, nowS - slot.lastT);
+        const vx = (slot.wrist.x - slot.prevWrist.x) / dt;
+        const vy = (slot.wrist.y - slot.prevWrist.y) / dt;
+        const vz = (slot.wrist.z - slot.prevWrist.z) / dt;
+
+        // smooth velocity (reduces jitter)
+        slot.vel.x = slot.vel.x*0.75 + vx*0.25;
+        slot.vel.y = slot.vel.y*0.75 + vy*0.25;
+        slot.vel.z = slot.vel.z*0.75 + vz*0.25;
+
+        slot.speed = Math.hypot(slot.vel.x, slot.vel.y);
+      }else{
+        slot.vel.x = slot.vel.y = slot.vel.z = 0;
+        slot.speed = 0;
+      }
+
+      slot.prevWrist.x = slot.wrist.x;
+      slot.prevWrist.y = slot.wrist.y;
+      slot.prevWrist.z = slot.wrist.z;
+      slot.lastT = nowS;
+    }
+
+    async function startCamera(){
+      if(cameraRunning) return;
+      statusLine.textContent="Status: requesting camera…";
+
+      const resizeOverlay=()=>{
+        overlay.width=overlay.clientWidth;
+        overlay.height=overlay.clientHeight;
+      };
+      resizeOverlay();
+      new ResizeObserver(resizeOverlay).observe(el('camWrap'));
+
+      hands=new Hands({ locateFile:(f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+      hands.setOptions({
+        maxNumHands:2,                 // ✅ TWO HANDS
+        modelComplexity:1,
+        minDetectionConfidence:0.7,
+        minTrackingConfidence:0.7
+      });
+
+      hands.onResults((results)=>{
+        drawLandmarksOnOverlay(results);
+
+        // clear then fill
+        handLR.left.present = false; handLR.left.pinch=false; handLR.left.fist=false;
+        handLR.right.present= false; handLR.right.pinch=false; handLR.right.fist=false;
+
+        const lms=results.multiHandLandmarks||[];
+        if(!lms.length){
+          statusLine.textContent="Status: no hands detected";
+          return;
+        }
+
+        const nowS = performance.now()/1000;
+
+        for(let i=0;i<lms.length;i++){
+          const label = handedLabelFor(results, i); // "Left" / "Right"
+          const lm = lms[i];
+
+          if(label==="Left")  setHandSlot(handLR.left, lm, nowS);
+          if(label==="Right") setHandSlot(handLR.right,lm, nowS);
+        }
+
+        const L = handLR.left.present ? (handLR.left.fist ? "FIST" : "OPEN") : "—";
+        const R = handLR.right.present? (handLR.right.fist? "FIST" : "OPEN") : "—";
+        statusLine.textContent = `Status: L=${L}  R=${R}`;
+      });
+
+      video.autoplay=true; video.playsInline=true; video.muted=true;
+      cam=new Camera(video,{
+        onFrame: async ()=>{ await hands.send({image:video}); },
+        width:640, height:480
+      });
+
+      try{
+        await cam.start();
+        cameraRunning=true;
+        statusLine.textContent="Status: camera ON";
+      }catch(err){
+        console.error(err);
+        statusLine.textContent="Status: camera ERROR (need https/localhost)";
+      }
+    }
+
+    function stopCamera(){
+      if(!cameraRunning) return;
+      cameraRunning=false;
+      statusLine.textContent="Status: camera OFF";
+      try{ cam.stop(); }catch(e){}
+      try{
+        const stream=video.srcObject;
+        if(stream){ stream.getTracks().forEach(t=>t.stop()); video.srcObject=null; }
+      }catch(e){}
+      octx.clearRect(0,0,overlay.width,overlay.height);
+
+      // reset hands
+      handLR.left = makeHandSlot();
+      handLR.right= makeHandSlot();
+      stopShotMeter();
+    }
+
+    // ============================================================
+    // Actions: Pass / Shoot / Steal
+    // ============================================================
+    function nearestPlayerTo(pos, teamFilter=null){
+      let best=null, bestD=1e9;
+      for(const p of players){
+        if(teamFilter!==null && p.team!==teamFilter) continue;
+        const d=p.pos.distanceTo(pos);
+        if(d<bestD){ bestD=d; best=p; }
+      }
+      return {player:best, dist:bestD};
+    }
+
+    function chooseBestPassTarget(fromPlayer){
+      const team=fromPlayer.team;
+      const mates=players.filter(p=>p.team===team && p.id!==fromPlayer.id);
+      const hoop=offenseHoopFor(team);
+
+      let best=null, bestScore=-1e9;
+      for(const p of mates){
+        const toHoop = V3(p.pos.x-hoop.x,0,p.pos.z-hoop.z).length();
+        const defender = nearestPlayerTo(p.pos, team===TEAM_HOME?TEAM_AWAY:TEAM_HOME);
+        const guardDist = defender.dist;
+
+        const s = (-toHoop*0.65) + (guardDist*1.25) + (Math.random()*0.20);
+        if(s>bestScore){ bestScore=s; best=p; }
+      }
+      return best;
+    }
+
+    function doPass(fromPlayer,toPlayer, speedBoost=1.0){
+      if(!fromPlayer.hasBall || !toPlayer) return;
+
+      const start=V3(fromPlayer.pos.x,1.25,fromPlayer.pos.z);
+      const end=V3(toPlayer.pos.x,1.25,toPlayer.pos.z);
+
+      const dist = start.distanceTo(end);
+
+      // speedBoost: faster release => shorter flight time
+      const t=clamp(dist/(12.0 + speedBoost*6.0),0.22,0.80);
+      const v=end.clone().sub(start).divideScalar(t);
+
+      v.y += 3.0 + clamp(dist*0.08,0,3);
+      v.multiplyScalar(Number(tossGainEl.value));
+
+      setBallFree(start,v);
+      ball.targetPlayerId=toPlayer.id;
+      ball.lastTouchTeam=fromPlayer.team;
+
+      fromPlayer.hasBall=false;
+      logEvent(`<span class="mono">${playerName(fromPlayer)}</span> passed to <span class="mono">${playerName(toPlayer)}</span>.`);
+    }
+
+    function doShoot(shooter, params, extraArc=0){
+      if(!shooter.hasBall) return;
+
+      const hoop=offenseHoopFor(shooter.team);
+      const start=V3(shooter.pos.x,1.35,shooter.pos.z);
+      const aim=V3(hoop.x,rimY+0.10,hoop.z);
+
+      const to=aim.clone().sub(start);
+      const dist=Math.max(2.0,to.length());
+      const dir=to.normalize();
+
+      const power = params.power;
+      const accuracy = params.accuracy;
+
+      const base = 7.8 + dist*0.55;
+      const shotSpeed = clamp(base * (0.72 + power*0.75) * Number(tossGainEl.value), 7.0, 21.0);
+
+      const vel = dir.multiplyScalar(shotSpeed);
+
+      vel.y += 3.5 + dist*0.10 + extraArc;
+
+      const jitter = (1 - accuracy);
+      vel.x += (Math.random()*2-1) * 1.20 * jitter;
+      vel.z += (Math.random()*2-1) * 0.55 * jitter;
+
+      setBallFree(start, vel);
+      ball.shotActive=true;
+      ball.scoredThisShot=false;
+      ball.lastTouchTeam=shooter.team;
+      ball.shotStartT=performance.now()/1000;
+      ball.reboundLive=false;
+
+      shooter.hasBall=false;
+
+      logEvent(`<span class="mono">${playerName(shooter)}</span> <b>SHOT</b> (${params.label}).`);
+
+      computeReboundSpot();
+    }
+
+    function attemptSteal(stealer){
+      const oppTeam = stealer.team===TEAM_HOME ? TEAM_AWAY : TEAM_HOME;
+      const handler = players.find(p=>p.team===oppTeam && p.hasBall);
+      if(!handler) return;
+
+      const d=stealer.pos.distanceTo(handler.pos);
+      if(d>0.9) return;
+
+      const diff=difficultyParams();
+      const baseChance = stealer.ai ? 0.15*diff.steal : 0.22;
+      const moveFactor = clamp(handler.vel.length()/6.0,0,1);
+      const chance = baseChance + moveFactor*0.10;
+
+      if(Math.random()<chance){
+        const pop = forwardFromYaw(handler.yaw||0).multiplyScalar(2.0);
+        pop.y=2.6;
+        setBallFree(V3(handler.pos.x,1.1,handler.pos.z), pop);
+        ball.lastTouchTeam = stealer.team;
+
+        handler.hasBall=false;
+        GAME.possTeam=stealer.team;
+        GAME.shotClock=24.0;
+
+        logEvent(`<b>STEAL!</b> <span class="mono">${playerName(stealer)}</span> stripped <span class="mono">${playerName(handler)}</span>.`);
+      }
+    }
+
+    // ============================================================
+    // Catches / pickups / rebounds
+    // ============================================================
+    function switchControlledToPlayer(p){
+      if(!p || p.team!==TEAM_HOME) return;
+
+      for(const q of players){
+        if(q.cursorSprite){ q.mesh.remove(q.cursorSprite); q.cursorSprite=null; }
+      }
+      controlledId=p.id;
+
+      p.cursorSprite=makeCursorSprite();
+      p.mesh.add(p.cursorSprite);
+
+      for(const q of players){
+        if(q.team===TEAM_HOME) q.ai = (q.id!==controlledId);
+      }
+
+      ctrlEl.textContent=playerName(p);
+    }
+
+    function switchControlledTeammate(){
+      const home=players.filter(p=>p.team===TEAM_HOME).sort((a,b)=>a.num-b.num);
+      const idx=home.findIndex(p=>p.id===controlledId);
+      const next=home[(idx+1)%home.length];
+      switchControlledToPlayer(next);
+      logEvent(`Control switched to <span class="mono">${playerName(next)}</span>.`);
+    }
+
+    function tryCatchOrPickup(){
+      if(ball.held) return;
+
+      if(ball.targetPlayerId){
+        const t=getPlayerById(ball.targetPlayerId);
+        if(t){
+          const d=t.pos.distanceTo(ball.pos);
+          if(d < t.reach && ball.pos.y < 2.25){
+            attachBallToPlayer(t);
+            logEvent(`<span class="mono">${playerName(t)}</span> caught it.`);
+            if(GAME.autoSwitch && t.team===TEAM_HOME){
+              switchControlledToPlayer(t);
+              logEvent(`Auto-switch: controlling <span class="mono">${playerName(t)}</span>.`);
+            }
+            return;
+          }
+        }
+      }
+
+      if(ball.shotActive && ball.reboundLive){
+        let best=null, bestScore=-1e9;
+        for(const p of players){
+          const d=p.pos.distanceTo(ball.pos);
+          if(d > p.reach) continue;
+          if(ball.pos.y > 2.35) continue;
+
+          const toSpot = p.pos.distanceTo(ball.reboundSpot);
+          const big = (p.num===4||p.num===5) ? 0.25 : 0;
+          const s = (1.2 - d) + (0.8 - toSpot*0.08) + big;
+          if(s>bestScore){ bestScore=s; best=p; }
+        }
+        if(best){
+          attachBallToPlayer(best);
+          logEvent(`<b>REBOUND!</b> <span class="mono">${playerName(best)}</span>.`);
+          return;
+        }
+      }
+
+      const onGround = (ball.pos.y <= ballRadius + 0.03);
+      const slow = (ball.vel.length() < 3.1);
+
+      if(onGround && slow){
+        let best=null, bestD=1e9;
+        for(const p of players){
+          const d=p.pos.distanceTo(ball.pos);
+          if(d<bestD){ bestD=d; best=p; }
+        }
+        if(best && bestD < best.reach){
+          attachBallToPlayer(best);
+          if(ball.shotActive){
+            logEvent(`<b>REBOUND (floor)!</b> <span class="mono">${playerName(best)}</span>.`);
+          }else{
+            logEvent(`<span class="mono">${playerName(best)}</span> picked it up.`);
+          }
+          return;
+        }
+      }
+    }
+
+    // ============================================================
+    // Dribble / held ball (with RIGHT HAND "ball in front")
+    // ============================================================
+    function updateHeldBall(dt){
+      const holder=getPlayerById(ball.heldBy);
+      if(!holder) return;
+
+      const ctrl = getPlayerById(controlledId);
+      const isControlled = (ctrl && holder.id===ctrl.id);
+
+      // ✅ If controlled + has ball + RIGHT fist => ball is in front (ready)
+      if(isControlled && holder.hasBall && cameraRunning && handLR.right.present && handLR.right.fist){
+        const f = forwardFromYaw(userYaw);
+        ball.pos.set(
+          holder.pos.x + f.x*0.42,
+          1.25,
+          holder.pos.z + f.z*0.42
+        );
+        ballMesh.position.copy(ball.pos);
+        return;
+      }
+
+      const moving = holder.vel.length() > 0.2;
+
+      if(holder.lockAim){
+        ball.pos.set(holder.pos.x,1.25,holder.pos.z);
+
+        const moved = holder.pos.distanceTo(holder.lockStartPos);
+        const heldTime = (performance.now()/1000 - holder.lockStartTime);
+
+        if(holder.id===controlledId && moved>1.55 && heldTime>0.35){
+          const nextTeam = TEAM_AWAY;
+          endPlayAndReset(nextTeam, "travel");
+          stopShotMeter();
+          return;
+        }
+
+        ballMesh.position.copy(ball.pos);
+        return;
+      }
+
+      if(moving){
+        holder.dribbleT += dt * (6.5 + holder.vel.length()*0.5);
+        const bounce=Math.abs(Math.sin(holder.dribbleT));
+        const y=lerp(ballRadius,1.15,bounce);
+        ball.pos.set(holder.pos.x,y,holder.pos.z);
+      }else{
+        ball.pos.set(holder.pos.x,1.15,holder.pos.z);
+      }
+      ballMesh.position.copy(ball.pos);
+    }
+
+    // ============================================================
+    // AI lanes + steering (same as before)
+    // ============================================================
+    function applyBounds(p){
+      p.pos.x = clamp(p.pos.x, xMin+0.4, xMax-0.4);
+      p.pos.z = clamp(p.pos.z, zMin+0.4, zMax-0.4);
+    }
+
+    function separatePlayers(){
+      for(let i=0;i<players.length;i++){
+        for(let j=i+1;j<players.length;j++){
+          const a=players[i], b=players[j];
+          const dx=b.pos.x-a.pos.x;
+          const dz=b.pos.z-a.pos.z;
+          const d=Math.hypot(dx,dz);
+          const minD=0.60;
+          if(d>0 && d<minD){
+            const nx=dx/d, nz=dz/d;
+            const push=(minD-d)*0.55;
+            a.pos.x-=nx*push; a.pos.z-=nz*push;
+            b.pos.x+=nx*push; b.pos.z+=nz*push;
+          }
+        }
+      }
+      for(const p of players) applyBounds(p);
+    }
+
+    function steerArrive(p, target, dt, speedMul=1.0){
+      const diff=difficultyParams();
+      const to=target.clone().sub(p.pos);
+      to.y=0;
+      const dist=to.length();
+
+      if(dist < 0.05){
+        p.vel.multiplyScalar(1 - clamp(dt*6,0,1));
+        return;
+      }
+
+      const dir=to.normalize();
+      const arrive = clamp(dist / 2.4, 0.25, 1.0);
+      const desiredSpeed = (p.hasBall ? 5.6 : 6.2) * arrive * diff.aiSpeed * speedMul;
+      const desiredVel = dir.multiplyScalar(desiredSpeed);
+
+      const accelScale = clamp(dt * (p.hasBall ? 5.2 : 4.4) * diff.react, 0, 1);
+      p.vel.lerp(desiredVel, accelScale);
+
+      if(p.vel.length() > 0.2){
+        p.yaw = Math.atan2(p.vel.x, p.vel.z);
+      }
+    }
+
+    function laneTargetsForTeam(team){
+      const hoop=offenseHoopFor(team);
+      const dir = Math.sign(hoop.z - 0) || 1;
+
+      const arcZ = hoop.z - dir * 7.2;
+      const wingZ = arcZ + dir * 0.7;
+      const cornerZ = hoop.z - dir * 2.8;
+      const dunkZ = hoop.z - dir * 3.4;
+
+      return {
+        PG: V3(0,0, arcZ + dir*2.2),
+        SG: V3(-5.2,0, wingZ),
+        SF: V3( 5.2,0, wingZ),
+        PF: V3(-2.4,0, dunkZ),
+        C : V3( 2.4,0, dunkZ),
+        CORNER_L: V3(-6.0,0, cornerZ),
+        CORNER_R: V3( 6.0,0, cornerZ),
+      };
+    }
+
+    function aiUpdatePlayer(p, dt){
+      const diff=difficultyParams();
+      p.aiCooldown = Math.max(0, p.aiCooldown - dt);
+
+      const off = (p.team === GAME.possTeam);
+      const oppTeam = p.team===TEAM_HOME ? TEAM_AWAY : TEAM_HOME;
+      const hoop = offenseHoopFor(p.team);
+      const defHoop = defenseHoopFor(p.team);
+
+      const handler = players.find(q=>q.team===p.team && q.hasBall) || null;
+      const match = players.find(q=>q.team===oppTeam && q.num===p.num) || players.find(q=>q.team===oppTeam);
+
+      if(ball.shotActive && ball.reboundLive && !ball.held){
+        const spot = ball.reboundSpot.clone();
+        const isBig = (p.num===4||p.num===5);
+        const crashMul = isBig ? 1.08 : 0.92;
+
+        if(p.team !== ball.lastTouchTeam){
+          const toHoop = defHoop ? V3(defHoop.x-spot.x,0,defHoop.z-spot.z).normalize() : V3(0,0,0);
+          p.aiTarget.copy(spot.clone().add(toHoop.multiplyScalar( isBig ? 0.65 : 0.95 )));
+        }else{
+          const biasX = isBig ? (p.num===4 ? -0.6 : 0.6) : (p.aiRole==="SG" ? -1.2 : 1.2);
+          p.aiTarget.set(clamp(spot.x + biasX, xMin+0.6, xMax-0.6), 0, clamp(spot.z, zMin+0.6, zMax-0.6));
+        }
+
+        steerArrive(p, p.aiTarget, dt, crashMul);
+        return;
+      }
+
+      if(off){
+        if(p.hasBall){
+          const dirToHoop = V3(hoop.x - p.pos.x, 0, hoop.z - p.pos.z);
+          const dist = dirToHoop.length();
+
+          const candidates = [
+            { x: 0.0, w: 1.0 },
+            { x: 2.8, w: 0.9 },
+            { x: -2.8, w: 0.9 },
+            { x: 5.0, w: 0.75 },
+            { x: -5.0, w: 0.75 }
+          ];
+
+          let bestLane=candidates[0], bestScore=-1e9;
+          for(const c of candidates){
+            const lanePt = V3(c.x,0, p.pos.z + Math.sign(hoop.z - p.pos.z)*2.5);
+            const def = nearestPlayerTo(lanePt, oppTeam);
+            const s = (def.dist*1.35 + c.w) - Math.abs(c.x)*0.08;
+            if(s>bestScore){ bestScore=s; bestLane=c; bestScore=s; }
+          }
+
+          const forwardSign = Math.sign(hoop.z - p.pos.z) || 1;
+          const driveZ = clamp(p.pos.z + forwardSign*3.4, zMin+1.2, zMax-1.2);
+          const driveX = clamp(lerp(p.pos.x, bestLane.x, 0.22 + diff.laneIQ*0.25), xMin+0.6, xMax-0.6);
+
+          p.aiTarget.set(driveX,0,driveZ);
+
+          const defender = nearestPlayerTo(p.pos, oppTeam);
+          const guardDist = defender.dist;
+
+          const shootWindow = (dist < 8.3 && guardDist > 1.3);
+          const passWindow  = (guardDist < 0.95 || dist > 11.0);
+
+          if(p.aiCooldown<=0){
+            const shootProb = (shootWindow?0.62:0.16) * diff.shoot;
+            const passProb  = (passWindow ?0.58:0.22);
+
+            if(shootWindow && Math.random()<shootProb){
+              const params = finalizeAIShotParams(p);
+              doShoot(p, params);
+              p.aiCooldown = 0.7 + Math.random()*0.35;
+              return;
+            }
+            if(Math.random()<passProb){
+              const to=chooseBestPassTarget(p);
+              if(to){ doPass(p,to); p.aiCooldown = 0.55 + Math.random()*0.25; return; }
+            }
+            p.aiCooldown = 0.18 + Math.random()*0.18;
+          }
+
+          steerArrive(p, p.aiTarget, dt, 1.05);
+        }else{
+          const lanes=laneTargetsForTeam(p.team);
+          const ballHandler = handler;
+          let base = lanes[p.aiRole] ? lanes[p.aiRole].clone() : V3(p.aiLaneX,0,0);
+
+          if(ballHandler){
+            const side = Math.sign(ballHandler.pos.x) || 1;
+            if(p.aiRole==="SF" && side>0) base = lanes.CORNER_R.clone();
+            if(p.aiRole==="SG" && side<0) base = lanes.CORNER_L.clone();
+          }
+
+          if(GAME.shotClock < 8.0){
+            const dir = Math.sign(offenseHoopFor(p.team).z - 0) || 1;
+            base.z += dir * 0.9;
+          }
+
+          p.aiTarget.copy(base);
+          steerArrive(p, p.aiTarget, dt, 1.0);
+        }
+      }else{
+        if(match){
+          const toHoop = V3(defHoop.x - match.pos.x, 0, defHoop.z - match.pos.z).normalize();
+          const contain = match.pos.clone().add(toHoop.multiplyScalar(0.95));
+
+          const oppHandler = players.find(q=>q.team===oppTeam && q.hasBall);
+          if(oppHandler && oppHandler.id!==match.id){
+            const help = oppHandler.pos.clone().sub(match.pos); help.y=0;
+            if(help.length()>0.001){
+              help.normalize();
+              contain.add(help.multiplyScalar(0.25));
+            }
+          }
+
+          p.aiTarget.copy(contain);
+          steerArrive(p, p.aiTarget, dt, 1.02);
+
+          if(match.hasBall && p.pos.distanceTo(match.pos)<0.85 && p.aiCooldown<=0){
+            if(Math.random() < 0.12 * diff.steal){
+              attemptSteal(p);
+              p.aiCooldown = 0.75 + Math.random()*0.35;
+              return;
+            }
+            p.aiCooldown = 0.22 + Math.random()*0.22;
+          }
+        }else{
+          p.aiTarget.set(0,0,0);
+          steerArrive(p,p.aiTarget,dt,0.9);
+        }
+      }
+    }
+
+    // ============================================================
+    // ✅ Gesture pipelines: LEFT movement + RIGHT throw
+    // ============================================================
+    const GESTURE = {
+      moveDead: 0.08,            // deadzone for left-hand height
+      throwMinSpeed: 0.85,       // min right-hand speed to release
+      throwShotUp: 0.55,         // upward component threshold (SHOT)
+      throwCd: 0.22              // anti-double-trigger
+    };
+
+    function forwardAndRight(){
+      return { f: forwardFromYaw(userYaw), r: rightFromYaw(userYaw) };
+    }
+
+    function gestureMoveVector(leftSlot, f){
+      // Left fist controls forward/back by wrist height:
+      // wrist.y: 0 top -> 1 bottom
+      // delta positive means "hand up" => forward
+      const delta = 0.5 - leftSlot.wrist.y;
+      const dead = GESTURE.moveDead;
+
+      const mag = clamp((Math.abs(delta) - dead) / 0.42, 0, 1);
+      if(mag <= 0) return V3(0,0,0);
+
+      const dir = (delta > 0) ? 1 : -1;
+      return f.clone().multiplyScalar(dir * mag);
+    }
+
+    function gestureThrowRelease(p){
+      // Called on RIGHT fist -> open
+      const speed = handLR.right.speed;
+      const up = (-handLR.right.vel.y); // up motion => positive
+
+      if(speed < GESTURE.throwMinSpeed) return;
+
+      // Stop any meter (gesture throw owns release)
+      stopShotMeter();
+      p.lockAim = false;
+
+      // If upward snap => shot, else pass
+      if(up > GESTURE.throwShotUp){
+        const power = clamp(0.58 + speed*0.12, 0.58, 1.0);
+        const accuracy = clamp(0.45 + speed*0.08, 0.45, 0.95);
+        const label = (up>1.05 && speed>1.25) ? "GREEN-ish" : "HAND";
+        doShoot(p, {power, accuracy, label}, clamp(up*0.55, 0, 2.2));
+      }else{
+        const to = chooseBestPassTarget(p);
+        if(to) doPass(p, to, speed);
+      }
+    }
+
+    function updateUserPlayer(p, dt){
+      const {f,r}=forwardAndRight();
+
+      // ---- LEFT HAND: open = lock, fist = forward/back by height ----
+      let useGestureMove = false;
+      let move = V3();
+
+      const leftActive = cameraRunning && handLR.left.present;
+      const leftFist = leftActive && handLR.left.fist;
+      const leftOpen = leftActive && !handLR.left.fist;
+
+      // ✅ open left hand locks player in place (overrides keyboard)
+      if(leftOpen){
+        // hard stop
+        p.vel.multiplyScalar(1 - clamp(dt*20,0,1));
+        // ignore keyboard movement entirely while left hand is open
+      }else{
+        // keyboard movement base
+        if(keys["KeyW"]) move.add(f);
+        if(keys["KeyS"]) move.add(f.clone().multiplyScalar(-1));
+        if(keys["KeyA"]) move.add(r.clone().multiplyScalar(-1));
+        if(keys["KeyD"]) move.add(r);
+
+        // left fist overrides into forward/back pipeline (cleaner)
+        if(leftFist){
+          const gv = gestureMoveVector(handLR.left, f);
+          if(gv.lengthSq() > 0){
+            useGestureMove = true;
+            move.copy(gv);
+          }else{
+            // if fist but in deadzone, treat as stop
+            move.set(0,0,0);
+          }
+        }
+
+        const sprint = keys["ShiftLeft"]||keys["ShiftRight"];
+        const baseSpeed = sprint ? 6.6 : 5.4;
+
+        if(move.lengthSq()>0){
+          // If gesture move, it already contains 0..1 magnitude
+          const mag = clamp(move.length(), 0, 1);
+          const dir = move.clone().normalize();
+          const desiredVel = dir.multiplyScalar(baseSpeed * (useGestureMove ? mag : 1.0));
+          p.vel.lerp(desiredVel, clamp(dt*6.0,0,1));
+          p.yaw = Math.atan2(p.vel.x,p.vel.z);
+        }else{
+          p.vel.multiplyScalar(1 - clamp(dt*10,0,1));
+        }
+      }
+
+      // PASS (keyboard tap Q)
+      if(keys["KeyQ"]){
+        keys["KeyQ"]=false;
+        if(p.hasBall){
+          const to=chooseBestPassTarget(p);
+          if(to) doPass(p,to);
+        }
+      }
+
+      // STEAL (space)
+      if(keys["Space"]){
+        if(p._stealCd<=0){
+          attemptSteal(p);
+          p._stealCd = 0.45;
+        }
+      }
+      p._stealCd = Math.max(0, p._stealCd - dt);
+
+      // Aim lock toggle (F)
+      if(keys["KeyF"]){
+        keys["KeyF"]=false;
+        if(p.hasBall){
+          p.lockAim = !p.lockAim;
+          p.lockStartPos.copy(p.pos);
+          p.lockStartTime = performance.now()/1000;
+          logEvent(`${p.lockAim ? "Aim lock ON" : "Aim lock OFF"} for <span class="mono">${playerName(p)}</span>.`);
+        }
+      }
+
+      // ---- RIGHT HAND: fist=ready, open+velocity=throw/shot/pass ----
+      p.handThrowCd = Math.max(0, p.handThrowCd - dt);
+
+      const rightActive = cameraRunning && handLR.right.present;
+      const rightFist = rightActive && handLR.right.fist;
+
+      if(p.hasBall && rightActive){
+        if(rightFist){
+          p.handThrowHold = true;     // “ball ready” (handled in updateHeldBall)
+        }else{
+          // fist released to open -> throw
+          if(p.handThrowHold && p.handThrowCd<=0){
+            gestureThrowRelease(p);
+            p.handThrowCd = GESTURE.throwCd;
+          }
+          p.handThrowHold = false;
+        }
+      }else{
+        p.handThrowHold = false;
+      }
+
+      // Optional pinch-release still passes
+      const pinchHeld = rightActive && handLR.right.pinch;
+      if(p.hasBall && rightActive){
+        if(handLR.right.prevPinch && !handLR.right.pinch){
+          const to=chooseBestPassTarget(p);
+          if(to) doPass(p,to);
+        }
+      }
+
+      // Keyboard shot meter: Hold E to charge, release to shoot
+      const eHeld = !!keys["KeyE"];
+      const eReleased = (!eHeld && keys["_EwasHeld"]===true);
+      keys["_EwasHeld"] = eHeld;
+
+      const shouldHoldShot = p.hasBall && eHeld;
+
+      if(shouldHoldShot){
+        if(!p.lockAim){
+          p.lockAim=true;
+          p.lockStartPos.copy(p.pos);
+          p.lockStartTime = performance.now()/1000;
+        }
+        startShotMeter(p);
+        updateShotMeter(dt);
+      }
+
+      if(p.hasBall && meter.active && meter.ownerId===p.id && eReleased){
+        const params = finalizeUserShotParams();
+        doShoot(p, params);
+        stopShotMeter();
+        p.lockAim=false;
+      }
+
+      if(meter.active && meter.ownerId===p.id && !shouldHoldShot){
+        stopShotMeter();
+      }
+
+      // Readout
+      const L = leftActive ? (leftFist ? `FIST y=${handLR.left.wrist.y.toFixed(2)}` : "OPEN=LOCK") : "—";
+      const R = rightActive ? (rightFist ? `FIST v=${handLR.right.speed.toFixed(2)}` : `OPEN v=${handLR.right.speed.toFixed(2)}`) : "—";
+      handReadEl.textContent = `L=${L}  R=${R}`;
+    }
+
+    // ============================================================
+    // Player loop
+    // ============================================================
+    function tickPlayers(dt){
+      for(const p of players){
+        if(p.team===TEAM_HOME) p.ai = (p.id!==controlledId);
+      }
+
+      for(const p of players){
+        if(p.id===controlledId) updateUserPlayer(p,dt);
+        else if(p.ai) aiUpdatePlayer(p,dt);
+        else aiUpdatePlayer(p,dt);
+      }
+
+      const diff=difficultyParams();
+      for(const p of players){
+        const speed=p.vel.length();
+        const maxSpeed = (p.hasBall ? 6.0 : 6.9) * diff.aiSpeed;
+        if(speed>maxSpeed) p.vel.multiplyScalar(maxSpeed/speed);
+
+        p.pos.addScaledVector(p.vel,dt);
+        applyBounds(p);
+
+        if(p.vel.length()>0.15){
+          p.mesh.rotation.y = p.yaw;
+        }
+        p.mesh.position.copy(p.pos);
+      }
+
+      separatePlayers();
+
+      const ctrl=getPlayerById(controlledId);
+      if(ctrl) ctrlEl.textContent = playerName(ctrl);
+    }
+
+    // ============================================================
+    // Ball loop
+    // ============================================================
+    function tickBall(dt){
+      if(ball.held){
+        updateHeldBall(dt);
+      }else if(ball.thrown){
+        stepBallPhysics(dt);
+        tryCatchOrPickup();
+      }else{
+        ball.pos.y = ballRadius;
+        ballMesh.position.copy(ball.pos);
+      }
+
+      if(ball.shotActive && !ball.held){
+        const age = performance.now()/1000 - ball.shotStartT;
+        if(age > 6.0){
+          ball.reboundLive = true;
+        }
+      }
+    }
+
+    // ============================================================
+    // Clocks
+    // ============================================================
+    function updateClocks(dt){
+      if(!GAME.running || GAME.paused) return;
+      GAME.gameClock = Math.max(0, GAME.gameClock - dt);
+      GAME.shotClock = Math.max(0, GAME.shotClock - dt);
+
+      if(GAME.shotClock <= 0.001){
+        const next = (GAME.possTeam===TEAM_HOME) ? TEAM_AWAY : TEAM_HOME;
+        endPlayAndReset(next, "shotclock");
+        stopShotMeter();
+      }
+      if(GAME.gameClock <= 0.001){
+        GAME.running=false;
+        logEvent(`<b>FINAL.</b> HOME ${GAME.homeScore} — ${GAME.awayScore} AWAY`);
+        stopShotMeter();
+      }
+    }
+
+    // ============================================================
+    // Camera (LEVEL: yaw-only look)
+    // ============================================================
+    const camSmooth={pos:V3(0,2,0)};
+    function setCameraLevelLook(pos, look){
+      const flatDir = look.clone().sub(pos);
+      flatDir.y=0;
+      if(flatDir.lengthSq()<1e-6) flatDir.set(0,0,1);
+      flatDir.normalize();
+
+      const leveledLook = pos.clone().add(flatDir.multiplyScalar(10.0));
+      leveledLook.y = pos.y;
+
+      camera.position.copy(pos);
+      camera.lookAt(leveledLook);
+    }
+
+    function updateCamera(dt){
+      const ctrl=getPlayerById(controlledId);
+      if(!ctrl) return;
+
+      const f=forwardFromYaw(userYaw);
+      const r=rightFromYaw(userYaw);
+
+      let lookTarget = ctrl.pos.clone().add(f.clone().multiplyScalar(9.0));
+
+      const oppHandler = players.find(p=>p.team!==TEAM_HOME && p.hasBall);
+      if(!ctrl.hasBall && oppHandler){
+        lookTarget.lerp(oppHandler.pos.clone().add(V3(0,1.2,0)), 0.65);
+      }
+      if(ball.shotActive && ball.reboundLive && !ball.held){
+        lookTarget.lerp(ball.pos.clone(), 0.55);
+      }
+      if(ctrl.hasBall && ctrl.lockAim){
+        const hoop=offenseHoopFor(ctrl.team);
+        lookTarget = V3(hoop.x,1.6,hoop.z);
+      }
+
+      let desiredPos;
+      if(GAME.camMode==="FP"){
+        desiredPos = ctrl.pos.clone().add(V3(0,1.65,0));
+      }else{
+        desiredPos = ctrl.pos.clone()
+          .add(V3(0,3.2,0))
+          .add(f.clone().multiplyScalar(-6.0))
+          .add(r.clone().multiplyScalar(1.1));
+      }
+
+      camSmooth.pos.lerp(desiredPos, clamp(dt*6.0,0,1));
+      setCameraLevelLook(camSmooth.pos, lookTarget);
+    }
+
+    // ============================================================
+    // Mode text + ball readout
+    // ============================================================
+    function updateModeText(){
+      const ctrl=getPlayerById(controlledId);
+      if(!ctrl){ modeEl.textContent="—"; return; }
+
+      if(ctrl.hasBall){
+        if(meter.active && meter.ownerId===ctrl.id) modeEl.textContent="SHOT METER (LOCKED)";
+        else if(ctrl.handThrowHold) modeEl.textContent="HAND READY (RIGHT FIST)";
+        else if(ctrl.lockAim) modeEl.textContent="AIM LOCK (TRAVEL RISK)";
+        else modeEl.textContent=(ctrl.vel.length()>0.2)?"DRIBBLE":"HOLD";
+      }else{
+        modeEl.textContent = (ball.shotActive && ball.reboundLive) ? "CRASH / BOX OUT" : "DEFEND";
+      }
+    }
+
+    function updateBallReadout(){
+      let s="";
+      if(ball.held){
+        const p=getPlayerById(ball.heldBy);
+        s=`state=HELD by ${p?playerName(p):"??"}`;
+      }else if(ball.shotActive){
+        s=`state=SHOT v=${ball.vel.length().toFixed(2)} rebound=${ball.reboundLive?"YES":"NO"}`;
+      }else if(ball.thrown){
+        s=`state=PASS/LOOSE v=${ball.vel.length().toFixed(2)}`;
+      }else{
+        s=`state=IDLE`;
+      }
+      ballReadEl.textContent=s;
+    }
+
+    // ============================================================
+    // Buttons
+    // ============================================================
+    startGameBtn.addEventListener('click', ()=>{
+      if(loginOverlay.style.display !== "none") return;
+      resetGame();
+    });
+
+    toggleCamBtn.addEventListener('click', async ()=>{
+      if(loginOverlay.style.display !== "none") return;
+      if(!cameraRunning){
+        await startCamera();
+        toggleCamBtn.textContent="Camera: ON";
+      }else{
+        stopCamera();
+        toggleCamBtn.textContent="Camera: OFF";
+        stopShotMeter();
+      }
+    });
+
+    pauseBtn.addEventListener('click', ()=>{
+      if(loginOverlay.style.display !== "none") return;
+      GAME.paused=!GAME.paused;
+      pauseBtn.textContent=`Pause: ${GAME.paused?"ON":"OFF"}`;
+      logEvent(GAME.paused ? "Paused." : "Resumed.");
+      if(GAME.paused) stopShotMeter();
+    });
+
+    camModeBtn.addEventListener('click', ()=>{
+      if(loginOverlay.style.display !== "none") return;
+      GAME.camMode = (GAME.camMode==="FP") ? "TP" : "FP";
+      camModeBtn.textContent = `View: ${GAME.camMode}`;
+      logEvent(`Camera mode: <span class="mono">${GAME.camMode}</span> (level).`);
+    });
+
+    autoSwitchBtn.addEventListener('click', ()=>{
+      if(loginOverlay.style.display !== "none") return;
+      GAME.autoSwitch=!GAME.autoSwitch;
+      autoSwitchBtn.textContent=`Auto-switch: ${GAME.autoSwitch?"ON":"OFF"}`;
+      logEvent(`Auto-switch on catch: <span class="mono">${GAME.autoSwitch?"ON":"OFF"}</span>.`);
+    });
+
+    difficultyBtn.addEventListener('click', ()=>{
+      if(loginOverlay.style.display !== "none") return;
+      GAME.difficulty = (GAME.difficulty==="EASY") ? "NORMAL" : (GAME.difficulty==="NORMAL" ? "HARD" : "EASY");
+      difficultyBtn.textContent = `AI: ${GAME.difficulty}`;
+      logEvent(`AI difficulty: <span class="mono">${GAME.difficulty}</span>.`);
+    });
+
+    // ============================================================
+    // Reset / Boot
+    // ============================================================
+    function resetGame(){
+      GAME.running=true;
+      GAME.paused=false;
+      GAME.gameClock=120;
+      GAME.shotClock=24.0;
+      GAME.homeScore=0;
+      GAME.awayScore=0;
+      GAME.possTeam=TEAM_HOME;
+
+      logEl.innerHTML="";
+      logEvent(`<b>Tip-off.</b> HOME ball.`);
+
+      spawnPlayers();
+      setFormation(TEAM_HOME);
+      resetBallToTeam(TEAM_HOME);
+      updateScoreUI();
+      updateModeText();
+      updateBallReadout();
+      stopShotMeter();
+    }
+
+    // Boot login + initial UI
+    bootLogin();
+    if(loginOverlay.style.display==="none"){
+      resetGame();
+    }else{
+      // show user line even before
+      userLine.textContent = "—";
+    }
+
+    // ============================================================
+    // Animation loop
+    // ============================================================
+    const clock=new THREE.Clock();
+
+    function animate(){
+      requestAnimationFrame(animate);
+
+      const dtRaw=clock.getDelta();
+      const dt=clamp(dtRaw,0,0.033);
+
+      if(loginOverlay.style.display==="none"){
+        if(!GAME.paused && GAME.running){
+          updateClocks(dt);
+          tickPlayers(dt);
+          tickBall(dt);
+        }
+      }
+
+      updateScoreUI();
+      updateModeText();
+      updateBallReadout();
+
+      // update per-frame prev states ✅ (stable releases)
+      handLR.left.prevPinch = handLR.left.pinch;
+      handLR.left.prevFist  = handLR.left.fist;
+      handLR.right.prevPinch= handLR.right.pinch;
+      handLR.right.prevFist = handLR.right.fist;
+
+      updateCamera(dt);
+      renderer.render(scene,camera);
+    }
+    animate();
+
+    addEventListener('resize', ()=>{
+      camera.aspect=innerWidth/innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth,innerHeight);
+    });
+  </script>
+</body>
+</html>
