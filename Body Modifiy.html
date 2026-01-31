@@ -1,0 +1,759 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Full Body SVG Muscle Mesh (MediaPipe Pose)</title>
+
+  <style>
+    html,body{height:100%;margin:0;background:#000;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    #app{position:relative;width:100%;height:100%}
+
+    video{
+      position:absolute;inset:0;width:100%;height:100%;
+      object-fit:cover; transform:scaleX(-1);
+      background:#000;
+    }
+    svg{
+      position:absolute;inset:0;width:100%;height:100%;
+      transform:scaleX(-1);
+      pointer-events:none;
+    }
+
+    #hud{
+      position:absolute;left:16px;top:16px;
+      width:min(820px,calc(100% - 32px));
+      background:rgba(255,255,255,0.08);
+      border:1px solid rgba(255,255,255,0.12);
+      border-radius:14px; padding:14px;
+      backdrop-filter:blur(10px);
+      box-shadow:0 12px 30px rgba(0,0,0,.45);
+      color:rgba(255,255,255,.92);
+      pointer-events:auto;
+      user-select:none;
+    }
+    #hud.collapsed{display:none}
+    #hudToggle{
+      position:absolute;left:16px;top:16px;
+      border-radius:999px;padding:8px 12px;
+      background:rgba(10,10,10,0.6);
+      border:1px solid rgba(255,255,255,0.2);
+      color:#fff;font-size:12px;font-weight:700;
+      display:none;pointer-events:auto;
+    }
+    #row1{display:flex;justify-content:space-between;gap:10px;align-items:center}
+    #title{font-size:14px;font-weight:800;margin:0}
+    #status{font-size:12px;opacity:.86}
+    #hideHud{
+      border-radius:999px;padding:6px 10px;
+      background:rgba(255,255,255,0.12);
+      border:1px solid rgba(255,255,255,0.25);
+      color:#fff;font-size:11px;font-weight:700;
+    }
+    .grid{display:grid;grid-template-columns:1fr auto;gap:10px 12px;margin-top:12px;align-items:center}
+    label{font-size:12px;opacity:.85}
+    input[type="range"]{width:280px}
+    .toggles{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+    .toggle{display:inline-flex;gap:8px;align-items:center;padding:8px 10px;border-radius:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.10)}
+    .color-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+    .color-pill{display:flex;gap:8px;align-items:center;padding:6px 10px;border-radius:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.10);font-size:12px}
+    .color-pill input{width:26px;height:26px;border:none;background:transparent;padding:0}
+    .section-title{font-size:12px;text-transform:uppercase;letter-spacing:.08em;margin-top:14px;opacity:.7}
+    .warn{margin-top:10px;font-size:12px;opacity:.78;line-height:1.35}
+    .warn code{background:rgba(255,255,255,.08);padding:2px 6px;border-radius:8px}
+  </style>
+
+  <!-- MediaPipe -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+</head>
+
+<body>
+<div id="app">
+  <video id="video" autoplay playsinline muted></video>
+
+  <svg id="overlay" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice">
+    <defs>
+      <radialGradient id="torsoGrad" gradientUnits="userSpaceOnUse">
+        <stop offset="0%"   stop-color="rgba(255,255,255,0.18)"/>
+        <stop offset="45%"  stop-color="rgba(255,255,255,0.06)"/>
+        <stop offset="100%" stop-color="rgba(0,0,0,0.32)"/>
+      </radialGradient>
+
+      <linearGradient id="limbGrad" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"   stop-color="rgba(255,255,255,0.16)"/>
+        <stop offset="55%"  stop-color="rgba(255,255,255,0.05)"/>
+        <stop offset="100%" stop-color="rgba(0,0,0,0.30)"/>
+      </linearGradient>
+
+      <radialGradient id="muscleGrad" gradientUnits="userSpaceOnUse">
+        <stop offset="0%"   stop-color="rgba(255,255,255,0.22)"/>
+        <stop offset="70%"  stop-color="rgba(255,255,255,0.06)"/>
+        <stop offset="100%" stop-color="rgba(0,0,0,0.25)"/>
+      </radialGradient>
+
+      <filter id="softShadow" x="-40%" y="-40%" width="180%" height="180%">
+        <feDropShadow dx="0" dy="2.5" stdDeviation="2.5" flood-color="#000" flood-opacity="0.55"/>
+      </filter>
+    </defs>
+
+    <!-- Torso -->
+    <path id="torso" fill="rgba(255,255,255,0.09)" filter="url(#softShadow)"/>
+    <path id="torsoShade" fill="url(#torsoGrad)" opacity="0.9"/>
+
+    <!-- Limbs -->
+    <g id="limbs" filter="url(#softShadow)">
+      <path id="uArmL" fill="rgba(255,255,255,0.08)"/><path id="uArmLShade" fill="url(#limbGrad)" opacity="0.9"/>
+      <path id="fArmL" fill="rgba(255,255,255,0.08)"/><path id="fArmLShade" fill="url(#limbGrad)" opacity="0.9"/>
+      <path id="uArmR" fill="rgba(255,255,255,0.08)"/><path id="uArmRShade" fill="url(#limbGrad)" opacity="0.9"/>
+      <path id="fArmR" fill="rgba(255,255,255,0.08)"/><path id="fArmRShade" fill="url(#limbGrad)" opacity="0.9"/>
+
+      <path id="thighL" fill="rgba(255,255,255,0.08)"/><path id="thighLShade" fill="url(#limbGrad)" opacity="0.9"/>
+      <path id="calfL"  fill="rgba(255,255,255,0.08)"/><path id="calfLShade"  fill="url(#limbGrad)" opacity="0.9"/>
+      <path id="thighR" fill="rgba(255,255,255,0.08)"/><path id="thighRShade" fill="url(#limbGrad)" opacity="0.9"/>
+      <path id="calfR"  fill="rgba(255,255,255,0.08)"/><path id="calfRShade"  fill="url(#limbGrad)" opacity="0.9"/>
+
+      <path id="footL" fill="rgba(255,255,255,0.10)"/><path id="footLShade" fill="url(#limbGrad)" opacity="0.9"/>
+      <path id="footR" fill="rgba(255,255,255,0.10)"/><path id="footRShade" fill="url(#limbGrad)" opacity="0.9"/>
+    </g>
+
+    <!-- Muscles -->
+    <g id="muscles">
+      <ellipse id="bicepL" fill="url(#muscleGrad)"/><ellipse id="foreL"  fill="url(#muscleGrad)"/>
+      <ellipse id="bicepR" fill="url(#muscleGrad)"/><ellipse id="foreR"  fill="url(#muscleGrad)"/>
+      <ellipse id="quadL"  fill="url(#muscleGrad)"/><ellipse id="calfML" fill="url(#muscleGrad)"/>
+      <ellipse id="quadR"  fill="url(#muscleGrad)"/><ellipse id="calfMR" fill="url(#muscleGrad)"/>
+      <ellipse id="pecL"   fill="url(#muscleGrad)"/><ellipse id="pecR"  fill="url(#muscleGrad)"/>
+      <ellipse id="abs"    fill="url(#muscleGrad)"/>
+    </g>
+
+    <!-- Optional joints + skeleton -->
+    <g id="joints" opacity="1"></g>
+    <g id="skeleton" opacity="0">
+      <path id="bones" fill="none" stroke="rgba(0,255,180,0.85)" stroke-width="3" stroke-linecap="round"/>
+      <g id="dots"></g>
+    </g>
+  </svg>
+
+  <div id="hud">
+    <div id="row1">
+      <div id="title">Full Body SVG Muscle Mesh • MediaPipe Pose</div>
+      <div style="display:flex;gap:10px;align-items:center">
+        <div id="status">Loading…</div>
+        <button id="hideHud" type="button">Hide panel</button>
+      </div>
+    </div>
+
+    <div class="section-title">Mesh Controls</div>
+    <div class="grid">
+      <label for="meshOpacity">Mesh opacity</label>
+      <input id="meshOpacity" type="range" min="0" max="100" value="86"/>
+
+      <label for="thickness">Mesh thickness</label>
+      <input id="thickness" type="range" min="10" max="90" value="44"/>
+
+      <label for="jointSize">Joint size</label>
+      <input id="jointSize" type="range" min="2" max="24" value="10"/>
+
+      <label for="muscle">Muscle intensity</label>
+      <input id="muscle" type="range" min="0" max="100" value="72"/>
+
+      <label for="smooth">Smoothing</label>
+      <input id="smooth" type="range" min="0" max="95" value="78"/>
+    </div>
+
+    <div class="section-title">Proportions</div>
+    <div class="grid">
+      <label for="armScale">Arm length</label>
+      <input id="armScale" type="range" min="70" max="140" value="100"/>
+
+      <label for="legScale">Leg length</label>
+      <input id="legScale" type="range" min="70" max="140" value="100"/>
+
+      <label for="torsoScale">Torso length</label>
+      <input id="torsoScale" type="range" min="70" max="140" value="100"/>
+
+      <label for="shoulderWidth">Shoulder width</label>
+      <input id="shoulderWidth" type="range" min="70" max="140" value="100"/>
+
+      <label for="hipWidth">Hip width</label>
+      <input id="hipWidth" type="range" min="70" max="140" value="100"/>
+
+      <label for="waistPinch">Waist pinch</label>
+      <input id="waistPinch" type="range" min="0" max="40" value="12"/>
+
+      <label for="muscleScale">Muscle size</label>
+      <input id="muscleScale" type="range" min="60" max="150" value="100"/>
+    </div>
+
+    <div class="section-title">Colors</div>
+    <div class="color-row">
+      <label class="color-pill">Torso <input id="torsoColor" type="color" value="#ffffff"/></label>
+      <label class="color-pill">Limbs <input id="limbColor" type="color" value="#f3f6ff"/></label>
+      <label class="color-pill">Muscles <input id="muscleColor" type="color" value="#9ad0ff"/></label>
+      <label class="color-pill">Joints <input id="jointColor" type="color" value="#7fffd4"/></label>
+      <label class="color-pill">Skeleton <input id="skeletonColor" type="color" value="#00ffb4"/></label>
+    </div>
+
+    <div class="toggles">
+      <label class="toggle"><input id="showVideo" type="checkbox" checked/> Show video</label>
+      <label class="toggle"><input id="showSkeleton" type="checkbox"/> Show skeleton</label>
+      <label class="toggle"><input id="showJoints" type="checkbox" checked/> Show joints</label>
+    </div>
+
+    <div class="warn">
+      If camera stays black: run via local server.<br/>
+      Windows: <code>python -m http.server 8000</code> then open <code>http://localhost:8000</code><br/>
+      Mac/Linux: same command, then open in Chrome/Edge.
+    </div>
+  </div>
+  <button id="hudToggle" type="button">Show panel</button>
+</div>
+
+<script>
+(() => {
+  const video = document.getElementById("video");
+  const svg = document.getElementById("overlay");
+  const statusEl = document.getElementById("status");
+
+  const meshOpacityEl = document.getElementById("meshOpacity");
+  const thicknessEl = document.getElementById("thickness");
+  const jointSizeEl = document.getElementById("jointSize");
+  const muscleEl = document.getElementById("muscle");
+  const smoothEl = document.getElementById("smooth");
+  const showVideoEl = document.getElementById("showVideo");
+  const showSkeletonEl = document.getElementById("showSkeleton");
+  const showJointsEl = document.getElementById("showJoints");
+
+  const armScaleEl = document.getElementById("armScale");
+  const legScaleEl = document.getElementById("legScale");
+  const torsoScaleEl = document.getElementById("torsoScale");
+  const shoulderWidthEl = document.getElementById("shoulderWidth");
+  const hipWidthEl = document.getElementById("hipWidth");
+  const waistPinchEl = document.getElementById("waistPinch");
+  const muscleScaleEl = document.getElementById("muscleScale");
+
+  const torsoColorEl = document.getElementById("torsoColor");
+  const limbColorEl = document.getElementById("limbColor");
+  const muscleColorEl = document.getElementById("muscleColor");
+  const jointColorEl = document.getElementById("jointColor");
+  const skeletonColorEl = document.getElementById("skeletonColor");
+
+  const torso = document.getElementById("torso");
+  const torsoShade = document.getElementById("torsoShade");
+  const torsoGrad = document.getElementById("torsoGrad");
+  const limbGrad = document.getElementById("limbGrad");
+  const muscleGrad = document.getElementById("muscleGrad");
+  const torsoStops = torsoGrad.querySelectorAll("stop");
+  const limbStops = limbGrad.querySelectorAll("stop");
+  const muscleStops = muscleGrad.querySelectorAll("stop");
+
+  const jointsG = document.getElementById("joints");
+  const skeletonG = document.getElementById("skeleton");
+  const bonesPath = document.getElementById("bones");
+  const dotsG = document.getElementById("dots");
+
+  const hud = document.getElementById("hud");
+  const hudToggle = document.getElementById("hudToggle");
+  const hideHud = document.getElementById("hideHud");
+
+  hudToggle.addEventListener("click", () => {
+    hud.classList.remove("collapsed");
+    hudToggle.style.display = "none";
+  });
+
+  hideHud.addEventListener("click", () => {
+    hud.classList.add("collapsed");
+    hudToggle.style.display = "block";
+  });
+
+  const paths = {
+    uArmL: [document.getElementById("uArmL"), document.getElementById("uArmLShade")],
+    fArmL: [document.getElementById("fArmL"), document.getElementById("fArmLShade")],
+    uArmR: [document.getElementById("uArmR"), document.getElementById("uArmRShade")],
+    fArmR: [document.getElementById("fArmR"), document.getElementById("fArmRShade")],
+    thighL:[document.getElementById("thighL"),document.getElementById("thighLShade")],
+    calfL: [document.getElementById("calfL"), document.getElementById("calfLShade")],
+    thighR:[document.getElementById("thighR"),document.getElementById("thighRShade")],
+    calfR: [document.getElementById("calfR"), document.getElementById("calfRShade")],
+    footL: [document.getElementById("footL"), document.getElementById("footLShade")],
+    footR: [document.getElementById("footR"), document.getElementById("footRShade")]
+  };
+
+  const mus = {
+    bicepL: document.getElementById("bicepL"),
+    foreL:  document.getElementById("foreL"),
+    bicepR: document.getElementById("bicepR"),
+    foreR:  document.getElementById("foreR"),
+    quadL:  document.getElementById("quadL"),
+    calfML: document.getElementById("calfML"),
+    quadR:  document.getElementById("quadR"),
+    calfMR: document.getElementById("calfMR"),
+    pecL:   document.getElementById("pecL"),
+    pecR:   document.getElementById("pecR"),
+    abs:    document.getElementById("abs")
+  };
+
+  function hexToRgba(hex, alpha){
+    const val = hex.replace("#", "");
+    const bigint = parseInt(val, 16);
+    const r = (bigint >> 16) & 255;
+    const g = (bigint >> 8) & 255;
+    const b = bigint & 255;
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+
+  function setStatus(t){ statusEl.textContent = t; }
+  function clamp(v,lo,hi){ return Math.max(lo, Math.min(hi, v)); }
+  function lerp(a,b,t){ return a + (b-a)*t; }
+  function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+  function scaleAround(p, c, s){ return { x: c.x + (p.x - c.x) * s, y: c.y + (p.y - c.y) * s }; }
+
+  // Pose indices
+  const IDX = {
+    lShoulder:11, rShoulder:12,
+    lElbow:13, rElbow:14,
+    lWrist:15, rWrist:16,
+    lHip:23, rHip:24,
+    lKnee:25, rKnee:26,
+    lAnkle:27, rAnkle:28,
+    lHeel:29, rHeel:30,
+    lFoot:31, rFoot:32
+  };
+
+  const CONNECTIONS = [
+    [IDX.lShoulder, IDX.rShoulder],
+    [IDX.lShoulder, IDX.lElbow],
+    [IDX.lElbow, IDX.lWrist],
+    [IDX.rShoulder, IDX.rElbow],
+    [IDX.rElbow, IDX.rWrist],
+    [IDX.lShoulder, IDX.lHip],
+    [IDX.rShoulder, IDX.rHip],
+    [IDX.lHip, IDX.rHip],
+    [IDX.lHip, IDX.lKnee],
+    [IDX.lKnee, IDX.lAnkle],
+    [IDX.rHip, IDX.rKnee],
+    [IDX.rKnee, IDX.rAnkle],
+    [IDX.lAnkle, IDX.lHeel],
+    [IDX.lHeel, IDX.lFoot],
+    [IDX.rAnkle, IDX.rHeel],
+    [IDX.rHeel, IDX.rFoot],
+  ];
+
+  // Smoothing
+  let last = null;
+  function smoothLandmarks(curr, prev, alpha){
+    if(!prev) return curr;
+    const out = new Array(curr.length);
+    for(let i=0;i<curr.length;i++){
+      out[i] = {
+        x: lerp(prev[i].x, curr[i].x, alpha),
+        y: lerp(prev[i].y, curr[i].y, alpha),
+        z: lerp(prev[i].z ?? 0, curr[i].z ?? 0, alpha),
+        visibility: lerp(prev[i].visibility ?? 1, curr[i].visibility ?? 1, alpha),
+      };
+    }
+    return out;
+  }
+
+  // Convert to pixels
+  let W = 1280, H = 720;
+  function P(lm, i){
+    const p = lm[i];
+    return { x: p.x * W, y: p.y * H, v: p.visibility ?? 1 };
+  }
+
+  function polyPath(pts){
+    if(!pts || pts.length < 3) return "";
+    let d = `M ${pts[0].x.toFixed(2)} ${pts[0].y.toFixed(2)}`;
+    for(let i=1;i<pts.length;i++) d += ` L ${pts[i].x.toFixed(2)} ${pts[i].y.toFixed(2)}`;
+    return d + " Z";
+  }
+
+  function quadAround(a, b, tA, tB){
+    const vx = b.x - a.x, vy = b.y - a.y;
+    const len = Math.hypot(vx,vy) || 1;
+    const nx = -vy/len, ny = vx/len;
+    const aL = { x: a.x + nx*tA, y: a.y + ny*tA };
+    const aR = { x: a.x - nx*tA, y: a.y - ny*tA };
+    const bL = { x: b.x + nx*tB, y: b.y + ny*tB };
+    const bR = { x: b.x - nx*tB, y: b.y - ny*tB };
+    return [aL,bL,bR,aR];
+  }
+
+  function setLimb(id, pts){
+    const d = polyPath(pts);
+    paths[id][0].setAttribute("d", d);
+    paths[id][1].setAttribute("d", d);
+  }
+
+  function angleDeg(a,b){
+    return Math.atan2(b.y-a.y, b.x-a.x) * 180/Math.PI;
+  }
+
+  function setEllipse(el, cx, cy, rx, ry, angle, opacity){
+    el.setAttribute("cx", cx);
+    el.setAttribute("cy", cy);
+    el.setAttribute("rx", Math.max(0.1, rx));
+    el.setAttribute("ry", Math.max(0.1, ry));
+    el.setAttribute("opacity", opacity);
+    el.setAttribute("transform", `rotate(${angle.toFixed(2)} ${cx.toFixed(2)} ${cy.toFixed(2)})`);
+  }
+
+  // Pose
+  const pose = new Pose({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+  });
+
+  pose.setOptions({
+    modelComplexity: 2,
+    smoothLandmarks: false,    // we smooth ourselves
+    enableSegmentation: false,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.7
+  });
+
+  let latestPose = null;
+  pose.onResults((res) => {
+    latestPose = res;
+  });
+
+  function resetOverlay(){
+    torso.setAttribute("d", "");
+    torsoShade.setAttribute("d", "");
+    Object.values(paths).forEach(([a, b]) => {
+      a.setAttribute("d", "");
+      b.setAttribute("d", "");
+    });
+    Object.values(mus).forEach((el) => el.setAttribute("opacity", "0"));
+    bonesPath.setAttribute("d", "");
+    dotsG.innerHTML = "";
+    jointsG.innerHTML = "";
+  }
+
+  function draw(){
+    // UI toggles
+    video.style.opacity = showVideoEl.checked ? "1" : "0";
+    skeletonG.style.opacity = showSkeletonEl.checked ? "1" : "0";
+    jointsG.style.opacity = showJointsEl.checked ? "1" : "0";
+
+    // UI toggles
+    const opacity = Number(meshOpacityEl.value)/100;
+    const torsoFill = hexToRgba(torsoColorEl.value, 0.12 + opacity * 0.38);
+    const limbFill = hexToRgba(limbColorEl.value, 0.12 + opacity * 0.36);
+    const muscleFill = hexToRgba(muscleColorEl.value, 0.18 + opacity * 0.5);
+
+    torso.setAttribute("opacity", opacity);
+    torsoShade.setAttribute("opacity", opacity*0.95);
+    torso.setAttribute("fill", torsoFill);
+    document.getElementById("limbs").setAttribute("opacity", opacity);
+    document.getElementById("muscles").setAttribute("opacity", opacity);
+
+    Object.values(paths).forEach(([a]) => a.setAttribute("fill", limbFill));
+    Object.values(mus).forEach((el) => el.setAttribute("fill", muscleFill));
+
+    if(torsoStops.length >= 3){
+      torsoStops[0].setAttribute("stop-color", hexToRgba(torsoColorEl.value, 0.38));
+      torsoStops[1].setAttribute("stop-color", hexToRgba(torsoColorEl.value, 0.16));
+      torsoStops[2].setAttribute("stop-color", hexToRgba(torsoColorEl.value, 0.04));
+    }
+    if(limbStops.length >= 3){
+      limbStops[0].setAttribute("stop-color", hexToRgba(limbColorEl.value, 0.32));
+      limbStops[1].setAttribute("stop-color", hexToRgba(limbColorEl.value, 0.14));
+      limbStops[2].setAttribute("stop-color", hexToRgba(limbColorEl.value, 0.05));
+    }
+    if(muscleStops.length >= 3){
+      muscleStops[0].setAttribute("stop-color", hexToRgba(muscleColorEl.value, 0.42));
+      muscleStops[1].setAttribute("stop-color", hexToRgba(muscleColorEl.value, 0.18));
+      muscleStops[2].setAttribute("stop-color", hexToRgba(muscleColorEl.value, 0.06));
+    }
+
+    const poseLmRaw = latestPose?.poseLandmarks || null;
+    if(!poseLmRaw){
+      setStatus("No body detected");
+      last = null;
+      resetOverlay();
+      return;
+    }
+
+    const now = performance.now();
+    draw._t ??= now;
+    const dt = now - draw._t;
+    draw._t = now;
+    const fps = dt > 0 ? (1000/dt) : 0;
+
+    // smoothing: alpha = how fast we move toward new
+    const alpha = 1 - (Number(smoothEl.value)/100);
+    const lm = smoothLandmarks(poseLmRaw, last, alpha);
+    last = lm;
+
+    // points
+    const LS0 = P(lm, IDX.lShoulder), RS0 = P(lm, IDX.rShoulder);
+    const LE0 = P(lm, IDX.lElbow),    RE0 = P(lm, IDX.rElbow);
+    const LW0 = P(lm, IDX.lWrist),    RW0 = P(lm, IDX.rWrist);
+
+    const LH0 = P(lm, IDX.lHip),      RH0 = P(lm, IDX.rHip);
+    const LK0 = P(lm, IDX.lKnee),     RK0 = P(lm, IDX.rKnee);
+    const LA0 = P(lm, IDX.lAnkle),    RA0 = P(lm, IDX.rAnkle);
+
+    const LHeel0 = P(lm, IDX.lHeel), RHeel0 = P(lm, IDX.rHeel);
+    const LFoot0 = P(lm, IDX.lFoot), RFoot0 = P(lm, IDX.rFoot);
+
+    const shoulderCenter = { x: (LS0.x + RS0.x) / 2, y: (LS0.y + RS0.y) / 2 };
+    const hipCenter = { x: (LH0.x + RH0.x) / 2, y: (LH0.y + RH0.y) / 2 };
+    const torsoCenter = { x: (shoulderCenter.x + hipCenter.x) / 2, y: (shoulderCenter.y + hipCenter.y) / 2 };
+
+    const shoulderScale = Number(shoulderWidthEl.value) / 100;
+    const hipScale = Number(hipWidthEl.value) / 100;
+    let LS = scaleAround(LS0, shoulderCenter, shoulderScale);
+    let RS = scaleAround(RS0, shoulderCenter, shoulderScale);
+    let LH = scaleAround(LH0, hipCenter, hipScale);
+    let RH = scaleAround(RH0, hipCenter, hipScale);
+
+    const torsoScale = Number(torsoScaleEl.value) / 100;
+    LS = scaleAround(LS, torsoCenter, torsoScale);
+    RS = scaleAround(RS, torsoCenter, torsoScale);
+    LH = scaleAround(LH, torsoCenter, torsoScale);
+    RH = scaleAround(RH, torsoCenter, torsoScale);
+
+    const armScale = Number(armScaleEl.value) / 100;
+    const legScale = Number(legScaleEl.value) / 100;
+
+    const LE = scaleAround(LE0, LS, armScale);
+    const LW = scaleAround(LW0, LS, armScale);
+    const RE = scaleAround(RE0, RS, armScale);
+    const RW = scaleAround(RW0, RS, armScale);
+
+    const LK = scaleAround(LK0, LH, legScale);
+    const LA = scaleAround(LA0, LH, legScale);
+    const LK2 = scaleAround(RK0, RH, legScale);
+    const RA = scaleAround(RA0, RH, legScale);
+    const LHeel = scaleAround(LHeel0, LH, legScale);
+    const RHeel = scaleAround(RHeel0, RH, legScale);
+    const LFoot = scaleAround(LFoot0, LH, legScale);
+    const RFoot = scaleAround(RFoot0, RH, legScale);
+    const RK = LK2;
+    const adjustedPoints = new Map([
+      [IDX.lShoulder, LS],
+      [IDX.rShoulder, RS],
+      [IDX.lElbow, LE],
+      [IDX.rElbow, RE],
+      [IDX.lWrist, LW],
+      [IDX.rWrist, RW],
+      [IDX.lHip, LH],
+      [IDX.rHip, RH],
+      [IDX.lKnee, LK],
+      [IDX.rKnee, RK],
+      [IDX.lAnkle, LA],
+      [IDX.rAnkle, RA],
+      [IDX.lHeel, LHeel],
+      [IDX.rHeel, RHeel],
+      [IDX.lFoot, LFoot],
+      [IDX.rFoot, RFoot],
+    ]);
+    const getAdjusted = (idx) => adjustedPoints.get(idx) || P(lm, idx);
+
+    // scale thickness by body width
+    const shoulderW = dist(LS, RS);
+    const hipW = dist(LH, RH);
+    const scale = clamp(((shoulderW + hipW)/2) / 320, 0.55, 1.8);
+    const T = Number(thicknessEl.value) * scale;
+    const jointSize = Number(jointSizeEl.value) * scale;
+
+    // gradients anchored to torso center
+    const cx = (LS.x + RS.x + LH.x + RH.x) / 4;
+    const cy = (LS.y + RS.y + LH.y + RH.y) / 4;
+
+    torsoGrad.setAttribute("cx", cx);
+    torsoGrad.setAttribute("cy", cy - shoulderW*0.18);
+    torsoGrad.setAttribute("r", shoulderW*1.25);
+
+    limbGrad.setAttribute("x1", 0);
+    limbGrad.setAttribute("y1", cy - 260);
+    limbGrad.setAttribute("x2", 0);
+    limbGrad.setAttribute("y2", cy + 380);
+
+    muscleGrad.setAttribute("cx", cx);
+    muscleGrad.setAttribute("cy", cy);
+    muscleGrad.setAttribute("r", shoulderW*1.25);
+
+    // torso shell (shoulders + hips with slight waist pinch)
+    const waistPinch = Number(waistPinchEl.value) / 100;
+    const midL = { x: lerp(LS.x, LH.x, 0.55), y: lerp(LS.y, LH.y, 0.55) };
+    const midR = { x: lerp(RS.x, RH.x, 0.55), y: lerp(RS.y, RH.y, 0.55) };
+    const torsoPts = [
+      {x: LS.x, y: LS.y},
+      {x: RS.x, y: RS.y},
+      {x: RH.x, y: RH.y},
+      {x: lerp(midR.x, cx, waistPinch), y: midR.y},
+      {x: lerp(midL.x, cx, waistPinch), y: midL.y},
+      {x: LH.x, y: LH.y},
+    ];
+    const torsoD = polyPath(torsoPts);
+    torso.setAttribute("d", torsoD);
+    torsoShade.setAttribute("d", torsoD);
+
+    // limb quads
+    setLimb("uArmL", quadAround(LS, LE, T*0.58, T*0.44));
+    setLimb("uArmR", quadAround(RS, RE, T*0.58, T*0.44));
+    setLimb("fArmL", quadAround(LE, LW, T*0.42, T*0.30));
+    setLimb("fArmR", quadAround(RE, RW, T*0.42, T*0.30));
+
+    setLimb("thighL", quadAround(LH, LK, T*0.76, T*0.58));
+    setLimb("thighR", quadAround(RH, RK, T*0.76, T*0.58));
+    setLimb("calfL",  quadAround(LK, LA, T*0.58, T*0.44));
+    setLimb("calfR",  quadAround(RK, RA, T*0.58, T*0.44));
+
+    // feet pads
+    function footPoly(A, Heel, Toe){
+      const vx = Toe.x - A.x, vy = Toe.y - A.y;
+      const len = Math.hypot(vx,vy)||1;
+      const nx = -vy/len, ny = vx/len;
+      const pad = T*0.26;
+
+      const Aout = {x: A.x + nx*pad,     y: A.y + ny*pad};
+      const Ain  = {x: A.x - nx*pad,     y: A.y - ny*pad};
+      const Hout = {x: Heel.x + nx*pad*0.8, y: Heel.y + ny*pad*0.8};
+      const Hin  = {x: Heel.x - nx*pad*0.6, y: Heel.y - ny*pad*0.6};
+      const Tout = {x: Toe.x  + nx*pad*1.2, y: Toe.y  + ny*pad*1.2};
+      const Tin  = {x: Toe.x  - nx*pad*0.7, y: Toe.y  - ny*pad*0.7};
+
+      return [Aout, Hout, Tout, Tin, Hin, Ain];
+    }
+    setLimb("footL", footPoly(LA, LHeel, LFoot));
+    setLimb("footR", footPoly(RA, RHeel, RFoot));
+
+    // muscles
+    const muscleK = Number(muscleEl.value)/100;
+    const muscleScale = Number(muscleScaleEl.value)/100;
+
+    const bL = {x: lerp(LS.x, LE.x, 0.55), y: lerp(LS.y, LE.y, 0.55)};
+    const bR = {x: lerp(RS.x, RE.x, 0.55), y: lerp(RS.y, RE.y, 0.55)};
+    setEllipse(mus.bicepL, bL.x, bL.y, T*0.38*muscleScale, T*0.30*muscleScale, angleDeg(LS, LE), 0.90*muscleK);
+    setEllipse(mus.bicepR, bR.x, bR.y, T*0.38*muscleScale, T*0.30*muscleScale, angleDeg(RS, RE), 0.90*muscleK);
+
+    const fL = {x: lerp(LE.x, LW.x, 0.55), y: lerp(LE.y, LW.y, 0.55)};
+    const fR = {x: lerp(RE.x, RW.x, 0.55), y: lerp(RE.y, RW.y, 0.55)};
+    setEllipse(mus.foreL, fL.x, fL.y, T*0.32*muscleScale, T*0.24*muscleScale, angleDeg(LE, LW), 0.78*muscleK);
+    setEllipse(mus.foreR, fR.x, fR.y, T*0.32*muscleScale, T*0.24*muscleScale, angleDeg(RE, RW), 0.78*muscleK);
+
+    const qL = {x: lerp(LH.x, LK.x, 0.48), y: lerp(LH.y, LK.y, 0.48)};
+    const qR = {x: lerp(RH.x, RK.x, 0.48), y: lerp(RH.y, RK.y, 0.48)};
+    setEllipse(mus.quadL, qL.x, qL.y, T*0.52*muscleScale, T*0.36*muscleScale, angleDeg(LH, LK), 0.92*muscleK);
+    setEllipse(mus.quadR, qR.x, qR.y, T*0.52*muscleScale, T*0.36*muscleScale, angleDeg(RH, RK), 0.92*muscleK);
+
+    const cL = {x: lerp(LK.x, LA.x, 0.58), y: lerp(LK.y, LA.y, 0.58)};
+    const cR = {x: lerp(RK.x, RA.x, 0.58), y: lerp(RK.y, RA.y, 0.58)};
+    setEllipse(mus.calfML, cL.x, cL.y, T*0.46*muscleScale, T*0.32*muscleScale, angleDeg(LK, LA), 0.88*muscleK);
+    setEllipse(mus.calfMR, cR.x, cR.y, T*0.46*muscleScale, T*0.32*muscleScale, angleDeg(RK, RA), 0.88*muscleK);
+
+    const pecY = lerp((LS.y+RS.y)/2, (LH.y+RH.y)/2, 0.22);
+    const pecDx = shoulderW*0.18;
+    setEllipse(mus.pecL, cx - pecDx, pecY, shoulderW*0.16*muscleScale, shoulderW*0.11*muscleScale, 0, 0.72*muscleK);
+    setEllipse(mus.pecR, cx + pecDx, pecY, shoulderW*0.16*muscleScale, shoulderW*0.11*muscleScale, 0, 0.72*muscleK);
+
+    const absY = lerp((LS.y+RS.y)/2, (LH.y+RH.y)/2, 0.56);
+    setEllipse(mus.abs, cx, absY, shoulderW*0.20*muscleScale, shoulderW*0.28*muscleScale, 0, 0.55*muscleK);
+
+    // joints
+    jointsG.innerHTML = "";
+    const jointColor = jointColorEl.value;
+    const jointPoints = [LS, RS, LE, RE, LW, RW, LH, RH, LK, RK, LA, RA];
+    jointPoints.forEach((p) => {
+      const c = document.createElementNS("http://www.w3.org/2000/svg","circle");
+      c.setAttribute("cx", p.x);
+      c.setAttribute("cy", p.y);
+      c.setAttribute("r", jointSize);
+      c.setAttribute("fill", hexToRgba(jointColor, 0.75));
+      c.setAttribute("stroke", hexToRgba(jointColor, 0.35));
+      c.setAttribute("stroke-width", Math.max(1, jointSize * 0.2));
+      jointsG.appendChild(c);
+    });
+
+    // skeleton (optional)
+    if(showSkeletonEl.checked){
+      bonesPath.setAttribute("stroke", hexToRgba(skeletonColorEl.value, 0.9));
+      let d = "";
+      for(const [a,b] of CONNECTIONS){
+        const A = getAdjusted(a), B = getAdjusted(b);
+        d += `M ${A.x.toFixed(2)} ${A.y.toFixed(2)} L ${B.x.toFixed(2)} ${B.y.toFixed(2)} `;
+      }
+      bonesPath.setAttribute("d", d);
+
+      dotsG.innerHTML = "";
+      for(let i=0;i<lm.length;i++){
+        const p = getAdjusted(i);
+        if(p.v < 0.35) continue;
+        const c = document.createElementNS("http://www.w3.org/2000/svg","circle");
+        c.setAttribute("cx", p.x);
+        c.setAttribute("cy", p.y);
+        c.setAttribute("r", Math.max(1.5, jointSize * 0.35));
+        c.setAttribute("fill", hexToRgba(skeletonColorEl.value, 0.85));
+        dotsG.appendChild(c);
+      }
+    }
+
+    setStatus(`cam=${W}x${H} • pose=${lm.length} • ${fps.toFixed(1)}fps • scale ${(scale*100).toFixed(0)}% • thickness ${(T).toFixed(0)}px`);
+  }
+
+  async function waitVideoReady() {
+    for (let i=0;i<200;i++){
+      if (video.videoWidth && video.videoHeight) return true;
+      await new Promise(r=>setTimeout(r,25));
+    }
+    return false;
+  }
+
+  let running = true;
+  async function pump(){
+    while(running){
+      if(video.readyState >= 2){
+        await pose.send({ image: video });
+        draw();
+      }
+      await new Promise(r=>requestAnimationFrame(r));
+    }
+  }
+
+  async function startCamera() {
+    setStatus("Requesting camera permission…");
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false
+    });
+
+    video.srcObject = stream;
+
+    const ok = await waitVideoReady();
+    if(!ok){
+      setStatus("Camera readyState timeout (try local server + permissions)");
+      return;
+    }
+
+    // Use real video dimensions for correct overlay scaling
+    W = video.videoWidth || 1280;
+    H = video.videoHeight || 720;
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+
+    setStatus(`Camera OK • ${W}x${H} • loading model…`);
+
+    for(let i=0;i<4;i++){
+      await pose.send({ image: video });
+    }
+
+    setStatus("Running…");
+    pump();
+  }
+
+  // Start
+  startCamera().catch(err => {
+    console.error(err);
+    const msg = (err && err.name) ? `${err.name}: ${err.message || ""}` : String(err);
+    setStatus("Camera/model error: " + msg);
+  });
+
+})();
+</script>
+</body>
+</html>
