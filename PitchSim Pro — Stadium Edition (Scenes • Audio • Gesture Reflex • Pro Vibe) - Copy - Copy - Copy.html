@@ -1,0 +1,541 @@
+<script>
+    function handleInPlayLanding(){
+      if (ballMode !== "inPlay") return false;
+
+      if (pos.y <= 0.03){
+        const landX = pos.x;
+        const landZ = pos.z;
+
+        showLandMarker(landX, landZ);
+        const res = classifyBattedBallLanding(landX, landZ);
+        addFieldMark(landX, landZ, res.type);
+
+        if (res.type === "FOUL"){
+          lastCallEl.textContent = "FOUL";
+          foulBall();
+        } else if (res.type === "OUT"){
+          addOut("OUT (IN PLAY)");
+        } else if (res.type === "HR"){
+          advanceOnHit(4);
+        } else {
+          advanceOnHit(res.bases);
+        }
+
+        ballMode = "idle";
+        setTimeout(()=>resetBallToIdle(), 250);
+        return true;
+      }
+      return false;
+    }
+
+    // -----------------------------
+    // Pitch / Swing Requests
+    // -----------------------------
+    let lastPitch = { mph: 0, rpm: 0, axis: 0, gyro: 0 };
+    let nextAutoPitchAt = 0;
+
+    function updateLiveReadout(){
+      const txt = `mph=${Math.round(lastPitch.mph)} rpm=${Math.round(lastPitch.rpm)} axis=${Math.round(lastPitch.axis)}° gyro=${Math.round(lastPitch.gyro)}%`;
+      liveReadEl.textContent = txt;
+      updateGameHUD();
+    }
+
+    function shouldBallFollowHand(){
+      // Let the ball “sit” in the hand before a gesture pitch
+      if (ballMode !== "idle") return false;
+      if (player.role !== "pitcher") return false;
+      if (player.pitchCtrl !== "gesture") return false;
+      return !!handState.hasHand;
+    }
+
+    function throwPitchFrom(releasePos, rawAim, mph, presetKey){
+      const z = currentZone();
+
+      // Wind along +X (mph)
+      windVec.set(mphToMps(Number(windEl.value)), 0, 0);
+
+      // Aim assist + scatter + lift assist
+      const a1 = assistedAim(rawAim);
+      const scatterM = Number(scatterCmEl.value) / 100;
+      const dx = randn() * scatterM;
+      const dy = randn() * scatterM;
+
+      const target = new THREE.Vector3(
+        a1.x + dx,
+        a1.y + dy + Number(liftAssistEl.value),
+        z.z
+      );
+
+      // Solve initial velocity to hit target at chosen speed
+      const speedMps = mphToMps(mph);
+      const sol = solveBallisticVelocity(releasePos, target, speedMps);
+
+      // Spin preset
+      const P = PRESETS[presetKey] || PRESETS.fourSeam;
+      const rpm = P.rpm * (0.92 + 0.16*Math.random());
+      const axis = P.axisBias + randn()*10;
+      const gyro = clamp(P.gyro + randn()*6, 0, 95);
+
+      omega.copy(buildSpinVector(axis, rpm, gyro));
+
+      // Set state
+      pos.copy(releasePos);
+      vel.copy(sol.v);
+
+      // Reference (no magnus): same start + v, but omega is zero (ref uses same drag + gravity in stepPhysics())
+      refPos = releasePos.clone();
+      refVel = sol.v.clone();
+
+      trailReset();
+      ballMode = "pitch";
+
+      // UI readouts
+      lastPitch = { mph, rpm, axis, gyro };
+      updateLiveReadout();
+
+      prevZ = pos.z;
+      prevPos.copy(pos);
+      prevRefPos.copy(refPos);
+
+      showCallout(`${presetKey.toUpperCase()}  ${Math.round(mph)} mph`, 650);
+    }
+
+    function throwKeyboardPitch(){
+      const z = currentZone();
+      const releasePos = new THREE.Vector3(0, 1.75, 10.0);
+
+      // use current aim (mouse/drag cage)
+      const rawAim = { x: aim.x, y: aim.y };
+      const mph = randPitchMph();
+      throwPitchFrom(releasePos, rawAim, mph, pitchTypeEl.value);
+    }
+
+    function throwGesturePitch(){
+      const z = currentZone();
+      const wrist = handState.wrist || { x: 0.5, y: 0.5 };
+      const releasePos = mapHandToRelease(wrist);
+
+      // Aim by wrist as well (feels natural)
+      const rawAim = mapHandToAim(wrist);
+
+      // Speed from peak wrist velocity during fist hold (fallback to random)
+      const mph = handState.lastReleaseMph > 0 ? handState.lastReleaseMph : randPitchMph();
+      throwPitchFrom(releasePos, rawAim, mph, pitchTypeEl.value);
+    }
+
+    function throwAIPitch(){
+      const z = currentZone();
+      const releasePos = new THREE.Vector3(0, 1.78, 10.0);
+
+      // AI aims near/around the zone, biased by aimAssist/zoneScale
+      const midY = (z.yBot + z.yTop) * 0.5;
+      const rawAim = {
+        x: randn() * z.halfW * 0.8,
+        y: clamp(midY + randn() * (z.yTop - z.yBot) * 0.35, 0.35, 1.55)
+      };
+
+      const mph = randPitchMph();
+      const keys = Object.keys(PRESETS);
+      const presetKey = pitchTypeEl.value || keys[(Math.random()*keys.length)|0];
+
+      throwPitchFrom(releasePos, rawAim, mph, presetKey);
+    }
+
+    function requestPitch(){
+      normalizeControlSelections();
+
+      if (ballMode !== "idle") return;
+
+      // spectator forces AI vs AI
+      const pitchCtrl = (player.role === "spectator") ? "ai" : player.pitchCtrl;
+
+      if (pitchCtrl === "ai") throwAIPitch();
+      else if (pitchCtrl === "gesture") throwGesturePitch();
+      else throwKeyboardPitch();
+    }
+
+    // -----------------------------
+    // AI Batter Swing Logic
+    // -----------------------------
+    let aiSwingArmed = false;
+
+    function aiBatterUpdate(){
+      // AI batter swings when pitch is nearing the plate, based on aggression
+      if (!game.aiBatter) return;
+      if (ballMode !== "pitch") { aiSwingArmed = false; return; }
+      if (bat.swinging) return;
+
+      const z = currentZone();
+      // arm once ball is close
+      if (!aiSwingArmed && pos.z < (z.z + 3.0)) aiSwingArmed = true;
+
+      if (!aiSwingArmed) return;
+
+      // estimate where it will cross the plate soon (simple)
+      const dz = (pos.z - z.z);
+      const vz = (vel.z || -1e-6);
+      const t = clamp(dz / (-vz + 1e-6), 0, 0.25);
+      const px = pos.x + vel.x * t;
+      const py = pos.y + vel.y * t;
+
+      const inZone = (Math.abs(px) <= z.halfW*1.05) && (py >= z.yBot*0.95) && (py <= z.yTop*1.05);
+      const want = Math.random() < Number(aiAggEl.value);
+
+      // swing a bit early
+      if (inZone && want && pos.z < (z.z + 1.2)){
+        requestSwing();
+        aiSwingArmed = false;
+      } else if (!inZone && pos.z < (z.z + 0.8)){
+        // sometimes chase
+        if (Math.random() < Number(aiAggEl.value) * 0.25) requestSwing();
+        aiSwingArmed = false;
+      }
+    }
+
+    // -----------------------------
+    // MediaPipe Hands (gesture controls)
+    // -----------------------------
+    const videoEl = el('video');
+    const overlay = el('overlay');
+    const octx = overlay.getContext('2d');
+    const statusLine = el('statusLine');
+
+    let mpHands = null;
+    let mpCamera = null;
+
+    const handState = {
+      hasHand: false,
+      wrist: null,
+      lastWrist: null,
+      lastT: 0,
+
+      // metrics
+      pinchRatio: 1,
+      openness: 2,
+
+      // pitch gesture
+      wasFist: false,
+      isFist: false,
+      peakVel: 0,
+      lastReleaseMph: 0,
+      lastReleaseAt: -999,
+
+      // swing gesture
+      pinchDown: false
+    };
+
+    function dist2(a,b){ const dx=a.x-b.x, dy=a.y-b.y; return Math.hypot(dx,dy); }
+
+    function computeHandMetrics(lm){
+      // landmarks: 0 wrist, 4 thumb tip, 8 index tip, 5 index mcp, 17 pinky mcp, tips 8,12,16,20
+      const wrist = lm[0];
+      const thumb = lm[4];
+      const index = lm[8];
+      const indexM = lm[5];
+      const pinkyM = lm[17];
+      const palm = Math.max(1e-6, dist2(indexM, pinkyM));
+
+      const pinch = dist2(thumb, index) / palm;
+
+      const tips = [8,12,16,20].map(i=>lm[i]);
+      const openAvg = tips.reduce((s,p)=>s+dist2(p,wrist),0)/tips.length;
+      const openness = openAvg / palm;
+
+      return { pinchRatio: pinch, openness };
+    }
+
+    function startCamera(){
+      if (mpCamera) return;
+
+      overlay.width = overlay.clientWidth * devicePixelRatio;
+      overlay.height = overlay.clientHeight * devicePixelRatio;
+      octx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+
+      mpHands = new Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+      });
+      mpHands.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.6,
+        minTrackingConfidence: 0.6
+      });
+
+      mpHands.onResults((results)=>{
+        octx.clearRect(0,0,overlay.clientWidth,overlay.clientHeight);
+
+        if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0){
+          handState.hasHand = false;
+          handState.wrist = null;
+          return;
+        }
+
+        const lm = results.multiHandLandmarks[0];
+        handState.hasHand = true;
+
+        // draw
+        drawConnectors(octx, lm, HAND_CONNECTIONS, { color: "rgba(80,210,255,0.8)", lineWidth: 2 });
+        drawLandmarks(octx, lm, { color: "rgba(255,255,255,0.9)", lineWidth: 1 });
+
+        // wrist
+        const w = lm[0];
+        handState.wrist = { x: w.x, y: w.y };
+
+        // metrics
+        const m = computeHandMetrics(lm);
+        handState.pinchRatio = m.pinchRatio;
+        handState.openness = m.openness;
+
+        // fist/open heuristic
+        handState.isFist = (handState.openness < 1.05);
+
+        // velocity estimate in normalized space/sec
+        const t = nowS();
+        if (handState.lastWrist){
+          const dt = Math.max(1e-3, t - handState.lastT);
+          const v = Math.hypot(handState.wrist.x - handState.lastWrist.x, handState.wrist.y - handState.lastWrist.y) / dt;
+          if (handState.isFist){
+            handState.peakVel = Math.max(handState.peakVel, v);
+          }
+        }
+        handState.lastWrist = handState.wrist;
+        handState.lastT = t;
+
+        // detect fist->open release to pitch
+        const justReleased = (handState.wasFist && !handState.isFist);
+        handState.wasFist = handState.isFist;
+
+        if (justReleased){
+          // Convert peakVel to mph via your tuner mapping (reuse computePitchSpeedMph)
+          const mph = computePitchSpeedMph(handState.peakVel);
+          handState.lastReleaseMph = mph;
+          handState.lastReleaseAt = t;
+          handState.peakVel = 0;
+
+          // auto pitch if in gesture pitching mode
+          normalizeControlSelections();
+          const pitchCtrl = (player.role === "spectator") ? "ai" : player.pitchCtrl;
+          if (pitchCtrl === "gesture" && player.role === "pitcher" && ballMode === "idle"){
+            requestPitch();
+          }
+        }
+
+        // pinch swing (batter gesture)
+        const thresh = Number(pinchThreshEl.value);
+        const isPinch = (handState.pinchRatio < thresh);
+
+        if (isPinch && !handState.pinchDown){
+          handState.pinchDown = true;
+          if (canUserSwing() && (player.batCtrl === "gesture")){
+            requestSwing();
+          }
+        }
+        if (!isPinch) handState.pinchDown = false;
+      });
+
+      mpCamera = new Camera(videoEl, {
+        onFrame: async () => {
+          await mpHands.send({ image: videoEl });
+        },
+        width: 640,
+        height: 480
+      });
+
+      mpCamera.start();
+      statusLine.textContent = "Status: camera ON";
+      showCallout("Camera ON", 700);
+    }
+
+    startCamBtn.addEventListener('click', startCamera);
+    startCamBtnQ.addEventListener('click', startCamera);
+
+    // -----------------------------
+    // Buttons / toggles
+    // -----------------------------
+    pitchBtn.addEventListener('click', requestPitch);
+    pitchBtnQ.addEventListener('click', requestPitch);
+
+    resetBtn.addEventListener('click', resetGame);
+    resetBtnQ.addEventListener('click', resetGame);
+
+    function resetGame(){
+      game.balls=0; game.strikes=0; game.outs=0;
+      game.inning=1; game.half='top';
+      game.away=0; game.home=0;
+      clearBases();
+      lastCallEl.textContent = "RESET";
+      aiSwingArmed = false;
+      resetBallToIdle();
+      updateGameHUD();
+      showCallout("RESET", 650);
+    }
+
+    aiBtn.addEventListener('click', ()=>{
+      game.aiBatter = !game.aiBatter;
+      aiBtn.textContent = `AI Batter: ${game.aiBatter ? "ON" : "OFF"}`;
+      showCallout(`AI Batter ${game.aiBatter?"ON":"OFF"}`, 650);
+    });
+
+    followBtn.addEventListener('click', ()=>{
+      followCam = !followCam;
+      followBtn.textContent = `Follow Cam: ${followCam ? "ON" : "OFF"}`;
+      if (followCam) viewSel.value = "follow";
+      showCallout(`Follow ${followCam?"ON":"OFF"}`, 650);
+    });
+
+    trailBtn.addEventListener('click', ()=>{
+      trailOn = !trailOn;
+      trailBtn.textContent = `Trail: ${trailOn ? "ON" : "OFF"}`;
+      showCallout(`Trail ${trailOn?"ON":"OFF"}`, 650);
+    });
+
+    slowBtn.addEventListener('click', ()=>{
+      slowMo = !slowMo;
+      slowBtn.textContent = `Slow: ${slowMo ? "ON" : "OFF"}`;
+      showCallout(`Slow ${slowMo?"ON":"OFF"}`, 650);
+    });
+
+    camBtn.addEventListener('click', ()=>{
+      viewSel.value = "catcher";
+      applyViewSelection();
+    });
+
+    // Keep selections synced
+    [roleSel, pitchCtrlSel, batCtrlSel].forEach(sel=>{
+      sel.addEventListener('change', ()=>{
+        normalizeControlSelections();
+        if (player.role === "spectator"){
+          pitchCtrlSel.value = "ai";
+          batCtrlSel.value = "ai";
+          normalizeControlSelections();
+        }
+      });
+    });
+
+    // -----------------------------
+    // Finish setup
+    // -----------------------------
+    updateZoneOutline();
+    setBatHomePose();
+    resetBallToIdle();
+    updateGameHUD();
+
+    // -----------------------------
+    // Main loop
+    // -----------------------------
+    let lastT = nowS();
+
+    function animate(){
+      const t = nowS();
+      let dt = t - lastT;
+      lastT = t;
+
+      // safety clamp
+      dt = clamp(dt, 0, 0.033);
+
+      if (slowMo) dt *= 0.33;
+
+      normalizeControlSelections();
+
+      // Pre-pitch: follow hand aim + hold ball in hand
+      if (handState.hasHand && player.pitchCtrl === "gesture" && player.role === "pitcher"){
+        const a = mapHandToAim(handState.wrist);
+        aim.x = a.x; aim.y = a.y;
+
+        // update target dot in cage to match gesture aim (optional polish)
+        const pos2 = plateToPanel(aim.x, aim.y);
+        targetDotEl.style.left = `${pos2.px*100}%`;
+        targetDotEl.style.top  = `${pos2.py*100}%`;
+        plateReadoutEl.textContent = `Aim: x=${aim.x.toFixed(2)}m, y=${aim.y.toFixed(2)}m`;
+        targetRing.position.set(aim.x, aim.y, currentZone().z + 0.05);
+
+        if (shouldBallFollowHand()){
+          const rp = mapHandToRelease(handState.wrist);
+          pos.copy(rp);
+          ballMesh.position.copy(pos);
+        }
+      }
+
+      // Auto pitch if AI pitcher / spectator
+      const pitchCtrl = (player.role === "spectator") ? "ai" : player.pitchCtrl;
+      const batCtrl = (player.role === "spectator") ? "ai" : player.batCtrl;
+
+      if (ballMode === "idle" && pitchCtrl === "ai"){
+        if (t > nextAutoPitchAt){
+          throwAIPitch();
+          nextAutoPitchAt = t + 1.6 + Math.random()*1.2;
+        }
+      }
+
+      // Step physics
+      prevZ = pos.z;
+      prevPos.copy(pos);
+      if (refPos) prevRefPos.copy(refPos);
+
+      // Substep for stability
+      const steps = (ballMode === "inPlay") ? 3 : 2;
+      const h = dt / steps;
+      for (let i=0;i<steps;i++){
+        if (ballMode === "pitch" || ballMode === "inPlay"){
+          stepPhysics(h);
+        }
+      }
+
+      // Bat swing anim
+      updateBatSwing();
+
+      // Collision checks
+      if (ballMode === "pitch"){
+        checkBatCollisionAndHit();
+        handleEarlyGround();
+        handlePlateCross();
+      } else if (ballMode === "inPlay"){
+        handleInPlayLanding();
+      }
+
+      // AI batter (only if batter control is AI)
+      if (batCtrl === "ai") aiBatterUpdate();
+
+      // Follow camera (simple)
+      if (followCam && (ballMode === "inPlay")){
+        lookAt.lerp(new THREE.Vector3(pos.x, clamp(pos.y, 0.6, 18), pos.z), 0.10);
+        orbit.radius = lerp(orbit.radius, 28, 0.02);
+        orbit.phi = lerp(orbit.phi, 0.22, 0.02);
+        updateOrbitCamera();
+      }
+
+      // Update impact visuals
+      updateImpactFade(dt);
+      updateLandMarker(dt);
+
+      // Field map refresh
+      if (ballMode === "inPlay") drawFieldMap();
+
+      renderer.render(scene, camera);
+      requestAnimationFrame(animate);
+    }
+
+    requestAnimationFrame(animate);
+
+    // -----------------------------
+    // Resize handling
+    // -----------------------------
+    addEventListener('resize', ()=>{
+      renderer.setSize(innerWidth, innerHeight);
+      camera.aspect = innerWidth/innerHeight;
+      camera.updateProjectionMatrix();
+
+      // clamp floating tiles inside viewport
+      Tile.map.forEach(t=>{
+        if (t.state !== "float") return;
+        const r = t.el.getBoundingClientRect();
+        const L = clamp(r.left, 8, window.innerWidth - 280);
+        const T = clamp(r.top, 8, window.innerHeight - 160);
+        t.el.style.left = L + "px";
+        t.el.style.top  = T + "px";
+        t.last.x = L; t.last.y = T;
+      });
+    });
+</script>
+</body>
+</html>

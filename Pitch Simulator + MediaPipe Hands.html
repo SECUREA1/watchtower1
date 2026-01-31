@@ -1,0 +1,1056 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Pitch Simulator + MediaPipe Hands</title>
+  <style>
+    html, body { margin:0; height:100%; background:#06070b; overflow:hidden; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    canvas { display:block; }
+
+    #hud {
+      position:absolute; top:14px; left:14px; z-index:10;
+      width: 380px; max-width: calc(100vw - 28px);
+      background: rgba(10,12,18,.72); border: 1px solid rgba(255,255,255,.10);
+      backdrop-filter: blur(10px);
+      border-radius: 14px; padding: 12px;
+      box-shadow: 0 10px 40px rgba(0,0,0,.45);
+      color: rgba(255,255,255,.92);
+    }
+    #hud h1 { margin:0 0 8px; font-size: 14px; font-weight: 800; letter-spacing:.4px; }
+    .row { display:flex; gap:10px; align-items:center; margin: 7px 0; }
+    .row label { flex: 1 1 auto; font-size: 12px; opacity: .85; }
+    .row input[type="range"] { width: 100%; }
+    .row select {
+      background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.14);
+      color: rgba(255,255,255,.92);
+      border-radius: 10px;
+      padding: 6px 8px;
+      outline: none;
+      flex: 1 1 auto;
+    }
+
+    .btnrow { display:flex; gap:10px; margin-top:10px; }
+    button {
+      appearance:none; border: 1px solid rgba(255,255,255,.16);
+      background: rgba(255,255,255,.08);
+      color: rgba(255,255,255,.92);
+      padding: 8px 10px;
+      border-radius: 12px;
+      cursor: pointer;
+      font-weight: 700;
+      flex:1;
+    }
+    button:hover { background: rgba(255,255,255,.12); }
+    button.primary { background: rgba(120,180,255,.18); border-color: rgba(120,180,255,.30); }
+    button.primary:hover { background: rgba(120,180,255,.24); }
+
+    #stats {
+      margin-top:10px; padding-top:10px;
+      border-top: 1px solid rgba(255,255,255,.10);
+      font-size: 12px; line-height: 1.35;
+      color: rgba(255,255,255,.88);
+    }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New"; }
+
+    #rightStack {
+      position:absolute; right:14px; top:14px; z-index:10;
+      display:flex; flex-direction:column; gap:12px;
+      width: 260px; max-width: calc(100vw - 28px);
+    }
+
+    #aimPanel, #camPanel {
+      background: rgba(10,12,18,.72);
+      border: 1px solid rgba(255,255,255,.10);
+      backdrop-filter: blur(10px);
+      border-radius: 14px; padding: 10px;
+      box-shadow: 0 10px 40px rgba(0,0,0,.45);
+      color: rgba(255,255,255,.92);
+      user-select: none;
+    }
+    #aimPanel h2, #camPanel h2 { margin:0 0 8px; font-size: 12px; letter-spacing:.3px; opacity:.9; }
+
+    #zone {
+      width: 100%; aspect-ratio: 3 / 4;
+      border-radius: 12px;
+      background: rgba(255,255,255,.04);
+      border: 1px solid rgba(255,255,255,.14);
+      position: relative;
+      overflow: hidden;
+    }
+    #zone::before {
+      content:"";
+      position:absolute; inset: 12% 12%;
+      border: 2px solid rgba(255,255,255,.75);
+      border-radius: 10px;
+    }
+    #targetDot {
+      position:absolute; width: 10px; height: 10px; border-radius: 999px;
+      background: rgba(255,80,80,.95);
+      box-shadow: 0 0 0 3px rgba(255,80,80,.20);
+      transform: translate(-50%,-50%);
+      left: 50%; top: 50%;
+    }
+    #plateReadout { margin-top: 8px; font-size: 12px; opacity: .86; }
+
+    #camWrap {
+      width: 100%;
+      border-radius: 12px;
+      overflow:hidden;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.04);
+      position: relative;
+      aspect-ratio: 4 / 3;
+    }
+    #video {
+      position:absolute; inset:0;
+      width:100%; height:100%;
+      object-fit: cover;
+      transform: scaleX(-1); /* mirror */
+      opacity: 0.92;
+    }
+    #overlay {
+      position:absolute; inset:0;
+      width:100%; height:100%;
+      transform: scaleX(-1); /* mirror to match video */
+      pointer-events:none;
+    }
+    #statusLine { margin-top: 8px; font-size: 12px; opacity: .86; }
+
+    #bottomHint {
+      position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(10,12,18,.55);
+      border: 1px solid rgba(255,255,255,.10);
+      color: rgba(255,255,255,.78);
+      font-size: 12px;
+      z-index: 10;
+      backdrop-filter: blur(10px);
+      pointer-events: none;
+      white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <h1>⚾ Pitch Simulator + Hand Tracking</h1>
+
+    <div class="row">
+      <label for="pitchType">Pitch type (optional preset)</label>
+      <select id="pitchType">
+        <option value="fourSeam">4-Seam Fastball</option>
+        <option value="twoSeam">2-Seam / Sinker</option>
+        <option value="cutter">Cutter</option>
+        <option value="slider">Slider</option>
+        <option value="curve">Curveball</option>
+        <option value="changeup">Changeup</option>
+        <option value="splitter">Splitter</option>
+        <option value="knuckle">Knuckle-ish</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <label>Hand velocity gain <span class="mono" id="vGainLabel">1.00</span></label>
+      <input id="vGain" type="range" min="0.4" max="2.0" step="0.01" value="1.00"/>
+    </div>
+
+    <div class="row">
+      <label>Spin gain <span class="mono" id="sGainLabel">8.00</span></label>
+      <input id="sGain" type="range" min="1.0" max="18.0" step="0.1" value="8.0"/>
+    </div>
+
+    <div class="row">
+      <label>Release sensitivity <span class="mono" id="relLabel">0.18</span></label>
+      <input id="releaseThresh" type="range" min="0.05" max="0.45" step="0.01" value="0.18"/>
+    </div>
+
+    <div class="row">
+      <label>Wind (mph) <span class="mono" id="windLabel">0</span></label>
+      <input id="wind" type="range" min="-12" max="12" step="1" value="0"/>
+    </div>
+
+    <div class="btnrow">
+      <button class="primary" id="startCamBtn">Start Camera</button>
+      <button id="replayBtn">Replay</button>
+      <button id="resetBtn">Reset</button>
+    </div>
+
+    <div class="btnrow">
+      <button id="trailBtn">Trail: ON</button>
+      <button id="slowBtn">Slow: OFF</button>
+      <button id="camBtn">Camera: P</button>
+    </div>
+
+    <div id="stats">
+      <div><b>Count:</b> <span class="mono" id="count">0-0</span> &nbsp; <b>Strikes:</b> <span class="mono" id="strikes">0</span> &nbsp; <b>Balls:</b> <span class="mono" id="balls">0</span></div>
+      <div style="margin-top:6px">
+        <b>Last call:</b> <span class="mono" id="lastCall">—</span><br/>
+        <b>Plate location:</b> <span class="mono" id="plateLoc">—</span><br/>
+        <b>Break (x,y):</b> <span class="mono" id="breakXY">—</span>
+      </div>
+      <div style="margin-top:8px">
+        <b>Live pitch read:</b><br/>
+        <span class="mono" id="liveRead">mph=— rpm=— axis=— gyro=—</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="rightStack">
+    <div id="aimPanel">
+      <h2>Target (click inside)</h2>
+      <div id="zone"><div id="targetDot"></div></div>
+      <div id="plateReadout" class="mono">Aim: x=0.00m, y=0.80m</div>
+    </div>
+
+    <div id="camPanel">
+      <h2>Camera (MediaPipe Hands)</h2>
+      <div id="camWrap">
+        <video id="video" playsinline muted></video>
+        <canvas id="overlay"></canvas>
+      </div>
+      <div id="statusLine" class="mono">Status: camera OFF</div>
+    </div>
+  </div>
+
+  <div id="bottomHint">Make a fist to “hold” the ball. Open your hand to “release” and throw.</div>
+
+  <!-- Three.js -->
+  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+
+  <!-- MediaPipe Hands + helpers -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+
+  <script>
+    // -----------------------------
+    // Helpers
+    // -----------------------------
+    const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+    const lerp  = (a,b,t)=>a+(b-a)*t;
+    const mphToMps = mph => mph * 0.44704;
+    const rpmFromRadPerSec = w => (w * 60) / (2*Math.PI);
+
+    function dist2(a,b){ const dx=a.x-b.x, dy=a.y-b.y; return Math.hypot(dx,dy); }
+    function dist3(a,b){ const dx=a.x-b.x, dy=a.y-b.y, dz=a.z-b.z; return Math.hypot(dx,dy,dz); }
+
+    // -----------------------------
+    // UI
+    // -----------------------------
+    const el = id => document.getElementById(id);
+    const pitchTypeEl = el('pitchType');
+    const vGainEl = el('vGain');
+    const sGainEl = el('sGain');
+    const releaseThreshEl = el('releaseThresh');
+    const windEl = el('wind');
+
+    const vGainLabel = el('vGainLabel');
+    const sGainLabel = el('sGainLabel');
+    const relLabel = el('relLabel');
+    const windLabel = el('windLabel');
+
+    const startCamBtn = el('startCamBtn');
+    const replayBtn = el('replayBtn');
+    const resetBtn = el('resetBtn');
+    const trailBtn = el('trailBtn');
+    const slowBtn = el('slowBtn');
+    const camBtn = el('camBtn');
+
+    const statusLine = el('statusLine');
+    const liveRead = el('liveRead');
+
+    const countEl = el('count');
+    const strikesEl = el('strikes');
+    const ballsEl = el('balls');
+    const lastCallEl = el('lastCall');
+    const plateLocEl = el('plateLoc');
+    const breakXYEl = el('breakXY');
+
+    function syncHud(){
+      vGainLabel.textContent = Number(vGainEl.value).toFixed(2);
+      sGainLabel.textContent = Number(sGainEl.value).toFixed(1);
+      relLabel.textContent   = Number(releaseThreshEl.value).toFixed(2);
+      windLabel.textContent  = windEl.value;
+    }
+    [vGainEl,sGainEl,releaseThreshEl,windEl].forEach(x=>x.addEventListener('input',syncHud));
+    syncHud();
+
+    // Optional pitch presets (used as bias / starting points)
+    const PRESETS = {
+      fourSeam:  { mph: 95, rpm: 2400, axisDeg: 0,   gyro: 8  },
+      twoSeam:   { mph: 93, rpm: 2100, axisDeg: -35, gyro: 10 },
+      cutter:    { mph: 92, rpm: 2350, axisDeg: 35,  gyro: 18 },
+      slider:    { mph: 85, rpm: 2500, axisDeg: 120, gyro: 22 },
+      curve:     { mph: 78, rpm: 2700, axisDeg: 180, gyro: 12 },
+      changeup:  { mph: 82, rpm: 1700, axisDeg: -20, gyro: 15 },
+      splitter:  { mph: 86, rpm: 1200, axisDeg: 160, gyro: 25 },
+      knuckle:   { mph: 68, rpm: 150,  axisDeg: 0,   gyro: 65 },
+    };
+
+    // -----------------------------
+    // Aim Panel (click target)
+    // -----------------------------
+    const zoneEl = el('zone');
+    const targetDotEl = el('targetDot');
+    const plateReadoutEl = el('plateReadout');
+
+    // Strike zone (meters) at plate
+    const zone = { z: -18.44, halfW: 0.216, yBot: 0.55, yTop: 1.15 };
+    let aim = { x: 0.0, y: 0.80 };
+
+    function setAimFromPanel(clientX, clientY){
+      const r = zoneEl.getBoundingClientRect();
+      const px = clamp((clientX - r.left)/r.width, 0, 1);
+      const py = clamp((clientY - r.top)/r.height, 0, 1);
+
+      const inset = 0.12;
+      const ux = (px - 0.5) / (0.5 - inset);
+      const uy = (1 - py - 0.5) / (0.5 - inset);
+
+      const xNorm = clamp(ux, -1.35, 1.35);
+      const yNorm = clamp(uy, -1.35, 1.35);
+
+      aim.x = xNorm * zone.halfW;
+      aim.y = lerp(zone.yBot, zone.yTop, (yNorm + 1)*0.5);
+      aim.y = clamp(aim.y, 0.25, 1.55);
+
+      targetDotEl.style.left = (px*100) + '%';
+      targetDotEl.style.top  = (py*100) + '%';
+      plateReadoutEl.textContent = `Aim: x=${aim.x.toFixed(2)}m, y=${aim.y.toFixed(2)}m`;
+
+      targetRing.position.set(aim.x, aim.y, zone.z + 0.05);
+    }
+
+    zoneEl.addEventListener('pointerdown', e=>{
+      setAimFromPanel(e.clientX, e.clientY);
+      zoneEl.setPointerCapture(e.pointerId);
+    });
+    zoneEl.addEventListener('pointermove', e=>{
+      if (e.buttons) setAimFromPanel(e.clientX, e.clientY);
+    });
+
+    // -----------------------------
+    // THREE.JS Scene
+    // -----------------------------
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.Fog(0x06070b, 8, 55);
+
+    const renderer = new THREE.WebGLRenderer({ antialias:true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    document.body.appendChild(renderer.domElement);
+
+    const camera = new THREE.PerspectiveCamera(52, innerWidth/innerHeight, 0.05, 200);
+
+    const ambient = new THREE.AmbientLight(0xffffff, 0.55);
+    scene.add(ambient);
+
+    const keyLight = new THREE.DirectionalLight(0xffffff, 1.1);
+    keyLight.position.set(6,10,12);
+    scene.add(keyLight);
+
+    const rimLight = new THREE.DirectionalLight(0x9bd0ff, 0.35);
+    rimLight.position.set(-10,6,-12);
+    scene.add(rimLight);
+
+    const field = new THREE.Mesh(
+      new THREE.PlaneGeometry(70,90),
+      new THREE.MeshStandardMaterial({ color:0x0b2b18, roughness:0.95 })
+    );
+    field.rotation.x = -Math.PI/2;
+    field.position.set(0,0,-10);
+    scene.add(field);
+
+    const mound = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.1, 1.4, 0.25, 48),
+      new THREE.MeshStandardMaterial({ color:0x5b4636, roughness:1.0 })
+    );
+    mound.position.set(0,0.12,10);
+    scene.add(mound);
+
+    const plate = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.28,0.28,0.03,6),
+      new THREE.MeshStandardMaterial({ color:0xe6e6e6, roughness:0.8 })
+    );
+    plate.rotation.y = Math.PI/6;
+    plate.position.set(0,0.02,zone.z);
+    scene.add(plate);
+
+    // Strike zone outline
+    const zoneGeo = new THREE.BufferGeometry();
+    zoneGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
+      -zone.halfW, zone.yBot, zone.z,   zone.halfW, zone.yBot, zone.z,
+       zone.halfW, zone.yBot, zone.z,   zone.halfW, zone.yTop, zone.z,
+       zone.halfW, zone.yTop, zone.z,  -zone.halfW, zone.yTop, zone.z,
+      -zone.halfW, zone.yTop, zone.z,  -zone.halfW, zone.yBot, zone.z
+    ]), 3));
+    scene.add(new THREE.LineSegments(zoneGeo, new THREE.LineBasicMaterial({ color:0xffffff })));
+
+    // Target ring in 3D
+    const targetRing = new THREE.Mesh(
+      new THREE.TorusGeometry(0.12, 0.01, 10, 48),
+      new THREE.MeshStandardMaterial({ color:0xff5050, roughness:0.4 })
+    );
+    targetRing.position.set(aim.x, aim.y, zone.z + 0.05);
+    targetRing.rotation.x = Math.PI/2;
+    scene.add(targetRing);
+
+    // Ball
+    const ballRadius = 0.037;
+    const ballMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(ballRadius, 36, 24),
+      new THREE.MeshStandardMaterial({ color:0xf34a4a, roughness:0.35 })
+    );
+    scene.add(ballMesh);
+
+    // Trail
+    let trailOn = true;
+    const trailMax = 220;
+    const trailPositions = new Float32Array(trailMax*3);
+    const trailGeo = new THREE.BufferGeometry();
+    trailGeo.setAttribute('position', new THREE.BufferAttribute(trailPositions, 3));
+    trailGeo.setDrawRange(0,0);
+    const trailLine = new THREE.Line(trailGeo, new THREE.LineBasicMaterial({ color:0xff5050, transparent:true, opacity:0.75 }));
+    scene.add(trailLine);
+    let trailCount = 0;
+
+    function trailReset(){
+      trailCount = 0;
+      trailGeo.setDrawRange(0,0);
+      trailGeo.attributes.position.needsUpdate = true;
+    }
+    function trailAdd(p){
+      if (!trailOn) return;
+      if (trailCount >= trailMax){
+        for (let i=1;i<trailMax;i++){
+          trailPositions[(i-1)*3+0] = trailPositions[i*3+0];
+          trailPositions[(i-1)*3+1] = trailPositions[i*3+1];
+          trailPositions[(i-1)*3+2] = trailPositions[i*3+2];
+        }
+        trailCount = trailMax-1;
+      }
+      trailPositions[trailCount*3+0]=p.x;
+      trailPositions[trailCount*3+1]=p.y;
+      trailPositions[trailCount*3+2]=p.z;
+      trailCount++;
+      trailGeo.setDrawRange(0, trailCount);
+      trailGeo.attributes.position.needsUpdate = true;
+    }
+
+    // Camera orbit
+    const lookAt = new THREE.Vector3(0,1.4,-8);
+    const orbit = { theta:0, phi:0.12, radius:13, dragging:false, lx:0, ly:0 };
+    const CAM_MODES = { PITCHER:0, CATCHER:1, SIDE:2 };
+    let camMode = CAM_MODES.PITCHER;
+
+    function setCameraMode(mode){
+      camMode = mode;
+      if (mode===CAM_MODES.PITCHER){ orbit.theta=0; orbit.phi=0.12; orbit.radius=13; lookAt.set(0,1.4,-8); }
+      if (mode===CAM_MODES.CATCHER){ orbit.theta=Math.PI; orbit.phi=0.14; orbit.radius=10.5; lookAt.set(0,1.2,-12); }
+      if (mode===CAM_MODES.SIDE){ orbit.theta=-0.55; orbit.phi=0.18; orbit.radius=14; lookAt.set(0,1.2,-10); }
+      updateOrbitCamera();
+    }
+    function updateOrbitCamera(){
+      orbit.phi = clamp(orbit.phi, -0.05, 0.65);
+      orbit.radius = clamp(orbit.radius, 6, 26);
+      const x = lookAt.x + orbit.radius * Math.sin(orbit.theta) * Math.cos(orbit.phi);
+      const y = lookAt.y + orbit.radius * Math.sin(orbit.phi) + 0.2;
+      const z = lookAt.z + orbit.radius * Math.cos(orbit.theta) * Math.cos(orbit.phi);
+      camera.position.set(x,y,z);
+      camera.lookAt(lookAt);
+    }
+
+    renderer.domElement.addEventListener('pointerdown', e=>{
+      const inUI = e.target.closest && (e.target.closest('#hud') || e.target.closest('#rightStack'));
+      if (inUI) return;
+      orbit.dragging=true; orbit.lx=e.clientX; orbit.ly=e.clientY;
+      renderer.domElement.setPointerCapture(e.pointerId);
+    });
+    renderer.domElement.addEventListener('pointermove', e=>{
+      if (!orbit.dragging) return;
+      const dx=e.clientX-orbit.lx, dy=e.clientY-orbit.ly;
+      orbit.lx=e.clientX; orbit.ly=e.clientY;
+      orbit.theta -= dx*0.004;
+      orbit.phi   -= dy*0.003;
+      updateOrbitCamera();
+    });
+    renderer.domElement.addEventListener('pointerup', ()=> orbit.dragging=false );
+    renderer.domElement.addEventListener('wheel', e=>{
+      orbit.radius += e.deltaY*0.01;
+      updateOrbitCamera();
+    }, { passive:true });
+
+    setCameraMode(CAM_MODES.PITCHER);
+
+    // -----------------------------
+    // Pitch Physics
+    // -----------------------------
+    const g = new THREE.Vector3(0, -9.81, 0);
+    const air = {
+      rho: 1.225,
+      Cd: 0.35,
+      area: Math.PI * ballRadius * ballRadius,
+      mass: 0.145,
+      magnusK: 0.00055
+    };
+
+    function accelDrag(v){
+      const s = v.length();
+      if (s < 1e-5) return new THREE.Vector3();
+      const k = 0.5 * air.rho * air.Cd * air.area / air.mass;
+      return v.clone().multiplyScalar(-k * s);
+    }
+    function accelMagnus(v, omega){
+      return new THREE.Vector3().crossVectors(omega, v).multiplyScalar(air.magnusK);
+    }
+
+    const pos = new THREE.Vector3(0, 1.75, 10.0);
+    const vel = new THREE.Vector3(0, 0, -40);
+    const omega = new THREE.Vector3(0, 0, 0);
+    const windVec = new THREE.Vector3(0,0,0);
+
+    // "no-magnus" reference for break
+    let refPos = null, refVel = null;
+    let breakAtPlate = { x:0, y:0 };
+
+    let pitching = false;
+    let replaying = false;
+    let slowMo = false;
+
+    let replayFrames = [];
+    let replayIndex = 0;
+
+    let strikes = 0, balls = 0;
+    function updateCount(){
+      strikesEl.textContent = String(strikes);
+      ballsEl.textContent = String(balls);
+      countEl.textContent = `${balls}-${strikes}`;
+    }
+    updateCount();
+
+    function resetBallToHand(){
+      pitching=false; replaying=false;
+      replayFrames=[]; replayIndex=0;
+      trailReset();
+    }
+
+    function callPitch(plateX, plateY){
+      const strike = (Math.abs(plateX) <= zone.halfW) && (plateY >= zone.yBot) && (plateY <= zone.yTop);
+      lastCallEl.textContent = strike ? "STRIKE" : "BALL";
+      if (strike) strikes++; else balls++;
+      plateLocEl.textContent = `x=${plateX.toFixed(2)}m, y=${plateY.toFixed(2)}m`;
+      breakXYEl.textContent = `Δx=${breakAtPlate.x.toFixed(2)}m, Δy=${breakAtPlate.y.toFixed(2)}m`;
+
+      if (strikes >= 3){ lastCallEl.textContent = "STRIKEOUT (reset)"; strikes=0; balls=0; }
+      if (balls >= 4){ lastCallEl.textContent = "WALK (reset)"; strikes=0; balls=0; }
+      updateCount();
+    }
+
+    const prevPos = new THREE.Vector3();
+    const prevRefPos = new THREE.Vector3();
+    let prevZ = pos.z;
+
+    function stepPhysics(dt){
+      const vAir = vel.clone().sub(windVec);
+      const a = new THREE.Vector3();
+      a.add(g);
+      a.add(accelDrag(vAir));
+      a.add(accelMagnus(vAir, omega));
+
+      vel.addScaledVector(a, dt);
+      pos.addScaledVector(vel, dt);
+
+      if (refPos && refVel){
+        const vAirRef = refVel.clone().sub(windVec);
+        const aRef = new THREE.Vector3();
+        aRef.add(g);
+        aRef.add(accelDrag(vAirRef));
+        refVel.addScaledVector(aRef, dt);
+        refPos.addScaledVector(refVel, dt);
+      }
+
+      ballMesh.position.copy(pos);
+      trailAdd(pos);
+
+      const zNorm = clamp((10 - pos.z) / (10 - zone.z), 0, 1);
+      const scale = lerp(1.15, 0.95, zNorm);
+      ballMesh.scale.setScalar(scale);
+    }
+
+    function handlePlateCross(){
+      const z0 = prevZ, z1 = pos.z;
+      if (z0 > zone.z && z1 <= zone.z){
+        const t = (z0 - zone.z) / (z0 - z1 + 1e-9);
+        const plateX = lerp(prevPos.x, pos.x, t);
+        const plateY = lerp(prevPos.y, pos.y, t);
+
+        if (refPos){
+          const refPlateX = lerp(prevRefPos.x, refPos.x, t);
+          const refPlateY = lerp(prevRefPos.y, refPos.y, t);
+          breakAtPlate.x = plateX - refPlateX;
+          breakAtPlate.y = plateY - refPlateY;
+        }
+
+        callPitch(plateX, plateY);
+        pitching = false;
+
+        // after a short beat, return ball to hand
+        setTimeout(()=>{ if (!pitching && handState.present) resetBallToHand(); }, 350);
+      }
+    }
+
+    function startReplay(){
+      if (pitching) return;
+      if (!replayFrames.length) return;
+      replaying = true; replayIndex = 0;
+      lastCallEl.textContent = "REPLAY";
+    }
+
+    // -----------------------------
+    // Hand Tracking -> Pitch Read
+    // -----------------------------
+    const video = el('video');
+    const overlay = el('overlay');
+    const octx = overlay.getContext('2d');
+
+    let cam = null;
+    let hands = null;
+    let cameraRunning = false;
+
+    // Live hand state
+    const handState = {
+      present: false,
+      closed: false,
+      prevClosed: false,
+      wrist: {x:0.5,y:0.5,z:0},
+      prevWrist: null,
+      wristVel: 0,
+      peakVel: 0,
+      lastT: 0,
+      angle: 0,         // finger direction angle (rad)
+      prevAngle: null,
+      angVel: 0,        // rad/s
+      palmNormalZ: 0,   // proxy for gyro
+      axisDeg: 0,
+      rpm: 0,
+      mph: 0
+    };
+
+    // Closure heuristic: compare fingertip to MCP distance against wrist->MCP baseline
+    function isHandClosed(lm){
+      // wrist(0), index_mcp(5), middle_mcp(9), ring_mcp(13), pinky_mcp(17)
+      const wrist = lm[0];
+      const idxM = lm[5], midM = lm[9], ringM = lm[13], pinkyM = lm[17];
+
+      // tips: 8, 12, 16, 20
+      const idxT = lm[8], midT = lm[12], ringT = lm[16], pinkyT = lm[20];
+
+      const base =
+        (dist3(wrist, idxM) + dist3(wrist, midM) + dist3(wrist, ringM) + dist3(wrist, pinkyM)) / 4;
+
+      const curls = [
+        dist3(idxT, idxM) / base,
+        dist3(midT, midM) / base,
+        dist3(ringT, ringM) / base,
+        dist3(pinkyT, pinkyM) / base
+      ];
+
+      // lower ratio means curled (tip near MCP)
+      const curled = curls.filter(v => v < 0.72).length;
+      return curled >= 3;
+    }
+
+    function unwrapAngle(prev, curr){
+      let d = curr - prev;
+      while (d > Math.PI) d -= 2*Math.PI;
+      while (d < -Math.PI) d += 2*Math.PI;
+      return prev + d;
+    }
+
+    function computePalmNormalZ(lm){
+      // Use 3D-ish points: wrist(0), index_mcp(5), pinky_mcp(17)
+      const w = lm[0], i = lm[5], p = lm[17];
+      const v1 = { x: i.x - w.x, y: i.y - w.y, z: i.z - w.z };
+      const v2 = { x: p.x - w.x, y: p.y - w.y, z: p.z - w.z };
+      // cross v1 x v2
+      const nx = v1.y*v2.z - v1.z*v2.y;
+      const ny = v1.z*v2.x - v1.x*v2.z;
+      const nz = v1.x*v2.y - v1.y*v2.x;
+      const mag = Math.hypot(nx,ny,nz) || 1;
+      return nz / mag; // roughly toward/away camera
+    }
+
+    function mapHandToRelease(wrist){
+      // wrist.x,y are normalized (0..1), mirrored in video.
+      // Map to mound/release space:
+      const rx = (wrist.x - 0.5) * 1.2;             // ~[-0.6..0.6] meters
+      const ry = 1.30 + (0.5 - wrist.y) * 0.9;      // lift up/down
+      const rz = 10.0;
+      return new THREE.Vector3(rx, clamp(ry, 0.9, 2.2), rz);
+    }
+
+    function mapHandToAim(wrist){
+      // map wrist to plate target: keep it intuitive
+      const ax = (wrist.x - 0.5) * (zone.halfW * 2.2);  // allow outside zone
+      const ay = 0.85 + (0.5 - wrist.y) * 0.65;
+      return { x: clamp(ax, -0.55, 0.55), y: clamp(ay, 0.25, 1.55) };
+    }
+
+    function buildSpinVector(axisDeg, rpm, gyroPct){
+      const w = (rpm * 2*Math.PI)/60;
+      const gyro = clamp(gyroPct/100, 0, 1);
+      const eff = 1 - gyro;
+
+      const theta = THREE.MathUtils.degToRad(axisDeg);
+      const wxy = w * eff;
+      const ox = Math.cos(theta) * wxy;
+      const oy = Math.sin(theta) * wxy;
+      const oz = -w * gyro; // align w/ flight approx
+      return new THREE.Vector3(ox, oy, oz);
+    }
+
+    function throwFromHandRead(){
+      if (pitching) return;
+
+      // Wind
+      windVec.set(mphToMps(Number(windEl.value)), 0, 0);
+
+      // Aim from hand at release (feel free to disable and use panel aim only)
+      const a = mapHandToAim(handState.wrist);
+      aim.x = a.x; aim.y = a.y;
+      targetRing.position.set(aim.x, aim.y, zone.z + 0.05);
+      plateReadoutEl.textContent = `Aim: x=${aim.x.toFixed(2)}m, y=${aim.y.toFixed(2)}m`;
+
+      // Release point from hand position
+      const release = mapHandToRelease(handState.wrist);
+      pos.copy(release);
+
+      // Velocity from peak hand speed
+      const vGain = Number(vGainEl.value);
+      const basePreset = PRESETS[pitchTypeEl.value] || PRESETS.fourSeam;
+
+      // wristVel is in "normalized units / s". Convert to mph-ish by tuned mapping:
+      //  - typical good throw peakVel ~ 0.6-1.2
+      const mphFromHand = clamp(60 + handState.peakVel * 38 * vGain, 55, 105);
+
+      // Spin from angular velocity + gain (hand rotation -> ball spin)
+      const sGain = Number(sGainEl.value);
+      const rpmFromHand = clamp(Math.abs(rpmFromRadPerSec(handState.angVel)) * sGain, 0, 3200);
+
+      // Axis from finger direction
+      const axisDeg = clamp(handState.axisDeg, -180, 180);
+
+      // Gyro proxy from palm normal Z (more facing camera -> higher gyro-ish)
+      const gyroPct = clamp(Math.abs(handState.palmNormalZ) * 100, 0, 100);
+
+      // Blend a little toward preset so it feels “pitch-type-ish” but still hand-driven
+      const mph = lerp(basePreset.mph, mphFromHand, 0.85);
+      const rpm = lerp(basePreset.rpm, rpmFromHand, 0.85);
+      const gyro = lerp(basePreset.gyro, gyroPct, 0.65);
+
+      // Build throw direction to target
+      const target = new THREE.Vector3(aim.x, aim.y, zone.z);
+      const dir = target.clone().sub(pos).normalize();
+
+      vel.copy(dir.multiplyScalar(mphToMps(mph)));
+
+      omega.copy(buildSpinVector(axisDeg, rpm, gyro));
+
+      // reset visuals / replay buffers
+      trailReset();
+      replayFrames = [];
+      replayIndex = 0;
+
+      refPos = pos.clone();
+      refVel = vel.clone();
+      breakAtPlate = { x:0, y:0 };
+
+      lastCallEl.textContent = "—";
+      plateLocEl.textContent = "—";
+      breakXYEl.textContent = "—";
+
+      // start sim
+      pitching = true;
+      replaying = false;
+
+      // clear peak after throw
+      handState.peakVel = 0;
+    }
+
+    // -----------------------------
+    // MediaPipe setup
+    // -----------------------------
+    function drawLandmarksOnOverlay(results){
+      octx.clearRect(0,0,overlay.width, overlay.height);
+      if (!results.multiHandLandmarks || !results.multiHandLandmarks.length) return;
+
+      // draw
+      for (const lm of results.multiHandLandmarks){
+        drawConnectors(octx, lm, HAND_CONNECTIONS, { color: '#5df', lineWidth: 2 });
+        drawLandmarks(octx, lm, { color: '#f55', lineWidth: 1, radius: 2 });
+      }
+    }
+
+    async function startCamera(){
+      if (cameraRunning) return;
+      statusLine.textContent = "Status: requesting camera…";
+
+      // Size overlay to match element box
+      const resizeOverlay = ()=>{
+        overlay.width = overlay.clientWidth;
+        overlay.height = overlay.clientHeight;
+      };
+      resizeOverlay();
+      new ResizeObserver(resizeOverlay).observe(el('camWrap'));
+
+      hands = new Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+      });
+
+      hands.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.7,
+        minTrackingConfidence: 0.7
+      });
+
+      hands.onResults((results) => {
+        drawLandmarksOnOverlay(results);
+
+        const now = performance.now()/1000;
+
+        if (!results.multiHandLandmarks || !results.multiHandLandmarks.length){
+          handState.present = false;
+          statusLine.textContent = "Status: no hand detected";
+          liveRead.textContent = "mph=— rpm=— axis=— gyro=—";
+          return;
+        }
+
+        const lm = results.multiHandLandmarks[0];
+        handState.present = true;
+
+        // update wrist
+        const wrist = lm[0];
+        handState.wrist = { x:wrist.x, y:wrist.y, z:wrist.z };
+
+        // compute dt
+        const dt = handState.lastT ? (now - handState.lastT) : 0;
+        handState.lastT = now;
+
+        // velocity (normalized/s)
+        if (dt > 0.0001 && handState.prevWrist){
+          const v = Math.hypot(wrist.x - handState.prevWrist.x, wrist.y - handState.prevWrist.y) / dt;
+          // light smoothing
+          handState.wristVel = handState.wristVel ? lerp(handState.wristVel, v, 0.35) : v;
+          handState.peakVel = Math.max(handState.peakVel * 0.98, handState.wristVel);
+        }
+        handState.prevWrist = { x:wrist.x, y:wrist.y, z:wrist.z };
+
+        // axis from index finger direction (index_mcp -> index_tip)
+        const idxM = lm[5], idxT = lm[8];
+        let ang = Math.atan2(idxT.y - idxM.y, idxT.x - idxM.x);
+
+        if (handState.prevAngle !== null){
+          const unwrapped = unwrapAngle(handState.prevAngle, ang);
+          const d = unwrapped - handState.prevAngle;
+          if (dt > 0.0001) handState.angVel = lerp(handState.angVel, d/dt, 0.25);
+          handState.prevAngle = unwrapped;
+          ang = unwrapped;
+        } else {
+          handState.prevAngle = ang;
+          handState.angVel = 0;
+        }
+
+        // axisDeg in [-180..180]
+        let axisDeg = THREE.MathUtils.radToDeg(ang);
+        // map so “backspin-ish” feels around 0: rotate frame to match intuition
+        axisDeg = ((axisDeg + 180) % 360) - 180;
+        handState.axisDeg = axisDeg;
+
+        // palm normal -> gyro proxy
+        handState.palmNormalZ = computePalmNormalZ(lm);
+
+        // closed/open
+        handState.prevClosed = handState.closed;
+        handState.closed = isHandClosed(lm);
+
+        statusLine.textContent = `Status: hand ${handState.closed ? "CLOSED (holding)" : "OPEN"} • vel=${handState.wristVel.toFixed(2)}`;
+
+        // live read preview
+        const vGain = Number(vGainEl.value);
+        const sGain = Number(sGainEl.value);
+        const mphPreview = clamp(60 + handState.peakVel * 38 * vGain, 55, 105);
+        const rpmPreview = clamp(Math.abs(rpmFromRadPerSec(handState.angVel)) * sGain, 0, 3200);
+        const gyroPreview = clamp(Math.abs(handState.palmNormalZ) * 100, 0, 100);
+        liveRead.textContent = `mph=${mphPreview.toFixed(0)} rpm=${rpmPreview.toFixed(0)} axis=${handState.axisDeg.toFixed(0)} gyro=${gyroPreview.toFixed(0)}%`;
+
+        // If not pitching, show ball in hand when closed
+        if (!pitching && !replaying){
+          const releasePos = mapHandToRelease(handState.wrist);
+          if (handState.closed){
+            ballMesh.position.copy(releasePos);
+            ballMesh.scale.setScalar(1.05);
+            trailReset();
+          } else {
+            // keep it hovering near mound if open and idle
+            ballMesh.position.lerp(new THREE.Vector3(0,1.75,10.0), 0.08);
+            ballMesh.scale.setScalar(1.0);
+          }
+        }
+
+        // Release detection: CLOSED -> OPEN with enough peak velocity
+        const relThresh = Number(releaseThreshEl.value);
+        if (handState.prevClosed && !handState.closed && handState.peakVel > relThresh){
+          throwFromHandRead();
+        }
+
+        // If user holds fist steady too long, decay peakVel so accidental opens don't launch
+        if (handState.closed){
+          handState.peakVel *= 0.995;
+        }
+      });
+
+      // Start webcam stream via MediaPipe Camera helper
+      video.autoplay = true;
+      video.playsInline = true;
+      video.muted = true;
+
+      cam = new Camera(video, {
+        onFrame: async () => {
+          await hands.send({ image: video });
+        },
+        width: 640,
+        height: 480
+      });
+
+      try{
+        await cam.start();
+        cameraRunning = true;
+        statusLine.textContent = "Status: camera ON (show your hand)";
+      } catch (err){
+        statusLine.textContent = "Status: camera ERROR (permission / http / device)";
+        console.error(err);
+      }
+    }
+
+    // -----------------------------
+    // Replay + Buttons
+    // -----------------------------
+    startCamBtn.addEventListener('click', startCamera);
+
+    replayBtn.addEventListener('click', () => {
+      if (!replayFrames.length) return;
+      replaying = true;
+      replayIndex = 0;
+      lastCallEl.textContent = "REPLAY";
+    });
+
+    resetBtn.addEventListener('click', () => {
+      pitching=false; replaying=false;
+      strikes=0; balls=0; updateCount();
+      lastCallEl.textContent="—";
+      plateLocEl.textContent="—";
+      breakXYEl.textContent="—";
+      trailReset();
+    });
+
+    trailBtn.addEventListener('click', () => {
+      trailOn = !trailOn;
+      trailBtn.textContent = `Trail: ${trailOn ? "ON" : "OFF"}`;
+      if (!trailOn) trailReset();
+    });
+
+    slowBtn.addEventListener('click', () => {
+      slowMo = !slowMo;
+      slowBtn.textContent = `Slow: ${slowMo ? "ON" : "OFF"}`;
+    });
+
+    camBtn.addEventListener('click', () => {
+      const next = (camMode + 1) % 3;
+      setCameraMode(next);
+      camBtn.textContent = `Camera: ${next===0 ? "P" : next===1 ? "C" : "S"}`;
+    });
+
+    // -----------------------------
+    // Aim ring sync from panel clicks
+    // -----------------------------
+    setAimFromPanel(
+      zoneEl.getBoundingClientRect().left + zoneEl.getBoundingClientRect().width/2,
+      zoneEl.getBoundingClientRect().top + zoneEl.getBoundingClientRect().height/2
+    );
+
+    // -----------------------------
+    // Store replay frames during pitch
+    // -----------------------------
+    function captureFrame(){
+      replayFrames.push([ballMesh.position.x, ballMesh.position.y, ballMesh.position.z, ballMesh.scale.x]);
+      if (replayFrames.length > 900) replayFrames.shift();
+    }
+
+    // -----------------------------
+    // Animation loop
+    // -----------------------------
+    const clock = new THREE.Clock();
+
+    function animate(){
+      requestAnimationFrame(animate);
+
+      const dtRaw = clock.getDelta();
+      const dt = clamp(dtRaw, 0, 0.033);
+
+      if (pitching){
+        prevPos.copy(pos);
+        prevZ = pos.z;
+        if (refPos) prevRefPos.copy(refPos);
+
+        const slowFactor = slowMo ? 0.35 : 1.0;
+        const scaledDt = dt * slowFactor;
+
+        // substep integrator
+        const step = 1/240;
+        let t = 0;
+        while (t < scaledDt){
+          const h = Math.min(step, scaledDt - t);
+          stepPhysics(h);
+          t += h;
+
+          if ((replayFrames.length % 2) === 0) captureFrame();
+
+          // terminate if in dirt or too far past plate
+          if (pos.y < 0.03 || pos.z < zone.z - 2.0){
+            pitching = false;
+            if (lastCallEl.textContent === "—") lastCallEl.textContent = "IN PLAY / DIRT";
+            setTimeout(()=>{ if (!pitching && handState.present) resetBallToHand(); }, 350);
+            break;
+          }
+        }
+
+        handlePlateCross();
+      }
+
+      if (replaying){
+        const fr = replayFrames[replayIndex++];
+        if (!fr){ replaying=false; }
+        else {
+          ballMesh.position.set(fr[0],fr[1],fr[2]);
+          ballMesh.scale.setScalar(fr[3]);
+        }
+      }
+
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    // Resize
+    addEventListener('resize', () => {
+      camera.aspect = innerWidth/innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+
+  </script>
+</body>
+</html>

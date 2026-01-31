@@ -1,0 +1,934 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>High-End Pitch Simulator (HTML/WebGL)</title>
+  <style>
+    html, body { margin:0; height:100%; background:#06070b; overflow:hidden; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    #hud {
+      position: absolute; top: 14px; left: 14px; z-index: 10;
+      width: 360px; max-width: calc(100vw - 28px);
+      background: rgba(10,12,18,.72); border: 1px solid rgba(255,255,255,.10);
+      backdrop-filter: blur(10px);
+      border-radius: 14px; padding: 12px 12px 10px;
+      box-shadow: 0 10px 40px rgba(0,0,0,.45);
+      color: rgba(255,255,255,.92);
+    }
+    #hud h1 { margin:0 0 8px; font-size: 14px; font-weight: 700; letter-spacing: .4px; opacity:.92; }
+    .row { display:flex; gap:10px; align-items:center; margin: 7px 0; }
+    .row label { flex: 1 1 auto; font-size: 12px; opacity: .85; }
+    .row select, .row input[type="range"], .row input[type="number"] {
+      flex: 1 1 auto;
+    }
+    .row select, .row input[type="number"] {
+      background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.14);
+      color: rgba(255,255,255,.92);
+      border-radius: 10px;
+      padding: 6px 8px;
+      outline: none;
+    }
+    .row input[type="range"] { width: 100%; }
+    .btnrow { display:flex; gap:10px; margin-top: 10px; }
+    button {
+      appearance:none; border: 1px solid rgba(255,255,255,.16);
+      background: rgba(255,255,255,.08);
+      color: rgba(255,255,255,.92);
+      padding: 8px 10px;
+      border-radius: 12px;
+      cursor: pointer;
+      font-weight: 650;
+      flex:1;
+    }
+    button:hover { background: rgba(255,255,255,.12); }
+    button.primary { background: rgba(120,180,255,.18); border-color: rgba(120,180,255,.30); }
+    button.primary:hover { background: rgba(120,180,255,.24); }
+    #stats {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255,255,255,.10);
+      font-size: 12px;
+      line-height: 1.35;
+      color: rgba(255,255,255,.88);
+    }
+    #stats .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New"; }
+    #help {
+      margin-top: 8px;
+      font-size: 11px;
+      opacity: .72;
+    }
+
+    /* Aim panel (strike zone target) */
+    #aimPanel {
+      position: absolute; right: 14px; top: 14px; z-index: 10;
+      width: 210px; background: rgba(10,12,18,.72);
+      border: 1px solid rgba(255,255,255,.10);
+      backdrop-filter: blur(10px);
+      border-radius: 14px; padding: 10px;
+      box-shadow: 0 10px 40px rgba(0,0,0,.45);
+      color: rgba(255,255,255,.92);
+      user-select: none;
+    }
+    #aimPanel h2 { margin: 0 0 8px; font-size: 12px; letter-spacing:.3px; opacity:.9; }
+    #zone {
+      width: 100%; aspect-ratio: 3 / 4;
+      border-radius: 12px;
+      background: rgba(255,255,255,.04);
+      border: 1px solid rgba(255,255,255,.14);
+      position: relative;
+      overflow: hidden;
+    }
+    #zone::before {
+      content:"";
+      position:absolute; inset: 12% 12%;
+      border: 2px solid rgba(255,255,255,.75);
+      border-radius: 10px;
+    }
+    #targetDot {
+      position:absolute; width: 10px; height: 10px; border-radius: 999px;
+      background: rgba(255,80,80,.95);
+      box-shadow: 0 0 0 3px rgba(255,80,80,.20);
+      transform: translate(-50%,-50%);
+      left: 50%; top: 50%;
+    }
+    #plateReadout {
+      margin-top: 8px; font-size: 12px; opacity: .86;
+    }
+
+    /* Bottom hint overlay */
+    #bottomHint {
+      position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(10,12,18,.55);
+      border: 1px solid rgba(255,255,255,.10);
+      color: rgba(255,255,255,.78);
+      font-size: 12px;
+      z-index: 10;
+      backdrop-filter: blur(10px);
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    canvas { display:block; }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <h1>⚾ Pitch Simulator</h1>
+
+    <div class="row">
+      <label for="pitchType">Pitch type</label>
+      <select id="pitchType">
+        <option value="fourSeam">4-Seam Fastball</option>
+        <option value="twoSeam">2-Seam / Sinker</option>
+        <option value="cutter">Cutter</option>
+        <option value="slider">Slider</option>
+        <option value="curve">Curveball</option>
+        <option value="changeup">Changeup</option>
+        <option value="splitter">Splitter</option>
+        <option value="knuckle">Knuckle-ish</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <label>Velocity (mph) <span class="mono" id="vLabel">95</span></label>
+      <input id="vel" type="range" min="55" max="105" step="1" value="95"/>
+    </div>
+
+    <div class="row">
+      <label>Spin (rpm) <span class="mono" id="rpmLabel">2400</span></label>
+      <input id="rpm" type="range" min="0" max="3200" step="50" value="2400"/>
+    </div>
+
+    <div class="row">
+      <label>Spin axis (deg) <span class="mono" id="axisLabel">0</span></label>
+      <input id="axis" type="range" min="-180" max="180" step="1" value="0"/>
+    </div>
+
+    <div class="row">
+      <label>Gyro % <span class="mono" id="gyroLabel">10</span></label>
+      <input id="gyro" type="range" min="0" max="100" step="1" value="10"/>
+    </div>
+
+    <div class="row">
+      <label>Wind (mph) <span class="mono" id="windLabel">0</span></label>
+      <input id="wind" type="range" min="-12" max="12" step="1" value="0"/>
+    </div>
+
+    <div class="btnrow">
+      <button class="primary" id="throwBtn">Throw (Space)</button>
+      <button id="replayBtn">Replay (R)</button>
+      <button id="resetBtn">Reset</button>
+    </div>
+
+    <div class="btnrow">
+      <button id="trailBtn">Trail: ON (T)</button>
+      <button id="slowBtn">Slow: OFF</button>
+      <button id="camBtn">Camera: P</button>
+    </div>
+
+    <div id="stats">
+      <div><b>Count:</b> <span class="mono" id="count">0-0</span> &nbsp; <b>Strikes:</b> <span class="mono" id="strikes">0</span> &nbsp; <b>Balls:</b> <span class="mono" id="balls">0</span></div>
+      <div style="margin-top:6px">
+        <b>Last pitch:</b> <span class="mono" id="lastCall">—</span><br/>
+        <b>Plate location:</b> <span class="mono" id="plateLoc">—</span><br/>
+        <b>Break (x,y):</b> <span class="mono" id="breakXY">—</span>
+      </div>
+    </div>
+
+    <div id="help">
+      Keys: <span class="mono">1–8</span> pitch preset • <span class="mono">Space</span> throw • <span class="mono">R</span> replay • <span class="mono">T</span> trail • Drag mouse to orbit • Scroll zoom
+    </div>
+  </div>
+
+  <div id="aimPanel">
+    <h2>Target (click inside)</h2>
+    <div id="zone">
+      <div id="targetDot"></div>
+    </div>
+    <div id="plateReadout" class="mono">Aim: x=0.00m, y=0.80m</div>
+  </div>
+
+  <div id="bottomHint">Tip: Click the strike-zone panel to set a target, then press Space.</div>
+
+  <!-- Three.js global build -->
+  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+
+  <script>
+    // ---------- Utilities ----------
+    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+    const lerp = (a, b, t) => a + (b - a) * t;
+
+    function mphToMps(mph){ return mph * 0.44704; }
+    function rpmToRadPerSec(rpm){ return rpm * 2 * Math.PI / 60; }
+
+    // ---------- Scene Setup ----------
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.Fog(0x06070b, 8, 55);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    document.body.appendChild(renderer.domElement);
+
+    const camera = new THREE.PerspectiveCamera(52, window.innerWidth / window.innerHeight, 0.05, 200);
+
+    // Camera modes
+    const CAM_MODES = {
+      PITCHER: 0,
+      CATCHER: 1,
+      SIDE: 2
+    };
+    let camMode = CAM_MODES.PITCHER;
+
+    function setCameraMode(mode){
+      camMode = mode;
+      if (camMode === CAM_MODES.PITCHER){
+        camera.position.set(0, 1.7, 11.5);
+        lookAt.set(0, 1.4, -8);
+        orbit.theta = 0;
+        orbit.phi = 0.12;
+        orbit.radius = 13;
+      } else if (camMode === CAM_MODES.CATCHER){
+        camera.position.set(0, 1.6, -19.2);
+        lookAt.set(0, 1.2, -12);
+        orbit.theta = Math.PI;
+        orbit.phi = 0.14;
+        orbit.radius = 10.5;
+      } else {
+        camera.position.set(6.5, 2.1, -2.0);
+        lookAt.set(0, 1.2, -10);
+        orbit.theta = -0.55;
+        orbit.phi = 0.18;
+        orbit.radius = 14;
+      }
+      camera.lookAt(lookAt);
+    }
+
+    // Lights
+    const ambient = new THREE.AmbientLight(0xffffff, 0.55);
+    scene.add(ambient);
+
+    const keyLight = new THREE.DirectionalLight(0xffffff, 1.1);
+    keyLight.position.set(6, 10, 12);
+    scene.add(keyLight);
+
+    const rimLight = new THREE.DirectionalLight(0x9bd0ff, 0.35);
+    rimLight.position.set(-10, 6, -12);
+    scene.add(rimLight);
+
+    // Field
+    const field = new THREE.Mesh(
+      new THREE.PlaneGeometry(70, 90, 1, 1),
+      new THREE.MeshStandardMaterial({ color: 0x0b2b18, roughness: 0.95, metalness: 0.0 })
+    );
+    field.rotation.x = -Math.PI / 2;
+    field.position.y = 0;
+    field.position.z = -10;
+    scene.add(field);
+
+    // Mound
+    const mound = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.1, 1.4, 0.25, 48),
+      new THREE.MeshStandardMaterial({ color: 0x5b4636, roughness: 1.0 })
+    );
+    mound.position.set(0, 0.12, 10);
+    scene.add(mound);
+
+    // Rubber
+    const rubber = new THREE.Mesh(
+      new THREE.BoxGeometry(0.6, 0.05, 0.18),
+      new THREE.MeshStandardMaterial({ color: 0xeaeaea, roughness: 0.7 })
+    );
+    rubber.position.set(0, 0.19, 10.02);
+    scene.add(rubber);
+
+    // Home plate
+    const plate = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.28, 0.28, 0.03, 6),
+      new THREE.MeshStandardMaterial({ color: 0xe6e6e6, roughness: 0.8 })
+    );
+    plate.rotation.y = Math.PI / 6;
+    plate.position.set(0, 0.02, -18.44);
+    scene.add(plate);
+
+    // Strike zone frame (at plate)
+    // Typical: width ~17"=0.432m, height depends; we’ll use 0.55m to 1.15m
+    const zone = {
+      z: -18.44,
+      halfW: 0.216,
+      yBot: 0.55,
+      yTop: 1.15
+    };
+
+    const zoneGeo = new THREE.BufferGeometry();
+    const zonePts = new Float32Array([
+      -zone.halfW, zone.yBot, zone.z,   zone.halfW, zone.yBot, zone.z,
+       zone.halfW, zone.yBot, zone.z,   zone.halfW, zone.yTop, zone.z,
+       zone.halfW, zone.yTop, zone.z,  -zone.halfW, zone.yTop, zone.z,
+      -zone.halfW, zone.yTop, zone.z,  -zone.halfW, zone.yBot, zone.z
+    ]);
+    zoneGeo.setAttribute('position', new THREE.BufferAttribute(zonePts, 3));
+    const zoneLines = new THREE.LineSegments(zoneGeo, new THREE.LineBasicMaterial({ color: 0xffffff }));
+    scene.add(zoneLines);
+
+    // Catcher target
+    const targetRing = new THREE.Mesh(
+      new THREE.TorusGeometry(0.12, 0.01, 10, 48),
+      new THREE.MeshStandardMaterial({ color: 0xff5050, roughness: 0.4 })
+    );
+    targetRing.position.set(0, 0.8, zone.z + 0.05);
+    targetRing.rotation.x = Math.PI / 2;
+    scene.add(targetRing);
+
+    // Ball
+    const ballRadius = 0.037; // ~baseball radius in meters (7.4cm diameter)
+    const ball = new THREE.Mesh(
+      new THREE.SphereGeometry(ballRadius, 36, 24),
+      new THREE.MeshStandardMaterial({ color: 0xf34a4a, roughness: 0.35, metalness: 0.05 })
+    );
+    scene.add(ball);
+
+    // Simple trail
+    let trailOn = true;
+    const trailMax = 220;
+    const trailPositions = new Float32Array(trailMax * 3);
+    const trailGeo = new THREE.BufferGeometry();
+    trailGeo.setAttribute('position', new THREE.BufferAttribute(trailPositions, 3));
+    trailGeo.setDrawRange(0, 0);
+    const trailLine = new THREE.Line(trailGeo, new THREE.LineBasicMaterial({ color: 0xff5050, transparent: true, opacity: 0.75 }));
+    scene.add(trailLine);
+
+    function trailReset(){
+      for (let i=0;i<trailPositions.length;i++) trailPositions[i] = 0;
+      trailGeo.attributes.position.needsUpdate = true;
+      trailGeo.setDrawRange(0, 0);
+      trailCount = 0;
+    }
+    let trailCount = 0;
+
+    function trailAdd(p){
+      if (!trailOn) return;
+      if (trailCount >= trailMax) {
+        // shift left
+        for (let i=1;i<trailMax;i++){
+          trailPositions[(i-1)*3+0] = trailPositions[i*3+0];
+          trailPositions[(i-1)*3+1] = trailPositions[i*3+1];
+          trailPositions[(i-1)*3+2] = trailPositions[i*3+2];
+        }
+        trailCount = trailMax - 1;
+      }
+      trailPositions[trailCount*3+0] = p.x;
+      trailPositions[trailCount*3+1] = p.y;
+      trailPositions[trailCount*3+2] = p.z;
+      trailCount++;
+      trailGeo.setDrawRange(0, trailCount);
+      trailGeo.attributes.position.needsUpdate = true;
+    }
+
+    // ---------- UI ----------
+    const el = (id) => document.getElementById(id);
+
+    const pitchTypeEl = el('pitchType');
+    const velEl = el('vel');
+    const rpmEl = el('rpm');
+    const axisEl = el('axis');
+    const gyroEl = el('gyro');
+    const windEl = el('wind');
+
+    const vLabel = el('vLabel');
+    const rpmLabel = el('rpmLabel');
+    const axisLabel = el('axisLabel');
+    const gyroLabel = el('gyroLabel');
+    const windLabel = el('windLabel');
+
+    const throwBtn = el('throwBtn');
+    const replayBtn = el('replayBtn');
+    const resetBtn = el('resetBtn');
+    const trailBtn = el('trailBtn');
+    const slowBtn = el('slowBtn');
+    const camBtn = el('camBtn');
+
+    const countEl = el('count');
+    const strikesEl = el('strikes');
+    const ballsEl = el('balls');
+    const lastCallEl = el('lastCall');
+    const plateLocEl = el('plateLoc');
+    const breakXYEl = el('breakXY');
+
+    const zoneEl = el('zone');
+    const targetDotEl = el('targetDot');
+    const plateReadoutEl = el('plateReadout');
+
+    function syncLabels(){
+      vLabel.textContent = velEl.value;
+      rpmLabel.textContent = rpmEl.value;
+      axisLabel.textContent = axisEl.value;
+      gyroLabel.textContent = gyroEl.value;
+      windLabel.textContent = windEl.value;
+    }
+    [velEl,rpmEl,axisEl,gyroEl,windEl].forEach(x => x.addEventListener('input', syncLabels));
+    syncLabels();
+
+    // ---------- Pitch Presets ----------
+    // axisDeg: 0 backspin (rise), 180 topspin (drop), 90 breaks left, -90 breaks right (relative to pitcher)
+    const PRESETS = {
+      fourSeam:  { mph: 95, rpm: 2400, axisDeg: 0,   gyro: 8,  wind: 0 },
+      twoSeam:   { mph: 93, rpm: 2100, axisDeg: -35, gyro: 10, wind: 0 },
+      cutter:    { mph: 92, rpm: 2350, axisDeg: 35,  gyro: 18, wind: 0 },
+      slider:    { mph: 85, rpm: 2500, axisDeg: 120, gyro: 22, wind: 0 },
+      curve:     { mph: 78, rpm: 2700, axisDeg: 180, gyro: 12, wind: 0 },
+      changeup:  { mph: 82, rpm: 1700, axisDeg: -20, gyro: 15, wind: 0 },
+      splitter:  { mph: 86, rpm: 1200, axisDeg: 160, gyro: 25, wind: 0 },
+      knuckle:   { mph: 68, rpm: 150,  axisDeg: 0,   gyro: 65, wind: 0 },
+    };
+
+    function applyPreset(key){
+      const p = PRESETS[key];
+      if (!p) return;
+      pitchTypeEl.value = key;
+      velEl.value = p.mph;
+      rpmEl.value = p.rpm;
+      axisEl.value = p.axisDeg;
+      gyroEl.value = p.gyro;
+      windEl.value = p.wind;
+      syncLabels();
+    }
+
+    pitchTypeEl.addEventListener('change', () => applyPreset(pitchTypeEl.value));
+    applyPreset('fourSeam');
+
+    // ---------- Aim / Targeting ----------
+    // Aim maps to strike-zone rectangle at plate. We'll aim x in [-halfW..halfW], y in [yBot..yTop]
+    // plus allow aiming slightly outside for edge-dotting / balls.
+    let aim = { x: 0.0, y: 0.80 };
+
+    function setAimFromPanel(clientX, clientY){
+      const r = zoneEl.getBoundingClientRect();
+      const px = clamp((clientX - r.left) / r.width, 0, 1);
+      const py = clamp((clientY - r.top) / r.height, 0, 1);
+
+      // inner strike zone box is inset 12% from each side in CSS; replicate that feel
+      const inset = 0.12;
+      const ux = (px - 0.5) / (0.5 - inset); // roughly -1..1 over strike zone box
+      const uy = (1 - py - 0.5) / (0.5 - inset);
+
+      // allow a little extra beyond edges for "misses"
+      const xNorm = clamp(ux, -1.35, 1.35);
+      const yNorm = clamp(uy, -1.35, 1.35);
+
+      aim.x = xNorm * zone.halfW;
+      aim.y = lerp(zone.yBot, zone.yTop, (yNorm + 1) * 0.5); // map -1..1 to bottom..top
+      aim.y = clamp(aim.y, 0.25, 1.55);
+
+      // update dot
+      const dotX = clamp(px, 0, 1) * 100;
+      const dotY = clamp(py, 0, 1) * 100;
+      targetDotEl.style.left = dotX + '%';
+      targetDotEl.style.top = dotY + '%';
+
+      targetRing.position.set(aim.x, aim.y, zone.z + 0.05);
+      plateReadoutEl.textContent = `Aim: x=${aim.x.toFixed(2)}m, y=${aim.y.toFixed(2)}m`;
+    }
+
+    zoneEl.addEventListener('pointerdown', (e) => {
+      setAimFromPanel(e.clientX, e.clientY);
+      zoneEl.setPointerCapture(e.pointerId);
+    });
+    zoneEl.addEventListener('pointermove', (e) => {
+      if (e.buttons) setAimFromPanel(e.clientX, e.clientY);
+    });
+
+    // ---------- Physics Model ----------
+    // Coordinate system:
+    //  - z decreases toward plate (pitch travels -z)
+    //  - x is horizontal (catcher view: +x to catcher right)
+    //  - y is vertical
+    //
+    // We'll simulate with:
+    //  a = gravity + drag + magnus + wind influence
+    //
+    // Notes:
+    //  - This is a tuned "sim-like" model, not MLB-grade CFD.
+    //  - Still feels very controllable and responsive to spin axis + rpm.
+
+    const g = new THREE.Vector3(0, -9.81, 0);
+
+    // Drag tuning (roughly baseball-ish)
+    const air = {
+      rho: 1.225,          // kg/m^3
+      Cd: 0.35,            // effective drag coefficient (varies with speed, seam, etc.)
+      area: Math.PI * ballRadius * ballRadius,
+      mass: 0.145,         // kg
+      // Magnus scaling: we use an effective coefficient to get realistic "break"
+      magnusK: 0.00055     // tuned constant
+    };
+
+    function accelDrag(v){
+      const speed = v.length();
+      if (speed < 0.0001) return new THREE.Vector3();
+      // a_drag = -(1/2 rho Cd A / m) * |v| v
+      const k = 0.5 * air.rho * air.Cd * air.area / air.mass;
+      return v.clone().multiplyScalar(-k * speed);
+    }
+
+    function accelMagnus(v, omega){
+      // a_magnus ~ K * (omega x v)
+      // omega in rad/s, v in m/s
+      const ax = new THREE.Vector3().crossVectors(omega, v).multiplyScalar(air.magnusK);
+      return ax;
+    }
+
+    // ---------- Pitch State ----------
+    let pitching = false;
+    let replaying = false;
+    let slowMo = false;
+
+    // Ball state vectors
+    const pos = new THREE.Vector3(0, 1.75, 10.0); // release-ish
+    const vel = new THREE.Vector3(0, 0, -40);
+    const omega = new THREE.Vector3(0, 0, 0);
+
+    // Store replay frames
+    let replayFrames = [];
+    let replayIndex = 0;
+
+    // Count logic
+    let strikes = 0;
+    let balls = 0;
+
+    function updateCountDisplay(){
+      strikesEl.textContent = String(strikes);
+      ballsEl.textContent = String(balls);
+      countEl.textContent = `${balls}-${strikes}`;
+    }
+    updateCountDisplay();
+
+    function resetCount(){
+      strikes = 0;
+      balls = 0;
+      updateCountDisplay();
+      lastCallEl.textContent = "—";
+      plateLocEl.textContent = "—";
+      breakXYEl.textContent = "—";
+    }
+
+    // Compute straight-line "no-magnus" reference for break measurement
+    let refPos = null;
+    let refVel = null;
+    let breakAtPlate = { x: 0, y: 0 };
+
+    function resetBall(){
+      pitching = false;
+      replaying = false;
+      replayFrames = [];
+      replayIndex = 0;
+      pos.set(0, 1.75, 10.0);
+      ball.position.copy(pos);
+      trailReset();
+    }
+
+    function buildSpinVector(axisDeg, rpm, gyroPercent){
+      // omega magnitude from rpm
+      const w = rpmToRadPerSec(rpm);
+
+      // "gyro" means % of spin pointing along velocity axis (bullet spin -> minimal magnus)
+      const gyro = clamp(gyroPercent / 100, 0, 1);
+      const eff = 1 - gyro;
+
+      const theta = THREE.MathUtils.degToRad(axisDeg);
+      // omegaXY in x-y plane
+      const wxy = w * eff;
+      const ox = Math.cos(theta) * wxy;
+      const oy = Math.sin(theta) * wxy;
+
+      // omegaZ is "gyro" component
+      // sign: align with pitch direction (-z). Put omega.z negative for "bullet spin" aligned with flight.
+      const oz = -w * gyro;
+
+      return new THREE.Vector3(ox, oy, oz);
+    }
+
+    function throwPitch(){
+      if (pitching) return;
+
+      // Read UI
+      const mph = Number(velEl.value);
+      const rpm = Number(rpmEl.value);
+      const axisDeg = Number(axisEl.value);
+      const gyroPct = Number(gyroEl.value);
+      const windMph = Number(windEl.value);
+
+      // Release point (slight variability could be added)
+      pos.set(0, 1.75, 10.0);
+
+      // Aim at plate target: compute initial direction vector from release to aim point.
+      const target = new THREE.Vector3(aim.x, aim.y, zone.z);
+
+      const dir = target.clone().sub(pos).normalize();
+
+      // Initial speed
+      const speed = mphToMps(mph);
+
+      // Add tiny "hand noise" / realism
+      const noise = new THREE.Vector3(
+        (Math.random()-0.5) * 0.12,
+        (Math.random()-0.5) * 0.06,
+        (Math.random()-0.5) * 0.05
+      );
+
+      vel.copy(dir.multiplyScalar(speed).add(noise));
+
+      // Wind affects relative air velocity (crosswind). We'll apply as air-relative in drag/magnus calc.
+      windVec.set(mphToMps(windMph), 0, 0); // crosswind along +x
+
+      // Spin vector
+      omega.copy(buildSpinVector(axisDeg, rpm, gyroPct));
+
+      // Reset visuals
+      ball.position.copy(pos);
+      trailReset();
+
+      // Reset replay storage
+      replayFrames = [];
+      replayIndex = 0;
+
+      // Setup break reference (no magnus)
+      refPos = pos.clone();
+      refVel = vel.clone();
+      breakAtPlate = { x: 0, y: 0 };
+
+      lastCallEl.textContent = "—";
+      plateLocEl.textContent = "—";
+      breakXYEl.textContent = "—";
+
+      pitching = true;
+      replaying = false;
+    }
+
+    function callPitch(plateX, plateY){
+      const strike = (Math.abs(plateX) <= zone.halfW) && (plateY >= zone.yBot) && (plateY <= zone.yTop);
+
+      if (strike){
+        strikes++;
+        lastCallEl.textContent = "STRIKE";
+      } else {
+        balls++;
+        lastCallEl.textContent = "BALL";
+      }
+
+      // Display plate location + break
+      plateLocEl.textContent = `x=${plateX.toFixed(2)}m, y=${plateY.toFixed(2)}m`;
+      breakXYEl.textContent = `Δx=${breakAtPlate.x.toFixed(2)}m, Δy=${breakAtPlate.y.toFixed(2)}m`;
+
+      if (strikes >= 3){
+        lastCallEl.textContent = "STRIKEOUT (reset)";
+        strikes = 0;
+        balls = 0;
+      } else if (balls >= 4){
+        lastCallEl.textContent = "WALK (reset)";
+        strikes = 0;
+        balls = 0;
+      }
+      updateCountDisplay();
+    }
+
+    // ---------- Wind ----------
+    const windVec = new THREE.Vector3(0,0,0);
+
+    // ---------- Simulation Loop ----------
+    // Integrator (semi-implicit Euler) with small dt for smoothness
+    const clock = new THREE.Clock();
+
+    function stepPhysics(dt){
+      // air-relative velocity (wind subtract)
+      const vAir = vel.clone().sub(windVec);
+
+      // forces/accels
+      const a = new THREE.Vector3();
+      a.add(g);
+      a.add(accelDrag(vAir));
+      a.add(accelMagnus(vAir, omega));
+
+      // Integrate velocity then position (semi-implicit)
+      vel.addScaledVector(a, dt);
+      pos.addScaledVector(vel, dt);
+
+      // Reference (no magnus) for break comparison
+      if (refPos && refVel){
+        const vAirRef = refVel.clone().sub(windVec);
+        const aRef = new THREE.Vector3();
+        aRef.add(g);
+        aRef.add(accelDrag(vAirRef));
+        refVel.addScaledVector(aRef, dt);
+        refPos.addScaledVector(refVel, dt);
+      }
+
+      // Move ball mesh
+      ball.position.copy(pos);
+
+      // Add trail sample
+      trailAdd(pos);
+
+      // Scale ball a tiny bit for depth cue (optional subtle)
+      const zNorm = clamp((10 - pos.z) / (10 - zone.z), 0, 1);
+      const scale = lerp(1.15, 0.95, zNorm);
+      ball.scale.setScalar(scale);
+
+      // Plate crossing check: if ball passes zone.z (home plate plane)
+      // We detect crossing by looking at current z vs previous z.
+    }
+
+    // We'll store previous z for crossing detection
+    let prevZ = pos.z;
+
+    function handlePlateCrossing(){
+      // Linear interpolation to find plate crossing position
+      const z0 = prevZ;
+      const z1 = pos.z;
+
+      if (z0 > zone.z && z1 <= zone.z){
+        const t = (z0 - zone.z) / (z0 - z1 + 1e-9);
+        const plateX = lerp(prevPos.x, pos.x, t);
+        const plateY = lerp(prevPos.y, pos.y, t);
+
+        // Break at plate relative to ref
+        if (refPos){
+          const refPlateX = lerp(prevRefPos.x, refPos.x, t);
+          const refPlateY = lerp(prevRefPos.y, refPos.y, t);
+          breakAtPlate.x = plateX - refPlateX;
+          breakAtPlate.y = plateY - refPlateY;
+        }
+
+        callPitch(plateX, plateY);
+        pitching = false;
+      }
+    }
+
+    // Keep prev pos for interpolation
+    const prevPos = new THREE.Vector3();
+    const prevRefPos = new THREE.Vector3();
+
+    // ---------- Replay ----------
+    function startReplay(){
+      if (pitching) return;
+      if (!replayFrames.length) return;
+      replaying = true;
+      replayIndex = 0;
+      pitching = false;
+      lastCallEl.textContent = "REPLAY";
+    }
+
+    function stepReplay(){
+      if (!replaying) return;
+      const frame = replayFrames[replayIndex];
+      if (!frame){
+        replaying = false;
+        return;
+      }
+      ball.position.set(frame[0], frame[1], frame[2]);
+      ball.scale.setScalar(frame[3]);
+      replayIndex++;
+
+      // trail during replay (optional): rebuild from frames
+      // We'll keep current trail as-is; if you want clean replay trail, toggle trail off/on before replay.
+    }
+
+    // ---------- Controls / Camera Orbit ----------
+    // Simple orbit around a lookAt point (no extra libs)
+    const lookAt = new THREE.Vector3(0, 1.4, -8);
+    const orbit = { theta: 0, phi: 0.12, radius: 13, dragging: false, lx: 0, ly: 0 };
+
+    function updateOrbitCamera(){
+      // phi clamp to avoid flipping
+      orbit.phi = clamp(orbit.phi, -0.05, 0.65);
+      orbit.radius = clamp(orbit.radius, 6, 26);
+
+      const x = lookAt.x + orbit.radius * Math.sin(orbit.theta) * Math.cos(orbit.phi);
+      const y = lookAt.y + orbit.radius * Math.sin(orbit.phi) + 0.2;
+      const z = lookAt.z + orbit.radius * Math.cos(orbit.theta) * Math.cos(orbit.phi);
+
+      camera.position.set(x, y, z);
+      camera.lookAt(lookAt);
+    }
+
+    renderer.domElement.addEventListener('pointerdown', (e) => {
+      // Don't orbit if clicking UI panels
+      const inUI = e.target.closest && (e.target.closest('#hud') || e.target.closest('#aimPanel'));
+      if (inUI) return;
+      orbit.dragging = true;
+      orbit.lx = e.clientX;
+      orbit.ly = e.clientY;
+      renderer.domElement.setPointerCapture(e.pointerId);
+    });
+
+    renderer.domElement.addEventListener('pointermove', (e) => {
+      if (!orbit.dragging) return;
+      const dx = e.clientX - orbit.lx;
+      const dy = e.clientY - orbit.ly;
+      orbit.lx = e.clientX;
+      orbit.ly = e.clientY;
+
+      orbit.theta -= dx * 0.004;
+      orbit.phi   -= dy * 0.003;
+      updateOrbitCamera();
+    });
+
+    renderer.domElement.addEventListener('pointerup', () => {
+      orbit.dragging = false;
+    });
+
+    renderer.domElement.addEventListener('wheel', (e) => {
+      orbit.radius += e.deltaY * 0.01;
+      updateOrbitCamera();
+    }, { passive: true });
+
+    // ---------- Buttons ----------
+    throwBtn.addEventListener('click', throwPitch);
+    replayBtn.addEventListener('click', startReplay);
+
+    resetBtn.addEventListener('click', () => {
+      resetBall();
+      resetCount();
+    });
+
+    trailBtn.addEventListener('click', () => {
+      trailOn = !trailOn;
+      trailBtn.textContent = `Trail: ${trailOn ? 'ON' : 'OFF'} (T)`;
+      if (!trailOn) trailReset();
+    });
+
+    slowBtn.addEventListener('click', () => {
+      slowMo = !slowMo;
+      slowBtn.textContent = `Slow: ${slowMo ? 'ON' : 'OFF'}`;
+    });
+
+    camBtn.addEventListener('click', () => {
+      const next = (camMode + 1) % 3;
+      setCameraMode(next);
+      camBtn.textContent = `Camera: ${next === 0 ? 'P' : next === 1 ? 'C' : 'S'}`;
+      updateOrbitCamera();
+    });
+
+    // Keyboard shortcuts
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Space'){ e.preventDefault(); throwPitch(); }
+      if (e.key.toLowerCase() === 'r') startReplay();
+      if (e.key.toLowerCase() === 't') trailBtn.click();
+
+      const n = Number(e.key);
+      if (n >= 1 && n <= 8){
+        const keys = ['fourSeam','twoSeam','cutter','slider','curve','changeup','splitter','knuckle'];
+        applyPreset(keys[n-1]);
+      }
+    });
+
+    // ---------- Store frames during pitch ----------
+    function captureFrame(){
+      // store x,y,z,scale
+      replayFrames.push([ball.position.x, ball.position.y, ball.position.z, ball.scale.x]);
+      if (replayFrames.length > 900) replayFrames.shift();
+    }
+
+    // ---------- Resize ----------
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // Initialize camera
+    setCameraMode(CAM_MODES.PITCHER);
+    updateOrbitCamera();
+    resetBall();
+
+    // ---------- Main Render Loop ----------
+    function animate(){
+      requestAnimationFrame(animate);
+
+      const dtRaw = clock.getDelta();
+      const dt = clamp(dtRaw, 0, 0.033);
+
+      if (pitching){
+        // store prev for crossing interpolation
+        prevPos.copy(pos);
+        prevZ = pos.z;
+        if (refPos) prevRefPos.copy(refPos);
+
+        // simulate in substeps for stability
+        const slowFactor = slowMo ? 0.35 : 1.0;
+        const step = 1/240;
+        let t = 0;
+        const scaledDt = dt * slowFactor;
+
+        while (t < scaledDt){
+          const h = Math.min(step, scaledDt - t);
+          stepPhysics(h);
+          t += h;
+
+          // record frames for replay (subsample)
+          if (replayFrames.length % 2 === 0) captureFrame();
+
+          // ground / behind plate termination
+          if (pos.y < 0.03 || pos.z < zone.z - 2.0){
+            pitching = false;
+            if (lastCallEl.textContent === "—") lastCallEl.textContent = "IN PLAY / DIRT";
+            break;
+          }
+        }
+
+        handlePlateCrossing();
+      }
+
+      if (replaying){
+        stepReplay();
+      }
+
+      renderer.render(scene, camera);
+    }
+    animate();
+  </script>
+</body>
+</html>

@@ -1,0 +1,2715 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Pitch Simulator Pro — Pitcher / Batter / Fielder + Follow Cam + Field Minimap</title>
+  <style>
+    :root{
+      --bg: #05060a;
+      --panel: rgba(12,14,22,.74);
+      --border: rgba(255,255,255,.10);
+      --text: rgba(255,255,255,.92);
+      --muted: rgba(255,255,255,.72);
+      --chip: rgba(255,255,255,.08);
+      --chip2: rgba(120,180,255,.18);
+    }
+    html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    canvas{display:block}
+
+    /* LEFT HUD (scrollable) */
+    #hud{
+      position:absolute;top:14px;left:14px;z-index:10;
+      width:520px;max-width:calc(100vw - 28px);
+      max-height:calc(100vh - 28px);
+      overflow:auto;
+      background:var(--panel);border:1px solid var(--border);
+      backdrop-filter:blur(10px);border-radius:16px;padding:12px;
+      box-shadow:0 10px 40px rgba(0,0,0,.45);color:var(--text);
+      user-select:none;
+    }
+    #hud::-webkit-scrollbar{width:10px}
+    #hud::-webkit-scrollbar-thumb{background:rgba(255,255,255,.10);border-radius:999px}
+    #hudHeader{
+      position:sticky;top:0;background:linear-gradient(to bottom, rgba(12,14,22,.95), rgba(12,14,22,.70));
+      padding:2px 0 10px 0;z-index:2
+    }
+    #hud h1{margin:0 0 8px;font-size:14px;font-weight:900;letter-spacing:.3px}
+    .row{display:flex;gap:10px;align-items:center;margin:8px 0}
+    .row label{flex:1 1 auto;font-size:12px;opacity:.88}
+    .row input[type="range"]{width:100%}
+    .row select{
+      background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);
+      color:var(--text);border-radius:12px;padding:6px 8px;outline:none;flex:1 1 auto
+    }
+    .btnrow{display:flex;gap:10px;margin-top:10px;flex-wrap:wrap}
+    button{
+      appearance:none;border:1px solid rgba(255,255,255,.16);
+      background:rgba(255,255,255,.08);color:var(--text);
+      padding:9px 10px;border-radius:14px;cursor:pointer;font-weight:850;
+      flex:1 1 140px;
+    }
+    button:hover{background:rgba(255,255,255,.12)}
+    button.primary{background:var(--chip2);border-color:rgba(120,180,255,.30)}
+    button.primary:hover{background:rgba(120,180,255,.24)}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New"}
+
+    details{
+      border-top:1px solid rgba(255,255,255,.10);
+      padding-top:10px;margin-top:10px;
+    }
+    summary{
+      list-style:none;cursor:pointer;font-size:12px;font-weight:900;letter-spacing:.3px;
+      opacity:.92;display:flex;align-items:center;justify-content:space-between;
+    }
+    summary::-webkit-details-marker{display:none}
+    summary .tag{
+      font-size:11px;font-weight:850;opacity:.8;background:rgba(255,255,255,.06);
+      padding:3px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.10)
+    }
+    .small{font-size:11px;opacity:.82}
+
+    /* RIGHT STACK */
+    #rightStack{position:absolute;right:14px;top:14px;z-index:10;display:flex;flex-direction:column;gap:12px;width:360px;max-width:calc(100vw - 28px)}
+    #zonePanel,#fieldPanel,#camPanel{
+      background:var(--panel);border:1px solid var(--border);
+      backdrop-filter:blur(10px);border-radius:16px;padding:10px;
+      box-shadow:0 10px 40px rgba(0,0,0,.45);color:var(--text)
+    }
+    #zonePanel h2,#fieldPanel h2,#camPanel h2{margin:0 0 8px;font-size:12px;letter-spacing:.3px;opacity:.9}
+
+    #zone{
+      width:100%;aspect-ratio:3/4;border-radius:14px;background:rgba(255,255,255,.04);
+      border:1px solid rgba(255,255,255,.14);position:relative;overflow:hidden
+    }
+    #zone::after{content:"";position:absolute;inset:6% 6%;border:1px solid rgba(255,255,255,.16);border-radius:12px}
+    #zone::before{
+      content:"";position:absolute;inset:12% 12%;
+      border:2px solid rgba(255,255,255,.86);border-radius:10px;
+      box-shadow:0 0 0 1px rgba(0,0,0,.30) inset
+    }
+    #plateShape{
+      position:absolute;left:50%;bottom:7%;width:24%;height:14%;transform:translateX(-50%);
+      opacity:.9;filter:drop-shadow(0 2px 6px rgba(0,0,0,.45));pointer-events:none
+    }
+    #targetDot{
+      position:absolute;width:11px;height:11px;border-radius:999px;background:rgba(255,80,80,.95);
+      box-shadow:0 0 0 4px rgba(255,80,80,.20);transform:translate(-50%,-50%);
+      left:50%;top:50%;pointer-events:none
+    }
+    #landDot{
+      position:absolute;width:11px;height:11px;border-radius:999px;background:rgba(80,210,255,.95);
+      box-shadow:0 0 0 4px rgba(80,210,255,.18);transform:translate(-50%,-50%);
+      left:50%;top:50%;opacity:0;transition:opacity 120ms ease;pointer-events:none;z-index:5
+    }
+    .mark{position:absolute;width:8px;height:8px;border-radius:999px;transform:translate(-50%,-50%);opacity:.85;pointer-events:none;z-index:4;box-shadow:0 0 0 2px rgba(0,0,0,.25)}
+    #zoneLegend{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;font-size:11px;opacity:.84;align-items:center}
+    .chip{display:flex;gap:6px;align-items:center}
+    .dot{width:8px;height:8px;border-radius:999px;display:inline-block}
+    .dotStrike{background:#60e38b}
+    .dotBall{background:#ff6c6c}
+    .dotPlay{background:#ffd96a}
+    #plateReadout{margin-top:8px;font-size:12px;opacity:.90}
+
+    /* Field minimap */
+    #minimapWrap{
+      width:100%;border-radius:14px;overflow:hidden;border:1px solid rgba(255,255,255,.14);
+      background:rgba(255,255,255,.04);position:relative;aspect-ratio:1/1
+    }
+    #minimap{position:absolute;inset:0;width:100%;height:100%}
+    #minimapReadout{margin-top:8px;font-size:12px;opacity:.90}
+    #minimapLegend{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;font-size:11px;opacity:.84;align-items:center}
+    .dotFielder{background:#60e38b}
+    .dotBallLive{background:#ffd96a}
+    .dotLand{background:#50d2ff}
+    .dotProj{background:#b6a6ff}
+
+    #camWrap{
+      width:100%;border-radius:14px;overflow:hidden;border:1px solid rgba(255,255,255,.14);
+      background:rgba(255,255,255,.04);position:relative;aspect-ratio:4/3
+    }
+    #video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);opacity:.92}
+    #overlay{position:absolute;inset:0;width:100%;height:100%;transform:scaleX(-1);pointer-events:none}
+
+    /* Bottom hint */
+    #bottomHint{
+      position:absolute;left:50%;bottom:14px;transform:translateX(-50%);
+      padding:9px 12px;border-radius:999px;background:rgba(12,14,22,.55);
+      border:1px solid rgba(255,255,255,.10);color:rgba(255,255,255,.82);
+      font-size:12px;z-index:10;backdrop-filter:blur(10px);pointer-events:none;white-space:nowrap
+    }
+
+    /* Hit callout */
+    #callout{
+      position:absolute;left:50%;top:18px;transform:translateX(-50%);
+      z-index:11;pointer-events:none;
+      font-weight:950;letter-spacing:.3px;
+      padding:10px 14px;border-radius:999px;
+      background:rgba(12,14,22,.55);border:1px solid rgba(255,255,255,.10);
+      backdrop-filter:blur(10px);color:rgba(255,255,255,.92);
+      opacity:0;transition:opacity 120ms ease;
+    }
+  </style>
+</head>
+<body>
+  <div id="callout" class="mono">—</div>
+
+  <div id="hud">
+    <div id="hudHeader">
+      <h1>⚾ Pitch Simulator Pro — Pitcher / Batter / Fielder • Follow Cam • Field Minimap</h1>
+
+      <div class="row">
+        <label for="roleSel">Role (3 control types)</label>
+        <select id="roleSel">
+          <option value="pitcher">Pitcher (gesture pitch • batter AI or manual)</option>
+          <option value="batter">Batter (gesture swing • AI pitcher)</option>
+          <option value="fielder">Fielder (WASD fielding • AI vs AI)</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <label for="viewSel">View</label>
+        <select id="viewSel">
+          <option value="CATCHER">Catcher (see swing + hit)</option>
+          <option value="BATTER">Batter view (see pitch coming)</option>
+          <option value="PITCHER">Pitcher view</option>
+          <option value="FIELD">Field / Broadcast</option>
+          <option value="SIDE">Side view</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <label for="pitchType">Pitch preset (bias)</label>
+        <select id="pitchType">
+          <option value="fourSeam">4-Seam Fastball</option>
+          <option value="twoSeam">2-Seam / Sinker</option>
+          <option value="cutter">Cutter</option>
+          <option value="slider">Slider</option>
+          <option value="curve">Curveball</option>
+          <option value="changeup">Changeup</option>
+          <option value="splitter">Splitter</option>
+          <option value="knuckle">Knuckle-ish</option>
+        </select>
+      </div>
+
+      <div class="btnrow">
+        <button class="primary" id="startCamBtn">Start Camera</button>
+        <button id="stopCamBtn">Stop Camera</button>
+        <button id="aiBtn">AI Batter: ON</button>
+        <button id="followBtn">Follow Cam: ON</button>
+        <button id="resetBtn">Reset Game</button>
+      </div>
+
+      <div class="btnrow">
+        <button id="trailBtn">Trail: ON</button>
+        <button id="slowBtn">Slow: OFF</button>
+        <button id="pitchBtn">Pitch (P)</button>
+        <button id="swingBtn">Swing (SPACE)</button>
+      </div>
+
+      <div class="small mono" id="modeHint">
+        Pitcher: fist → open release. Aim: drag cage panel. Swing: SPACE. Follow Cam toggles on contact.
+      </div>
+    </div>
+
+    <details open>
+      <summary><span>Throw + Aim Tuners</span> <span class="tag">pitch control</span></summary>
+
+      <div class="row">
+        <label>Aim Assist <span class="mono" id="aimAssistLabel">45%</span></label>
+        <input id="aimAssist" type="range" min="0" max="100" step="1" value="45"/>
+      </div>
+
+      <div class="row">
+        <label>Pitch Scatter <span class="mono" id="scatterLabel">5cm</span></label>
+        <input id="scatterCm" type="range" min="0" max="25" step="1" value="5"/>
+      </div>
+
+      <div class="row">
+        <label>Release Sensitivity <span class="mono" id="relLabel">0.16</span></label>
+        <input id="releaseThresh" type="range" min="0.05" max="0.45" step="0.01" value="0.16"/>
+      </div>
+
+      <div class="row">
+        <label>Velocity Range <span class="mono" id="velRangeLabel">0.95</span></label>
+        <input id="velRange" type="range" min="0.35" max="1.80" step="0.01" value="0.95"/>
+      </div>
+
+      <div class="row">
+        <label>Speed Min/Max <span class="mono" id="mphLabel">68–102</span></label>
+        <input id="mphMin" type="range" min="40" max="95" step="1" value="68"/>
+        <input id="mphMax" type="range" min="75" max="110" step="1" value="102"/>
+      </div>
+
+      <div class="row">
+        <label>Speed Curve (expo) <span class="mono" id="expoLabel">0.62</span></label>
+        <input id="velExpo" type="range" min="0.35" max="1.50" step="0.01" value="0.62"/>
+      </div>
+
+      <div class="row">
+        <label>Lift Assist <span class="mono" id="liftLabel">0.11m</span></label>
+        <input id="liftAssist" type="range" min="0.00" max="0.25" step="0.01" value="0.11"/>
+      </div>
+
+      <div class="small mono">If pitches still “dirt”, raise Lift Assist + Aim Assist and lower Scatter.</div>
+    </details>
+
+    <details open>
+      <summary><span>Bat + Swing Tuners</span> <span class="tag">contact quality</span></summary>
+
+      <div class="row">
+        <label>Swing Duration <span class="mono" id="swingDurLabel">170ms</span></label>
+        <input id="swingDurMs" type="range" min="110" max="320" step="5" value="170"/>
+      </div>
+
+      <div class="row">
+        <label>Swing Power <span class="mono" id="batPowerLabel">1.20×</span></label>
+        <input id="batPower" type="range" min="0.70" max="1.90" step="0.01" value="1.20"/>
+      </div>
+
+      <div class="row">
+        <label>Sweet-Spot Size <span class="mono" id="sweetLabel">1.25×</span></label>
+        <input id="sweetSpot" type="range" min="0.70" max="2.00" step="0.01" value="1.25"/>
+      </div>
+
+      <div class="row">
+        <label>Gesture Swing (Pinch) Threshold <span class="mono" id="pinchLabel">0.055</span></label>
+        <input id="pinchThresh" type="range" min="0.020" max="0.120" step="0.005" value="0.055"/>
+      </div>
+
+      <div class="row">
+        <label>Bat Size <span class="mono" id="batScaleLabel">1.25×</span></label>
+        <input id="batScale" type="range" min="0.85" max="1.80" step="0.01" value="1.25"/>
+      </div>
+
+      <div class="row">
+        <label>Bat Height <span class="mono" id="batYLabel">0.95m</span></label>
+        <input id="batY" type="range" min="0.65" max="1.25" step="0.01" value="0.95"/>
+      </div>
+
+      <div class="row">
+        <label>Bat Side Offset <span class="mono" id="batXLabel">0.52m</span></label>
+        <input id="batX" type="range" min="0.25" max="0.85" step="0.01" value="0.52"/>
+      </div>
+
+      <div class="row">
+        <label>Bat Depth Offset <span class="mono" id="batZLabel">0.28m</span></label>
+        <input id="batZ" type="range" min="0.05" max="0.55" step="0.01" value="0.28"/>
+      </div>
+
+      <div class="row">
+        <label>Bat Collision Radius <span class="mono" id="batRadLabel">0.055m</span></label>
+        <input id="batRadius" type="range" min="0.030" max="0.095" step="0.001" value="0.055"/>
+      </div>
+
+      <div class="small mono">Contact quality uses: barrel vs handle + centeredness + sweet-spot size.</div>
+    </details>
+
+    <details>
+      <summary><span>Spin + Physics Tuners</span> <span class="tag">break / movement</span></summary>
+
+      <div class="row">
+        <label>Spin Gain <span class="mono" id="sGainLabel">8.0</span></label>
+        <input id="sGain" type="range" min="1.0" max="18.0" step="0.1" value="8.0"/>
+      </div>
+
+      <div class="row">
+        <label>Drag Scale <span class="mono" id="dragLabel">1.00</span></label>
+        <input id="dragScale" type="range" min="0.50" max="1.80" step="0.01" value="1.00"/>
+      </div>
+
+      <div class="row">
+        <label>Magnus Scale <span class="mono" id="magLabel">1.00</span></label>
+        <input id="magnusScale" type="range" min="0.50" max="2.00" step="0.01" value="1.00"/>
+      </div>
+
+      <div class="row">
+        <label>Gravity Scale <span class="mono" id="gravLabel">1.00</span></label>
+        <input id="gravityScale" type="range" min="0.70" max="1.30" step="0.01" value="1.00"/>
+      </div>
+
+      <div class="row">
+        <label>Wind (mph) <span class="mono" id="windLabel">0</span></label>
+        <input id="wind" type="range" min="-12" max="12" step="1" value="0"/>
+      </div>
+    </details>
+
+    <details open>
+      <summary><span>Strike Zone + Batter AI</span> <span class="tag">gameplay</span></summary>
+
+      <div class="row">
+        <label>Zone Forgiveness <span class="mono" id="zoneScaleLabel">1.25×</span></label>
+        <input id="zoneScale" type="range" min="0.85" max="1.80" step="0.01" value="1.25"/>
+      </div>
+
+      <div class="row">
+        <label>Swing Window <span class="mono" id="swingWinLabel">260ms</span></label>
+        <input id="swingWindowMs" type="range" min="120" max="520" step="5" value="260"/>
+      </div>
+
+      <div class="row">
+        <label>AI Aggression <span class="mono" id="aiAggLabel">0.70</span></label>
+        <input id="aiAgg" type="range" min="0.10" max="0.95" step="0.01" value="0.70"/>
+      </div>
+    </details>
+
+    <details open>
+      <summary><span>Game Readouts</span> <span class="tag">live</span></summary>
+      <div class="mono" style="line-height:1.35;margin-top:8px">
+        <b>Inning:</b> <span id="inning">1 ▲</span> &nbsp; <b>Outs:</b> <span id="outs">0</span><br/>
+        <b>Score:</b> Away <span id="awayScore">0</span> — Home <span id="homeScore">0</span><br/>
+        <b>Count:</b> <span id="count">0-0</span><br/>
+        <b>Bases:</b> <span id="bases">○ ○ ○</span><br/>
+        <b>Last:</b> <span id="lastCall">—</span><br/>
+        <b>Plate:</b> <span id="plateLoc">—</span><br/>
+        <b>Break:</b> <span id="breakXY">—</span><br/>
+        <b>Contact:</b> <span id="contactRead">—</span><br/>
+        <b>Field:</b> <span id="fieldRead">—</span><br/>
+        <b>Live:</b> <span id="liveRead">mph=— rpm=— axis=— gyro=—</span>
+      </div>
+    </details>
+  </div>
+
+  <div id="rightStack">
+    <div id="zonePanel">
+      <h2>Batter Cage View (Target + Plate Crossing + History)</h2>
+      <div id="zone">
+        <div id="targetDot"></div>
+        <div id="landDot"></div>
+        <svg id="plateShape" viewBox="0 0 100 70" aria-hidden="true">
+          <path d="M15 10 H85 V40 L50 65 L15 40 Z" fill="rgba(255,255,255,0.88)"/>
+          <path d="M15 10 H85 V40 L50 65 L15 40 Z" fill="none" stroke="rgba(0,0,0,0.25)" stroke-width="3"/>
+        </svg>
+      </div>
+      <div id="plateReadout" class="mono">Aim: x=0.00m, y=0.80m</div>
+      <div id="zoneLegend">
+        <span class="chip"><span class="dot dotStrike"></span> Strike</span>
+        <span class="chip"><span class="dot dotBall"></span> Ball</span>
+        <span class="chip"><span class="dot dotPlay"></span> In Play</span>
+      </div>
+    </div>
+
+    <div id="fieldPanel">
+      <h2>Field Minimap (Batted-Ball Landing Spot)</h2>
+      <div id="minimapWrap">
+        <canvas id="minimap"></canvas>
+      </div>
+      <div id="minimapReadout" class="mono">—</div>
+      <div id="minimapLegend">
+        <span class="chip"><span class="dot dotFielder"></span> Fielder</span>
+        <span class="chip"><span class="dot dotBallLive"></span> Live ball</span>
+        <span class="chip"><span class="dot dotProj"></span> Projected</span>
+        <span class="chip"><span class="dot dotLand"></span> Landing</span>
+      </div>
+      <div class="small mono" style="margin-top:6px;opacity:.85">Fielding role: move with WASD / arrows to catch the ball.</div>
+    </div>
+
+    <div id="camPanel">
+      <h2>Camera (MediaPipe Hands)</h2>
+      <div id="camWrap">
+        <video id="video" playsinline muted></video>
+        <canvas id="overlay"></canvas>
+      </div>
+      <div id="statusLine" class="mono">Status: camera OFF</div>
+      <div class="small mono" style="margin-top:6px;opacity:.85">
+        Camera requires <b>localhost</b> or <b>https</b>. If it fails, use Pitch (P) + Swing (SPACE).
+      </div>
+    </div>
+  </div>
+
+  <div id="bottomHint">Default view = Catcher (so you SEE swing + hit). Role switch: Pitcher / Batter / Fielder.</div>
+
+  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+
+  <script>
+    // -----------------------------
+    // Utilities
+    // -----------------------------
+    const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+    const lerp  = (a,b,t)=>a+(b-a)*t;
+    const mphToMps = mph => mph * 0.44704;
+    const mpsToMph = mps => mps / 0.44704;
+    const mToFt = m => m * 3.28084;
+    const rpmFromRadPerSec = w => (w * 60) / (2*Math.PI);
+    const nowS = () => performance.now()/1000;
+    const el = id => document.getElementById(id);
+
+    // -----------------------------
+    // UI Elements
+    // -----------------------------
+    const roleSel = el('roleSel');
+    const viewSel = el('viewSel');
+    const modeHint = el('modeHint');
+
+    const pitchTypeEl = el('pitchType');
+
+    const aimAssistEl = el('aimAssist');
+    const scatterCmEl = el('scatterCm');
+    const releaseThreshEl = el('releaseThresh');
+    const velRangeEl = el('velRange');
+    const mphMinEl = el('mphMin');
+    const mphMaxEl = el('mphMax');
+    const velExpoEl = el('velExpo');
+    const liftAssistEl = el('liftAssist');
+
+    const swingDurMsEl = el('swingDurMs');
+    const batPowerEl   = el('batPower');
+    const sweetSpotEl  = el('sweetSpot');
+    const pinchThreshEl = el('pinchThresh');
+
+    const batScaleEl   = el('batScale');
+    const batYEl       = el('batY');
+    const batXEl       = el('batX');
+    const batZEl       = el('batZ');
+    const batRadiusEl  = el('batRadius');
+
+    const sGainEl = el('sGain');
+    const dragScaleEl = el('dragScale');
+    const magnusScaleEl = el('magnusScale');
+    const gravityScaleEl = el('gravityScale');
+    const windEl = el('wind');
+
+    const zoneScaleEl = el('zoneScale');
+    const swingWindowMsEl = el('swingWindowMs');
+    const aiAggEl = el('aiAgg');
+
+    const aimAssistLabel = el('aimAssistLabel');
+    const scatterLabel = el('scatterLabel');
+    const relLabel = el('relLabel');
+    const velRangeLabel = el('velRangeLabel');
+    const mphLabel = el('mphLabel');
+    const expoLabel = el('expoLabel');
+    const liftLabel = el('liftLabel');
+
+    const swingDurLabel = el('swingDurLabel');
+    const batPowerLabel = el('batPowerLabel');
+    const sweetLabel    = el('sweetLabel');
+    const pinchLabel    = el('pinchLabel');
+
+    const batScaleLabel = el('batScaleLabel');
+    const batYLabel     = el('batYLabel');
+    const batXLabel     = el('batXLabel');
+    const batZLabel     = el('batZLabel');
+    const batRadLabel   = el('batRadLabel');
+
+    const sGainLabel = el('sGainLabel');
+    const dragLabel = el('dragLabel');
+    const magLabel = el('magLabel');
+    const gravLabel = el('gravLabel');
+    const windLabel = el('windLabel');
+
+    const zoneScaleLabel = el('zoneScaleLabel');
+    const swingWinLabel = el('swingWinLabel');
+    const aiAggLabel = el('aiAggLabel');
+
+    const startCamBtn = el('startCamBtn');
+    const stopCamBtn  = el('stopCamBtn');
+    const resetBtn = el('resetBtn');
+    const trailBtn = el('trailBtn');
+    const slowBtn = el('slowBtn');
+    const pitchBtn = el('pitchBtn');
+    const aiBtn = el('aiBtn');
+    const followBtn = el('followBtn');
+    const swingBtn = el('swingBtn');
+
+    const statusLine = el('statusLine');
+    const liveReadEl = el('liveRead');
+
+    const inningEl = el('inning');
+    const outsEl = el('outs');
+    const awayScoreEl = el('awayScore');
+    const homeScoreEl = el('homeScore');
+    const countEl = el('count');
+    const basesEl = el('bases');
+
+    const lastCallEl = el('lastCall');
+    const plateLocEl = el('plateLoc');
+    const breakXYEl = el('breakXY');
+    const contactReadEl = el('contactRead');
+    const fieldReadEl = el('fieldRead');
+
+    const zoneEl = el('zone');
+    const targetDotEl = el('targetDot');
+    const landDotEl = el('landDot');
+    const plateReadoutEl = el('plateReadout');
+
+    const minimap = el('minimap');
+    const minimapReadoutEl = el('minimapReadout');
+    const mmCtx = minimap.getContext('2d');
+
+    const calloutEl = el('callout');
+
+    function showCallout(text, ms=850){
+      calloutEl.textContent = text;
+      calloutEl.style.opacity = 1;
+      setTimeout(()=>{ calloutEl.style.opacity = 0; }, ms);
+    }
+
+    function syncHud(){
+      aimAssistLabel.textContent = `${aimAssistEl.value}%`;
+      scatterLabel.textContent = `${scatterCmEl.value}cm`;
+      relLabel.textContent = Number(releaseThreshEl.value).toFixed(2);
+      velRangeLabel.textContent = Number(velRangeEl.value).toFixed(2);
+
+      const minM = Number(mphMinEl.value);
+      const maxM = Number(mphMaxEl.value);
+      if (maxM < minM + 1) mphMaxEl.value = String(minM + 1);
+      mphLabel.textContent = `${mphMinEl.value}–${mphMaxEl.value}`;
+
+      expoLabel.textContent = Number(velExpoEl.value).toFixed(2);
+      liftLabel.textContent = `${Number(liftAssistEl.value).toFixed(2)}m`;
+
+      swingDurLabel.textContent = `${swingDurMsEl.value}ms`;
+      batPowerLabel.textContent = `${Number(batPowerEl.value).toFixed(2)}×`;
+      sweetLabel.textContent = `${Number(sweetSpotEl.value).toFixed(2)}×`;
+      pinchLabel.textContent = Number(pinchThreshEl.value).toFixed(3);
+
+      batScaleLabel.textContent = `${Number(batScaleEl.value).toFixed(2)}×`;
+      batYLabel.textContent = `${Number(batYEl.value).toFixed(2)}m`;
+      batXLabel.textContent = `${Number(batXEl.value).toFixed(2)}m`;
+      batZLabel.textContent = `${Number(batZEl.value).toFixed(2)}m`;
+      batRadLabel.textContent = `${Number(batRadiusEl.value).toFixed(3)}m`;
+
+      sGainLabel.textContent = Number(sGainEl.value).toFixed(1);
+      dragLabel.textContent = Number(dragScaleEl.value).toFixed(2);
+      magLabel.textContent = Number(magnusScaleEl.value).toFixed(2);
+      gravLabel.textContent = Number(gravityScaleEl.value).toFixed(2);
+      windLabel.textContent = windEl.value;
+
+      zoneScaleLabel.textContent = `${Number(zoneScaleEl.value).toFixed(2)}×`;
+      swingWinLabel.textContent = `${swingWindowMsEl.value}ms`;
+      aiAggLabel.textContent = Number(aiAggEl.value).toFixed(2);
+    }
+    [
+      aimAssistEl, scatterCmEl, releaseThreshEl, velRangeEl, mphMinEl, mphMaxEl, velExpoEl, liftAssistEl,
+      swingDurMsEl, batPowerEl, sweetSpotEl, pinchThreshEl, batScaleEl, batYEl, batXEl, batZEl, batRadiusEl,
+      sGainEl, dragScaleEl, magnusScaleEl, gravityScaleEl, windEl,
+      zoneScaleEl, swingWindowMsEl, aiAggEl
+    ].forEach(x=>x.addEventListener('input',()=>{ syncHud(); }));
+    syncHud();
+
+    // -----------------------------
+    // Pitch presets (bias)
+    // -----------------------------
+    const PRESETS = {
+      fourSeam:  { rpm: 2400, axisBias: 0,   gyro: 10 },
+      twoSeam:   { rpm: 2100, axisBias: -35, gyro: 16 },
+      cutter:    { rpm: 2350, axisBias: 35,  gyro: 22 },
+      slider:    { rpm: 2500, axisBias: 120, gyro: 30 },
+      curve:     { rpm: 2700, axisBias: 180, gyro: 20 },
+      changeup:  { rpm: 1700, axisBias: -20, gyro: 28 },
+      splitter:  { rpm: 1200, axisBias: 160, gyro: 40 },
+      knuckle:   { rpm: 200,  axisBias: 0,   gyro: 70 }
+    };
+
+    // -----------------------------
+    // Strike zone at plate (meters)
+    // -----------------------------
+    const zoneBase = { z: -18.44, halfW: 0.216, yBot: 0.55, yTop: 1.15 };
+    let aim = { x: 0.0, y: 0.85 };
+
+    function currentZone(){
+      const s = Number(zoneScaleEl.value);
+      const midY = (zoneBase.yBot + zoneBase.yTop) * 0.5;
+      const halfH = (zoneBase.yTop - zoneBase.yBot) * 0.5 * s;
+      return { z: zoneBase.z, halfW: zoneBase.halfW * s, yBot: midY - halfH, yTop: midY + halfH };
+    }
+
+    // -----------------------------
+    // Batter cage panel mapping
+    // -----------------------------
+    const marks = [];
+    const MARK_MAX = 26;
+
+    function plateToPanel(plateX, plateY){
+      const z = currentZone();
+      const inset = 0.12;
+      const zoneMid = (z.yBot + z.yTop) * 0.5;
+      const halfH = (z.yTop - z.yBot) * 0.5;
+
+      let xNorm = plateX / (z.halfW + 1e-9);
+      let yNorm = (plateY - zoneMid) / (halfH + 1e-9);
+
+      xNorm = clamp(xNorm, -1.35, 1.35);
+      yNorm = clamp(yNorm, -1.35, 1.35);
+
+      const px = 0.5 + xNorm * (0.5 - inset);
+      const py = 0.5 - yNorm * (0.5 - inset);
+
+      return { px: clamp(px,0,1), py: clamp(py,0,1) };
+    }
+
+    function setLandingDotFromPlate(plateX, plateY){
+      const pos = plateToPanel(plateX, plateY);
+      landDotEl.style.left = (pos.px*100) + '%';
+      landDotEl.style.top  = (pos.py*100) + '%';
+      landDotEl.style.opacity = 1;
+      landDotEl.animate(
+        [{ transform:'translate(-50%,-50%) scale(1.9)', opacity:1 }, { transform:'translate(-50%,-50%) scale(1.0)', opacity:1 }],
+        { duration:160, easing:'ease-out' }
+      );
+    }
+
+    function addHistoryMark(px, py, type){
+      const m = document.createElement('div');
+      m.className = 'mark';
+      m.style.background = (type==='strike') ? '#60e38b' : (type==='ball' ? '#ff6c6c' : '#ffd96a');
+      const pos = plateToPanel(px, py);
+      m.style.left = `${pos.px*100}%`;
+      m.style.top  = `${pos.py*100}%`;
+      zoneEl.appendChild(m);
+
+      marks.push(m);
+      while (marks.length > MARK_MAX){
+        const old = marks.shift(); old.remove();
+      }
+      for (let i=0;i<marks.length;i++){
+        const age = (marks.length-1 - i);
+        marks[i].style.opacity = clamp(0.9 - age*0.03, 0.25, 0.9).toFixed(2);
+      }
+    }
+
+    function setAimFromPanel(clientX, clientY){
+      const r = zoneEl.getBoundingClientRect();
+      const px = clamp((clientX - r.left)/r.width, 0, 1);
+      const py = clamp((clientY - r.top)/r.height, 0, 1);
+
+      const inset = 0.12;
+      const ux = (px - 0.5) / (0.5 - inset);
+      const uy = (1 - py - 0.5) / (0.5 - inset);
+
+      const xNorm = clamp(ux, -1.35, 1.35);
+      const yNorm = clamp(uy, -1.35, 1.35);
+
+      const z = currentZone();
+      const midY = (z.yBot + z.yTop)*0.5;
+      const halfH = (z.yTop - z.yBot)*0.5;
+
+      aim.x = xNorm * z.halfW;
+      aim.y = midY + yNorm * halfH;
+
+      targetDotEl.style.left = (px*100) + '%';
+      targetDotEl.style.top  = (py*100) + '%';
+
+      plateReadoutEl.textContent = `Aim: x=${aim.x.toFixed(2)}m, y=${aim.y.toFixed(2)}m`;
+      targetRing.position.set(aim.x, aim.y, z.z + 0.05);
+    }
+
+    zoneEl.addEventListener('pointerdown', e=>{
+      setAimFromPanel(e.clientX, e.clientY);
+      zoneEl.setPointerCapture(e.pointerId);
+    });
+    zoneEl.addEventListener('pointermove', e=>{
+      if (e.buttons) setAimFromPanel(e.clientX, e.clientY);
+    });
+
+    // -----------------------------
+    // Game state
+    // -----------------------------
+    const game = {
+      balls: 0, strikes: 0, outs: 0,
+      inning: 1, half: 'top',
+      away: 0, home: 0,
+      runners: [false,false,false],
+      aiBatter: true,
+      role: "pitcher"
+    };
+
+    function updateGameHUD(){
+      inningEl.textContent = `${game.inning} ${game.half==='top'?'▲':'▼'}`;
+      outsEl.textContent = String(game.outs);
+      awayScoreEl.textContent = String(game.away);
+      homeScoreEl.textContent = String(game.home);
+      countEl.textContent = `${game.balls}-${game.strikes}`;
+      basesEl.textContent = `${game.runners[0]?'●':'○'} ${game.runners[1]?'●':'○'} ${game.runners[2]?'●':'○'}`;
+    }
+    function resetCount(){ game.balls=0; game.strikes=0; }
+    function clearBases(){ game.runners=[false,false,false]; }
+    function scoreRun(n=1){ if (game.half==='top') game.away += n; else game.home += n; }
+    function endHalfInning(){
+      game.outs = 0; resetCount(); clearBases();
+      game.half = (game.half==='top') ? 'bottom' : 'top';
+      if (game.half==='top') game.inning += 1;
+      lastCallEl.textContent = "SIDE RETIRED";
+      updateGameHUD();
+    }
+    function addOut(reason="OUT"){
+      game.outs += 1;
+      lastCallEl.textContent = reason;
+      resetCount();
+      if (game.outs >= 3) endHalfInning();
+      updateGameHUD();
+    }
+    function walk(){
+      const r = game.runners.slice();
+      if (!r[0]) game.runners[0]=true;
+      else if (!r[1]) { game.runners[1]=true; game.runners[0]=true; }
+      else if (!r[2]) { game.runners[2]=true; game.runners[1]=true; game.runners[0]=true; }
+      else { scoreRun(1); game.runners=[true,true,true]; }
+      lastCallEl.textContent = "WALK";
+      resetCount(); updateGameHUD();
+    }
+    function foulBall(){
+      if (game.strikes < 2) game.strikes += 1;
+      lastCallEl.textContent = "FOUL";
+      updateGameHUD();
+    }
+    function strike(reason="STRIKE"){
+      game.strikes += 1;
+      lastCallEl.textContent = reason;
+      if (game.strikes >= 3) addOut("STRIKEOUT");
+      else updateGameHUD();
+    }
+    function ballCall(){
+      game.balls += 1;
+      lastCallEl.textContent = "BALL";
+      if (game.balls >= 4) walk();
+      else updateGameHUD();
+    }
+    function advanceOnHit(bases){
+      const r = game.runners.slice();
+      let runs = 0;
+
+      if (bases===4){
+        runs = (r[0]?1:0)+(r[1]?1:0)+(r[2]?1:0)+1;
+        scoreRun(runs);
+        clearBases();
+        lastCallEl.textContent = "HOME RUN!";
+        resetCount(); updateGameHUD();
+        return;
+      }
+
+      const newR=[false,false,false];
+      for (let i=2;i>=0;i--){
+        if (!r[i]) continue;
+        const ni=i+bases;
+        if (ni>=3) runs += 1;
+        else newR[ni]=true;
+      }
+      scoreRun(runs);
+
+      if (bases===3) newR[2]=true;
+      if (bases===2) newR[1]=true;
+      if (bases===1) newR[0]=true;
+
+      game.runners = newR;
+
+      lastCallEl.textContent = (bases===1?"SINGLE":bases===2?"DOUBLE":"TRIPLE");
+      resetCount(); updateGameHUD();
+    }
+
+    // -----------------------------
+    // Scene (Three.js)
+    // -----------------------------
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.Fog(0x05060a, 10, 75);
+
+    const renderer = new THREE.WebGLRenderer({ antialias:true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.domElement.style.position = "fixed";
+    renderer.domElement.style.inset = "0";
+    document.body.appendChild(renderer.domElement);
+
+    const camera = new THREE.PerspectiveCamera(56, innerWidth/innerHeight, 0.05, 250);
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+    const keyLight = new THREE.DirectionalLight(0xffffff, 1.05);
+    keyLight.position.set(6,10,12);
+    scene.add(keyLight);
+
+    // Strong plate spotlight to make bat/ball SUPER visible
+    const plateSpot = new THREE.SpotLight(0xffffff, 2.2, 45, Math.PI/7, 0.5, 0.8);
+    plateSpot.position.set(0, 7.0, zoneBase.z + 4.0);
+    plateSpot.target.position.set(0, 1.0, zoneBase.z);
+    scene.add(plateSpot);
+    scene.add(plateSpot.target);
+
+    const rimLight = new THREE.DirectionalLight(0x9bd0ff, 0.35);
+    rimLight.position.set(-10,6,-12);
+    scene.add(rimLight);
+
+    // Field
+    const field = new THREE.Mesh(
+      new THREE.PlaneGeometry(120, 150),
+      new THREE.MeshStandardMaterial({ color:0x0a2a17, roughness:0.95 })
+    );
+    field.rotation.x = -Math.PI/2;
+    field.position.set(0,0,-10);
+    scene.add(field);
+
+    // Mound
+    const mound = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.1, 1.4, 0.25, 48),
+      new THREE.MeshStandardMaterial({ color:0x5b4636, roughness:1.0 })
+    );
+    mound.position.set(0,0.12,10);
+    scene.add(mound);
+
+    // Plate
+    const plate = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.28,0.28,0.03,6),
+      new THREE.MeshStandardMaterial({ color:0xe6e6e6, roughness:0.7 })
+    );
+    plate.rotation.y = Math.PI/6;
+    plate.position.set(0,0.02,zoneBase.z);
+    scene.add(plate);
+
+    // Zone outline
+    const zoneLineMat = new THREE.LineBasicMaterial({ color:0xffffff });
+    const zoneLineGeo = new THREE.BufferGeometry();
+    const zoneLine = new THREE.LineSegments(zoneLineGeo, zoneLineMat);
+    scene.add(zoneLine);
+
+    // Target ring
+    const targetRing = new THREE.Mesh(
+      new THREE.TorusGeometry(0.14, 0.012, 10, 56),
+      new THREE.MeshStandardMaterial({ color:0xff5050, roughness:0.35, emissive:0x220000, emissiveIntensity:0.8 })
+    );
+    targetRing.rotation.x = Math.PI/2;
+    scene.add(targetRing);
+
+    // Impact ring
+    const impactMat = new THREE.MeshBasicMaterial({ color:0x50d2ff, transparent:true, opacity:0.0, side:THREE.DoubleSide });
+    const impactRing = new THREE.Mesh(new THREE.RingGeometry(0.05, 0.095, 48), impactMat);
+    impactRing.rotation.x = -Math.PI/2;
+    impactRing.position.set(0,1.0,zoneBase.z+0.02);
+    impactRing.visible = false;
+    scene.add(impactRing);
+    let impactTTL = 0;
+    function showImpact3D(x,y){
+      impactRing.position.set(x, y, zoneBase.z + 0.02);
+      impactRing.visible = true;
+      impactTTL = 1.1;
+      impactMat.opacity = 0.95;
+      impactRing.scale.setScalar(1.0);
+    }
+    function updateImpactFade(dt){
+      if (impactTTL > 0){
+        impactTTL -= dt;
+        const t = clamp(impactTTL / 1.1, 0, 1);
+        impactMat.opacity = 0.18 + 0.78 * t;
+        impactRing.scale.setScalar(1.0 + (1.0 - t) * 0.5);
+        if (impactTTL <= 0){
+          impactRing.visible = false;
+          impactMat.opacity = 0.0;
+        }
+      }
+    }
+
+    // -----------------------------
+    // Batter model (simple silhouette)
+    // -----------------------------
+    const batter = new THREE.Group();
+    scene.add(batter);
+
+    const batterMat = new THREE.MeshStandardMaterial({
+      color:0x2a2f3f, roughness:0.95, emissive:0x0b0e18, emissiveIntensity:0.35
+    });
+
+    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.48, 6, 14), batterMat);
+    const head  = new THREE.Mesh(new THREE.SphereGeometry(0.14, 18, 12), batterMat);
+    const legL  = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.38, 6, 12), batterMat);
+    const legR  = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.38, 6, 12), batterMat);
+
+    torso.position.set(0.70, 1.05, zoneBase.z + 0.55);
+    head.position.set(0.72, 1.52, zoneBase.z + 0.55);
+    legL.position.set(0.62, 0.52, zoneBase.z + 0.55);
+    legR.position.set(0.78, 0.52, zoneBase.z + 0.55);
+
+    batter.add(torso, head, legL, legR);
+
+    // -----------------------------
+    // Fielder (for Fielding role)
+    // -----------------------------
+    const fielder = new THREE.Group();
+    scene.add(fielder);
+
+    const fielderBody = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.18, 0.50, 6, 14),
+      new THREE.MeshStandardMaterial({ color:0x2ad06a, roughness:0.85, emissive:0x082012, emissiveIntensity:0.35 })
+    );
+    fielderBody.position.set(0,0.60,0);
+    fielder.add(fielderBody);
+
+    const fielderState = {
+      pos: new THREE.Vector3(0,0,55),
+      speed: 12.5,
+      catchRadius: 1.0,
+      active: false,
+      keys: Object.create(null)
+    };
+    fielder.position.copy(fielderState.pos);
+
+    addEventListener('keydown', (e)=>{ fielderState.keys[e.code]=true; });
+    addEventListener('keyup',   (e)=>{ fielderState.keys[e.code]=false; });
+
+    function updateFielder(dt){
+      if (!fielderState.active) return;
+      const k = fielderState.keys;
+      const mx = (k['KeyA']||k['ArrowLeft'] ? -1:0) + (k['KeyD']||k['ArrowRight'] ? 1:0);
+      const mz = (k['KeyW']||k['ArrowUp'] ? 1:0) + (k['KeyS']||k['ArrowDown'] ? -1:0);
+      if (mx===0 && mz===0) return;
+
+      const v = new THREE.Vector3(mx,0,mz).normalize().multiplyScalar(fielderState.speed);
+      fielderState.pos.addScaledVector(v, dt);
+
+      fielderState.pos.x = clamp(fielderState.pos.x, -45, 45);
+      fielderState.pos.z = clamp(fielderState.pos.z, zoneBase.z + 8, 125);
+      fielder.position.set(fielderState.pos.x, 0, fielderState.pos.z);
+    }
+
+    // -----------------------------
+    // Bat model + swing animation
+    // -----------------------------
+    const bat = {
+      swinging:false,
+      t0:0,
+      duration:0.17,
+      lastSwingT:-999,
+      pivot: new THREE.Vector3(0.52, 0.95, zoneBase.z + 0.28),
+      segA: new THREE.Vector3(0.09, 0.00, 0.00), // handle side
+      segB: new THREE.Vector3(1.02, 0.00, 0.00), // barrel tip
+      radius: 0.055
+    };
+
+    const batPivot = new THREE.Group();
+    scene.add(batPivot);
+
+    const batMat = new THREE.MeshStandardMaterial({
+      color:0xcaa06d, roughness:0.62,
+      emissive:0x2b1a06, emissiveIntensity:0.55
+    });
+
+    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.030, 0.040, 0.30, 22), batMat);
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.050, 0.070, 0.88, 26), batMat);
+    handle.rotation.z = Math.PI/2;
+    barrel.rotation.z = Math.PI/2;
+
+    handle.position.set(0.22, 0, 0);
+    barrel.position.set(0.70, 0, 0);
+
+    const knob = new THREE.Mesh(new THREE.SphereGeometry(0.055, 20, 14),
+      new THREE.MeshStandardMaterial({ color:0x24170c, roughness:0.85, emissive:0x080503, emissiveIntensity:0.6 })
+    );
+    knob.position.set(0.05, 0, 0);
+
+    batPivot.add(handle, barrel, knob);
+
+    // Bat trail line
+    const batTrailMax = 64;
+    const batTrailPositions = new Float32Array(batTrailMax*3);
+    const batTrailGeo = new THREE.BufferGeometry();
+    batTrailGeo.setAttribute('position', new THREE.BufferAttribute(batTrailPositions, 3));
+    batTrailGeo.setDrawRange(0,0);
+    const batTrail = new THREE.Line(
+      batTrailGeo,
+      new THREE.LineBasicMaterial({ color:0x80d4ff, transparent:true, opacity:0.55 })
+    );
+    scene.add(batTrail);
+    let batTrailCount = 0;
+    function batTrailReset(){ batTrailCount=0; batTrailGeo.setDrawRange(0,0); batTrailGeo.attributes.position.needsUpdate=true; }
+    function batTrailAdd(p){
+      if (batTrailCount >= batTrailMax){
+        for (let i=1;i<batTrailMax;i++){
+          batTrailPositions[(i-1)*3+0]=batTrailPositions[i*3+0];
+          batTrailPositions[(i-1)*3+1]=batTrailPositions[i*3+1];
+          batTrailPositions[(i-1)*3+2]=batTrailPositions[i*3+2];
+        }
+        batTrailCount = batTrailMax-1;
+      }
+      batTrailPositions[batTrailCount*3+0]=p.x;
+      batTrailPositions[batTrailCount*3+1]=p.y;
+      batTrailPositions[batTrailCount*3+2]=p.z;
+      batTrailCount++;
+      batTrailGeo.setDrawRange(0, batTrailCount);
+      batTrailGeo.attributes.position.needsUpdate = true;
+    }
+
+    function setBatHomePose(){
+      const z = currentZone();
+      bat.radius = Number(batRadiusEl.value);
+      bat.pivot.set(Number(batXEl.value), Number(batYEl.value), z.z + Number(batZEl.value));
+
+      batPivot.position.copy(bat.pivot);
+      batPivot.rotation.set(0,0,0);
+
+      // Loaded behind shoulder, facing pitcher
+      batPivot.rotation.y = THREE.MathUtils.degToRad(165);
+      batPivot.rotation.z = THREE.MathUtils.degToRad(14);
+      batPivot.rotation.x = THREE.MathUtils.degToRad(-6);
+
+      const s = Number(batScaleEl.value);
+      batPivot.scale.setScalar(s);
+
+      batter.position.set(0,0,0);
+    }
+
+    function startBatSwing(){
+      bat.swinging = true;
+      bat.t0 = nowS();
+      bat.duration = Number(swingDurMsEl.value)/1000;
+      bat.lastSwingT = bat.t0;
+      batTrailReset();
+      showCallout("SWING!");
+    }
+
+    function updateBatSwing(){
+      if (!bat.swinging) return;
+
+      const t = (nowS() - bat.t0) / (bat.duration + 1e-9);
+      const tt = clamp(t, 0, 1);
+
+      const ease = tt<0.5 ? (2*tt*tt) : (1 - Math.pow(-2*tt+2,2)/2);
+
+      const yawStart = 172, yawEnd = 48;
+      const rollStart = 16, rollEnd = -10;
+      const pitchStart = -6, pitchEnd = 10;
+
+      batPivot.position.copy(bat.pivot);
+      batPivot.rotation.y = THREE.MathUtils.degToRad(lerp(yawStart, yawEnd, ease));
+      batPivot.rotation.z = THREE.MathUtils.degToRad(lerp(rollStart, rollEnd, ease));
+      batPivot.rotation.x = THREE.MathUtils.degToRad(lerp(pitchStart, pitchEnd, ease));
+
+      // trail at barrel tip
+      const tipLocal = new THREE.Vector3(1.05, 0, 0);
+      const tipWorld = tipLocal.applyMatrix4(batPivot.matrixWorld);
+      batTrailAdd(tipWorld);
+
+      if (t >= 1){
+        bat.swinging = false;
+        setTimeout(()=>{ if (!bat.swinging) setBatHomePose(); }, 80);
+      }
+    }
+
+    // -----------------------------
+    // Zone outline update
+    // -----------------------------
+    function updateZoneOutline(){
+      const z = currentZone();
+      const arr = new Float32Array([
+        -z.halfW, z.yBot, z.z,   z.halfW, z.yBot, z.z,
+         z.halfW, z.yBot, z.z,   z.halfW, z.yTop, z.z,
+         z.halfW, z.yTop, z.z,  -z.halfW, z.yTop, z.z,
+        -z.halfW, z.yTop, z.z,  -z.halfW, z.yBot, z.z
+      ]);
+      zoneLineGeo.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+      zoneLineGeo.computeBoundingSphere();
+
+      targetRing.position.set(aim.x, aim.y, z.z + 0.05);
+      setBatHomePose();
+    }
+    zoneScaleEl.addEventListener('input', updateZoneOutline);
+    [batXEl, batYEl, batZEl, batScaleEl, batRadiusEl].forEach(x=>x.addEventListener('input', setBatHomePose));
+
+    // -----------------------------
+    // Trail (ball)
+    // -----------------------------
+    let trailOn = true;
+    const trailMax = 260;
+    const trailPositions = new Float32Array(trailMax*3);
+    const trailGeo = new THREE.BufferGeometry();
+    trailGeo.setAttribute('position', new THREE.BufferAttribute(trailPositions, 3));
+    trailGeo.setDrawRange(0,0);
+    const trailMat = new THREE.LineBasicMaterial({ color:0xff5050, transparent:true, opacity:0.70 });
+    const trailLine = new THREE.Line(trailGeo, trailMat);
+    scene.add(trailLine);
+
+    let trailCount = 0;
+    function trailReset(){ trailCount=0; trailGeo.setDrawRange(0,0); trailGeo.attributes.position.needsUpdate=true; }
+    function trailAdd(p){
+      if (!trailOn) return;
+      if (trailCount >= trailMax){
+        for (let i=1;i<trailMax;i++){
+          trailPositions[(i-1)*3+0]=trailPositions[i*3+0];
+          trailPositions[(i-1)*3+1]=trailPositions[i*3+1];
+          trailPositions[(i-1)*3+2]=trailPositions[i*3+2];
+        }
+        trailCount = trailMax-1;
+      }
+      trailPositions[trailCount*3+0]=p.x;
+      trailPositions[trailCount*3+1]=p.y;
+      trailPositions[trailCount*3+2]=p.z;
+      trailCount++;
+      trailGeo.setDrawRange(0, trailCount);
+      trailGeo.attributes.position.needsUpdate = true;
+    }
+
+    // -----------------------------
+    // Views / Camera modes (Pitcher / Batter / Field + others)
+    // -----------------------------
+    const lookAt = new THREE.Vector3(0,1.2,zoneBase.z+1.5);
+    const orbit = { theta:Math.PI, phi:0.14, radius:10.5, dragging:false, lx:0, ly:0 };
+
+    const VIEW = { PITCHER:"PITCHER", CATCHER:"CATCHER", BATTER:"BATTER", FIELD:"FIELD", SIDE:"SIDE" };
+    let viewMode = VIEW.CATCHER;
+
+    let followCamEnabled = true;        // toggled by button
+    let followCamActive = false;        // only while ball in play
+    let viewBeforeFollow = VIEW.CATCHER;
+
+    function updateOrbitCamera(){
+      orbit.phi = clamp(orbit.phi, -0.05, 0.70);
+      orbit.radius = clamp(orbit.radius, 6, 60);
+      const x = lookAt.x + orbit.radius * Math.sin(orbit.theta) * Math.cos(orbit.phi);
+      const y = lookAt.y + orbit.radius * Math.sin(orbit.phi) + 0.2;
+      const z = lookAt.z + orbit.radius * Math.cos(orbit.theta) * Math.cos(orbit.phi);
+      camera.position.set(x,y,z);
+      camera.lookAt(lookAt);
+    }
+
+    function setView(mode){
+      viewMode = mode;
+      followCamActive = false;
+      if (mode===VIEW.PITCHER){
+        lookAt.set(0, 1.15, zoneBase.z + 0.9);
+        orbit.theta = 0.0;
+        orbit.phi = 0.12;
+        orbit.radius = 32.0;
+      }
+      if (mode===VIEW.CATCHER){
+        lookAt.set(0, 1.2, zoneBase.z + 1.0);
+        orbit.theta = Math.PI;
+        orbit.phi = 0.14;
+        orbit.radius = 10.5;
+      }
+      if (mode===VIEW.BATTER){
+        lookAt.set(0, 1.4, 8.0);
+        orbit.theta = Math.PI;
+        orbit.phi = 0.08;
+        orbit.radius = 29.0;
+      }
+      if (mode===VIEW.FIELD){
+        lookAt.set(0, 2.2, 48.0);
+        orbit.theta = Math.PI;
+        orbit.phi = 0.42;
+        orbit.radius = 56.0;
+      }
+      if (mode===VIEW.SIDE){
+        lookAt.set(0, 1.2, zoneBase.z + 0.5);
+        orbit.theta = -0.55;
+        orbit.phi = 0.18;
+        orbit.radius = 15.0;
+      }
+      viewSel.value = mode;
+      updateOrbitCamera();
+    }
+
+    // default
+    setView(VIEW.CATCHER);
+
+    renderer.domElement.addEventListener('pointerdown', e=>{
+      const inUI = e.target.closest && (e.target.closest('#hud') || e.target.closest('#rightStack'));
+      if (inUI) return;
+      orbit.dragging=true; orbit.lx=e.clientX; orbit.ly=e.clientY;
+      renderer.domElement.setPointerCapture(e.pointerId);
+    });
+    renderer.domElement.addEventListener('pointermove', e=>{
+      if (!orbit.dragging) return;
+      const dx=e.clientX-orbit.lx, dy=e.clientY-orbit.ly;
+      orbit.lx=e.clientX; orbit.ly=e.clientY;
+      orbit.theta -= dx*0.004;
+      orbit.phi   -= dy*0.003;
+      updateOrbitCamera();
+    });
+    renderer.domElement.addEventListener('pointerup', ()=> orbit.dragging=false );
+    renderer.domElement.addEventListener('wheel', e=>{
+      orbit.radius += e.deltaY*0.01;
+      updateOrbitCamera();
+    }, { passive:true });
+
+    viewSel.addEventListener('change', ()=> setView(viewSel.value));
+
+    // -----------------------------
+    // SVG baseball texture
+    // -----------------------------
+    function baseballSVG(){
+      return `
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <radialGradient id="shine" cx="35%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="40%" stop-color="#f6f6f6"/>
+      <stop offset="75%" stop-color="#e7e7e7"/>
+      <stop offset="100%" stop-color="#d9d9d9"/>
+    </radialGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="2.2"/></filter>
+    <path id="seamLeft" d="M330 180 C 250 310 250 470 330 600 C 420 745 420 850 330 960" />
+    <path id="seamRight" d="M694 180 C 774 310 774 470 694 600 C 604 745 604 850 694 960" />
+  </defs>
+  <circle cx="512" cy="512" r="480" fill="url(#shine)"/>
+  <circle cx="512" cy="512" r="480" fill="none" stroke="#ffffff" stroke-opacity="0.6" stroke-width="6"/>
+  <circle cx="512" cy="512" r="480" fill="none" stroke="#000" stroke-opacity="0.10" stroke-width="30" filter="url(#soft)"/>
+  <g fill="none" stroke="#b5202a" stroke-width="18" stroke-linecap="round" stroke-linejoin="round">
+    <use href="#seamLeft"/><use href="#seamRight"/>
+  </g>
+  <g stroke="#b5202a" stroke-width="10" stroke-linecap="round">
+    ${Array.from({length:22}).map((_,i)=>{
+      const t=i/21,y=190+t*750,x=330+Math.sin(t*6.0)*18;
+      return `<line x1="${x-45}" y1="${y-10}" x2="${x-15}" y2="${y+10}"/>`;
+    }).join('')}
+  </g>
+  <g stroke="#b5202a" stroke-width="10" stroke-linecap="round">
+    ${Array.from({length:22}).map((_,i)=>{
+      const t=i/21,y=190+t*750,x=694-Math.sin(t*6.0)*18;
+      return `<line x1="${x+45}" y1="${y-10}" x2="${x+15}" y2="${y+10}"/>`;
+    }).join('')}
+  </g>
+  <ellipse cx="380" cy="330" rx="120" ry="85" fill="#fff" opacity="0.22" filter="url(#soft)"/>
+</svg>`;
+    }
+    function makeSVGTexture(svgText){
+      return new Promise((resolve)=>{
+        const img = new Image();
+        img.onload = ()=>{
+          const c = document.createElement('canvas');
+          c.width=1024; c.height=1024;
+          const ctx = c.getContext('2d');
+          ctx.drawImage(img,0,0);
+          const tex = new THREE.CanvasTexture(c);
+          tex.colorSpace = THREE.SRGBColorSpace;
+          tex.anisotropy = 8;
+          tex.needsUpdate = true;
+          resolve(tex);
+        };
+        img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgText);
+      });
+    }
+
+    // -----------------------------
+    // Ball
+    // -----------------------------
+    const ballRadius = 0.040;
+    const ballGeo = new THREE.SphereGeometry(ballRadius, 52, 36);
+    const ballMat = new THREE.MeshStandardMaterial({ color:0xffffff, roughness:0.40, metalness:0.0, emissive:0x101010, emissiveIntensity:0.25 });
+    const ballMesh = new THREE.Mesh(ballGeo, ballMat);
+    scene.add(ballMesh);
+
+    makeSVGTexture(baseballSVG()).then(tex=>{
+      ballMat.map = tex;
+      ballMat.needsUpdate = true;
+    });
+
+    // -----------------------------
+    // Physics
+    // -----------------------------
+    const gVec = new THREE.Vector3(0, -9.81, 0);
+    const air = {
+      rho: 1.225,
+      Cd: 0.35,
+      area: Math.PI * ballRadius * ballRadius,
+      mass: 0.145,
+      magnusK: 0.00055
+    };
+
+    function accelDrag(v){
+      const s = v.length();
+      if (s < 1e-5) return new THREE.Vector3();
+      const k = 0.5 * air.rho * air.Cd * air.area / air.mass;
+      return v.clone().multiplyScalar(-k * s);
+    }
+    function accelMagnus(v, omega){
+      return new THREE.Vector3().crossVectors(omega, v).multiplyScalar(air.magnusK);
+    }
+
+    const pos = new THREE.Vector3(0, 1.75, 10.0);
+    const vel = new THREE.Vector3(0, 0, -40);
+    const omega = new THREE.Vector3(0, 0, 0);
+    const windVec = new THREE.Vector3(0,0,0);
+
+    let refPos = null, refVel = null;
+    let breakAtPlate = { x:0, y:0 };
+
+    let ballMode = "idle"; // idle | pitch | inPlay
+    let slowMo = false;
+
+    let prevZ = pos.z;
+    const prevPos = new THREE.Vector3();
+    const prevRefPos = new THREE.Vector3();
+
+    function applyVisualSpin(dt){
+      const w = omega.length();
+      if (w < 1e-4) return;
+      const axis = omega.clone().normalize();
+      const visualScale = 0.22;
+      const dTheta = clamp(w * dt * visualScale, 0, 2.0);
+      ballMesh.rotateOnWorldAxis(axis, dTheta);
+    }
+
+    function stepPhysics(dt){
+      const dragScale = Number(dragScaleEl.value);
+      const magnusScale = Number(magnusScaleEl.value);
+      const gravScale = Number(gravityScaleEl.value);
+
+      const vAir = vel.clone().sub(windVec);
+      const a = new THREE.Vector3();
+      a.addScaledVector(gVec, gravScale);
+      a.addScaledVector(accelDrag(vAir), dragScale);
+      a.addScaledVector(accelMagnus(vAir, omega), magnusScale);
+
+      vel.addScaledVector(a, dt);
+      pos.addScaledVector(vel, dt);
+
+      if (refPos && refVel){
+        const vAirRef = refVel.clone().sub(windVec);
+        const aRef = new THREE.Vector3();
+        aRef.addScaledVector(gVec, gravScale);
+        aRef.addScaledVector(accelDrag(vAirRef), dragScale);
+        refVel.addScaledVector(aRef, dt);
+        refPos.addScaledVector(refVel, dt);
+      }
+
+      ballMesh.position.copy(pos);
+      trailAdd(pos);
+
+      // scale effect (slightly bigger near plate)
+      const z = currentZone();
+      const zNorm = clamp((10 - pos.z) / (10 - z.z), 0, 1);
+      const scale = lerp(1.18, 0.95, zNorm);
+      ballMesh.scale.setScalar(scale);
+
+      applyVisualSpin(dt);
+    }
+
+    // -----------------------------
+    // Reliable ballistic solver
+    // -----------------------------
+    function solveBallisticVelocity(start, target, speedMps){
+      const dx = target.x - start.x;
+      const dy = target.y - start.y;
+      const dz = target.z - start.z;
+
+      const g = 9.81 * Number(gravityScaleEl.value);
+      const tMin = 0.40;
+      const tMax = 0.92;
+
+      let bestT = 0.62;
+      let bestErr = 1e9;
+
+      for (let i=0;i<=160;i++){
+        const t = tMin + (tMax - tMin) * (i/160);
+        const vx = dx / t;
+        const vz = dz / t;
+        const vy = (dy + 0.5 * g * t * t) / t;
+        const s = Math.hypot(vx, vy, vz);
+        const err = Math.abs(s - speedMps);
+        if (err < bestErr){
+          bestErr = err;
+          bestT = t;
+        }
+      }
+      const t = bestT;
+      const vx = dx / t;
+      const vz = dz / t;
+      const vy = (dy + 0.5 * g * t * t) / t;
+      return { v: new THREE.Vector3(vx, vy, vz), t };
+    }
+
+    // -----------------------------
+    // Aim assist
+    // -----------------------------
+    function assistedAim(rawAim){
+      const z = currentZone();
+      const assist = Number(aimAssistEl.value) / 100;
+      const clamped = { x: clamp(rawAim.x, -z.halfW, z.halfW), y: clamp(rawAim.y, z.yBot, z.yTop) };
+      return { x: lerp(rawAim.x, clamped.x, assist), y: lerp(rawAim.y, clamped.y, assist) };
+    }
+
+    // -----------------------------
+    // Hand mapping
+    // -----------------------------
+    function mapHandToRelease(wrist){
+      const rx = (wrist.x - 0.5) * 0.95;
+      const ry = 1.78 + (0.5 - wrist.y) * 0.95;
+      return new THREE.Vector3(rx, clamp(ry, 1.35, 2.35), 10.0);
+    }
+    function mapHandToAim(wrist){
+      const z = currentZone();
+      const ax = (wrist.x - 0.5) * (z.halfW * 2.2);
+      const ay = ((z.yBot+z.yTop)*0.5) + (0.5 - wrist.y) * ((z.yTop - z.yBot) * 0.85);
+      return { x: clamp(ax, -0.70, 0.70), y: clamp(ay, 0.20, 1.65) };
+    }
+
+    function buildSpinVector(axisDeg, rpm, gyroPct){
+      const w = (rpm * 2*Math.PI)/60;
+      const gyro = clamp(gyroPct/100, 0, 1);
+      const eff = 1 - gyro;
+      const theta = THREE.MathUtils.degToRad(axisDeg);
+      const wxy = w * eff;
+      const ox = Math.cos(theta) * wxy;
+      const oy = Math.sin(theta) * wxy;
+      const oz = -w * gyro;
+      return new THREE.Vector3(ox, oy, oz);
+    }
+
+    function randn(){ return (Math.random()+Math.random()+Math.random()+Math.random()-2) * 0.5; }
+
+    function computePitchSpeedMph(peakVel){
+      const relThresh = Number(releaseThreshEl.value);
+      const velRange = Number(velRangeEl.value);
+      const expo = Number(velExpoEl.value);
+      const mphMin = Number(mphMinEl.value);
+      const mphMax = Number(mphMaxEl.value);
+      const v01 = clamp((peakVel - relThresh) / (velRange + 1e-9), 0, 1);
+      const curved = Math.pow(v01, expo);
+      return lerp(mphMin, mphMax, curved);
+    }
+
+    // -----------------------------
+    // Plate / markers
+    // -----------------------------
+    function showPlateResult(plateX, plateY, type){
+      setLandingDotFromPlate(plateX, plateY);
+      addHistoryMark(plateX, plateY, type);
+      showImpact3D(plateX, plateY);
+
+      plateLocEl.textContent = `x=${plateX.toFixed(2)}m, y=${plateY.toFixed(2)}m`;
+      breakXYEl.textContent  = `Δx=${breakAtPlate.x.toFixed(2)}m, Δy=${breakAtPlate.y.toFixed(2)}m`;
+    }
+
+    function resolveAtPlate(plateX, plateY){
+      const z = currentZone();
+      const inZone = (Math.abs(plateX) <= z.halfW) && (plateY >= z.yBot) && (plateY <= z.yTop);
+
+      const swingWindow = Number(swingWindowMsEl.value)/1000;
+      const swung = (nowS() - bat.lastSwingT) <= swingWindow;
+
+      if (!swung){
+        if (inZone){
+          showPlateResult(plateX, plateY, 'strike');
+          strike("CALLED STRIKE");
+        } else {
+          showPlateResult(plateX, plateY, 'ball');
+          ballCall();
+        }
+        return;
+      }
+
+      // swung but no contact -> whiff
+      showPlateResult(plateX, plateY, 'strike');
+      strike("SWINGING STRIKE");
+    }
+
+    function handlePlateCross(){
+      if (ballMode !== "pitch") return;
+      const z = currentZone();
+      const z0 = prevZ, z1 = pos.z;
+
+      if (z0 > z.z && z1 <= z.z){
+        const t = (z0 - z.z) / (z0 - z1 + 1e-9);
+        const plateX = lerp(prevPos.x, pos.x, t);
+        const plateY = lerp(prevPos.y, pos.y, t);
+
+        if (refPos){
+          const refPlateX = lerp(prevRefPos.x, refPos.x, t);
+          const refPlateY = lerp(prevRefPos.y, refPos.y, t);
+          breakAtPlate.x = plateX - refPlateX;
+          breakAtPlate.y = plateY - refPlateY;
+        }
+
+        resolveAtPlate(plateX, plateY);
+        ballMode = "idle";
+        scheduleNextAIPitch(0.7);
+        setTimeout(()=>{ if (ballMode==="idle") resetBallToReady(); }, 220);
+      }
+    }
+
+    // -----------------------------
+    // Reset / ready state
+    // -----------------------------
+    function resetBallToReady(){
+      trailReset();
+      trailMat.color.setHex(0xff5050);
+      refPos = null; refVel = null;
+      breakAtPlate = {x:0,y:0};
+      contactReadEl.textContent = "—";
+      fieldReadEl.textContent = "—";
+      landDotEl.style.opacity = 0;
+      minimapState.projected = null;
+      minimapState.landing = null;
+      minimapState.lastFair = null;
+      minimapReadoutEl.textContent = "—";
+
+      // default "ready" ball position depends on role:
+      if (game.role === "pitcher" && handState.present){
+        // let hand drive visuals
+        ballMode = "idle";
+        return;
+      }
+
+      // otherwise, put it at pitcher release spot
+      pos.set(0, 1.75, 10.0);
+      vel.set(0, 0, -40);
+      omega.set(0,0,0);
+      ballMesh.position.copy(pos);
+      ballMesh.scale.setScalar(1.0);
+      ballMode = "idle";
+      setBatHomePose();
+    }
+
+    // -----------------------------
+    // Swing request
+    // -----------------------------
+    function requestSwing(source="manual"){
+      if (bat.swinging) return;
+      bat.lastSwingT = nowS();
+      startBatSwing();
+    }
+    addEventListener('keydown',(e)=>{
+      if (e.code==="Space"){ e.preventDefault(); requestSwing("manual"); }
+    });
+    swingBtn.addEventListener('click', ()=>requestSwing("btn"));
+
+    // -----------------------------
+    // Pitch request (keyboard fallback)
+    // -----------------------------
+    function requestPitch(source="kbd"){
+      if (ballMode !== "idle") return;
+      // quick AI-style pitch to current aim target
+      doPitch({
+        releasePos: new THREE.Vector3(0, 1.75, 10.0),
+        mph: lerp(Number(mphMinEl.value), Number(mphMaxEl.value), 0.6 + 0.25*Math.random()),
+        axisDeg: (PRESETS[pitchTypeEl.value]||PRESETS.fourSeam).axisBias + randn()*18,
+        rpm: (PRESETS[pitchTypeEl.value]||PRESETS.fourSeam).rpm + randn()*220,
+        gyro: (PRESETS[pitchTypeEl.value]||PRESETS.fourSeam).gyro + randn()*10,
+        aimX: aim.x,
+        aimY: aim.y
+      });
+      showCallout(source==="ai" ? "AI PITCH!" : "PITCH!", 650);
+    }
+
+    addEventListener('keydown',(e)=>{
+      if (e.code==="KeyP"){ e.preventDefault(); requestPitch("kbd"); }
+    });
+    pitchBtn.addEventListener('click', ()=>requestPitch("btn"));
+
+    // -----------------------------
+    // Bat collision helpers
+    // -----------------------------
+    function closestPointOnSegmentWithT(p, a, b){
+      const ab = b.clone().sub(a);
+      const denom = ab.dot(ab) + 1e-9;
+      const t = clamp(p.clone().sub(a).dot(ab) / denom, 0, 1);
+      const point = a.clone().addScaledVector(ab, t);
+      return { point, t };
+    }
+    function getBatSegmentWorld(){
+      const A = bat.segA.clone().applyMatrix4(batPivot.matrixWorld);
+      const B = bat.segB.clone().applyMatrix4(batPivot.matrixWorld);
+      return { A, B };
+    }
+
+    // -----------------------------
+    // Contact quality + hit into play
+    // -----------------------------
+    function qualityFromImpact(tAlong, centered01){
+      // tAlong: 0 = handle, 1 = barrel tip
+      const sweetCenter = 0.78;
+      const sweetWidth = 0.12 * Number(sweetSpotEl.value);
+
+      const d = (tAlong - sweetCenter) / (sweetWidth + 1e-9);
+      const barrel = Math.exp(-d*d);                 // 0..1
+      const handlePenalty = clamp((0.45 - tAlong) / 0.45, 0, 1); // 0..1
+      const q = clamp(0.12 + 0.70*barrel + 0.30*centered01 - 0.55*handlePenalty, 0, 1);
+      return { q, barrel, handlePenalty };
+    }
+
+    function labelFromQuality(q, tAlong){
+      const part = (tAlong < 0.40) ? "HANDLE" : (tAlong > 0.68 ? "BARREL" : "MID");
+      const tag = (q > 0.86) ? "PERFECT" : (q > 0.68 ? "SWEET" : (q > 0.42 ? "OK" : "WEAK"));
+      return `${tag} • ${part}`;
+    }
+
+    function applyContactPhysics(contactPoint, batDir, batSpeed, qInfo){
+      // qInfo: { q, tAlong, centered01, label }
+      const pwr = Number(batPowerEl.value);
+      const vin = vel.clone();
+      const speedIn = vin.length();
+
+      // Launch model:
+      // - Weak / handle => lower launch + less exit (jammed)
+      // - Sweet / barrel => higher exit + cleaner loft
+      const q = qInfo.q;
+      const tAlong = qInfo.tAlong;
+      const handlePenalty = qInfo.handlePenalty;
+
+      // Spray based on contact x (right-handed batter: pull = -x, oppo = +x)
+      const pull = clamp((-contactPoint.x) / 0.35, -1, 1);
+      const handleJam = clamp(handlePenalty * 1.2, 0, 1);
+
+      // Base direction into field (+Z)
+      // More pull on jam/handle, more true up-the-middle on barrel.
+      const sprayX = lerp(pull * 0.55, pull * 0.25, q) + (Math.random()-0.5)*0.05;
+      const loftY  = lerp(0.06, 0.42, q) - handleJam*0.12 + (Math.random()-0.5)*0.03;
+
+      let dir = new THREE.Vector3(
+        sprayX,
+        loftY,
+        1.0
+      ).normalize();
+
+      // Exit velocity
+      const baseExit = (speedIn * 0.52 + batSpeed * 0.95);
+      const exit = clamp(baseExit * (0.58 + 0.58*q) * (1.0 - 0.22*handleJam) * pwr, 18, 86);
+      vel.copy(dir.multiplyScalar(exit));
+
+      // Spin: good contact => more backspin, weak/handle => more sidespin/topspin
+      const backspin = lerp(10, 46, q);
+      const sidespin = lerp(28, 10, q) * Math.sign(sprayX || 1);
+      const topspin  = lerp(16, 4, qInfo.centered01) * (1-q);
+      omega.set(-backspin, sidespin, -topspin);
+
+      // Trail color swap on contact
+      trailMat.color.setHex(0xffd96a);
+
+      // Readouts
+      const exitMph = mpsToMph(exit);
+      const la = THREE.MathUtils.radToDeg(Math.asin(clamp(vel.y / (vel.length()+1e-9), -1, 1)));
+      contactReadEl.textContent = `exit=${exitMph.toFixed(0)}mph • LA=${la.toFixed(0)}° • ${qInfo.label}`;
+      showCallout(q > 0.86 ? "BARRELED!" : "CONTACT!", 900);
+
+      // Plate display
+      showPlateResult(contactPoint.x, contactPoint.y, 'play');
+
+      lastCallEl.textContent = "IN PLAY";
+      updateGameHUD();
+
+      // Enter in-play
+      ballMode = "inPlay";
+      refPos = null; refVel = null;
+
+      // Follow cam only if enabled
+      if (followCamEnabled){
+        viewBeforeFollow = viewMode;
+        followCamActive = true;
+      }
+
+      // Predict landing for minimap
+      minimapState.projected = predictLanding(pos.clone(), vel.clone(), omega.clone());
+      minimapState.landing = null;
+      minimapState.lastFair = null;
+    }
+
+    function checkBatCollisionAndHit(){
+      if (ballMode !== "pitch") return false;
+      if (!bat.swinging) return false;
+
+      const z = currentZone();
+      if (pos.z < z.z - 0.9 || pos.z > z.z + 2.0) return false;
+
+      batPivot.updateMatrixWorld(true);
+      const {A,B} = getBatSegmentWorld();
+      const hit = closestPointOnSegmentWithT(pos, A, B);
+
+      const r = (bat.radius * Number(sweetSpotEl.value)) + ballRadius;
+      const d = pos.distanceTo(hit.point);
+
+      if (d <= r){
+        const centered01 = clamp(1 - (d / (r + 1e-9)), 0, 1);
+
+        // Bat direction = local +X axis in world
+        const xAxis = new THREE.Vector3(1,0,0)
+          .applyQuaternion(batPivot.getWorldQuaternion(new THREE.Quaternion()))
+          .normalize();
+
+        // Bat speed proxy (shorter duration => faster bat)
+        const dur = Number(swingDurMsEl.value)/1000;
+        const batSpeed = clamp(30 / (dur + 1e-6), 18, 65);
+
+        const qCalc = qualityFromImpact(hit.t, centered01);
+        const qInfo = {
+          q: qCalc.q,
+          tAlong: hit.t,
+          centered01,
+          handlePenalty: qCalc.handlePenalty,
+          label: labelFromQuality(qCalc.q, hit.t)
+        };
+
+        applyContactPhysics(pos.clone(), xAxis, batSpeed, qInfo);
+        return true;
+      }
+      return false;
+    }
+
+    // -----------------------------
+    // Fair/Foul + landing/outcome
+    // -----------------------------
+    function isFairByAngle(x, z){
+      const dz = (z - zoneBase.z);
+      if (dz <= 0.01) return true;
+      const ang = Math.abs(THREE.MathUtils.radToDeg(Math.atan2(x, dz)));
+      return ang <= 45.0;
+    }
+
+    function classifyOutcomeFromDistance(distFt, launchAngleDeg){
+      // Deterministic (simple), but feels more "baseball" than a single dz threshold.
+      if (distFt > 385 && launchAngleDeg > 18 && launchAngleDeg < 42) return { type:"HR", bases:4 };
+      if (launchAngleDeg > 55 && distFt < 190) return { type:"OUT", bases:0 }; // pop-up
+      if (launchAngleDeg < 8 && distFt < 170) return { type:"OUT", bases:0 };  // weak grounder
+      if (distFt > 315) return { type:"TRIPLE", bases:3 };
+      if (distFt > 245) return { type:"DOUBLE", bases:2 };
+      if (distFt > 155) return { type:"SINGLE", bases:1 };
+
+      // borderline: small chance to squeak through (single)
+      if (distFt > 120) return { type:"SINGLE", bases:1 };
+      return { type:"OUT", bases:0 };
+    }
+
+    function handleInPlayLanding(){
+      if (ballMode !== "inPlay") return false;
+
+      // Catch check (fielder)
+      if (fielderState.active){
+        const dx = pos.x - fielderState.pos.x;
+        const dz = pos.z - fielderState.pos.z;
+        const d = Math.hypot(dx, dz);
+
+        // allow catches while ball is still in the air
+        if (pos.y < 2.0 && pos.y > 0.25 && d < fielderState.catchRadius && pos.z > zoneBase.z + 10){
+          addOut("CAUGHT!");
+          showCallout("CAUGHT!", 900);
+          fieldReadEl.textContent = "Catch: YES";
+          ballMode = "idle";
+          followCamActive = false;
+          scheduleNextAIPitch(1.0);
+          setTimeout(()=> resetBallToReady(), 260);
+          return true;
+        }
+      }
+
+      // Ground / landing
+      if (pos.y <= 0.03){
+        const landX = pos.x;
+        const landZ = pos.z;
+
+        const fair = isFairByAngle(landX, landZ);
+        minimapState.landing = { x: landX, z: landZ, fair };
+        minimapState.lastFair = fair;
+
+        const distM = Math.hypot(landX, landZ - zoneBase.z);
+        const distFt = mToFt(distM);
+
+        const la = THREE.MathUtils.radToDeg(Math.asin(clamp(vel.y / (vel.length()+1e-9), -1, 1)));
+
+        // foul logic
+        if (!fair){
+          foulBall();
+          showCallout("FOUL", 700);
+          fieldReadEl.textContent = `Landing: FOUL • ${distFt.toFixed(0)}ft`;
+          ballMode = "idle";
+          followCamActive = false;
+          scheduleNextAIPitch(0.9);
+          setTimeout(()=> resetBallToReady(), 260);
+          return true;
+        }
+
+        // outcome
+        const res = classifyOutcomeFromDistance(distFt, la);
+
+        if (res.type === "OUT") {
+          addOut("BALL IN PLAY (OUT)");
+          showCallout("OUT", 700);
+          fieldReadEl.textContent = `Landing: OUT • ${distFt.toFixed(0)}ft`;
+        } else if (res.type === "HR") {
+          advanceOnHit(4);
+          showCallout("HOME RUN!", 1050);
+          fieldReadEl.textContent = `Landing: HR • ${distFt.toFixed(0)}ft`;
+        } else if (res.type === "TRIPLE") {
+          advanceOnHit(3);
+          showCallout("TRIPLE", 900);
+          fieldReadEl.textContent = `Landing: 3B • ${distFt.toFixed(0)}ft`;
+        } else if (res.type === "DOUBLE") {
+          advanceOnHit(2);
+          showCallout("DOUBLE", 900);
+          fieldReadEl.textContent = `Landing: 2B • ${distFt.toFixed(0)}ft`;
+        } else {
+          advanceOnHit(1);
+          showCallout("SINGLE", 900);
+          fieldReadEl.textContent = `Landing: 1B • ${distFt.toFixed(0)}ft`;
+        }
+
+        ballMode = "idle";
+        followCamActive = false;
+        scheduleNextAIPitch(1.0);
+        setTimeout(()=> resetBallToReady(), 260);
+        return true;
+      }
+
+      // too far => HR-ish
+      if (pos.z > 125){
+        const landX = pos.x;
+        const landZ = pos.z;
+        minimapState.landing = { x: landX, z: landZ, fair: true };
+        minimapState.lastFair = true;
+
+        advanceOnHit(4);
+        showCallout("HOME RUN!", 1050);
+        fieldReadEl.textContent = "Landing: HR (deep)";
+        ballMode = "idle";
+        followCamActive = false;
+        scheduleNextAIPitch(1.1);
+        setTimeout(()=> resetBallToReady(), 260);
+        return true;
+      }
+
+      return false;
+    }
+
+    // -----------------------------
+    // Dirt handling (pitch)
+    // -----------------------------
+    function handleEarlyGround(){
+      if (ballMode !== "pitch") return false;
+      const z = currentZone();
+      if (pos.y < 0.03 && pos.z > z.z + 3.5){
+        showPlateResult(pos.x, Math.max(pos.y, 0.02), 'ball');
+        ballCall();
+        ballMode = "idle";
+        followCamActive = false;
+        scheduleNextAIPitch(0.8);
+        setTimeout(()=>{ resetBallToReady(); }, 220);
+        return true;
+      }
+      return false;
+    }
+
+    // -----------------------------
+    // AI Batter timing (more obvious + more swings)
+    // -----------------------------
+    function maybeAISwing(){
+      if (!game.aiBatter) return;
+      if (ballMode !== "pitch") return;
+      if (bat.swinging) return;
+
+      const z = currentZone();
+      const distToPlate = pos.z - z.z;
+      if (distToPlate < 0.12 || distToPlate > 2.8) return;
+
+      const vz = Math.abs(vel.z) + 1e-6;
+      const tToPlate = distToPlate / vz;
+
+      const agg = Number(aiAggEl.value);
+      const trigger = lerp(0.10, 0.22, 1-agg);
+
+      if (tToPlate < trigger){
+        const zoneMidY = (z.yBot+z.yTop)*0.5;
+        const d = Math.hypot(pos.x/(z.halfW*1.65), (pos.y-zoneMidY)/((z.yTop-z.yBot)*1.20));
+        const base = clamp(0.25 + agg*0.75, 0.25, 0.95);
+        const swingProb = clamp(base*(0.95 - d*0.80), 0.12, 0.92);
+        if (Math.random() < swingProb) requestSwing("ai");
+      }
+    }
+
+    // -----------------------------
+    // Follow camera (AUTO on contact)
+    // -----------------------------
+    function updateFollowCam(dt){
+      if (!followCamEnabled) return;
+      if (!followCamActive) return;
+      if (ballMode !== "inPlay") return;
+
+      const forward = vel.clone().normalize();
+      const camPos = pos.clone()
+        .addScaledVector(forward, -3.4)
+        .add(new THREE.Vector3(0, 1.5, 0));
+
+      camera.position.lerp(camPos, clamp(dt*3.8, 0, 1));
+      const look = pos.clone().addScaledVector(forward, 6.0);
+      camera.lookAt(look);
+    }
+
+    // -----------------------------
+    // One unified pitch function (gesture pitch + AI pitch + keyboard pitch)
+    // -----------------------------
+    function doPitch({ releasePos, mph, axisDeg, rpm, gyro, aimX, aimY }){
+      if (ballMode !== "idle") return;
+
+      windVec.set(mphToMps(Number(windEl.value)), 0, 0);
+
+      // scatter (applied after aim assist)
+      const scatterM = Number(scatterCmEl.value) / 100;
+      const scatterX = randn() * scatterM;
+      const scatterY = randn() * scatterM;
+
+      const z = currentZone();
+
+      pos.copy(releasePos);
+
+      const speedMps = mphToMps(mph);
+
+      const sGain = Number(sGainEl.value);
+      const preset = PRESETS[pitchTypeEl.value] || PRESETS.fourSeam;
+
+      const rpmFinal = clamp(rpm * (0.75 + 0.25*sGain/8), 0, 3200);
+      const axisFinal = axisDeg;
+      const gyroFinal = clamp(gyro, 0, 100);
+
+      omega.copy(buildSpinVector(axisFinal, rpmFinal, gyroFinal));
+
+      // aim assist clamps aim inside zone, then scatter applies
+      const assisted = assistedAim({ x: aimX, y: aimY });
+      aim.x = assisted.x + scatterX;
+      aim.y = assisted.y + scatterY;
+
+      targetRing.position.set(aim.x, aim.y, z.z + 0.05);
+      plateReadoutEl.textContent = `Aim: x=${aim.x.toFixed(2)}m, y=${aim.y.toFixed(2)}m`;
+
+      // lift assist
+      const liftAssist = Number(liftAssistEl.value);
+      const target = new THREE.Vector3(aim.x, aim.y + liftAssist, z.z);
+
+      const solved = solveBallisticVelocity(pos, target, speedMps);
+      vel.copy(solved.v);
+
+      // reference w/o magnus for break display
+      refPos = pos.clone();
+      refVel = vel.clone();
+      breakAtPlate = {x:0,y:0};
+
+      trailReset();
+      trailMat.color.setHex(0xff5050);
+
+      lastCallEl.textContent = "—";
+      plateLocEl.textContent = "—";
+      breakXYEl.textContent = "—";
+      contactReadEl.textContent = "—";
+      fieldReadEl.textContent = "—";
+      landDotEl.style.opacity = 0;
+
+      minimapState.projected = null;
+      minimapState.landing = null;
+      minimapState.lastFair = null;
+
+      ballMode = "pitch";
+    }
+
+    // Gesture-based pitcher throw (fist->open release)
+    function throwFromHandRead(){
+      if (ballMode !== "idle") return;
+      if (game.role !== "pitcher") return; // IMPORTANT: only in pitcher role
+
+      const raw = mapHandToAim(handState.wrist);
+      const a = assistedAim(raw);
+
+      aim.x = a.x;
+      aim.y = a.y;
+
+      const releasePos = mapHandToRelease(handState.wrist);
+
+      const mph = computePitchSpeedMph(handState.peakVel);
+
+      const preset = PRESETS[pitchTypeEl.value] || PRESETS.fourSeam;
+      const sGain = Number(sGainEl.value);
+
+      const rpmFromHand = clamp(Math.abs(rpmFromRadPerSec(handState.angVel)) * sGain, 0, 3200);
+      const rpm = lerp(preset.rpm, rpmFromHand, 0.78);
+      const axisDeg = lerp(preset.axisBias, handState.axisDeg, 0.70);
+      const gyroFromHand = clamp(Math.abs(handState.palmNormalZ) * 100, 0, 100);
+      const gyro = lerp(preset.gyro, gyroFromHand, 0.65);
+
+      doPitch({
+        releasePos,
+        mph,
+        axisDeg,
+        rpm,
+        gyro,
+        aimX: aim.x,
+        aimY: aim.y
+      });
+
+      showCallout("PITCH!", 650);
+      handState.peakVel = 0;
+    }
+
+    // -----------------------------
+    // AI pitcher for Batter/Fielder roles
+    // -----------------------------
+    let nextAIPitchAt = 0;
+
+    function scheduleNextAIPitch(delayS=0.9){
+      nextAIPitchAt = nowS() + delayS;
+    }
+
+    function maybeAIPitch(){
+      if (ballMode !== "idle") return;
+      if (game.role === "pitcher") return; // pitcher role: user pitches (gesture or P button)
+      if (nowS() < nextAIPitchAt) return;
+
+      const z = currentZone();
+      const midY = (z.yBot + z.yTop) * 0.5;
+
+      // AI target: mostly near zone with some misses
+      const miss = (Math.random() < 0.20);
+      const ax = (Math.random()-0.5) * (z.halfW * (miss ? 4.2 : 1.8));
+      const ay = midY + (Math.random()-0.5) * ((z.yTop - z.yBot) * (miss ? 2.2 : 1.2));
+
+      const preset = PRESETS[pitchTypeEl.value] || PRESETS.fourSeam;
+
+      const mphMin = Number(mphMinEl.value);
+      const mphMax = Number(mphMaxEl.value);
+      const mph = lerp(mphMin, mphMax, 0.45 + 0.45*Math.random());
+
+      const rpm = preset.rpm + randn()*260;
+      const axisDeg = preset.axisBias + randn()*24;
+      const gyro = clamp(preset.gyro + randn()*14, 0, 100);
+
+      doPitch({
+        releasePos: new THREE.Vector3(0, 1.75, 10.0),
+        mph,
+        axisDeg,
+        rpm,
+        gyro,
+        aimX: ax,
+        aimY: ay
+      });
+
+      showCallout("AI PITCH!", 650);
+      scheduleNextAIPitch(999); // wait until play resolves
+    }
+
+    // -----------------------------
+    // Minimap: draw field + projected + landing + fielder + live ball
+    // -----------------------------
+    const minimapState = {
+      projected: null, // {x,z, t, distFt}
+      landing: null,   // {x,z,fair}
+      lastFair: null
+    };
+
+    function resizeMinimap(){
+      const r = minimap.getBoundingClientRect();
+      const s = Math.floor(Math.min(r.width, r.height) * devicePixelRatio);
+      minimap.width = Math.max(200, s);
+      minimap.height = Math.max(200, s);
+    }
+    new ResizeObserver(resizeMinimap).observe(el('minimapWrap'));
+    resizeMinimap();
+
+    function mapFieldToMinimap(x, z){
+      // Map world coords to minimap pixels:
+      // Home plate at bottom center. Outfield upward.
+      const W = minimap.width, H = minimap.height;
+
+      const minX = -45, maxX = 45;
+      const minZ = zoneBase.z; // home
+      const maxZ = 125;
+
+      const nx = (x - minX) / (maxX - minX);
+      const nz = (z - minZ) / (maxZ - minZ);
+
+      const px = nx * W;
+      const py = (1 - nz) * H; // z increases upfield => smaller y on canvas
+
+      return { px, py };
+    }
+
+    function drawMinimap(){
+      const W = minimap.width, H = minimap.height;
+      mmCtx.clearRect(0,0,W,H);
+
+      // background
+      mmCtx.fillStyle = "rgba(255,255,255,0.03)";
+      mmCtx.fillRect(0,0,W,H);
+
+      // field wedge + foul lines + outfield arc
+      const home = mapFieldToMinimap(0, zoneBase.z);
+      const leftFoul = mapFieldToMinimap(-45, 125);
+      const rightFoul = mapFieldToMinimap(45, 125);
+
+      mmCtx.strokeStyle = "rgba(255,255,255,0.20)";
+      mmCtx.lineWidth = Math.max(2, W*0.005);
+
+      // foul lines
+      mmCtx.beginPath();
+      mmCtx.moveTo(home.px, home.py);
+      mmCtx.lineTo(leftFoul.px, leftFoul.py);
+      mmCtx.moveTo(home.px, home.py);
+      mmCtx.lineTo(rightFoul.px, rightFoul.py);
+      mmCtx.stroke();
+
+      // outfield arc
+      mmCtx.beginPath();
+      const arcC = home;
+      const arcR = (home.py - leftFoul.py) * 0.95;
+      mmCtx.arc(arcC.px, arcC.py, arcR, Math.PI*1.05, Math.PI*1.95);
+      mmCtx.stroke();
+
+      // infield "diamond"
+      mmCtx.strokeStyle = "rgba(255,255,255,0.14)";
+      mmCtx.beginPath();
+      const p1 = mapFieldToMinimap(0, zoneBase.z + 16);
+      const p2 = mapFieldToMinimap(12, zoneBase.z + 28);
+      const p3 = mapFieldToMinimap(0, zoneBase.z + 40);
+      const p4 = mapFieldToMinimap(-12, zoneBase.z + 28);
+      mmCtx.moveTo(p1.px, p1.py);
+      mmCtx.lineTo(p2.px, p2.py);
+      mmCtx.lineTo(p3.px, p3.py);
+      mmCtx.lineTo(p4.px, p4.py);
+      mmCtx.closePath();
+      mmCtx.stroke();
+
+      // home plate dot
+      mmCtx.fillStyle = "rgba(255,255,255,0.8)";
+      mmCtx.beginPath();
+      mmCtx.arc(home.px, home.py, Math.max(3, W*0.01), 0, Math.PI*2);
+      mmCtx.fill();
+
+      // fielder
+      {
+        const fp = mapFieldToMinimap(fielderState.pos.x, fielderState.pos.z);
+        mmCtx.fillStyle = "#60e38b";
+        mmCtx.beginPath();
+        mmCtx.arc(fp.px, fp.py, Math.max(4, W*0.012), 0, Math.PI*2);
+        mmCtx.fill();
+      }
+
+      // projected
+      if (minimapState.projected){
+        const pp = mapFieldToMinimap(minimapState.projected.x, minimapState.projected.z);
+        mmCtx.fillStyle = "rgba(182,166,255,0.95)";
+        mmCtx.beginPath();
+        mmCtx.arc(pp.px, pp.py, Math.max(4, W*0.012), 0, Math.PI*2);
+        mmCtx.fill();
+      }
+
+      // landing
+      if (minimapState.landing){
+        const lp = mapFieldToMinimap(minimapState.landing.x, minimapState.landing.z);
+        mmCtx.fillStyle = minimapState.landing.fair ? "#50d2ff" : "#ff6c6c";
+        mmCtx.beginPath();
+        mmCtx.arc(lp.px, lp.py, Math.max(5, W*0.014), 0, Math.PI*2);
+        mmCtx.fill();
+      }
+
+      // live ball
+      if (ballMode === "inPlay"){
+        const bp = mapFieldToMinimap(pos.x, pos.z);
+        mmCtx.fillStyle = "#ffd96a";
+        mmCtx.beginPath();
+        mmCtx.arc(bp.px, bp.py, Math.max(3, W*0.010), 0, Math.PI*2);
+        mmCtx.fill();
+      }
+    }
+
+    function predictLanding(startPos, startVel, startOmega){
+      const p = startPos.clone();
+      const v = startVel.clone();
+      const w = startOmega.clone();
+      const dt = 1/180;
+      const maxT = 6.0;
+
+      const dragScale = Number(dragScaleEl.value);
+      const magnusScale = Number(magnusScaleEl.value);
+      const gravScale = Number(gravityScaleEl.value);
+
+      const wind = windVec.clone();
+
+      let t = 0;
+      while (t < maxT){
+        // accel
+        const vAir = v.clone().sub(wind);
+        const a = new THREE.Vector3();
+        a.addScaledVector(gVec, gravScale);
+        a.addScaledVector(accelDrag(vAir), dragScale);
+        a.addScaledVector(accelMagnus(vAir, w), magnusScale);
+
+        v.addScaledVector(a, dt);
+        p.addScaledVector(v, dt);
+
+        if (p.y <= 0.03) break;
+        if (p.z > 125) break;
+
+        t += dt;
+      }
+
+      const distM = Math.hypot(p.x, p.z - zoneBase.z);
+      const distFt = mToFt(distM);
+
+      minimapReadoutEl.textContent = `Projected: ${distFt.toFixed(0)}ft • x=${p.x.toFixed(1)} z=${p.z.toFixed(1)}`;
+      return { x:p.x, z:p.z, t, distFt };
+    }
+
+    // -----------------------------
+    // Role logic (Pitcher / Batter / Fielder)
+    // -----------------------------
+    function applyRole(role){
+      game.role = role;
+
+      if (role === "pitcher"){
+        game.aiBatter = true;
+        aiBtn.textContent = "AI Batter: ON";
+        fielderState.active = false;
+        modeHint.textContent = "Pitcher: fist → open release. Aim: drag cage panel. Swing: SPACE. Follow Cam toggles on contact.";
+        setView(viewSel.value || VIEW.CATCHER);
+        scheduleNextAIPitch(999);
+      }
+
+      if (role === "batter"){
+        game.aiBatter = false; // user bats (pinch/space)
+        aiBtn.textContent = "AI Batter: OFF";
+        fielderState.active = false;
+        modeHint.textContent = "Batter: pinch (index+thumb) to SWING (or SPACE). Pitcher is AI. Follow Cam toggles on contact.";
+        setView(VIEW.BATTER);
+        scheduleNextAIPitch(0.8);
+      }
+
+      if (role === "fielder"){
+        game.aiBatter = true; // AI swings; you field
+        aiBtn.textContent = "AI Batter: ON";
+        fielderState.active = true;
+        modeHint.textContent = "Fielder: AI vs AI. Move with WASD/arrows to CATCH. Follow Cam toggles on contact.";
+        setView(VIEW.FIELD);
+        scheduleNextAIPitch(0.8);
+      }
+
+      updateGameHUD();
+      resetBallToReady();
+    }
+
+    roleSel.addEventListener('change', ()=> applyRole(roleSel.value));
+
+    // -----------------------------
+    // Plate cross detection helpers
+    // -----------------------------
+    function handleEarlyPitchEvents(){
+      if (ballMode !== "pitch") return;
+
+      // AI batter swing timing
+      maybeAISwing();
+
+      // Contact detection (timing + sweet spot vs handle)
+      if (checkBatCollisionAndHit()) return;
+
+      // Dirt / bounce early
+      if (handleEarlyGround()) return;
+
+      // Plate cross (called strike/ball or swinging strike)
+      handlePlateCross();
+    }
+
+    // -----------------------------
+    // Animation loop
+    // -----------------------------
+    const clock = new THREE.Clock();
+
+    function animate(){
+      requestAnimationFrame(animate);
+
+      const dtRaw = clock.getDelta();
+      const dt = clamp(dtRaw, 0, 0.033);
+
+      updateImpactFade(dt);
+      updateBatSwing();
+      updateFielder(dt);
+      drawMinimap();
+
+      // auto pitch when batter/fielder role
+      maybeAIPitch();
+
+      if (ballMode === "pitch" || ballMode === "inPlay"){
+        prevPos.copy(pos);
+        prevZ = pos.z;
+        if (refPos) prevRefPos.copy(refPos);
+
+        const slowFactor = slowMo ? 0.35 : 1.0;
+        const scaledDt = dt * slowFactor;
+
+        const step = 1/240;
+        let t = 0;
+        while (t < scaledDt){
+          const h = Math.min(step, scaledDt - t);
+          stepPhysics(h);
+          t += h;
+
+          if (ballMode === "pitch"){
+            // keep checking contact + plate + dirt as ball moves
+            // (we do a lightweight check per micro-step)
+            // IMPORTANT: handlePlateCross needs prev values - we call the "event" wrapper after loop too.
+          }
+
+          if (ballMode === "inPlay"){
+            if (handleInPlayLanding()) break;
+          }
+        }
+
+        if (ballMode === "pitch"){
+          handleEarlyPitchEvents();
+        }
+      }
+
+      // follow cam after contact (AUTO)
+      updateFollowCam(dt);
+
+      renderer.render(scene, camera);
+    }
+
+    addEventListener('resize', ()=>{
+      camera.aspect = innerWidth/innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+      resizeMinimap();
+    });
+
+    // -----------------------------
+    // Start positions
+    // -----------------------------
+    function initAim(){
+      updateZoneOutline();
+      updateGameHUD();
+      const r = zoneEl.getBoundingClientRect();
+      setAimFromPanel(r.left + r.width/2, r.top + r.height/2);
+    }
+    initAim();
+
+    ballMesh.position.copy(pos);
+    setBatHomePose();
+
+    // -----------------------------
+    // Buttons
+    // -----------------------------
+    let trailOnState = true;
+    trailBtn.addEventListener('click', ()=>{
+      trailOnState = !trailOnState;
+      trailOn = trailOnState;
+      trailBtn.textContent = `Trail: ${trailOn ? "ON" : "OFF"}`;
+      if (!trailOn) trailReset();
+    });
+
+    slowBtn.addEventListener('click', ()=>{
+      slowMo = !slowMo;
+      slowBtn.textContent = `Slow: ${slowMo ? "ON" : "OFF"}`;
+    });
+
+    aiBtn.addEventListener('click', ()=>{
+      // Only meaningful if you're not "Batter" role, but we keep it usable.
+      game.aiBatter = !game.aiBatter;
+      aiBtn.textContent = `AI Batter: ${game.aiBatter ? "ON" : "OFF"}`;
+    });
+
+    followBtn.addEventListener('click', ()=>{
+      followCamEnabled = !followCamEnabled;
+      followBtn.textContent = `Follow Cam: ${followCamEnabled ? "ON" : "OFF"}`;
+
+      // if user turns it off during a follow, restore view
+      if (!followCamEnabled && followCamActive){
+        followCamActive = false;
+        setView(viewMode);
+      }
+    });
+
+    resetBtn.addEventListener('click', ()=>{
+      game.balls=0; game.strikes=0; game.outs=0;
+      game.inning=1; game.half='top';
+      game.away=0; game.home=0;
+      clearBases(); updateGameHUD();
+
+      lastCallEl.textContent = "—";
+      plateLocEl.textContent = "—";
+      breakXYEl.textContent = "—";
+      contactReadEl.textContent = "—";
+      fieldReadEl.textContent = "—";
+      landDotEl.style.opacity = 0;
+      marks.splice(0).forEach(m=>m.remove());
+
+      impactRing.visible = false;
+      impactTTL = 0;
+
+      minimapState.projected = null;
+      minimapState.landing = null;
+      minimapState.lastFair = null;
+      minimapReadoutEl.textContent = "—";
+
+      resetBallToReady();
+      showCallout("RESET", 650);
+    });
+
+    // -----------------------------
+    // MediaPipe Hands (Pitcher gesture + Batter pinch swing)
+    // -----------------------------
+    const video = el('video');
+    const overlay = el('overlay');
+    const octx = overlay.getContext('2d');
+    let cam = null;
+    let hands = null;
+    let cameraRunning = false;
+    let fallbackStream = null;
+    let fallbackRAF = 0;
+    let sending = false;
+
+    const handState = {
+      present:false,
+      closed:false,
+      prevClosed:false,
+      pinched:false,
+      prevPinched:false,
+      wrist:{x:0.5,y:0.5,z:0},
+      prevWrist:null,
+      wristVel:0,
+      peakVel:0,
+      lastT:0,
+      prevAngle:null,
+      angVel:0,
+      palmNormalZ:0,
+      axisDeg:0
+    };
+
+    function dist3(a,b){ const dx=a.x-b.x, dy=a.y-b.y, dz=a.z-b.z; return Math.hypot(dx,dy,dz); }
+    function unwrapAngle(prev, curr){
+      let d = curr - prev;
+      while (d > Math.PI) d -= 2*Math.PI;
+      while (d < -Math.PI) d += 2*Math.PI;
+      return prev + d;
+    }
+    function computePalmNormalZ(lm){
+      const w = lm[0], i = lm[5], p = lm[17];
+      const v1 = { x:i.x-w.x, y:i.y-w.y, z:i.z-w.z };
+      const v2 = { x:p.x-w.x, y:p.y-w.y, z:p.z-w.z };
+      const nx = v1.y*v2.z - v1.z*v2.y;
+      const ny = v1.z*v2.x - v1.x*v2.z;
+      const nz = v1.x*v2.y - v1.y*v2.x;
+      const mag = Math.hypot(nx,ny,nz) || 1;
+      return nz / mag;
+    }
+    function isHandClosed(lm){
+      const wrist = lm[0];
+      const idxM=lm[5], midM=lm[9], ringM=lm[13], pinkyM=lm[17];
+      const idxT=lm[8], midT=lm[12], ringT=lm[16], pinkyT=lm[20];
+      const base = (dist3(wrist, idxM)+dist3(wrist, midM)+dist3(wrist, ringM)+dist3(wrist, pinkyM))/4;
+      const curls = [
+        dist3(idxT, idxM)/base,
+        dist3(midT, midM)/base,
+        dist3(ringT, ringM)/base,
+        dist3(pinkyT, pinkyM)/base
+      ];
+      const curled = curls.filter(v=>v<0.72).length;
+      return curled >= 3;
+    }
+    function isPinched(lm){
+      const thumb = lm[4];
+      const idx = lm[8];
+      const d = dist3(thumb, idx);
+      return d < Number(pinchThreshEl.value);
+    }
+
+    function drawLandmarksOnOverlay(results){
+      octx.clearRect(0,0,overlay.width, overlay.height);
+      if (!results.multiHandLandmarks || !results.multiHandLandmarks.length) return;
+      for (const lm of results.multiHandLandmarks){
+        drawConnectors(octx, lm, HAND_CONNECTIONS, { color:'#5df', lineWidth:2 });
+        drawLandmarks(octx, lm, { color:'#f55', lineWidth:1, radius:2 });
+      }
+    }
+
+    function resizeOverlay(){
+      overlay.width = overlay.clientWidth;
+      overlay.height = overlay.clientHeight;
+    }
+
+    async function startCamera(){
+      if (cameraRunning) return;
+      statusLine.textContent = "Status: requesting camera…";
+
+      resizeOverlay();
+      new ResizeObserver(resizeOverlay).observe(el('camWrap'));
+
+      hands = new Hands({ locateFile:(file)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+      hands.setOptions({
+        maxNumHands:1,
+        modelComplexity:1,
+        minDetectionConfidence:0.7,
+        minTrackingConfidence:0.7
+      });
+
+      hands.onResults((results)=>{
+        drawLandmarksOnOverlay(results);
+        const t = nowS();
+
+        if (!results.multiHandLandmarks || !results.multiHandLandmarks.length){
+          handState.present = false;
+          statusLine.textContent = "Status: no hand detected";
+          liveReadEl.textContent = "mph=— rpm=— axis=— gyro=—";
+          return;
+        }
+
+        const lm = results.multiHandLandmarks[0];
+        handState.present = true;
+
+        const wrist = lm[0];
+        handState.wrist = { x:wrist.x, y:wrist.y, z:wrist.z };
+
+        const dt = handState.lastT ? (t - handState.lastT) : 0;
+        handState.lastT = t;
+
+        if (dt > 0.0001 && handState.prevWrist){
+          const v = Math.hypot(wrist.x - handState.prevWrist.x, wrist.y - handState.prevWrist.y) / dt;
+          handState.wristVel = handState.wristVel ? lerp(handState.wristVel, v, 0.32) : v;
+          handState.peakVel = Math.max(handState.peakVel * 0.985, handState.wristVel);
+        }
+        handState.prevWrist = { x:wrist.x, y:wrist.y, z:wrist.z };
+
+        const idxM = lm[5], idxT = lm[8];
+        let ang = Math.atan2(idxT.y - idxM.y, idxT.x - idxM.x);
+
+        if (handState.prevAngle !== null){
+          const unwrapped = unwrapAngle(handState.prevAngle, ang);
+          const d = unwrapped - handState.prevAngle;
+          if (dt > 0.0001) handState.angVel = lerp(handState.angVel, d/dt, 0.25);
+          handState.prevAngle = unwrapped;
+          ang = unwrapped;
+        } else {
+          handState.prevAngle = ang;
+          handState.angVel = 0;
+        }
+
+        let axisDeg = THREE.MathUtils.radToDeg(ang);
+        axisDeg = ((axisDeg + 180) % 360) - 180;
+        handState.axisDeg = axisDeg;
+
+        handState.palmNormalZ = computePalmNormalZ(lm);
+
+        handState.prevClosed = handState.closed;
+        handState.closed = isHandClosed(lm);
+
+        handState.prevPinched = handState.pinched;
+        handState.pinched = isPinched(lm);
+
+        const mphPreview = computePitchSpeedMph(handState.peakVel);
+        const rpmPreview = clamp(Math.abs(rpmFromRadPerSec(handState.angVel)) * Number(sGainEl.value), 0, 3200);
+        const gyroPreview = clamp(Math.abs(handState.palmNormalZ)*100, 0, 100);
+        liveReadEl.textContent = `mph=${mphPreview.toFixed(0)} rpm=${rpmPreview.toFixed(0)} axis=${handState.axisDeg.toFixed(0)} gyro=${gyroPreview.toFixed(0)}%`;
+
+        statusLine.textContent =
+          `Status: ${handState.closed ? "CLOSED" : "OPEN"} • pinch=${handState.pinched ? "ON" : "OFF"} • v=${handState.wristVel.toFixed(2)} peak=${handState.peakVel.toFixed(2)}`;
+
+        // Idle ball follows hand in Pitcher role
+        if (ballMode === "idle" && game.role === "pitcher"){
+          const releasePos = mapHandToRelease(handState.wrist);
+          if (handState.closed){
+            ballMesh.position.copy(releasePos);
+            ballMesh.scale.setScalar(1.08);
+            trailReset();
+          } else {
+            ballMesh.position.lerp(new THREE.Vector3(0,1.75,10.0), 0.08);
+            ballMesh.scale.setScalar(1.0);
+          }
+        }
+
+        // Pitch release detection (Pitcher role only)
+        const relThresh = Number(releaseThreshEl.value);
+        if (game.role === "pitcher" && handState.prevClosed && !handState.closed && handState.peakVel > relThresh){
+          throwFromHandRead();
+        }
+
+        // Gesture swing (Batter role): pinch-down = swing
+        if (game.role === "batter" && handState.pinched && !handState.prevPinched){
+          requestSwing("pinch");
+        }
+
+        if (handState.closed) handState.peakVel *= 0.995;
+      });
+
+      video.autoplay = true;
+      video.playsInline = true;
+      video.muted = true;
+
+      // Prefer MediaPipe Camera utility; fallback to manual getUserMedia if needed
+      try{
+        cam = new Camera(video, {
+          onFrame: async()=>{
+            if (sending || !hands) return;
+            sending = true;
+            try { await hands.send({ image: video }); }
+            finally { sending = false; }
+          },
+          width: 640,
+          height: 480
+        });
+
+        await cam.start();
+        cameraRunning = true;
+        statusLine.textContent = "Status: camera ON (show your hand)";
+        showCallout("CAM ON", 650);
+        return;
+      } catch (err){
+        console.warn("Camera_utils start failed; trying fallback getUserMedia.", err);
+      }
+
+      // Fallback path
+      try{
+        fallbackStream = await navigator.mediaDevices.getUserMedia({ video:{ width:640, height:480 }, audio:false });
+        video.srcObject = fallbackStream;
+        await video.play();
+
+        cameraRunning = true;
+        statusLine.textContent = "Status: camera ON (fallback mode)";
+        showCallout("CAM ON", 650);
+
+        const loop = async()=>{
+          if (!cameraRunning) return;
+          if (hands && !sending){
+            sending = true;
+            try { await hands.send({ image: video }); }
+            catch(e){ /* ignore frame errors */ }
+            finally { sending = false; }
+          }
+          fallbackRAF = requestAnimationFrame(loop);
+        };
+        fallbackRAF = requestAnimationFrame(loop);
+      } catch (err){
+        statusLine.textContent = "Status: camera ERROR (permission / http / device)";
+        console.error(err);
+      }
+    }
+
+    function stopCamera(){
+      if (!cameraRunning) return;
+
+      try { if (cam && cam.stop) cam.stop(); } catch(e){}
+      cam = null;
+
+      if (fallbackRAF) cancelAnimationFrame(fallbackRAF);
+      fallbackRAF = 0;
+
+      if (fallbackStream){
+        for (const t of fallbackStream.getTracks()) t.stop();
+        fallbackStream = null;
+      }
+
+      if (video.srcObject){
+        try{
+          const s = video.srcObject;
+          if (s && s.getTracks) s.getTracks().forEach(tr=>tr.stop());
+        } catch(e){}
+      }
+      video.srcObject = null;
+
+      cameraRunning = false;
+      handState.present = false;
+      statusLine.textContent = "Status: camera OFF";
+      liveReadEl.textContent = "mph=— rpm=— axis=— gyro=—";
+      showCallout("CAM OFF", 650);
+    }
+
+    startCamBtn.addEventListener('click', startCamera);
+    stopCamBtn.addEventListener('click', stopCamera);
+
+    // -----------------------------
+    // Final init & run
+    // -----------------------------
+    updateOrbitCamera();
+    updateZoneOutline();
+    setBatHomePose();
+    updateGameHUD();
+    scheduleNextAIPitch(0.8);
+
+    // Apply initial role
+    applyRole(roleSel.value);
+
+    animate();
+  </script>
+</body>
+</html>

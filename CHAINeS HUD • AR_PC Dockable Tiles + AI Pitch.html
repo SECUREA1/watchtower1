@@ -1,0 +1,2246 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>CHAINeS HUD • AR/PC Dockable Tiles + AI Pitch</title>
+  <style>
+    :root{
+      --bg: #0b0f14;
+      --panel: rgba(16, 22, 31, 0.86);
+      --panel2: rgba(16, 22, 31, 0.62);
+      --line: rgba(255,255,255,.10);
+      --text: rgba(255,255,255,.92);
+      --muted: rgba(255,255,255,.65);
+      --accent: rgba(0, 255, 200, .95);
+      --accent2: rgba(0, 170, 255, .95);
+      --danger: rgba(255, 80, 80, .95);
+      --shadow: 0 12px 40px rgba(0,0,0,.55);
+      --radius: 14px;
+      --font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      --tileMinW: 220px;
+      --tileMinH: 130px;
+    }
+
+    /* HUD mode (more transparent + bright accents) */
+    body.hudmode{
+      --panel: rgba(10, 16, 22, 0.40);
+      --panel2: rgba(10, 16, 22, 0.26);
+      --line: rgba(0,255,200,.25);
+      --text: rgba(240,255,252,.94);
+      --muted: rgba(220,255,248,.68);
+      --shadow: 0 18px 60px rgba(0,0,0,.35);
+    }
+
+    html, body{
+      height:100%;
+      margin:0;
+      background: radial-gradient(1200px 600px at 35% 20%, rgba(0,255,200,.08), transparent 60%),
+                  radial-gradient(900px 500px at 70% 40%, rgba(0,170,255,.07), transparent 60%),
+                  var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      overflow:hidden;
+    }
+
+    /* Layout */
+    #app{
+      position:relative;
+      height:100%;
+      width:100%;
+      display:grid;
+      grid-template-rows: 58px 1fr 120px;
+      grid-template-columns: 1fr 360px;
+      grid-template-areas:
+        "header header"
+        "main   right"
+        "footer footer";
+      gap: 10px;
+      padding: 10px;
+      box-sizing:border-box;
+    }
+
+    #header{
+      grid-area: header;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      user-select:none;
+    }
+
+    #main{
+      grid-area: main;
+      position:relative;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel2);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      overflow:hidden;
+    }
+
+    #rightDock{
+      grid-area: right;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel2);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      overflow:hidden;
+      min-width: 320px;
+    }
+
+    #footerDock{
+      grid-area: footer;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel2);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      overflow:hidden;
+      display:flex;
+      flex-direction:column;
+    }
+
+    #floatingLayer{
+      position:absolute;
+      inset: 0;
+      pointer-events:none;
+      z-index: 50;
+    }
+
+    /* Header: selectors + session */
+    .brand{
+      display:flex; gap:10px; align-items:center;
+      font-weight: 700;
+      letter-spacing:.3px;
+    }
+    .dot{
+      width:10px;height:10px;border-radius:50%;
+      background: var(--accent);
+      box-shadow: 0 0 18px rgba(0,255,200,.45);
+    }
+    .selectors{
+      display:flex; gap:8px; flex-wrap:wrap;
+      align-items:center;
+      justify-content:center;
+    }
+    .btn{
+      border:1px solid var(--line);
+      background: rgba(255,255,255,.03);
+      color: var(--text);
+      padding: 7px 10px;
+      border-radius: 999px;
+      cursor:pointer;
+      user-select:none;
+      font-weight: 600;
+      font-size: 12.5px;
+      transition: transform .08s ease, background .15s ease, border-color .15s ease;
+    }
+    .btn:hover{ transform: translateY(-1px); border-color: rgba(255,255,255,.18); }
+    .btn:active{ transform: translateY(0px) scale(.99); }
+    .btn.on{
+      border-color: rgba(0,255,200,.45);
+      background: rgba(0,255,200,.10);
+      box-shadow: 0 0 0 2px rgba(0,255,200,.08) inset;
+    }
+    .btn.warn{
+      border-color: rgba(255,80,80,.40);
+      background: rgba(255,80,80,.10);
+    }
+    .session{
+      display:flex; gap:10px; align-items:center;
+      font-size: 12.5px;
+      color: var(--muted);
+    }
+    .pill{
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.03);
+      max-width: 320px;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
+    /* Tile (dockable/pinnable) */
+    .tile{
+      position:relative;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      overflow:hidden;
+      min-width: var(--tileMinW);
+      min-height: var(--tileMinH);
+      display:flex;
+      flex-direction:column;
+      pointer-events:auto; /* for floating layer */
+      touch-action: none;  /* enables pinch/drag we manage */
+    }
+
+    .tileHeader{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 8px;
+      padding: 10px 10px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255,255,255,.02);
+      user-select:none;
+      cursor: grab;
+    }
+    .tileHeader:active{ cursor: grabbing; }
+    .tileTitle{
+      display:flex; align-items:center; gap:8px;
+      font-weight: 800;
+      font-size: 12.5px;
+      letter-spacing:.25px;
+    }
+    .tileTag{
+      font-size: 11px;
+      font-weight: 700;
+      color: rgba(0,255,200,.9);
+      border: 1px solid rgba(0,255,200,.25);
+      background: rgba(0,255,200,.08);
+      padding: 3px 7px;
+      border-radius: 999px;
+    }
+    .tileControls{
+      display:flex; gap:6px; align-items:center;
+    }
+    .iconBtn{
+      width:28px;height:28px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.03);
+      color: var(--text);
+      cursor:pointer;
+      display:grid;
+      place-items:center;
+      user-select:none;
+      font-weight: 900;
+      font-size: 12px;
+    }
+    .iconBtn:hover{ border-color: rgba(255,255,255,.18); }
+    .iconBtn.danger:hover{ border-color: rgba(255,80,80,.45); background: rgba(255,80,80,.10); }
+
+    .tileBody{
+      padding: 10px;
+      overflow:auto;
+      flex:1;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .tile.minimized .tileBody{ display:none; }
+    .tile.minimized{ min-height: 44px; }
+
+    .resizeHandle{
+      position:absolute;
+      width: 18px; height: 18px;
+      right: 8px; bottom: 8px;
+      border-radius: 7px;
+      border: 1px solid rgba(0,255,200,.25);
+      background: rgba(0,255,200,.08);
+      cursor: nwse-resize;
+      user-select:none;
+    }
+
+    /* Dock containers */
+    .dockStack{
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      padding:10px;
+      overflow:auto;
+      height:100%;
+      box-sizing:border-box;
+    }
+    .dockTitle{
+      padding:10px;
+      font-weight: 900;
+      letter-spacing:.3px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255,255,255,.02);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      user-select:none;
+    }
+    .dockTitle .hint{
+      color: var(--muted);
+      font-weight:700;
+      font-size: 12px;
+      opacity:.9;
+    }
+
+    /* Main canvas area (optional center stage) */
+    #centerStage{
+      position:absolute;
+      inset:0;
+      padding: 10px;
+      box-sizing:border-box;
+      display:flex;
+      gap:10px;
+    }
+    #centerStage .stageLeft{
+      flex: 1;
+      border:1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255,255,255,.02);
+      overflow:hidden;
+      position:relative;
+      min-width: 320px;
+    }
+    #centerStage .stageRight{
+      width: 340px;
+      border:1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255,255,255,.02);
+      overflow:hidden;
+      display:flex;
+      flex-direction:column;
+    }
+    .stageHeader{
+      padding: 10px;
+      border-bottom: 1px solid var(--line);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      font-weight: 900;
+      user-select:none;
+    }
+    .stageBody{
+      flex:1;
+      padding: 10px;
+      overflow:auto;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    /* Login / Wizard overlays */
+    .overlay{
+      position:absolute;
+      inset:0;
+      background: rgba(0,0,0,.62);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      z-index: 100;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+    .modal{
+      width:min(980px, 92vw);
+      max-height: 90vh;
+      overflow:auto;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--panel);
+      box-shadow: 0 30px 90px rgba(0,0,0,.7);
+    }
+    .modalHeader{
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 10px;
+      user-select:none;
+    }
+    .modalHeader h2{
+      margin:0;
+      font-size: 15px;
+      letter-spacing:.2px;
+    }
+    .modalBody{
+      padding: 14px 16px;
+      display:grid;
+      grid-template-columns: 340px 1fr;
+      gap: 14px;
+    }
+    .card{
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(255,255,255,.02);
+      padding: 12px;
+    }
+    label{
+      display:block;
+      font-size: 12px;
+      font-weight: 800;
+      color: var(--muted);
+      margin: 10px 0 6px;
+    }
+    input, select, textarea{
+      width:100%;
+      box-sizing:border-box;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.03);
+      color: var(--text);
+      border-radius: 12px;
+      padding: 10px 10px;
+      outline:none;
+      font-size: 13px;
+    }
+    textarea{ min-height: 92px; resize: vertical; }
+    .row{
+      display:flex; gap:10px; align-items:center;
+    }
+    .row > *{ flex:1; }
+    .divider{
+      height:1px;
+      background: var(--line);
+      margin: 10px 0;
+    }
+    .small{
+      font-size: 12.5px;
+      color: var(--muted);
+      line-height: 1.35;
+    }
+    .kbd{
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      border: 1px solid rgba(255,255,255,.16);
+      background: rgba(255,255,255,.04);
+      padding: 2px 6px;
+      border-radius: 8px;
+      color: var(--text);
+      white-space:nowrap;
+    }
+    .steps{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      margin-top: 10px;
+    }
+    .step{
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.03);
+      font-size: 12px;
+      font-weight: 800;
+      color: var(--muted);
+      user-select:none;
+    }
+    .step.on{
+      border-color: rgba(0,255,200,.45);
+      background: rgba(0,255,200,.10);
+      color: var(--text);
+    }
+
+    /* Footer dock inner layout */
+    #footerInner{
+      display:grid;
+      grid-template-columns: 1fr 400px;
+      height:100%;
+      min-height: 120px;
+    }
+    #timeline{
+      padding: 10px;
+      overflow:auto;
+      border-right: 1px solid var(--line);
+      font-size: 13px;
+      color: var(--muted);
+    }
+    #footControls{
+      padding: 10px;
+      overflow:auto;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .logLine{
+      padding: 6px 8px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,.08);
+      background: rgba(255,255,255,.02);
+      margin-bottom: 8px;
+    }
+
+    /* Simple canvas */
+    canvas{
+      width:100%;
+      height:100%;
+      display:block;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app" aria-label="HUD App">
+    <div id="header">
+      <div class="brand">
+        <div class="dot"></div>
+        <div>HUD • AR/PC • Dockable Tiles</div>
+      </div>
+
+      <div class="selectors" id="selectors"></div>
+
+      <div class="session">
+        <div class="pill" id="sessionPill">Not logged in</div>
+        <button class="btn" id="btnHUD">HUD Mode</button>
+        <button class="btn" id="btnHelp">Help</button>
+        <button class="btn warn" id="btnLogout">Logout</button>
+      </div>
+    </div>
+
+    <div id="main">
+      <div id="centerStage">
+        <div class="stageLeft">
+          <div class="stageHeader">
+            <div>Simulation Field</div>
+            <div style="display:flex; gap:8px;">
+              <button class="btn" id="btnSimStart">Start</button>
+              <button class="btn" id="btnSimPause">Pause</button>
+              <button class="btn" id="btnSimReset">Reset</button>
+            </div>
+          </div>
+          <div style="position:absolute; inset:46px 0 0 0;">
+            <canvas id="simCanvas"></canvas>
+          </div>
+        </div>
+
+        <div class="stageRight">
+          <div class="stageHeader">
+            <div>Quick Status</div>
+            <button class="btn" id="btnSetupWizard">Setup Wizard</button>
+          </div>
+          <div class="stageBody" id="quickStatus"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="rightDock">
+      <div class="dockTitle">
+        <div>Right Dock</div>
+        <div class="hint">Up to 3 expanded • Detach to float</div>
+      </div>
+      <div class="dockStack" id="rightStack"></div>
+    </div>
+
+    <div id="footerDock">
+      <div class="dockTitle">
+        <div>Footer</div>
+        <div class="hint">Logs • Timeline • Controls</div>
+      </div>
+      <div id="footerInner">
+        <div id="timeline"></div>
+        <div id="footControls"></div>
+      </div>
+    </div>
+
+    <div id="floatingLayer"></div>
+  </div>
+
+  <!-- LOGIN OVERLAY -->
+  <div class="overlay" id="loginOverlay">
+    <div class="modal">
+      <div class="modalHeader">
+        <h2>Startup Login • Role Setup • How-To</h2>
+        <div style="display:flex; gap:8px;">
+          <button class="btn" id="btnDemo">Demo Mode</button>
+          <button class="btn" id="btnOpenWizardFromLogin">Run Setup Wizard</button>
+        </div>
+      </div>
+      <div class="modalBody">
+        <div class="card">
+          <div class="small">
+            This HUD supports <b>AR + PC</b> input. Pinch/click-hold can drag tiles, pinch-resize tiles, dock to the right/footer, or detach for free-floating.
+          </div>
+          <div class="divider"></div>
+
+          <label>Username</label>
+          <input id="loginName" placeholder="e.g., Coach, Player1" />
+
+          <label>Role (Player Option)</label>
+          <select id="loginRole">
+            <option value="Pitcher">Pitcher</option>
+            <option value="Batter">Batter</option>
+            <option value="Catcher">Catcher</option>
+            <option value="Fielder">Fielder</option>
+          </select>
+
+          <label>Mode</label>
+          <select id="loginMode">
+            <option value="Training">Training</option>
+            <option value="Simulation">Simulation</option>
+            <option value="Live">Live</option>
+          </select>
+
+          <label>Notes (optional)</label>
+          <textarea id="loginNotes" placeholder="session goals, drills, targets..."></textarea>
+
+          <div class="divider"></div>
+          <button class="btn on" id="btnLogin">Enter HUD</button>
+
+          <div class="divider"></div>
+          <div class="small">
+            Controls:
+            <div style="margin-top:6px;">
+              <span class="kbd">Click-hold</span> drag tiles •
+              <span class="kbd">Pinch</span> resize tiles •
+              <span class="kbd">Detach</span> free-float •
+              <span class="kbd">Minimize</span> stack more panels
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+            <div style="font-weight:900;">How to Use Each Player Option</div>
+            <button class="btn" id="btnHelpFromLogin">Open Full Help Panel</button>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="steps" id="roleTabs"></div>
+
+          <div class="card" style="margin-top:10px;" id="roleHowTo"></div>
+
+          <div class="divider"></div>
+          <div class="small">
+            <b>Accuracy first:</b> run <b>Setup Wizard</b> once per field/cage/camera placement.
+            It calibrates strike zone, release point, camera scale, and timing offsets for pitching/batting/catching.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SETUP WIZARD OVERLAY -->
+  <div class="overlay" id="wizardOverlay" style="display:none;">
+    <div class="modal">
+      <div class="modalHeader">
+        <h2>Setup Wizard • Accuracy Calibration (Pitch / Bat / Catch)</h2>
+        <div style="display:flex; gap:8px;">
+          <button class="btn" id="btnWizardClose">Close</button>
+        </div>
+      </div>
+      <div class="modalBody">
+        <div class="card" id="wizardLeft"></div>
+        <div class="card" id="wizardRight"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /******************************************************************
+     * HUD: Dockable Tiles + Pinch/Drag/Resize + Role Login + AI Pitch
+     * - PointerEvents based (mouse/touch/pen). Works with AR cursors
+     *   if your system can inject pointer events or call injectPointer().
+     ******************************************************************/
+
+    const $ = (sel, root=document) => root.querySelector(sel);
+    const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
+
+    const state = {
+      session: null,
+      hudMode: false,
+      tiles: new Map(),
+      dock: {
+        right: [],
+        footer: [],
+        floating: []
+      },
+      settings: {
+        // AI pitch + calibration (defaults can be refined by wizard)
+        pitchAccuracy: 0.86,          // 0..1 (higher = tighter)
+        strikeZoneX: 0,               // normalized center offsets
+        strikeZoneY: 0,
+        releasePointX: -0.15,         // normalized offsets
+        releasePointY: 0.25,
+        timingOffsetMs: 0,            // sync for sensors/camera
+        smoothing: 0.20,              // 0..1 (higher = smoother)
+        variability: 0.18,            // 0..1 (higher = wilder)
+        catcherFramingAssist: true,
+        batterTimingAssist: true,
+        fieldingAssist: true,
+        moundDistanceFt: 60.5,
+        plateWidthIn: 17,
+        zoneHeightIn: 24,
+        zoneWidthIn: 20,
+      },
+      sim: {
+        running: false,
+        paused: false,
+        t: 0,
+        currentPitch: null,
+        history: []
+      }
+    };
+
+    const STORAGE_KEY = "hud_layout_v1";
+    const SETTINGS_KEY = "hud_settings_v1";
+    const SESSION_KEY  = "hud_session_v1";
+
+    function log(msg, kind="info"){
+      const timeline = $("#timeline");
+      const ts = new Date().toLocaleTimeString();
+      const line = document.createElement("div");
+      line.className = "logLine";
+      line.innerHTML = `<b style="color: var(--text)">${ts}</b> • ${escapeHtml(msg)}`;
+      timeline.prepend(line);
+      // keep it tidy
+      const lines = $$(".logLine", timeline);
+      if(lines.length > 60) lines.slice(60).forEach(n => n.remove());
+    }
+
+    function escapeHtml(s){
+      return String(s).replace(/[&<>"']/g, (c)=>({
+        "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+      }[c]));
+    }
+
+    /***********************
+     * Role How-To content
+     ***********************/
+    const ROLE_GUIDES = {
+      Pitcher: `
+        <div style="font-weight:900; margin-bottom:6px;">Pitcher • Using AI Pitch Reliably</div>
+        <div class="small">
+          <ol>
+            <li>Run <b>Setup Wizard</b> to calibrate strike zone + release point + timing offset.</li>
+            <li>Open <b>AI Pitch</b> panel: set <b>Accuracy</b> and <b>Variability</b> for drills.</li>
+            <li>Use <b>Targets</b> to aim corners; verify in the field canvas trajectory.</li>
+            <li>If AR input is used: keep the cursor stable before release; smooth jitter using <b>Smoothing</b>.</li>
+          </ol>
+          Tip: For “tight command” drills, raise Accuracy (0.9+) and reduce Variability (0.10–0.15).
+        </div>
+      `,
+      Batter: `
+        <div style="font-weight:900; margin-bottom:6px;">Batter • Timing + Contact Training</div>
+        <div class="small">
+          <ol>
+            <li>Run wizard once to align pitch speed scale + plate position.</li>
+            <li>Enable <b>Batter Timing Assist</b> for early sessions; disable for realism.</li>
+            <li>Use <b>Batting</b> panel to set swing window + reaction drill presets.</li>
+            <li>Track results in <b>Stats</b> and review pitch history in Footer.</li>
+          </ol>
+        </div>
+      `,
+      Catcher: `
+        <div style="font-weight:900; margin-bottom:6px;">Catcher • Framing + Block + Throw</div>
+        <div class="small">
+          <ol>
+            <li>Wizard: set strike zone height/width and timing offset for glove events.</li>
+            <li>Enable <b>Framing Assist</b> to get feedback on glove path and presentation.</li>
+            <li>Use <b>Catching</b> panel for block drills + pop-time measurements.</li>
+            <li>Detach panels you need in AR so they float where you can see them.</li>
+          </ol>
+        </div>
+      `,
+      Fielder: `
+        <div style="font-weight:900; margin-bottom:6px;">Fielder • Read + Route + Throw</div>
+        <div class="small">
+          <ol>
+            <li>Wizard: calibrate field scale (camera or AR) and movement smoothing.</li>
+            <li>Enable <b>Fielding Assist</b> to get route corrections early.</li>
+            <li>Use <b>Fielding</b> panel for reaction starts, angle breaks, and throw timing.</li>
+            <li>Log outcomes automatically in Footer; review for consistency.</li>
+          </ol>
+        </div>
+      `
+    };
+
+    /***********************
+     * Tiles (modules)
+     ***********************/
+    const TILE_DEFS = [
+      {
+        id:"help",
+        title:"Help / How-To",
+        tag:"GUIDE",
+        defaultDock:"right",
+        content: () => `
+          <div style="font-weight:900; color: var(--text); margin-bottom:6px;">HUD Usage</div>
+          <div class="small">
+            <ul>
+              <li><b>Drag</b> a tile by its header (click-hold / touch-hold).</li>
+              <li><b>Resize</b> with the corner handle or with <b>two-finger pinch</b>.</li>
+              <li><b>Minimize</b> stacks tiles in the right dock; only 3 stay expanded by default.</li>
+              <li><b>Detach</b> makes it free-floating anywhere across the GUI window.</li>
+              <li><b>Dock</b> back: use the tile menu → Right / Footer / Float.</li>
+            </ul>
+            <div class="divider"></div>
+            <b>AR Input Bridge:</b><br/>
+            If you have a hand/retina/EMG cursor system, call:
+            <div style="margin-top:6px;">
+              <span class="kbd">window.HUD.injectPointer({x,y,down,id})</span>
+            </div>
+            Where x/y are pixels in the window.
+          </div>
+        `
+      },
+      {
+        id:"aiPitch",
+        title:"AI Pitch",
+        tag:"PITCH",
+        defaultDock:"right",
+        content: () => `
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+            <div>
+              <div style="font-weight:900; color:var(--text); margin-bottom:6px;">Command & Reliability</div>
+              <div class="small">Accuracy tightens target grouping. Variability adds realism.</div>
+
+              <label>Accuracy (0..1)</label>
+              <input id="set_accuracy" type="number" step="0.01" min="0" max="1" />
+
+              <label>Variability (0..1)</label>
+              <input id="set_variability" type="number" step="0.01" min="0" max="1" />
+
+              <label>Smoothing (0..1)</label>
+              <input id="set_smoothing" type="number" step="0.01" min="0" max="1" />
+
+              <div class="divider"></div>
+              <button class="btn on" id="btnThrowPitch">Throw Pitch</button>
+              <button class="btn" id="btnRandomizePitch">Random Drill</button>
+            </div>
+
+            <div>
+              <div style="font-weight:900; color:var(--text); margin-bottom:6px;">Calibration</div>
+              <div class="small">Set strike zone & release point offsets from wizard.</div>
+
+              <label>Strike Zone Center X</label>
+              <input id="set_zoneX" type="number" step="0.01" />
+
+              <label>Strike Zone Center Y</label>
+              <input id="set_zoneY" type="number" step="0.01" />
+
+              <label>Release Point X</label>
+              <input id="set_relX" type="number" step="0.01" />
+
+              <label>Release Point Y</label>
+              <input id="set_relY" type="number" step="0.01" />
+
+              <label>Timing Offset (ms)</label>
+              <input id="set_timeOff" type="number" step="1" />
+
+              <div class="divider"></div>
+              <button class="btn" id="btnSaveSettings">Save Settings</button>
+            </div>
+          </div>
+        `,
+        onMount: () => {
+          // populate inputs
+          $("#set_accuracy").value   = state.settings.pitchAccuracy.toFixed(2);
+          $("#set_variability").value= state.settings.variability.toFixed(2);
+          $("#set_smoothing").value  = state.settings.smoothing.toFixed(2);
+          $("#set_zoneX").value      = state.settings.strikeZoneX.toFixed(2);
+          $("#set_zoneY").value      = state.settings.strikeZoneY.toFixed(2);
+          $("#set_relX").value       = state.settings.releasePointX.toFixed(2);
+          $("#set_relY").value       = state.settings.releasePointY.toFixed(2);
+          $("#set_timeOff").value    = state.settings.timingOffsetMs;
+
+          $("#btnSaveSettings").onclick = () => {
+            readPitchSettingsFromUI();
+            saveSettings();
+            log("Saved AI Pitch settings.");
+          };
+
+          $("#btnThrowPitch").onclick = () => {
+            readPitchSettingsFromUI();
+            const p = makePitch({ drill: "targeted" });
+            state.sim.currentPitch = p;
+            state.sim.history.unshift({ t: Date.now(), p });
+            log(`Pitch thrown: ${p.type} • v=${p.vMph.toFixed(1)} mph • break=${p.breakIn.toFixed(1)} in`);
+          };
+
+          $("#btnRandomizePitch").onclick = () => {
+            readPitchSettingsFromUI();
+            const p = makePitch({ drill: "random" });
+            state.sim.currentPitch = p;
+            state.sim.history.unshift({ t: Date.now(), p });
+            log(`Random drill pitch: ${p.type} • v=${p.vMph.toFixed(1)} mph`);
+          };
+        }
+      },
+      {
+        id:"batting",
+        title:"Batting",
+        tag:"HIT",
+        defaultDock:"right",
+        content: () => `
+          <div style="font-weight:900; color:var(--text); margin-bottom:6px;">Timing / Contact</div>
+          <div class="small">
+            Startup accuracy: wizard aligns plate scale + pitch timing.
+          </div>
+          <label>Timing Assist</label>
+          <select id="set_batterAssist">
+            <option value="true">On</option>
+            <option value="false">Off</option>
+          </select>
+          <label>Reaction Window (ms)</label>
+          <input id="set_reactionMs" type="number" step="10" value="180" />
+          <div class="divider"></div>
+          <button class="btn on" id="btnBatDrill">Start Bat Drill</button>
+        `,
+        onMount: () => {
+          $("#set_batterAssist").value = String(!!state.settings.batterTimingAssist);
+          $("#btnBatDrill").onclick = () => {
+            state.settings.batterTimingAssist = ($("#set_batterAssist").value === "true");
+            log(`Bat drill started • Timing Assist: ${state.settings.batterTimingAssist ? "ON" : "OFF"}`);
+          };
+        }
+      },
+      {
+        id:"catching",
+        title:"Catching",
+        tag:"CATCH",
+        defaultDock:"right",
+        content: () => `
+          <div style="font-weight:900; color:var(--text); margin-bottom:6px;">Framing / Block / Throw</div>
+          <label>Framing Assist</label>
+          <select id="set_frameAssist">
+            <option value="true">On</option>
+            <option value="false">Off</option>
+          </select>
+          <label>Pop-Time Goal (s)</label>
+          <input id="set_popGoal" type="number" step="0.05" value="2.00" />
+          <div class="divider"></div>
+          <button class="btn on" id="btnCatchDrill">Start Catch Drill</button>
+        `,
+        onMount: () => {
+          $("#set_frameAssist").value = String(!!state.settings.catcherFramingAssist);
+          $("#btnCatchDrill").onclick = () => {
+            state.settings.catcherFramingAssist = ($("#set_frameAssist").value === "true");
+            log(`Catch drill started • Framing Assist: ${state.settings.catcherFramingAssist ? "ON" : "OFF"}`);
+          };
+        }
+      },
+      {
+        id:"fielding",
+        title:"Fielding",
+        tag:"FIELD",
+        defaultDock:"right",
+        content: () => `
+          <div style="font-weight:900; color:var(--text); margin-bottom:6px;">Routes / Reaction / Throws</div>
+          <label>Fielding Assist</label>
+          <select id="set_fieldAssist">
+            <option value="true">On</option>
+            <option value="false">Off</option>
+          </select>
+          <label>Reaction Start Delay (ms)</label>
+          <input id="set_fieldDelay" type="number" step="10" value="120" />
+          <div class="divider"></div>
+          <button class="btn on" id="btnFieldDrill">Start Field Drill</button>
+        `,
+        onMount: () => {
+          $("#set_fieldAssist").value = String(!!state.settings.fieldingAssist);
+          $("#btnFieldDrill").onclick = () => {
+            state.settings.fieldingAssist = ($("#set_fieldAssist").value === "true");
+            log(`Field drill started • Assist: ${state.settings.fieldingAssist ? "ON" : "OFF"}`);
+          };
+        }
+      },
+      {
+        id:"stats",
+        title:"Stats",
+        tag:"METRICS",
+        defaultDock:"footer",
+        content: () => `
+          <div style="font-weight:900; color:var(--text); margin-bottom:6px;">Session Summary</div>
+          <div class="small" id="statsBox"></div>
+        `,
+        onMount: () => updateStatsTile()
+      },
+      {
+        id:"connections",
+        title:"Connections",
+        tag:"LINK",
+        defaultDock:"footer",
+        content: () => `
+          <div style="font-weight:900; color:var(--text); margin-bottom:6px;">Inputs / Sensors / Backend</div>
+          <div class="small">
+            This HTML HUD is ready for your AR/PC trackers.
+            Wire your systems into these hooks:
+            <div class="divider"></div>
+            <div><b>Pointer injection:</b> <span class="kbd">window.HUD.injectPointer({x,y,down,id})</span></div>
+            <div style="margin-top:6px;"><b>Pitch events:</b> <span class="kbd">window.HUD.onPitchEvent(evt)</span></div>
+            <div style="margin-top:6px;"><b>Telemetry:</b> <span class="kbd">window.HUD.onTelemetry(data)</span></div>
+            <div class="divider"></div>
+            <button class="btn" id="btnMockFeed">Start Mock Telemetry</button>
+            <button class="btn" id="btnStopMock">Stop</button>
+          </div>
+        `,
+        onMount: () => {
+          let timer = null;
+          $("#btnMockFeed").onclick = () => {
+            if(timer) return;
+            log("Mock telemetry started.");
+            timer = setInterval(() => {
+              const evt = {
+                type: "telemetry",
+                ts: Date.now(),
+                handCursor: { x: Math.random()*window.innerWidth, y: Math.random()*window.innerHeight, down: Math.random()>.85 },
+                batSpeedMph: 55 + Math.random()*30,
+                gloveImpactG: 2 + Math.random()*4
+              };
+              window.HUD.onTelemetry(evt);
+            }, 250);
+            window.__mockTimer = timer;
+          };
+          $("#btnStopMock").onclick = () => {
+            if(window.__mockTimer){
+              clearInterval(window.__mockTimer);
+              window.__mockTimer = null;
+              log("Mock telemetry stopped.");
+            }
+          };
+        }
+      }
+    ];
+
+    const SELECTOR_DEFS = [
+      { id:"aiPitch", label:"AI Pitch" },
+      { id:"batting", label:"Batting" },
+      { id:"catching", label:"Catching" },
+      { id:"fielding", label:"Fielding" },
+      { id:"stats", label:"Stats" },
+      { id:"connections", label:"Connections" },
+      { id:"help", label:"Help" }
+    ];
+
+    /***********************
+     * Build selectors
+     ***********************/
+    function renderSelectors(){
+      const root = $("#selectors");
+      root.innerHTML = "";
+      SELECTOR_DEFS.forEach(s => {
+        const b = document.createElement("button");
+        b.className = "btn";
+        b.textContent = s.label;
+        b.dataset.tile = s.id;
+        b.onclick = () => toggleTile(s.id);
+        root.appendChild(b);
+      });
+      syncSelectorButtons();
+    }
+
+    function syncSelectorButtons(){
+      $$("#selectors .btn").forEach(btn => {
+        const id = btn.dataset.tile;
+        const tile = state.tiles.get(id);
+        btn.classList.toggle("on", !!tile && tile.visible);
+      });
+    }
+
+    /***********************
+     * Tiles: create, dock, float, minimize, order
+     ***********************/
+    function createTile(def){
+      const tile = document.createElement("div");
+      tile.className = "tile";
+      tile.dataset.id = def.id;
+
+      const header = document.createElement("div");
+      header.className = "tileHeader";
+
+      const title = document.createElement("div");
+      title.className = "tileTitle";
+      title.innerHTML = `
+        <span>${escapeHtml(def.title)}</span>
+        <span class="tileTag">${escapeHtml(def.tag || "")}</span>
+      `;
+
+      const controls = document.createElement("div");
+      controls.className = "tileControls";
+
+      const btnMin = icon("—", "Minimize / Expand");
+      const btnDock = icon("≡", "Dock menu");
+      const btnDetach = icon("↗", "Detach / Float");
+      const btnClose = icon("×", "Hide", "danger");
+
+      controls.append(btnMin, btnDock, btnDetach, btnClose);
+
+      header.append(title, controls);
+
+      const body = document.createElement("div");
+      body.className = "tileBody";
+      body.innerHTML = def.content ? def.content() : "";
+
+      const resize = document.createElement("div");
+      resize.className = "resizeHandle";
+      resize.title = "Resize (or pinch with two fingers)";
+
+      tile.append(header, body, resize);
+
+      // Tile internal state
+      const obj = {
+        id: def.id,
+        def,
+        el: tile,
+        visible: true,
+        docked: def.defaultDock || "right", // right | footer | floating
+        minimized: false,
+        // floating geometry
+        x: 40 + Math.random()*80,
+        y: 90 + Math.random()*60,
+        w: 360,
+        h: 240,
+        z: 1,
+        order: 0
+      };
+
+      // Controls
+      btnMin.onclick = (e) => { e.stopPropagation(); setMinimized(obj, !obj.minimized); };
+      btnClose.onclick = (e) => { e.stopPropagation(); hideTile(obj.id); };
+      btnDetach.onclick = (e) => { e.stopPropagation(); floatTile(obj.id); };
+      btnDock.onclick = (e) => { e.stopPropagation(); openDockMenu(obj, btnDock); };
+
+      // Drag by header (works for mouse/touch)
+      makeDraggable(obj, header);
+
+      // Resize (handle + pinch)
+      makeResizable(obj, resize);
+
+      // Finish mount
+      state.tiles.set(obj.id, obj);
+
+      // Attach to DOM in the right place
+      dockTile(obj.id, obj.docked, { silent:true });
+
+      // mount callback after it exists in DOM
+      queueMicrotask(() => def.onMount && def.onMount());
+
+      return obj;
+    }
+
+    function icon(text, title, extraClass=""){
+      const b = document.createElement("div");
+      b.className = "iconBtn " + extraClass;
+      b.textContent = text;
+      b.title = title;
+      return b;
+    }
+
+    function openDockMenu(tileObj, anchorEl){
+      // Simple prompt-style menu (fast + reliable)
+      const choice = prompt(
+        `Dock "${tileObj.def.title}" to:\n`+
+        `1 = Right dock\n`+
+        `2 = Footer\n`+
+        `3 = Float (free)\n\n`+
+        `Type 1/2/3 and press OK.`, "1"
+      );
+      if(choice === "1") dockTile(tileObj.id, "right");
+      if(choice === "2") dockTile(tileObj.id, "footer");
+      if(choice === "3") floatTile(tileObj.id);
+    }
+
+    function toggleTile(id){
+      const t = state.tiles.get(id);
+      if(!t){
+        const def = TILE_DEFS.find(d => d.id === id);
+        if(def){
+          createTile(def);
+          log(`Opened panel: ${def.title}`);
+        }
+      } else {
+        if(t.visible) hideTile(id);
+        else showTile(id);
+      }
+      syncSelectorButtons();
+      enforceRightDockMaxExpanded();
+      saveLayout();
+    }
+
+    function showTile(id){
+      const t = state.tiles.get(id);
+      if(!t) return;
+      t.visible = true;
+      t.el.style.display = "";
+      log(`Show: ${t.def.title}`);
+    }
+
+    function hideTile(id){
+      const t = state.tiles.get(id);
+      if(!t) return;
+      t.visible = false;
+      t.el.style.display = "none";
+      log(`Hide: ${t.def.title}`);
+      syncSelectorButtons();
+      saveLayout();
+    }
+
+    function setMinimized(t, v){
+      t.minimized = v;
+      t.el.classList.toggle("minimized", v);
+      enforceRightDockMaxExpanded();
+      saveLayout();
+    }
+
+    function dockTile(id, where, {silent=false} = {}){
+      const t = state.tiles.get(id);
+      if(!t) return;
+
+      t.docked = where;
+
+      // remove from all stacks
+      const rightStack = $("#rightStack");
+      const floatLayer = $("#floatingLayer");
+
+      if(t.el.parentElement) t.el.parentElement.removeChild(t.el);
+
+      // reset styles
+      t.el.style.position = "";
+      t.el.style.left = "";
+      t.el.style.top = "";
+      t.el.style.width = "";
+      t.el.style.height = "";
+      t.el.style.transform = "";
+      t.el.style.zIndex = "";
+      t.el.style.pointerEvents = "auto";
+
+      if(where === "right"){
+        $("#rightStack").appendChild(t.el);
+      } else if(where === "footer"){
+        // footer tiles live in footControls for now (keep footer tidy)
+        $("#footControls").appendChild(t.el);
+        t.el.style.minHeight = "80px";
+      } else if(where === "floating"){
+        floatLayer.appendChild(t.el);
+        t.el.style.position = "absolute";
+        applyFloatingGeometry(t);
+      }
+
+      if(!silent) log(`Docked "${t.def.title}" → ${where}`);
+      enforceRightDockMaxExpanded();
+      saveLayout();
+    }
+
+    function floatTile(id){
+      const t = state.tiles.get(id);
+      if(!t) return;
+      t.docked = "floating";
+      dockTile(id, "floating");
+      // bring to top
+      t.z = getMaxZ() + 1;
+      applyFloatingGeometry(t);
+      log(`Detached "${t.def.title}" (free-floating).`);
+      saveLayout();
+    }
+
+    function applyFloatingGeometry(t){
+      const floatLayer = $("#floatingLayer");
+      t.el.style.position = "absolute";
+      t.el.style.left = t.x + "px";
+      t.el.style.top = t.y + "px";
+      t.el.style.width = t.w + "px";
+      t.el.style.height = t.h + "px";
+      t.el.style.zIndex = String(t.z);
+      t.el.style.pointerEvents = "auto";
+      floatLayer.style.pointerEvents = "none";
+      // tile itself can receive events
+    }
+
+    function getMaxZ(){
+      let z = 1;
+      state.tiles.forEach(t => z = Math.max(z, t.z||1));
+      return z;
+    }
+
+    function enforceRightDockMaxExpanded(){
+      // keep only 3 expanded in the right dock (unless user minimized them manually)
+      const rightTiles = Array.from(state.tiles.values())
+        .filter(t => t.visible && t.docked === "right");
+
+      const expanded = rightTiles.filter(t => !t.minimized);
+      if(expanded.length <= 3) return;
+
+      // minimize oldest extras (bottom-first)
+      const extras = expanded.slice(0, expanded.length - 3);
+      extras.forEach(t => {
+        t.minimized = true;
+        t.el.classList.add("minimized");
+      });
+    }
+
+    /***********************
+     * Drag + reorder behavior
+     ***********************/
+    function makeDraggable(tileObj, handleEl){
+      const pointers = new Map(); // for pinch tracking too
+
+      let drag = null; // {startX,startY,origX,origY}
+
+      handleEl.addEventListener("pointerdown", (e) => {
+        if(!tileObj.visible) return;
+        // bring to front when floating
+        if(tileObj.docked === "floating"){
+          tileObj.z = getMaxZ() + 1;
+          tileObj.el.style.zIndex = String(tileObj.z);
+        }
+
+        tileObj.el.setPointerCapture(e.pointerId);
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        // If 2 pointers active -> pinch mode handled in resize
+        if(pointers.size >= 2) return;
+
+        // Drag logic: if docked, offer reorder by up/down buttons via keyboardless:
+        // For reliability: drag only moves when floating. For docked, drag highlights but doesn't move.
+        if(tileObj.docked !== "floating"){
+          // quick reorder using prompt (simple + reliable)
+          // allow shift-click to reorder
+          if(e.shiftKey){
+            const action = prompt(`Reorder "${tileObj.def.title}" in right dock:\nU = move up\nD = move down`, "U");
+            if(action && action.toUpperCase() === "U") moveInDock(tileObj, -1);
+            if(action && action.toUpperCase() === "D") moveInDock(tileObj, +1);
+          }
+          return;
+        }
+
+        drag = {
+          startX: e.clientX,
+          startY: e.clientY,
+          origX: tileObj.x,
+          origY: tileObj.y
+        };
+      });
+
+      handleEl.addEventListener("pointermove", (e) => {
+        if(!pointers.has(e.pointerId)) return;
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        if(tileObj.docked !== "floating") return;
+        if(!drag) return;
+
+        const dx = e.clientX - drag.startX;
+        const dy = e.clientY - drag.startY;
+
+        tileObj.x = clamp(drag.origX + dx, 0, window.innerWidth - 40);
+        tileObj.y = clamp(drag.origY + dy, 0, window.innerHeight - 40);
+        applyFloatingGeometry(tileObj);
+      });
+
+      handleEl.addEventListener("pointerup", (e) => {
+        pointers.delete(e.pointerId);
+        drag = null;
+        saveLayout();
+      });
+      handleEl.addEventListener("pointercancel", (e) => {
+        pointers.delete(e.pointerId);
+        drag = null;
+      });
+    }
+
+    function moveInDock(tileObj, dir){
+      if(tileObj.docked !== "right") return;
+      const stack = $("#rightStack");
+      const children = Array.from(stack.children).filter(el => el.classList.contains("tile"));
+      const idx = children.indexOf(tileObj.el);
+      const next = idx + dir;
+      if(next < 0 || next >= children.length) return;
+      if(dir < 0) stack.insertBefore(tileObj.el, children[next]);
+      else stack.insertBefore(children[next], tileObj.el);
+      log(`Reordered "${tileObj.def.title}" in right dock.`);
+      saveLayout();
+    }
+
+    /***********************
+     * Resize: handle + pinch
+     ***********************/
+    function makeResizable(tileObj, handleEl){
+      const pointers = new Map();
+      let resizing = null; // single pointer resize
+      let pinch = null;    // two-pointer pinch resize
+
+      function startPinchIfReady(){
+        if(tileObj.docked !== "floating") return;
+        if(pointers.size !== 2) return;
+
+        const pts = Array.from(pointers.values());
+        const d0 = dist(pts[0], pts[1]);
+        pinch = {
+          startDist: d0,
+          startW: tileObj.w,
+          startH: tileObj.h,
+          // keep center anchored
+          cx: tileObj.x + tileObj.w/2,
+          cy: tileObj.y + tileObj.h/2
+        };
+      }
+
+      handleEl.addEventListener("pointerdown", (e) => {
+        if(tileObj.docked !== "floating"){
+          // auto-detach on resize attempt for flexibility
+          floatTile(tileObj.id);
+        }
+        tileObj.el.setPointerCapture(e.pointerId);
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        // bring to front
+        tileObj.z = getMaxZ() + 1;
+        tileObj.el.style.zIndex = String(tileObj.z);
+
+        resizing = {
+          startX: e.clientX,
+          startY: e.clientY,
+          startW: tileObj.w,
+          startH: tileObj.h
+        };
+      });
+
+      handleEl.addEventListener("pointermove", (e) => {
+        if(!pointers.has(e.pointerId)) return;
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        // pinch resize if 2 pointers exist
+        if(pointers.size === 2){
+          if(!pinch) startPinchIfReady();
+          if(!pinch) return;
+
+          const pts = Array.from(pointers.values());
+          const d = dist(pts[0], pts[1]);
+          const scale = d / (pinch.startDist || 1);
+
+          const newW = clamp(pinch.startW * scale, 220, Math.min(window.innerWidth - 20, 1200));
+          const newH = clamp(pinch.startH * scale, 130, Math.min(window.innerHeight - 20, 900));
+
+          tileObj.w = newW;
+          tileObj.h = newH;
+          tileObj.x = clamp(pinch.cx - newW/2, 0, window.innerWidth - 40);
+          tileObj.y = clamp(pinch.cy - newH/2, 0, window.innerHeight - 40);
+          applyFloatingGeometry(tileObj);
+          return;
+        }
+
+        // single pointer resize
+        if(!resizing) return;
+        const dx = e.clientX - resizing.startX;
+        const dy = e.clientY - resizing.startY;
+
+        tileObj.w = clamp(resizing.startW + dx, 220, Math.min(window.innerWidth - 20, 1200));
+        tileObj.h = clamp(resizing.startH + dy, 130, Math.min(window.innerHeight - 20, 900));
+
+        applyFloatingGeometry(tileObj);
+      });
+
+      handleEl.addEventListener("pointerup", (e) => {
+        pointers.delete(e.pointerId);
+        resizing = null;
+        pinch = null;
+        saveLayout();
+      });
+
+      handleEl.addEventListener("pointercancel", (e) => {
+        pointers.delete(e.pointerId);
+        resizing = null;
+        pinch = null;
+      });
+    }
+
+    function dist(a,b){
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      return Math.sqrt(dx*dx + dy*dy);
+    }
+
+    function clamp(v,min,max){ return Math.max(min, Math.min(max, v)); }
+
+    /***********************
+     * Settings: read/save/load
+     ***********************/
+    function readPitchSettingsFromUI(){
+      const acc = parseFloat($("#set_accuracy")?.value ?? state.settings.pitchAccuracy);
+      const vari= parseFloat($("#set_variability")?.value ?? state.settings.variability);
+      const sm  = parseFloat($("#set_smoothing")?.value ?? state.settings.smoothing);
+      const zx  = parseFloat($("#set_zoneX")?.value ?? state.settings.strikeZoneX);
+      const zy  = parseFloat($("#set_zoneY")?.value ?? state.settings.strikeZoneY);
+      const rx  = parseFloat($("#set_relX")?.value ?? state.settings.releasePointX);
+      const ry  = parseFloat($("#set_relY")?.value ?? state.settings.releasePointY);
+      const to  = parseInt($("#set_timeOff")?.value ?? state.settings.timingOffsetMs, 10);
+
+      state.settings.pitchAccuracy = clamp(isFinite(acc)?acc:state.settings.pitchAccuracy, 0, 1);
+      state.settings.variability   = clamp(isFinite(vari)?vari:state.settings.variability, 0, 1);
+      state.settings.smoothing     = clamp(isFinite(sm)?sm:state.settings.smoothing, 0, 1);
+
+      state.settings.strikeZoneX = isFinite(zx) ? zx : state.settings.strikeZoneX;
+      state.settings.strikeZoneY = isFinite(zy) ? zy : state.settings.strikeZoneY;
+      state.settings.releasePointX = isFinite(rx) ? rx : state.settings.releasePointX;
+      state.settings.releasePointY = isFinite(ry) ? ry : state.settings.releasePointY;
+      state.settings.timingOffsetMs = isFinite(to) ? to : state.settings.timingOffsetMs;
+
+      updateQuickStatus();
+    }
+
+    function saveSettings(){
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(state.settings));
+      updateQuickStatus();
+    }
+
+    function loadSettings(){
+      try{
+        const raw = localStorage.getItem(SETTINGS_KEY);
+        if(raw){
+          const s = JSON.parse(raw);
+          if(s && typeof s === "object"){
+            state.settings = { ...state.settings, ...s };
+          }
+        }
+      }catch(_){}
+    }
+
+    /***********************
+     * Layout persistence
+     ***********************/
+    function saveLayout(){
+      const layout = {};
+      state.tiles.forEach(t => {
+        layout[t.id] = {
+          visible: t.visible,
+          docked: t.docked,
+          minimized: t.minimized,
+          x: t.x, y: t.y, w: t.w, h: t.h, z: t.z
+        };
+      });
+      // also store right dock order
+      layout.__rightOrder = Array.from($("#rightStack").children)
+        .filter(el => el.classList.contains("tile"))
+        .map(el => el.dataset.id);
+
+      layout.__footerOrder = Array.from($("#footControls").children)
+        .filter(el => el.classList.contains("tile"))
+        .map(el => el.dataset.id);
+
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(layout));
+    }
+
+    function loadLayout(){
+      try{
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if(!raw) return;
+        const layout = JSON.parse(raw);
+        if(!layout || typeof layout !== "object") return;
+
+        // Create tiles for anything in layout
+        Object.keys(layout).forEach(id => {
+          if(id.startsWith("__")) return;
+          const def = TILE_DEFS.find(d => d.id === id);
+          if(def && !state.tiles.has(id)){
+            const t = createTile(def);
+            // apply saved geometry
+            applyLayoutToTile(t, layout[id]);
+          }
+        });
+
+        // Apply saved props for existing tiles
+        state.tiles.forEach(t => {
+          if(layout[t.id]) applyLayoutToTile(t, layout[t.id]);
+        });
+
+        // Restore order in docks
+        if(Array.isArray(layout.__rightOrder)){
+          layout.__rightOrder.forEach(id => {
+            const t = state.tiles.get(id);
+            if(t && t.docked === "right") $("#rightStack").appendChild(t.el);
+          });
+        }
+        if(Array.isArray(layout.__footerOrder)){
+          layout.__footerOrder.forEach(id => {
+            const t = state.tiles.get(id);
+            if(t && t.docked === "footer") $("#footControls").appendChild(t.el);
+          });
+        }
+
+        enforceRightDockMaxExpanded();
+        syncSelectorButtons();
+      }catch(_){}
+    }
+
+    function applyLayoutToTile(t, saved){
+      t.visible = !!saved.visible;
+      t.minimized = !!saved.minimized;
+      t.el.classList.toggle("minimized", t.minimized);
+      t.el.style.display = t.visible ? "" : "none";
+
+      t.x = saved.x ?? t.x;
+      t.y = saved.y ?? t.y;
+      t.w = saved.w ?? t.w;
+      t.h = saved.h ?? t.h;
+      t.z = saved.z ?? t.z;
+
+      const dock = saved.docked ?? t.docked;
+      dockTile(t.id, dock, {silent:true});
+      if(dock === "floating") applyFloatingGeometry(t);
+    }
+
+    /***********************
+     * Simulation: Pitch Engine (physics-ish + accuracy knobs)
+     ***********************/
+    function makePitch({drill}){
+      // Very lightweight model: controlled randomness based on accuracy/variability
+      const acc = state.settings.pitchAccuracy; // higher => tighter
+      const vari = state.settings.variability;  // higher => wilder
+
+      const types = ["4-Seam", "2-Seam", "Slider", "Curve", "Changeup"];
+      const type = (drill === "random")
+        ? types[Math.floor(Math.random()*types.length)]
+        : (state.session?.role === "Pitcher" ? "4-Seam" : "4-Seam");
+
+      // base velocity ranges
+      const baseV = ({
+        "4-Seam": 92,
+        "2-Seam": 90,
+        "Slider": 84,
+        "Curve": 78,
+        "Changeup": 82
+      })[type] || 90;
+
+      const vJitter = (1-acc) * 6 + vari * 4;
+      const vMph = baseV + randn()*vJitter;
+
+      // break in inches (horizontal/vertical)
+      const baseBreak = ({
+        "4-Seam": 8,
+        "2-Seam": 10,
+        "Slider": 16,
+        "Curve": 20,
+        "Changeup": 12
+      })[type] || 10;
+
+      const breakJitter = (1-acc) * 8 + vari * 10;
+      const breakIn = baseBreak + randn()*breakJitter;
+
+      // target: strike zone center with variability
+      const tx = state.settings.strikeZoneX + randn()*((1-acc)*0.25 + vari*0.18);
+      const ty = state.settings.strikeZoneY + randn()*((1-acc)*0.22 + vari*0.16);
+
+      // simple trajectory points in normalized space
+      const points = [];
+      const steps = 60;
+      for(let i=0;i<=steps;i++){
+        const u = i/steps; // 0..1 from release to plate
+        // ease-out travel
+        const z = u;
+        // horizontal break curves more near the end
+        const curve = u*u*(1+u*0.5);
+        const x = lerp(state.settings.releasePointX, tx, u) + (breakIn/120) * (curve - u*0.7);
+        const y = lerp(state.settings.releasePointY, ty, u) + (breakIn/180) * (Math.sin(u*Math.PI)*0.65);
+        points.push({u, x, y, z});
+      }
+
+      return { type, vMph, breakIn, tx, ty, points };
+    }
+
+    function randn(){
+      // Box–Muller
+      let u = 0, v = 0;
+      while(u === 0) u = Math.random();
+      while(v === 0) v = Math.random();
+      return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+    }
+
+    function lerp(a,b,t){ return a + (b-a)*t; }
+
+    /***********************
+     * Canvas drawing
+     ***********************/
+    const canvas = $("#simCanvas");
+    const ctx = canvas.getContext("2d");
+
+    function resizeCanvas(){
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.floor(rect.width * dpr);
+      canvas.height = Math.floor(rect.height * dpr);
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+    }
+    window.addEventListener("resize", () => { resizeCanvas(); });
+    resizeCanvas();
+
+    function draw(){
+      const w = canvas.getBoundingClientRect().width;
+      const h = canvas.getBoundingClientRect().height;
+      ctx.clearRect(0,0,w,h);
+
+      // field background grid
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(255,255,255,.08)";
+      for(let x=0;x<w;x+=40){
+        ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke();
+      }
+      for(let y=0;y<h;y+=40){
+        ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke();
+      }
+
+      // strike zone box
+      const zx = w*0.72;
+      const zy = h*0.40;
+      const zw = w*0.18;
+      const zh = h*0.26;
+      ctx.strokeStyle = "rgba(0,255,200,.35)";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(zx, zy, zw, zh);
+
+      // label
+      ctx.fillStyle = "rgba(255,255,255,.70)";
+      ctx.font = "12px " + getComputedStyle(document.body).fontFamily;
+      ctx.fillText("Strike Zone", zx, zy - 8);
+
+      // pitch trajectory
+      const p = state.sim.currentPitch;
+      if(p){
+        ctx.strokeStyle = "rgba(0,170,255,.65)";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        const map = (pt) => {
+          // map normalized x/y into canvas: release on left, plate near zone
+          const px = w*0.20 + (pt.u * w*0.55) + pt.x * w*0.08;
+          const py = h*0.55 - (pt.y * h*0.22);
+          return {px,py};
+        };
+        p.points.forEach((pt, i) => {
+          const {px,py} = map(pt);
+          if(i===0) ctx.moveTo(px,py);
+          else ctx.lineTo(px,py);
+        });
+        ctx.stroke();
+
+        // ball marker at time
+        const u = clamp(state.sim.t % 1, 0, 1);
+        const idx = Math.floor(u * (p.points.length-1));
+        const {px,py} = map(p.points[idx]);
+
+        ctx.fillStyle = "rgba(0,255,200,.95)";
+        ctx.beginPath();
+        ctx.arc(px,py, 6, 0, Math.PI*2);
+        ctx.fill();
+
+        // text
+        ctx.fillStyle = "rgba(255,255,255,.85)";
+        ctx.fillText(`${p.type}  •  ${p.vMph.toFixed(1)} mph  •  break ${p.breakIn.toFixed(1)} in`, 14, 20);
+      } else {
+        ctx.fillStyle = "rgba(255,255,255,.55)";
+        ctx.fillText("No pitch yet. Use AI Pitch panel → Throw Pitch.", 14, 20);
+      }
+
+      requestAnimationFrame(draw);
+    }
+    requestAnimationFrame(draw);
+
+    function tickSim(){
+      if(!state.sim.running || state.sim.paused) return;
+      state.sim.t += 0.012;
+    }
+    setInterval(tickSim, 16);
+
+    /***********************
+     * Quick status panel
+     ***********************/
+    function updateQuickStatus(){
+      const s = state.settings;
+      const role = state.session?.role || "—";
+      const mode = state.session?.mode || "—";
+      const name = state.session?.name || "—";
+
+      $("#quickStatus").innerHTML = `
+        <div style="font-weight:900; color:var(--text); margin-bottom:6px;">Session</div>
+        <div class="small">
+          <b>User:</b> ${escapeHtml(name)}<br/>
+          <b>Role:</b> ${escapeHtml(role)}<br/>
+          <b>Mode:</b> ${escapeHtml(mode)}<br/>
+        </div>
+        <div class="divider"></div>
+        <div style="font-weight:900; color:var(--text); margin-bottom:6px;">Accuracy Settings</div>
+        <div class="small">
+          <b>Pitch Accuracy:</b> ${(s.pitchAccuracy).toFixed(2)}<br/>
+          <b>Variability:</b> ${(s.variability).toFixed(2)}<br/>
+          <b>Smoothing:</b> ${(s.smoothing).toFixed(2)}<br/>
+          <b>Timing Offset:</b> ${s.timingOffsetMs} ms<br/>
+        </div>
+        <div class="divider"></div>
+        <div class="small">
+          Tip: If your AR cursor jitters, increase <b>Smoothing</b> and run <b>Wizard</b> for timing.
+        </div>
+      `;
+      updateStatsTile();
+    }
+
+    function updateStatsTile(){
+      const tile = state.tiles.get("stats");
+      const box = $("#statsBox");
+      if(!box) return;
+
+      const pitches = state.sim.history.length;
+      const avgV = pitches ? state.sim.history.reduce((a,b)=>a+b.p.vMph,0)/pitches : 0;
+      const avgB = pitches ? state.sim.history.reduce((a,b)=>a+b.p.breakIn,0)/pitches : 0;
+
+      box.innerHTML = `
+        <b>Total Pitches:</b> ${pitches}<br/>
+        <b>Avg Velocity:</b> ${pitches ? avgV.toFixed(1) : "—"} mph<br/>
+        <b>Avg Break:</b> ${pitches ? avgB.toFixed(1) : "—"} in<br/>
+        <div class="divider"></div>
+        <b>Role:</b> ${escapeHtml(state.session?.role || "—")}<br/>
+        <b>Mode:</b> ${escapeHtml(state.session?.mode || "—")}<br/>
+      `;
+    }
+
+    /***********************
+     * Footer content (controls area)
+     ***********************/
+    function renderFooterControls(){
+      $("#footControls").innerHTML = `
+        <div class="small" style="margin-bottom:8px;">
+          <b>Footer Controls</b><br/>
+          Keep “Stats” + “Connections” docked here for stable access.
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn" id="btnSaveLayout">Save Layout</button>
+          <button class="btn" id="btnResetLayout">Reset Layout</button>
+          <button class="btn" id="btnClearLogs">Clear Logs</button>
+        </div>
+        <div class="divider"></div>
+      `;
+
+      $("#btnSaveLayout").onclick = () => { saveLayout(); log("Layout saved."); };
+      $("#btnResetLayout").onclick = () => { localStorage.removeItem(STORAGE_KEY); location.reload(); };
+      $("#btnClearLogs").onclick = () => { $("#timeline").innerHTML = ""; log("Logs cleared."); };
+    }
+
+    /***********************
+     * Login + session persistence
+     ***********************/
+    function loadSession(){
+      try{
+        const raw = localStorage.getItem(SESSION_KEY);
+        if(raw){
+          const s = JSON.parse(raw);
+          if(s && s.name) state.session = s;
+        }
+      }catch(_){}
+    }
+
+    function saveSession(){
+      if(state.session) localStorage.setItem(SESSION_KEY, JSON.stringify(state.session));
+    }
+
+    function updateSessionUI(){
+      const pill = $("#sessionPill");
+      if(!state.session){
+        pill.textContent = "Not logged in";
+      } else {
+        pill.textContent = `${state.session.name} • ${state.session.role} • ${state.session.mode}`;
+      }
+    }
+
+    function showLogin(){
+      $("#loginOverlay").style.display = "flex";
+      $("#wizardOverlay").style.display = "none";
+    }
+    function hideLogin(){
+      $("#loginOverlay").style.display = "none";
+    }
+
+    /***********************
+     * Setup Wizard: accuracy calibration steps
+     ***********************/
+    const wizard = {
+      step: 0,
+      steps: [
+        {
+          name: "Environment",
+          left: () => `
+            <div style="font-weight:900; color:var(--text); margin-bottom:6px;">Step 1 • Environment</div>
+            <div class="small">
+              Enter field/cage geometry so pitch flight + zone mapping are stable.
+            </div>
+            <label>Mound Distance (ft)</label>
+            <input id="wiz_mound" type="number" step="0.5" value="${state.settings.moundDistanceFt}" />
+            <label>Plate Width (in)</label>
+            <input id="wiz_plate" type="number" step="0.5" value="${state.settings.plateWidthIn}" />
+            <label>Zone Width (in)</label>
+            <input id="wiz_zoneW" type="number" step="0.5" value="${state.settings.zoneWidthIn}" />
+            <label>Zone Height (in)</label>
+            <input id="wiz_zoneH" type="number" step="0.5" value="${state.settings.zoneHeightIn}" />
+          `,
+          right: () => `
+            <div style="font-weight:900; color:var(--text); margin-bottom:6px;">What this fixes</div>
+            <div class="small">
+              <ul>
+                <li>Wrong pitch scale (too fast/slow)</li>
+                <li>Strike zone mismatch (height/width)</li>
+                <li>AR overlay drift caused by wrong physical assumptions</li>
+              </ul>
+            </div>
+          `,
+          apply: () => {
+            state.settings.moundDistanceFt = parseFloat($("#wiz_mound").value) || state.settings.moundDistanceFt;
+            state.settings.plateWidthIn   = parseFloat($("#wiz_plate").value) || state.settings.plateWidthIn;
+            state.settings.zoneWidthIn    = parseFloat($("#wiz_zoneW").value) || state.settings.zoneWidthIn;
+            state.settings.zoneHeightIn   = parseFloat($("#wiz_zoneH").value) || state.settings.zoneHeightIn;
+          }
+        },
+        {
+          name: "Strike Zone",
+          left: () => `
+            <div style="font-weight:900; color:var(--text); margin-bottom:6px;">Step 2 • Strike Zone Centering</div>
+            <div class="small">
+              Set the strike zone center offsets (normalized). If your box is consistently off-center, fix it here.
+            </div>
+            <label>Zone Center X (suggest: -0.10..0.10)</label>
+            <input id="wiz_zx" type="number" step="0.01" value="${state.settings.strikeZoneX}" />
+            <label>Zone Center Y (suggest: -0.10..0.10)</label>
+            <input id="wiz_zy" type="number" step="0.01" value="${state.settings.strikeZoneY}" />
+            <div class="divider"></div>
+            <button class="btn on" id="wiz_testPitch">Test Pitch</button>
+          `,
+          right: () => `
+            <div style="font-weight:900; color:var(--text); margin-bottom:6px;">How to verify</div>
+            <div class="small">
+              Click <b>Test Pitch</b>. The ball should approach the center of the strike zone box.
+              If it’s left/right/up/down, adjust the offsets.
+            </div>
+          `,
+          onMount: () => {
+            $("#wiz_testPitch").onclick = () => {
+              state.settings.strikeZoneX = parseFloat($("#wiz_zx").value) || 0;
+              state.settings.strikeZoneY = parseFloat($("#wiz_zy").value) || 0;
+              state.sim.currentPitch = makePitch({drill:"targeted"});
+              log("Wizard test pitch thrown.");
+            };
+          },
+          apply: () => {
+            state.settings.strikeZoneX = parseFloat($("#wiz_zx").value) || state.settings.strikeZoneX;
+            state.settings.strikeZoneY = parseFloat($("#wiz_zy").value) || state.settings.strikeZoneY;
+          }
+        },
+        {
+          name: "Release Point",
+          left: () => `
+            <div style="font-weight:900; color:var(--text); margin-bottom:6px;">Step 3 • Release Point</div>
+            <div class="small">
+              Align where the pitch starts (release). This is critical for believable AI pitch + AR overlay consistency.
+            </div>
+            <label>Release X (suggest: -0.30..0.10)</label>
+            <input id="wiz_rx" type="number" step="0.01" value="${state.settings.releasePointX}" />
+            <label>Release Y (suggest: 0.10..0.40)</label>
+            <input id="wiz_ry" type="number" step="0.01" value="${state.settings.releasePointY}" />
+            <div class="divider"></div>
+            <button class="btn on" id="wiz_releaseTest">Test</button>
+          `,
+          right: () => `
+            <div style="font-weight:900; color:var(--text); margin-bottom:6px;">What this fixes</div>
+            <div class="small">
+              <ul>
+                <li>Pitch starts in the wrong spot</li>
+                <li>Unrealistic ball approach angle</li>
+                <li>Catcher/batter timing mismatch because the visual path is wrong</li>
+              </ul>
+            </div>
+          `,
+          onMount: () => {
+            $("#wiz_releaseTest").onclick = () => {
+              state.settings.releasePointX = parseFloat($("#wiz_rx").value) || state.settings.releasePointX;
+              state.settings.releasePointY = parseFloat($("#wiz_ry").value) || state.settings.releasePointY;
+              state.sim.currentPitch = makePitch({drill:"targeted"});
+              log("Release point test pitch thrown.");
+            };
+          },
+          apply: () => {
+            state.settings.releasePointX = parseFloat($("#wiz_rx").value) || state.settings.releasePointX;
+            state.settings.releasePointY = parseFloat($("#wiz_ry").value) || state.settings.releasePointY;
+          }
+        },
+        {
+          name: "Timing",
+          left: () => `
+            <div style="font-weight:900; color:var(--text); margin-bottom:6px;">Step 4 • Timing Offset</div>
+            <div class="small">
+              If your sensors/camera events appear late/early, set a timing offset in milliseconds.
+            </div>
+            <label>Timing Offset (ms)</label>
+            <input id="wiz_to" type="number" step="1" value="${state.settings.timingOffsetMs}" />
+            <label>Smoothing (0..1)</label>
+            <input id="wiz_sm" type="number" step="0.01" min="0" max="1" value="${state.settings.smoothing}" />
+            <div class="divider"></div>
+            <div class="small">
+              Rule of thumb:
+              <ul>
+                <li>Late visuals → negative offset</li>
+                <li>Early visuals → positive offset</li>
+                <li>Jittery cursor → increase smoothing</li>
+              </ul>
+            </div>
+          `,
+          right: () => `
+            <div style="font-weight:900; color:var(--text); margin-bottom:6px;">Finish</div>
+            <div class="small">
+              Click <b>Apply & Save</b> to lock accuracy settings for pitching, batting, and catching.
+            </div>
+            <div class="divider"></div>
+            <button class="btn on" id="wiz_saveAll">Apply & Save</button>
+          `,
+          onMount: () => {
+            $("#wiz_saveAll").onclick = () => {
+              wizardApplyCurrent();
+              saveSettings();
+              updateQuickStatus();
+              log("Wizard applied + settings saved.");
+              closeWizard();
+            };
+          },
+          apply: () => {
+            state.settings.timingOffsetMs = parseInt($("#wiz_to").value, 10) || state.settings.timingOffsetMs;
+            const sm = parseFloat($("#wiz_sm").value);
+            state.settings.smoothing = clamp(isFinite(sm)?sm:state.settings.smoothing, 0, 1);
+          }
+        }
+      ]
+    };
+
+    function openWizard(){
+      $("#wizardOverlay").style.display = "flex";
+      renderWizardStep(0);
+    }
+    function closeWizard(){
+      $("#wizardOverlay").style.display = "none";
+    }
+
+    function wizardApplyCurrent(){
+      const stepDef = wizard.steps[wizard.step];
+      stepDef.apply && stepDef.apply();
+      saveSettings();
+      updateQuickStatus();
+    }
+
+    function renderWizardStep(i){
+      wizard.step = clamp(i, 0, wizard.steps.length-1);
+      const stepDef = wizard.steps[wizard.step];
+
+      $("#wizardLeft").innerHTML = `
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+          <div style="font-weight:900;">${escapeHtml(stepDef.name)}</div>
+          <div style="display:flex; gap:8px;">
+            <button class="btn" id="wiz_prev">Prev</button>
+            <button class="btn" id="wiz_next">Next</button>
+          </div>
+        </div>
+        <div class="divider"></div>
+        ${stepDef.left()}
+      `;
+
+      $("#wizardRight").innerHTML = `
+        ${stepDef.right()}
+        <div class="divider"></div>
+        <div class="small">
+          Step ${wizard.step+1} / ${wizard.steps.length}
+        </div>
+      `;
+
+      $("#wiz_prev").onclick = () => { wizardApplyCurrent(); renderWizardStep(wizard.step-1); };
+      $("#wiz_next").onclick = () => { wizardApplyCurrent(); renderWizardStep(wizard.step+1); };
+
+      // mount hooks
+      queueMicrotask(() => stepDef.onMount && stepDef.onMount());
+    }
+
+    /***********************
+     * Global UI events
+     ***********************/
+    $("#btnHUD").onclick = () => {
+      state.hudMode = !state.hudMode;
+      document.body.classList.toggle("hudmode", state.hudMode);
+      log(`HUD mode: ${state.hudMode ? "ON" : "OFF"}`);
+    };
+
+    $("#btnHelp").onclick = () => {
+      if(!state.tiles.has("help")) createTile(TILE_DEFS.find(d=>d.id==="help"));
+      showTile("help");
+      dockTile("help", "right");
+      setMinimized(state.tiles.get("help"), false);
+      syncSelectorButtons();
+      log("Help opened.");
+    };
+
+    $("#btnLogout").onclick = () => {
+      state.session = null;
+      localStorage.removeItem(SESSION_KEY);
+      updateSessionUI();
+      showLogin();
+      log("Logged out.");
+    };
+
+    $("#btnSetupWizard").onclick = openWizard;
+    $("#btnWizardClose").onclick = closeWizard;
+
+    $("#btnSimStart").onclick = () => { state.sim.running = true; state.sim.paused = false; log("Simulation started."); };
+    $("#btnSimPause").onclick = () => { state.sim.paused = !state.sim.paused; log(`Simulation ${state.sim.paused ? "paused" : "resumed"}.`); };
+    $("#btnSimReset").onclick = () => { state.sim.t = 0; state.sim.currentPitch = null; log("Simulation reset."); };
+
+    $("#btnLogin").onclick = () => {
+      const name = ($("#loginName").value || "Player").trim();
+      const role = $("#loginRole").value;
+      const mode = $("#loginMode").value;
+      const notes= ($("#loginNotes").value || "").trim();
+
+      state.session = { name, role, mode, notes, ts: Date.now() };
+      saveSession();
+      updateSessionUI();
+      hideLogin();
+      log(`Session started: ${name} • ${role} • ${mode}`);
+      updateQuickStatus();
+
+      // show role-relevant tiles by default
+      const openDefault = (role === "Pitcher") ? ["aiPitch","stats","connections"]
+                        : (role === "Batter")  ? ["batting","stats","connections"]
+                        : (role === "Catcher") ? ["catching","stats","connections"]
+                        : ["fielding","stats","connections"];
+
+      openDefault.forEach(id => {
+        if(!state.tiles.has(id)) createTile(TILE_DEFS.find(d => d.id === id));
+        showTile(id);
+      });
+
+      dockTile("stats", "footer", {silent:true});
+      dockTile("connections", "footer", {silent:true});
+
+      enforceRightDockMaxExpanded();
+      syncSelectorButtons();
+      saveLayout();
+    };
+
+    $("#btnDemo").onclick = () => {
+      $("#loginName").value = "Demo";
+      $("#loginRole").value = "Pitcher";
+      $("#loginMode").value = "Simulation";
+      $("#loginNotes").value = "Demo session: accuracy + docking + pinch resize.";
+      log("Demo fields filled.");
+    };
+
+    $("#btnOpenWizardFromLogin").onclick = openWizard;
+    $("#btnHelpFromLogin").onclick = () => {
+      if(!state.tiles.has("help")) createTile(TILE_DEFS.find(d=>d.id==="help"));
+      hideLogin();
+      dockTile("help", "right");
+      setMinimized(state.tiles.get("help"), false);
+      showTile("help");
+      syncSelectorButtons();
+      log("Help opened from login.");
+    };
+
+    /***********************
+     * Role tabs on login screen
+     ***********************/
+    function renderRoleTabs(){
+      const tabs = $("#roleTabs");
+      tabs.innerHTML = "";
+      Object.keys(ROLE_GUIDES).forEach(role => {
+        const b = document.createElement("div");
+        b.className = "step";
+        b.textContent = role;
+        b.onclick = () => setRoleTab(role);
+        tabs.appendChild(b);
+      });
+      setRoleTab($("#loginRole").value);
+    }
+
+    function setRoleTab(role){
+      $$(".step", $("#roleTabs")).forEach(el => {
+        el.classList.toggle("on", el.textContent === role);
+      });
+      $("#roleHowTo").innerHTML = ROLE_GUIDES[role] || "";
+    }
+
+    $("#loginRole").addEventListener("change", (e)=> setRoleTab(e.target.value));
+
+    /***********************
+     * External input bridge (AR/PC cursor systems)
+     ***********************/
+    // Your tracker can call window.HUD.injectPointer({x,y,down,id})
+    // This can be used to simulate pinch/click-hold by toggling down true/false.
+    // NOTE: This does not fully emulate multi-touch pinch; for pinch-resize you can either:
+    // - dispatch real PointerEvents with 2 pointerIds, OR
+    // - call injectPinch(tileId, scale) if you want a direct control path.
+    window.HUD = {
+      injectPointer({x,y,down,id=1}){
+        // Minimal pointer injection: click tiles (hit-test) and drag floating tiles.
+        // For full control, you should map your AR cursor to real PointerEvents.
+        // This bridge is intentionally conservative to avoid false operations.
+        const hit = document.elementFromPoint(x,y);
+        if(!hit) return;
+
+        // optionally log
+        // log(`Injected pointer @ ${Math.round(x)},${Math.round(y)} down=${down}`);
+
+        // If the user is pressing down on a tile header, we can simulate "grab" by dispatching events:
+        const evtType = down ? "pointerdown" : "pointerup";
+        const evt = new PointerEvent(evtType, {
+          clientX:x, clientY:y,
+          pointerId:id,
+          bubbles:true,
+          pointerType:"mouse",
+          isPrimary:true
+        });
+        hit.dispatchEvent(evt);
+      },
+
+      onPitchEvent(evt){
+        // You can send pitch results, tracking, etc.
+        // Example evt: {type:"pitch", vMph:95, breakIn:14, typeName:"Slider"}
+        if(evt?.type === "pitch"){
+          log(`External pitch: ${evt.typeName||"Pitch"} • v=${evt.vMph} mph • break=${evt.breakIn} in`);
+        }
+      },
+
+      onTelemetry(data){
+        // Data from your AR/PC pipeline (hand cursor, bat sensor, glove IMU)
+        if(data?.handCursor){
+          // Example: if you want to drive pointer: uncomment:
+          // window.HUD.injectPointer({x:data.handCursor.x,y:data.handCursor.y,down:data.handCursor.down,id:1});
+        }
+      }
+    };
+
+    /***********************
+     * Startup: init
+     ***********************/
+    function init(){
+      loadSettings();
+      loadSession();
+
+      renderSelectors();
+      renderRoleTabs();
+      renderFooterControls();
+
+      if(state.session){
+        updateSessionUI();
+        hideLogin();
+        updateQuickStatus();
+      } else {
+        showLogin();
+      }
+
+      // Create any default tiles (optional)
+      // loadLayout may create saved tiles too
+      loadLayout();
+      updateQuickStatus();
+      syncSelectorButtons();
+      enforceRightDockMaxExpanded();
+
+      log("HUD initialized.");
+    }
+
+    init();
+  </script>
+</body>
+</html>

@@ -1,0 +1,3581 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>HUD • AR/PC • Dock Snap + Startup Tuners + Reliable AI Pitch</title>
+  <style>
+    :root{
+      --bg: #0b0f14;
+      --panel: rgba(16, 22, 31, 0.86);
+      --panel2: rgba(16, 22, 31, 0.62);
+      --line: rgba(255,255,255,.10);
+      --text: rgba(255,255,255,.92);
+      --muted: rgba(255,255,255,.65);
+      --accent: rgba(0, 255, 200, .95);
+      --accent2: rgba(0, 170, 255, .95);
+      --danger: rgba(255, 80, 80, .95);
+      --shadow: 0 12px 40px rgba(0,0,0,.55);
+      --radius: 14px;
+      --font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      --tileMinW: 240px;
+      --tileMinH: 140px;
+      --footerH: 120px;
+      --rightW: 360px;
+    }
+
+    body.hudmode{
+      --panel: rgba(10, 16, 22, 0.40);
+      --panel2: rgba(10, 16, 22, 0.26);
+      --line: rgba(0,255,200,.25);
+      --text: rgba(240,255,252,.94);
+      --muted: rgba(220,255,248,.68);
+      --shadow: 0 18px 60px rgba(0,0,0,.35);
+    }
+
+    html, body{
+      height:100%;
+      margin:0;
+      background: radial-gradient(1200px 600px at 35% 20%, rgba(0,255,200,.08), transparent 60%),
+                  radial-gradient(900px 500px at 70% 40%, rgba(0,170,255,.07), transparent 60%),
+                  var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      overflow:hidden;
+    }
+
+    #app{
+      position:relative;
+      height:100%;
+      width:100%;
+      display:grid;
+      grid-template-rows: 58px 1fr var(--footerH);
+      grid-template-columns: 1fr var(--rightW);
+      grid-template-areas:
+        "header header"
+        "main   right"
+        "footer footer";
+      gap: 10px;
+      padding: 10px;
+      box-sizing:border-box;
+    }
+
+    body.footerDetached #app{
+      --footerH: 58px;
+    }
+
+    #header{
+      grid-area: header;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      user-select:none;
+    }
+
+    #main{
+      grid-area: main;
+      position:relative;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel2);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      overflow:hidden;
+    }
+
+    #rightDock{
+      grid-area: right;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel2);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      overflow:hidden;
+      min-width: 320px;
+      position:relative;
+    }
+
+    #footerDock{
+      grid-area: footer;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel2);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      overflow:hidden;
+      display:flex;
+      flex-direction:column;
+      position:relative;
+    }
+
+    #floatingLayer{
+      position:absolute;
+      inset: 0;
+      pointer-events:none;
+      z-index: 50;
+    }
+
+    /* Dock Snap Hints */
+    .dockHint{
+      position:absolute;
+      border-radius: 16px;
+      border: 2px dashed rgba(0,255,200,.35);
+      background: rgba(0,255,200,.06);
+      box-shadow: 0 0 0 6px rgba(0,255,200,.06);
+      pointer-events:none;
+      opacity:0;
+      transition: opacity .12s ease;
+      z-index: 40;
+    }
+    .dockHint.on{ opacity:1; }
+
+    /* Header */
+    .brand{
+      display:flex; gap:10px; align-items:center;
+      font-weight: 800;
+      letter-spacing:.3px;
+    }
+    .dot{
+      width:10px;height:10px;border-radius:50%;
+      background: var(--accent);
+      box-shadow: 0 0 18px rgba(0,255,200,.45);
+    }
+    .selectors{
+      display:flex; gap:8px; flex-wrap:wrap;
+      align-items:center;
+      justify-content:center;
+    }
+    .btn{
+      border:1px solid var(--line);
+      background: rgba(255,255,255,.03);
+      color: var(--text);
+      padding: 7px 10px;
+      border-radius: 999px;
+      cursor:pointer;
+      user-select:none;
+      font-weight: 650;
+      font-size: 12.5px;
+      transition: transform .08s ease, background .15s ease, border-color .15s ease;
+      white-space:nowrap;
+    }
+    .btn:hover{ transform: translateY(-1px); border-color: rgba(255,255,255,.18); }
+    .btn:active{ transform: translateY(0px) scale(.99); }
+    .btn.on{
+      border-color: rgba(0,255,200,.45);
+      background: rgba(0,255,200,.10);
+      box-shadow: 0 0 0 2px rgba(0,255,200,.08) inset;
+    }
+    .btn.warn{
+      border-color: rgba(255,80,80,.40);
+      background: rgba(255,80,80,.10);
+    }
+    .session{
+      display:flex; gap:10px; align-items:center;
+      font-size: 12.5px;
+      color: var(--muted);
+    }
+    .pill{
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.03);
+      max-width: 360px;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
+    /* Tiles */
+    .tile{
+      position:relative;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      overflow:hidden;
+      min-width: var(--tileMinW);
+      min-height: var(--tileMinH);
+      display:flex;
+      flex-direction:column;
+      pointer-events:auto;
+      touch-action: none; /* enables pinch/drag controlled by us */
+    }
+    .tileHeader{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 8px;
+      padding: 10px 10px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255,255,255,.02);
+      user-select:none;
+      cursor: grab;
+    }
+    .tileHeader:active{ cursor: grabbing; }
+    .tileTitle{
+      display:flex; align-items:center; gap:8px;
+      font-weight: 900;
+      font-size: 12.5px;
+      letter-spacing:.25px;
+    }
+    .tileTag{
+      font-size: 11px;
+      font-weight: 800;
+      color: rgba(0,255,200,.9);
+      border: 1px solid rgba(0,255,200,.25);
+      background: rgba(0,255,200,.08);
+      padding: 3px 7px;
+      border-radius: 999px;
+    }
+    .tileControls{
+      display:flex; gap:6px; align-items:center;
+    }
+    .iconBtn{
+      width:28px;height:28px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.03);
+      color: var(--text);
+      cursor:pointer;
+      display:grid;
+      place-items:center;
+      user-select:none;
+      font-weight: 900;
+      font-size: 12px;
+    }
+    .iconBtn:hover{ border-color: rgba(255,255,255,.18); }
+    .iconBtn.danger:hover{ border-color: rgba(255,80,80,.45); background: rgba(255,80,80,.10); }
+
+    .tileBody{
+      padding: 10px;
+      overflow:auto;
+      flex:1;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+    .tile.minimized .tileBody{ display:none; }
+    .tile.minimized{ min-height: 44px; }
+
+    .resizeHandle{
+      position:absolute;
+      width: 18px; height: 18px;
+      right: 8px; bottom: 8px;
+      border-radius: 7px;
+      border: 1px solid rgba(0,255,200,.25);
+      background: rgba(0,255,200,.08);
+      cursor: nwse-resize;
+      user-select:none;
+    }
+
+    /* Docks */
+    .dockStack{
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      padding:10px;
+      overflow:auto;
+      height:100%;
+      box-sizing:border-box;
+    }
+    .dockTitle{
+      padding:10px;
+      font-weight: 950;
+      letter-spacing:.3px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255,255,255,.02);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      user-select:none;
+      gap: 10px;
+    }
+    .dockTitle .hint{
+      color: var(--muted);
+      font-weight:750;
+      font-size: 12px;
+      opacity:.95;
+    }
+
+    .dockTabs{
+      display:flex; gap:6px; flex-wrap:wrap;
+      align-items:center;
+      justify-content:flex-end;
+    }
+    .dockTabs .btn{ padding: 6px 9px; font-size: 12px; }
+
+    /* Dock resizing handles */
+    #rightResizeHandle{
+      position:absolute;
+      left: 0;
+      top: 58px;
+      bottom: 0;
+      width: 10px;
+      cursor: ew-resize;
+      background: transparent;
+      user-select:none;
+      touch-action:none;
+    }
+    #footerResizeHandle{
+      position:absolute;
+      left: 0;
+      right: 0;
+      top: 0;
+      height: 10px;
+      cursor: ns-resize;
+      background: transparent;
+      user-select:none;
+      touch-action:none;
+    }
+
+    /* Main stage */
+    #centerStage{
+      position:absolute;
+      inset:0;
+      padding: 10px;
+      box-sizing:border-box;
+      display:flex;
+      gap:10px;
+    }
+    #centerStage .stageLeft{
+      flex: 1;
+      border:1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255,255,255,.02);
+      overflow:hidden;
+      position:relative;
+      min-width: 320px;
+    }
+    #centerStage .stageRight{
+      width: 360px;
+      border:1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255,255,255,.02);
+      overflow:hidden;
+      display:flex;
+      flex-direction:column;
+    }
+    .stageHeader{
+      padding: 10px;
+      border-bottom: 1px solid var(--line);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      font-weight: 950;
+      user-select:none;
+      gap: 10px;
+    }
+    .stageBody{
+      flex:1;
+      padding: 10px;
+      overflow:auto;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    /* Login / Wizard overlays */
+    .overlay{
+      position:absolute;
+      inset:0;
+      background: rgba(0,0,0,.62);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      z-index: 100;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+    .modal{
+      width:min(1040px, 92vw);
+      max-height: 90vh;
+      overflow:auto;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--panel);
+      box-shadow: 0 30px 90px rgba(0,0,0,.7);
+    }
+    .modalHeader{
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 10px;
+      user-select:none;
+    }
+    .modalHeader h2{
+      margin:0;
+      font-size: 15px;
+      letter-spacing:.2px;
+    }
+    .modalBody{
+      padding: 14px 16px;
+      display:grid;
+      grid-template-columns: 360px 1fr;
+      gap: 14px;
+    }
+    .card{
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(255,255,255,.02);
+      padding: 12px;
+    }
+    label{
+      display:block;
+      font-size: 12px;
+      font-weight: 900;
+      color: var(--muted);
+      margin: 10px 0 6px;
+    }
+    input, select, textarea{
+      width:100%;
+      box-sizing:border-box;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.03);
+      color: var(--text);
+      border-radius: 12px;
+      padding: 10px 10px;
+      outline:none;
+      font-size: 13px;
+    }
+    textarea{ min-height: 92px; resize: vertical; }
+    .divider{
+      height:1px;
+      background: var(--line);
+      margin: 10px 0;
+    }
+    .small{
+      font-size: 12.5px;
+      color: var(--muted);
+      line-height: 1.35;
+    }
+    .kbd{
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      border: 1px solid rgba(255,255,255,.16);
+      background: rgba(255,255,255,.04);
+      padding: 2px 6px;
+      border-radius: 8px;
+      color: var(--text);
+      white-space:nowrap;
+    }
+    .steps{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      margin-top: 10px;
+    }
+    .step{
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.03);
+      font-size: 12px;
+      font-weight: 900;
+      color: var(--muted);
+      user-select:none;
+      cursor:pointer;
+    }
+    .step.on{
+      border-color: rgba(0,255,200,.45);
+      background: rgba(0,255,200,.10);
+      color: var(--text);
+    }
+
+    /* Footer host inner layout */
+    #footerHost{
+      height:100%;
+      display:flex;
+      flex-direction:column;
+    }
+    #footerInner{
+      display:grid;
+      grid-template-columns: 1fr 420px;
+      height:100%;
+      min-height: 120px;
+    }
+    #timeline{
+      padding: 10px;
+      overflow:auto;
+      border-right: 1px solid var(--line);
+      font-size: 13px;
+      color: var(--muted);
+    }
+    #footControls{
+      padding: 10px;
+      overflow:auto;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .logLine{
+      padding: 6px 8px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,.08);
+      background: rgba(255,255,255,.02);
+      margin-bottom: 8px;
+    }
+
+    /* Canvases and media */
+    canvas{ width:100%; height:100%; display:block; }
+    .mediaBox{
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(255,255,255,.02);
+      border-radius: 14px;
+      overflow:hidden;
+      position:relative;
+    }
+    .mediaOverlay{
+      position:absolute; inset:0;
+      pointer-events:none;
+    }
+    .statusRow{
+      display:flex; gap:8px; flex-wrap:wrap; align-items:center;
+      margin-top: 8px;
+    }
+    .badge{
+      display:inline-flex; align-items:center; gap:6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.03);
+      font-size: 12px;
+      font-weight: 850;
+      color: var(--text);
+    }
+    .badge.good{ border-color: rgba(0,255,200,.35); background: rgba(0,255,200,.08); }
+    .badge.warn{ border-color: rgba(255,190,0,.35); background: rgba(255,190,0,.08); }
+    .badge.bad{ border-color: rgba(255,80,80,.35); background: rgba(255,80,80,.08); }
+  </style>
+</head>
+
+<body>
+  <div id="app" aria-label="HUD App">
+    <div id="header">
+      <div class="brand">
+        <div class="dot"></div>
+        <div>HUD • Dock Snap • Startup Tuners • Simulator</div>
+      </div>
+
+      <div class="selectors" id="selectors"></div>
+
+      <div class="session">
+        <div class="pill" id="sessionPill">Not logged in</div>
+        <button class="btn" id="btnHUD">HUD Mode</button>
+        <button class="btn" id="btnWizard">Setup Wizard</button>
+        <button class="btn" id="btnHelp">Help</button>
+        <button class="btn warn" id="btnLogout">Logout</button>
+      </div>
+    </div>
+
+    <div id="main">
+      <div id="centerStage">
+        <div class="stageLeft">
+          <div class="stageHeader">
+            <div>Simulation Field</div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button class="btn" id="btnSimStart">Start</button>
+              <button class="btn" id="btnSimPause">Pause</button>
+              <button class="btn" id="btnSimReset">Reset</button>
+              <button class="btn" id="btnSimPitch">Throw Pitch</button>
+              <button class="btn" id="btnSimHit">Sim Hit</button>
+            </div>
+          </div>
+          <div style="position:absolute; inset:46px 0 0 0;">
+            <canvas id="simCanvas"></canvas>
+          </div>
+        </div>
+
+        <div class="stageRight">
+          <div class="stageHeader">
+            <div>Startup Reliability</div>
+            <button class="btn" id="btnOpenTuners">Tuners</button>
+          </div>
+          <div class="stageBody" id="quickStatus"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="rightDock">
+      <div id="rightResizeHandle" title="Resize right dock"></div>
+      <div class="dockTitle">
+        <div>Right Dock</div>
+        <div class="dockTabs" id="rightQuickTabs"></div>
+      </div>
+      <div class="dockTitle" style="margin-top:-10px; border-top:1px solid var(--line); border-bottom:1px solid var(--line); border-left:none; border-right:none; border-radius:0;">
+        <div class="hint">Snap tiles near this dock to reattach • 3 expanded max</div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn" id="btnRightCollapse">Collapse</button>
+          <button class="btn" id="btnRightExpand">Expand</button>
+        </div>
+      </div>
+      <div class="dockStack" id="rightStack"></div>
+    </div>
+
+    <div id="footerDock">
+      <div id="footerResizeHandle" title="Resize footer height"></div>
+      <div class="dockTitle">
+        <div>Footer</div>
+        <div style="display:flex; gap:8px;">
+          <div class="hint">Snap tiles near footer to reattach</div>
+          <button class="btn" id="btnDetachFooter">Detach</button>
+          <button class="btn" id="btnAttachFooter" style="display:none;">Attach</button>
+        </div>
+      </div>
+      <div id="footerHost">
+        <div id="footerInner">
+          <div id="timeline"></div>
+          <div id="footControls"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="floatingLayer"></div>
+
+    <!-- Dock snap hints -->
+    <div class="dockHint" id="hintRight"></div>
+    <div class="dockHint" id="hintFooter"></div>
+  </div>
+
+  <!-- LOGIN OVERLAY -->
+  <div class="overlay" id="loginOverlay">
+    <div class="modal">
+      <div class="modalHeader">
+        <h2>Startup Login • Roles • How-To • Reliability Checks</h2>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn" id="btnDemo">Demo Mode</button>
+          <button class="btn" id="btnWizardFromLogin">Run Wizard</button>
+        </div>
+      </div>
+      <div class="modalBody">
+        <div class="card">
+          <div class="small">
+            <b>Reliable startup:</b> This system loads your last tuners + layout and validates calibration.
+            If calibration is missing, you’ll be prompted to run the wizard (pitch/bat/catch/field timing).
+          </div>
+          <div class="divider"></div>
+
+          <label>Username</label>
+          <input id="loginName" placeholder="e.g., Coach, Player1" />
+
+          <label>Role (Player Option)</label>
+          <select id="loginRole">
+            <option value="Pitcher">Pitcher</option>
+            <option value="Batter">Batter</option>
+            <option value="Catcher">Catcher</option>
+            <option value="Fielder">Fielder</option>
+          </select>
+
+          <label>Mode</label>
+          <select id="loginMode">
+            <option value="Training">Training</option>
+            <option value="Simulation">Simulation</option>
+            <option value="Live">Live</option>
+          </select>
+
+          <label>Notes (optional)</label>
+          <textarea id="loginNotes" placeholder="session goals, drills, targets..."></textarea>
+
+          <div class="divider"></div>
+          <button class="btn on" id="btnLogin">Enter HUD</button>
+
+          <div class="divider"></div>
+          <div class="small">
+            Controls:
+            <div style="margin-top:6px;">
+              <span class="kbd">Click-hold</span> drag tiles •
+              <span class="kbd">Pinch</span> resize tiles •
+              <span class="kbd">Detach</span> free-float •
+              <span class="kbd">Snap</span> near dock to reattach
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+            <div style="font-weight:950;">How to Use Each Player Option</div>
+            <button class="btn" id="btnHelpFromLogin">Open Help Panel</button>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="steps" id="roleTabs"></div>
+
+          <div class="card" style="margin-top:10px;" id="roleHowTo"></div>
+
+          <div class="divider"></div>
+          <div class="small">
+            <b>Calibration status:</b> <span id="calStatusLogin">Checking…</span><br/>
+            Tip: Run <b>Setup Wizard</b> when changing camera placement, cage/field scale, or input device timing.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SETUP WIZARD OVERLAY -->
+  <div class="overlay" id="wizardOverlay" style="display:none;">
+    <div class="modal">
+      <div class="modalHeader">
+        <h2>Setup Wizard • Pitch/Bat/Catch/Field Calibration</h2>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn" id="btnWizardClose">Close</button>
+        </div>
+      </div>
+      <div class="modalBody">
+        <div class="card" id="wizardLeft"></div>
+        <div class="card" id="wizardRight"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /******************************************************************
+     * FULL HUD: Dock Snap + Reliable Startup Tuners + Simulator
+     * - No missing logic: every referenced function exists.
+     * - Safe when external libs are absent (MediaPipe optional).
+     ******************************************************************/
+
+    const $ = (sel, root=document) => root.querySelector(sel);
+    const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
+
+    const STORAGE_KEY = "hud_layout_v2";
+    const SETTINGS_KEY = "hud_settings_v2";
+    const SESSION_KEY  = "hud_session_v2";
+
+    const state = {
+      session: null,
+      hudMode: false,
+      tiles: new Map(),
+      settings: {
+        // Calibration marker (reliability on startup)
+        calibratedAt: 0,
+        calibrationProfile: "default",
+        // AI pitch & timing tuners
+        pitchAccuracy: 0.88,     // 0..1
+        variability: 0.16,       // 0..1
+        smoothing: 0.22,         // 0..1
+        timingOffsetMs: 0,       // ms
+        // strike zone & release
+        strikeZoneX: 0,
+        strikeZoneY: 0,
+        releasePointX: -0.15,
+        releasePointY: 0.25,
+        // gameplay assists
+        catcherFramingAssist: true,
+        batterTimingAssist: true,
+        fieldingAssist: true,
+        // environment geometry
+        moundDistanceFt: 60.5,
+        plateWidthIn: 17,
+        zoneHeightIn: 24,
+        zoneWidthIn: 20,
+        // batting outputs
+        hitPower: 0.70,          // 0..1
+        launchAngleDeg: 18,      // baseline
+        sprayBiasDeg: 0          // - = pull, + = oppo
+      },
+      sim: {
+        running: false,
+        paused: false,
+        t: 0,
+        currentPitch: null,
+        pitchHistory: [],
+        battedBalls: [],     // {x,y,dist,angleDeg,exitV}
+        lastContact: null,
+        drills: {
+          bat: false,
+          catch: false,
+          field: false
+        }
+      },
+      ui: {
+        rightCollapsed: false,
+        footerDetached: false,
+        rightW: 360,
+        footerH: 120,
+        snapTarget: null
+      },
+      input: {
+        // external pinch control
+        activeTileId: null,
+        pinch: null
+      }
+    };
+
+    const SNAP_MARGIN = 54; // px threshold for snap
+    const MAX_RIGHT_EXPANDED = 3;
+
+    function escapeHtml(s){
+      return String(s).replace(/[&<>"']/g, (c)=>({
+        "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+      }[c]));
+    }
+
+    function clamp(v,min,max){ return Math.max(min, Math.min(max, v)); }
+
+    function now(){ return Date.now(); }
+
+    function log(msg){
+      const timeline = $("#timeline");
+      if(!timeline) return;
+      const ts = new Date().toLocaleTimeString();
+      const line = document.createElement("div");
+      line.className = "logLine";
+      line.innerHTML = `<b style="color: var(--text)">${ts}</b> • ${escapeHtml(msg)}`;
+      timeline.prepend(line);
+      const lines = $$(".logLine", timeline);
+      if(lines.length > 80) lines.slice(80).forEach(n => n.remove());
+    }
+
+    /***********************
+     * Role guides
+     ***********************/
+    const ROLE_GUIDES = {
+      Pitcher: `
+        <div style="font-weight:950; margin-bottom:6px;">Pitcher • Reliable AI Pitch Startup</div>
+        <div class="small">
+          <ol>
+            <li>Run <b>Setup Wizard</b> after camera/device placement changes.</li>
+            <li>Confirm <b>Timing Offset</b> + <b>Smoothing</b> for stable releases.</li>
+            <li>Use <b>Tuners</b> to lock an accuracy profile (Command / Game / Wild).</li>
+            <li>Use <b>Cage View</b> + <b>Landing Map</b> to validate outcomes.</li>
+          </ol>
+        </div>
+      `,
+      Batter: `
+        <div style="font-weight:950; margin-bottom:6px;">Batter • Timing + Contact</div>
+        <div class="small">
+          <ol>
+            <li>Wizard aligns pitch timing and plate scale.</li>
+            <li>Use <b>Tuners</b> to set hit power and launch angle.</li>
+            <li>Track spray & landing in <b>Landing Map</b>.</li>
+            <li>Enable/disable assist to match training realism.</li>
+          </ol>
+        </div>
+      `,
+      Catcher: `
+        <div style="font-weight:950; margin-bottom:6px;">Catcher • Framing + Timing</div>
+        <div class="small">
+          <ol>
+            <li>Wizard sets strike zone + timing offset.</li>
+            <li>Enable framing assist for feedback.</li>
+            <li>Use Camera tile to confirm glove/hand tracking input.</li>
+          </ol>
+        </div>
+      `,
+      Fielder: `
+        <div style="font-weight:950; margin-bottom:6px;">Fielder • Routes + Throws</div>
+        <div class="small">
+          <ol>
+            <li>Wizard calibrates scale and smoothing for stable movement cues.</li>
+            <li>Use Landing Map to drill reads and routes.</li>
+            <li>Tuners let you adjust realism vs assist.</li>
+          </ol>
+        </div>
+      `
+    };
+
+    /***********************
+     * Tile System
+     * - No global duplicate IDs: tile content uses data-role attrs
+     ***********************/
+    function icon(text, title, extraClass=""){
+      const b = document.createElement("div");
+      b.className = "iconBtn " + extraClass;
+      b.textContent = text;
+      b.title = title;
+      return b;
+    }
+
+    function createTile(def){
+      const tile = document.createElement("div");
+      tile.className = "tile";
+      tile.dataset.id = def.id;
+
+      const header = document.createElement("div");
+      header.className = "tileHeader";
+
+      const title = document.createElement("div");
+      title.className = "tileTitle";
+      title.innerHTML = `
+        <span>${escapeHtml(def.title)}</span>
+        <span class="tileTag">${escapeHtml(def.tag || "")}</span>
+      `;
+
+      const controls = document.createElement("div");
+      controls.className = "tileControls";
+
+      const btnMin = icon("—", "Minimize / Expand");
+      const btnDock = icon("≡", "Dock: Right / Footer / Float");
+      const btnDetach = icon("↗", "Detach / Float");
+      const btnClose = icon("×", "Hide", "danger");
+
+      controls.append(btnMin, btnDock, btnDetach, btnClose);
+      header.append(title, controls);
+
+      const body = document.createElement("div");
+      body.className = "tileBody";
+      body.innerHTML = (typeof def.content === "function") ? def.content() : (def.content || "");
+
+      const resize = document.createElement("div");
+      resize.className = "resizeHandle";
+      resize.title = "Resize (or pinch with two fingers)";
+
+      tile.append(header, body, resize);
+
+      const obj = {
+        id: def.id,
+        def,
+        el: tile,
+        visible: true,
+        docked: def.defaultDock || "right", // right | footer | floating
+        minimized: false,
+        x: def.defaultX ?? (40 + Math.random()*80),
+        y: def.defaultY ?? (90 + Math.random()*60),
+        w: def.defaultW ?? 380,
+        h: def.defaultH ?? 260,
+        z: 1,
+        snapCandidate: null,
+        q: (sel) => obj.el.querySelector(sel),
+        qa: (sel) => Array.from(obj.el.querySelectorAll(sel))
+      };
+
+      btnMin.onclick = (e) => { e.stopPropagation(); setMinimized(obj, !obj.minimized); };
+      btnClose.onclick = (e) => { e.stopPropagation(); hideTile(obj.id); };
+      btnDetach.onclick = (e) => { e.stopPropagation(); floatTile(obj.id); };
+      btnDock.onclick = (e) => { e.stopPropagation(); openDockMenu(obj); };
+
+      makeDraggable(obj, header);
+      makeResizable(obj, resize);
+
+      state.tiles.set(obj.id, obj);
+      dockTile(obj.id, obj.docked, {silent:true});
+
+      queueMicrotask(() => def.onMount && def.onMount(obj));
+      return obj;
+    }
+
+    function openDockMenu(tileObj){
+      const choice = prompt(
+        `Dock "${tileObj.def.title}" to:\n`+
+        `1 = Right dock\n`+
+        `2 = Footer\n`+
+        `3 = Float (free)\n\nType 1/2/3`, "1"
+      );
+      if(choice === "1") dockTile(tileObj.id, "right");
+      if(choice === "2") dockTile(tileObj.id, "footer");
+      if(choice === "3") floatTile(tileObj.id);
+    }
+
+    function applyFloatingGeometry(t){
+      const floatLayer = $("#floatingLayer");
+      t.el.style.position = "absolute";
+      t.el.style.left = t.x + "px";
+      t.el.style.top = t.y + "px";
+      t.el.style.width = t.w + "px";
+      t.el.style.height = t.h + "px";
+      t.el.style.zIndex = String(t.z);
+      t.el.style.pointerEvents = "auto";
+      floatLayer.style.pointerEvents = "none";
+    }
+
+    function getMaxZ(){
+      let z = 1;
+      state.tiles.forEach(t => z = Math.max(z, t.z||1));
+      return z;
+    }
+
+    function setMinimized(t, v){
+      t.minimized = v;
+      t.el.classList.toggle("minimized", v);
+      enforceRightDockMaxExpanded();
+      saveLayout();
+    }
+
+    function showTile(id){
+      const t = state.tiles.get(id);
+      if(!t) return;
+      t.visible = true;
+      t.el.style.display = "";
+      syncSelectorButtons();
+      enforceRightDockMaxExpanded();
+      saveLayout();
+    }
+
+    function hideTile(id){
+      const t = state.tiles.get(id);
+      if(!t) return;
+      t.visible = false;
+      t.el.style.display = "none";
+      syncSelectorButtons();
+      saveLayout();
+    }
+
+    function dockTile(id, where, {silent=false} = {}){
+      const t = state.tiles.get(id);
+      if(!t) return;
+
+      t.docked = where;
+      t.snapCandidate = null;
+      setDockHints(null);
+
+      if(t.el.parentElement) t.el.parentElement.removeChild(t.el);
+
+      // reset base styles
+      t.el.style.position = "";
+      t.el.style.left = "";
+      t.el.style.top = "";
+      t.el.style.width = "";
+      t.el.style.height = "";
+      t.el.style.zIndex = "";
+      t.el.style.pointerEvents = "auto";
+
+      if(where === "right"){
+        $("#rightStack").appendChild(t.el);
+        t.el.style.minHeight = "120px";
+        t.el.style.width = "100%";
+      } else if(where === "footer"){
+        $("#footControls").appendChild(t.el);
+        t.el.style.minHeight = "80px";
+        t.el.style.width = "100%";
+      } else if(where === "floating"){
+        $("#floatingLayer").appendChild(t.el);
+        t.el.style.position = "absolute";
+        applyFloatingGeometry(t);
+      }
+
+      if(!silent) log(`Docked "${t.def.title}" → ${where}`);
+      enforceRightDockMaxExpanded();
+      syncSelectorButtons();
+      saveLayout();
+    }
+
+    function floatTile(id){
+      const t = state.tiles.get(id);
+      if(!t) return;
+      t.docked = "floating";
+      dockTile(id, "floating", {silent:true});
+      t.z = getMaxZ() + 1;
+      applyFloatingGeometry(t);
+      log(`Detached "${t.def.title}" (free-floating).`);
+      saveLayout();
+    }
+
+    function enforceRightDockMaxExpanded(){
+      const rightTiles = Array.from(state.tiles.values())
+        .filter(t => t.visible && t.docked === "right");
+
+      const expanded = rightTiles.filter(t => !t.minimized);
+      if(expanded.length <= MAX_RIGHT_EXPANDED) return;
+
+      const extras = expanded.slice(0, expanded.length - MAX_RIGHT_EXPANDED);
+      extras.forEach(t => {
+        t.minimized = true;
+        t.el.classList.add("minimized");
+      });
+    }
+
+    /***********************
+     * Dock snapping (TRUE snap when dragging near docks)
+     ***********************/
+    function setDockHints(target){
+      const hintRight = $("#hintRight");
+      const hintFooter = $("#hintFooter");
+      hintRight.classList.remove("on");
+      hintFooter.classList.remove("on");
+
+      if(target === "right"){
+        const r = $("#rightDock").getBoundingClientRect();
+        hintRight.style.left = r.left + "px";
+        hintRight.style.top = r.top + "px";
+        hintRight.style.width = r.width + "px";
+        hintRight.style.height = r.height + "px";
+        hintRight.classList.add("on");
+      } else if(target === "footer"){
+        const f = $("#footerDock").getBoundingClientRect();
+        hintFooter.style.left = f.left + "px";
+        hintFooter.style.top = f.top + "px";
+        hintFooter.style.width = f.width + "px";
+        hintFooter.style.height = f.height + "px";
+        hintFooter.classList.add("on");
+      }
+    }
+
+    function detectSnapTargetForTile(t){
+      // if right dock is collapsed, still allow snap, but threshold becomes smaller
+      const rightRect = $("#rightDock").getBoundingClientRect();
+      const footerRect = $("#footerDock").getBoundingClientRect();
+
+      const cx = t.x + t.w/2;
+      const cy = t.y + t.h/2;
+
+      // snap to right if center is near left edge of right dock OR tile right edge near right dock
+      const nearRight = (cx >= rightRect.left - SNAP_MARGIN) && (cy >= rightRect.top - SNAP_MARGIN) && (cy <= rightRect.bottom + SNAP_MARGIN);
+      // snap to footer if center is near top edge of footer OR bottom edge near footer
+      const nearFooter = (cy >= footerRect.top - SNAP_MARGIN) && (cx >= footerRect.left - SNAP_MARGIN) && (cx <= footerRect.right + SNAP_MARGIN);
+
+      // priority: if both, choose closer
+      if(nearRight && nearFooter){
+        const dr = Math.abs(cx - rightRect.left);
+        const df = Math.abs(cy - footerRect.top);
+        return (dr < df) ? "right" : "footer";
+      }
+      if(nearRight) return "right";
+      if(nearFooter) return "footer";
+      return null;
+    }
+
+    /***********************
+     * Dragging + snapping
+     ***********************/
+    function makeDraggable(tileObj, handleEl){
+      const pointers = new Map();
+      let drag = null;
+
+      handleEl.addEventListener("pointerdown", (e) => {
+        if(!tileObj.visible) return;
+
+        tileObj.el.setPointerCapture(e.pointerId);
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        if(pointers.size >= 2) return; // pinch handled elsewhere
+
+        // If docked and user wants to drag, detach immediately for reliability
+        if(tileObj.docked !== "floating"){
+          floatTile(tileObj.id);
+        }
+
+        tileObj.z = getMaxZ() + 1;
+        tileObj.el.style.zIndex = String(tileObj.z);
+
+        drag = {
+          startX: e.clientX,
+          startY: e.clientY,
+          origX: tileObj.x,
+          origY: tileObj.y
+        };
+      });
+
+      handleEl.addEventListener("pointermove", (e) => {
+        if(!pointers.has(e.pointerId)) return;
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        if(tileObj.docked !== "floating" || !drag) return;
+
+        const dx = e.clientX - drag.startX;
+        const dy = e.clientY - drag.startY;
+
+        tileObj.x = clamp(drag.origX + dx, 0, window.innerWidth - 40);
+        tileObj.y = clamp(drag.origY + dy, 0, window.innerHeight - 40);
+        applyFloatingGeometry(tileObj);
+
+        const snap = detectSnapTargetForTile(tileObj);
+        tileObj.snapCandidate = snap;
+        setDockHints(snap);
+      });
+
+      function endDrag(){
+        if(tileObj.docked === "floating" && tileObj.snapCandidate){
+          const target = tileObj.snapCandidate;
+          tileObj.snapCandidate = null;
+          setDockHints(null);
+          dockTile(tileObj.id, target);
+        } else {
+          setDockHints(null);
+        }
+        drag = null;
+        saveLayout();
+      }
+
+      handleEl.addEventListener("pointerup", (e) => {
+        pointers.delete(e.pointerId);
+        endDrag();
+      });
+
+      handleEl.addEventListener("pointercancel", (e) => {
+        pointers.delete(e.pointerId);
+        endDrag();
+      });
+    }
+
+    /***********************
+     * Resizing (handle + real two-pointer pinch + external pinch API)
+     ***********************/
+    function dist(a,b){
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      return Math.sqrt(dx*dx + dy*dy);
+    }
+
+    function makeResizable(tileObj, handleEl){
+      const pointers = new Map();
+      let resizing = null;
+      let pinch = null;
+
+      function startPinchIfReady(){
+        if(tileObj.docked !== "floating") return;
+        if(pointers.size !== 2) return;
+        const pts = Array.from(pointers.values());
+        const d0 = dist(pts[0], pts[1]);
+        pinch = {
+          startDist: d0,
+          startW: tileObj.w,
+          startH: tileObj.h,
+          cx: tileObj.x + tileObj.w/2,
+          cy: tileObj.y + tileObj.h/2
+        };
+      }
+
+      handleEl.addEventListener("pointerdown", (e) => {
+        // resize implies free floating for full flexibility
+        if(tileObj.docked !== "floating") floatTile(tileObj.id);
+
+        tileObj.el.setPointerCapture(e.pointerId);
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        tileObj.z = getMaxZ() + 1;
+        tileObj.el.style.zIndex = String(tileObj.z);
+
+        resizing = {
+          startX: e.clientX,
+          startY: e.clientY,
+          startW: tileObj.w,
+          startH: tileObj.h
+        };
+      });
+
+      handleEl.addEventListener("pointermove", (e) => {
+        if(!pointers.has(e.pointerId)) return;
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        if(pointers.size === 2){
+          if(!pinch) startPinchIfReady();
+          if(!pinch) return;
+
+          const pts = Array.from(pointers.values());
+          const d = dist(pts[0], pts[1]);
+          const scale = d / (pinch.startDist || 1);
+
+          const newW = clamp(pinch.startW * scale, 240, Math.min(window.innerWidth - 20, 1400));
+          const newH = clamp(pinch.startH * scale, 140, Math.min(window.innerHeight - 20, 1000));
+
+          tileObj.w = newW;
+          tileObj.h = newH;
+          tileObj.x = clamp(pinch.cx - newW/2, 0, window.innerWidth - 40);
+          tileObj.y = clamp(pinch.cy - newH/2, 0, window.innerHeight - 40);
+          applyFloatingGeometry(tileObj);
+          return;
+        }
+
+        if(!resizing) return;
+        const dx = e.clientX - resizing.startX;
+        const dy = e.clientY - resizing.startY;
+
+        tileObj.w = clamp(resizing.startW + dx, 240, Math.min(window.innerWidth - 20, 1400));
+        tileObj.h = clamp(resizing.startH + dy, 140, Math.min(window.innerHeight - 20, 1000));
+        applyFloatingGeometry(tileObj);
+      });
+
+      function endResize(e){
+        pointers.delete(e.pointerId);
+        resizing = null;
+        pinch = null;
+        saveLayout();
+      }
+
+      handleEl.addEventListener("pointerup", endResize);
+      handleEl.addEventListener("pointercancel", endResize);
+    }
+
+    /***********************
+     * Selector buttons (top header + right quick tabs)
+     ***********************/
+    const SELECTOR_DEFS = [
+      { id:"startup", label:"Startup" },
+      { id:"tuners", label:"Tuners" },
+      { id:"aiPitch", label:"AI Pitch" },
+      { id:"batting", label:"Batting" },
+      { id:"catching", label:"Catching" },
+      { id:"fielding", label:"Fielding" },
+      { id:"cageView", label:"Cage View" },
+      { id:"landingMap", label:"Landing Map" },
+      { id:"camera", label:"Camera" },
+      { id:"connections", label:"Connections" },
+      { id:"help", label:"Help" }
+    ];
+
+    function renderSelectors(){
+      const root = $("#selectors");
+      root.innerHTML = "";
+      SELECTOR_DEFS.forEach(s => {
+        const b = document.createElement("button");
+        b.className = "btn";
+        b.textContent = s.label;
+        b.dataset.tile = s.id;
+        b.onclick = () => toggleTile(s.id);
+        root.appendChild(b);
+      });
+      syncSelectorButtons();
+    }
+
+    function renderRightQuickTabs(){
+      const root = $("#rightQuickTabs");
+      root.innerHTML = "";
+      const quick = [
+        { id:"camera", label:"Camera" },
+        { id:"cageView", label:"Cage" },
+        { id:"landingMap", label:"Field" }
+      ];
+      quick.forEach(q => {
+        const b = document.createElement("button");
+        b.className = "btn";
+        b.textContent = q.label;
+        b.onclick = () => {
+          ensureTile(q.id);
+          showTile(q.id);
+          dockTile(q.id, "right");
+          setMinimized(state.tiles.get(q.id), false);
+          enforceRightDockMaxExpanded();
+          log(`Opened: ${q.label}`);
+        };
+        root.appendChild(b);
+      });
+    }
+
+    function syncSelectorButtons(){
+      $$("#selectors .btn").forEach(btn => {
+        const id = btn.dataset.tile;
+        const t = state.tiles.get(id);
+        btn.classList.toggle("on", !!t && t.visible);
+      });
+    }
+
+    function ensureTile(id){
+      if(state.tiles.has(id)) return state.tiles.get(id);
+      const def = TILE_DEFS.find(d => d.id === id);
+      if(!def) return null;
+      return createTile(def);
+    }
+
+    function toggleTile(id){
+      const t = state.tiles.get(id);
+      if(!t){
+        ensureTile(id);
+        log(`Opened panel: ${id}`);
+      } else {
+        if(t.visible) hideTile(id);
+        else showTile(id);
+      }
+      enforceRightDockMaxExpanded();
+      syncSelectorButtons();
+      saveLayout();
+    }
+
+    /***********************
+     * Settings load/save/validate (startup reliability)
+     ***********************/
+    function loadSettings(){
+      try{
+        const raw = localStorage.getItem(SETTINGS_KEY);
+        if(raw){
+          const s = JSON.parse(raw);
+          if(s && typeof s === "object"){
+            state.settings = { ...state.settings, ...s };
+          }
+        }
+      }catch(_){}
+      validateSettings();
+    }
+
+    function validateSettings(){
+      // clamp and repair any invalid values (reliable startup)
+      const s = state.settings;
+
+      const clamp01 = (v, fallback) => {
+        v = Number(v);
+        if(!isFinite(v)) v = fallback;
+        return clamp(v, 0, 1);
+      };
+
+      s.pitchAccuracy = clamp01(s.pitchAccuracy, 0.88);
+      s.variability   = clamp01(s.variability, 0.16);
+      s.smoothing     = clamp01(s.smoothing, 0.22);
+
+      s.hitPower      = clamp01(s.hitPower, 0.70);
+
+      s.timingOffsetMs = isFinite(Number(s.timingOffsetMs)) ? Number(s.timingOffsetMs) : 0;
+
+      s.strikeZoneX = isFinite(Number(s.strikeZoneX)) ? Number(s.strikeZoneX) : 0;
+      s.strikeZoneY = isFinite(Number(s.strikeZoneY)) ? Number(s.strikeZoneY) : 0;
+      s.releasePointX = isFinite(Number(s.releasePointX)) ? Number(s.releasePointX) : -0.15;
+      s.releasePointY = isFinite(Number(s.releasePointY)) ? Number(s.releasePointY) : 0.25;
+
+      s.moundDistanceFt = isFinite(Number(s.moundDistanceFt)) ? Number(s.moundDistanceFt) : 60.5;
+      s.plateWidthIn    = isFinite(Number(s.plateWidthIn)) ? Number(s.plateWidthIn) : 17;
+      s.zoneWidthIn     = isFinite(Number(s.zoneWidthIn)) ? Number(s.zoneWidthIn) : 20;
+      s.zoneHeightIn    = isFinite(Number(s.zoneHeightIn)) ? Number(s.zoneHeightIn) : 24;
+
+      s.launchAngleDeg  = isFinite(Number(s.launchAngleDeg)) ? Number(s.launchAngleDeg) : 18;
+      s.sprayBiasDeg    = isFinite(Number(s.sprayBiasDeg)) ? Number(s.sprayBiasDeg) : 0;
+
+      // boolean coercion
+      s.catcherFramingAssist = !!s.catcherFramingAssist;
+      s.batterTimingAssist = !!s.batterTimingAssist;
+      s.fieldingAssist = !!s.fieldingAssist;
+
+      // calibratedAt is numeric
+      s.calibratedAt = isFinite(Number(s.calibratedAt)) ? Number(s.calibratedAt) : 0;
+    }
+
+    function saveSettings(){
+      validateSettings();
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(state.settings));
+      updateQuickStatus();
+      updateCalibrationUI();
+    }
+
+    function calibrationIsValid(){
+      // A simple, robust rule: we consider calibration valid if calibratedAt exists
+      // and key mapping fields are finite (which validateSettings ensures).
+      return !!state.settings.calibratedAt;
+    }
+
+    /***********************
+     * Layout persistence
+     ***********************/
+    function saveLayout(){
+      const layout = {};
+      state.tiles.forEach(t => {
+        layout[t.id] = {
+          visible: t.visible,
+          docked: t.docked,
+          minimized: t.minimized,
+          x: t.x, y: t.y, w: t.w, h: t.h, z: t.z
+        };
+      });
+      layout.__rightOrder = Array.from($("#rightStack").children)
+        .filter(el => el.classList.contains("tile"))
+        .map(el => el.dataset.id);
+
+      layout.__footerOrder = Array.from($("#footControls").children)
+        .filter(el => el.classList.contains("tile"))
+        .map(el => el.dataset.id);
+
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(layout));
+    }
+
+    function loadLayout(){
+      try{
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if(!raw) return;
+        const layout = JSON.parse(raw);
+        if(!layout || typeof layout !== "object") return;
+
+        Object.keys(layout).forEach(id => {
+          if(id.startsWith("__")) return;
+          const def = TILE_DEFS.find(d => d.id === id);
+          if(def && !state.tiles.has(id)){
+            const t = createTile(def);
+            applyLayoutToTile(t, layout[id]);
+          }
+        });
+
+        state.tiles.forEach(t => {
+          if(layout[t.id]) applyLayoutToTile(t, layout[t.id]);
+        });
+
+        if(Array.isArray(layout.__rightOrder)){
+          layout.__rightOrder.forEach(id => {
+            const t = state.tiles.get(id);
+            if(t && t.docked === "right") $("#rightStack").appendChild(t.el);
+          });
+        }
+        if(Array.isArray(layout.__footerOrder)){
+          layout.__footerOrder.forEach(id => {
+            const t = state.tiles.get(id);
+            if(t && t.docked === "footer") $("#footControls").appendChild(t.el);
+          });
+        }
+
+        enforceRightDockMaxExpanded();
+        syncSelectorButtons();
+      }catch(_){}
+    }
+
+    function applyLayoutToTile(t, saved){
+      t.visible = !!saved.visible;
+      t.minimized = !!saved.minimized;
+      t.el.classList.toggle("minimized", t.minimized);
+      t.el.style.display = t.visible ? "" : "none";
+
+      t.x = saved.x ?? t.x;
+      t.y = saved.y ?? t.y;
+      t.w = saved.w ?? t.w;
+      t.h = saved.h ?? t.h;
+      t.z = saved.z ?? t.z;
+
+      const dock = saved.docked ?? t.docked;
+      dockTile(t.id, dock, {silent:true});
+      if(dock === "floating") applyFloatingGeometry(t);
+    }
+
+    /***********************
+     * Session persistence
+     ***********************/
+    function loadSession(){
+      try{
+        const raw = localStorage.getItem(SESSION_KEY);
+        if(raw){
+          const s = JSON.parse(raw);
+          if(s && s.name) state.session = s;
+        }
+      }catch(_){}
+    }
+
+    function saveSession(){
+      if(state.session) localStorage.setItem(SESSION_KEY, JSON.stringify(state.session));
+    }
+
+    function updateSessionUI(){
+      const pill = $("#sessionPill");
+      if(!pill) return;
+      if(!state.session){
+        pill.textContent = "Not logged in";
+      } else {
+        pill.textContent = `${state.session.name} • ${state.session.role} • ${state.session.mode}`;
+      }
+    }
+
+    function showLogin(){
+      $("#loginOverlay").style.display = "flex";
+      $("#wizardOverlay").style.display = "none";
+      updateCalibrationUI();
+    }
+    function hideLogin(){
+      $("#loginOverlay").style.display = "none";
+    }
+
+    /***********************
+     * Simulation (Pitch + Hit + Field landing)
+     ***********************/
+    function randn(){
+      let u = 0, v = 0;
+      while(u === 0) u = Math.random();
+      while(v === 0) v = Math.random();
+      return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+    }
+    function lerp(a,b,t){ return a + (b-a)*t; }
+
+    function makePitch({drill="targeted"} = {}){
+      const s = state.settings;
+      const acc = s.pitchAccuracy;
+      const vari = s.variability;
+
+      const types = ["4-Seam", "2-Seam", "Slider", "Curve", "Changeup"];
+      const type = (drill === "random") ? types[Math.floor(Math.random()*types.length)] : "4-Seam";
+
+      const baseV = ({ "4-Seam": 92, "2-Seam": 90, "Slider": 84, "Curve": 78, "Changeup": 82 })[type] || 90;
+
+      const vJitter = (1-acc) * 6 + vari * 4;
+      const vMph = baseV + randn()*vJitter;
+
+      const baseBreak = ({ "4-Seam": 8, "2-Seam": 10, "Slider": 16, "Curve": 20, "Changeup": 12 })[type] || 10;
+
+      const breakJitter = (1-acc) * 8 + vari * 10;
+      const breakIn = baseBreak + randn()*breakJitter;
+
+      const tx = s.strikeZoneX + randn()*((1-acc)*0.25 + vari*0.18);
+      const ty = s.strikeZoneY + randn()*((1-acc)*0.22 + vari*0.16);
+
+      const points = [];
+      const steps = 72;
+      for(let i=0;i<=steps;i++){
+        const u = i/steps;
+        const curve = u*u*(1+u*0.5);
+        const x = lerp(s.releasePointX, tx, u) + (breakIn/120) * (curve - u*0.7);
+        const y = lerp(s.releasePointY, ty, u) + (breakIn/180) * (Math.sin(u*Math.PI)*0.65);
+        points.push({u, x, y});
+      }
+
+      return { type, vMph, breakIn, tx, ty, points, createdAt: now() };
+    }
+
+    function simulateContact(){
+      // Requires a current pitch; makes a batted ball landing point.
+      const p = state.sim.currentPitch || makePitch({drill:"random"});
+      state.sim.currentPitch = p;
+
+      const s = state.settings;
+      const acc = s.pitchAccuracy;
+      const vari = s.variability;
+
+      // exit velocity depends on hitPower and pitch velo + randomness
+      const exitV = clamp( (85 + s.hitPower*35) + (p.vMph-80)*0.35 + randn()*((1-acc)*10 + vari*6), 55, 120 );
+
+      // launch angle around baseline with timing assist affecting variance
+      const assist = s.batterTimingAssist ? 0.65 : 1.0;
+      const laVar = ((1-acc)*14 + vari*10) * assist;
+      const launchAngleDeg = clamp(s.launchAngleDeg + randn()*laVar, -10, 45);
+
+      // spray angle around bias (pull/oppo), influenced by variability
+      const sprayVar = (12 + vari*18) * assist;
+      const sprayAngleDeg = clamp(s.sprayBiasDeg + randn()*sprayVar, -45, 45);
+
+      // distance rough model: increases with exitV and optimal launch (~22deg)
+      const opt = 22;
+      const angleFactor = 1 - Math.abs(launchAngleDeg - opt)/50; // ~0..1
+      const dist = clamp( (exitV * 3.2) * clamp(angleFactor, 0.25, 1.0) + randn()*18, 40, 450 );
+
+      // convert to field coords: home plate at bottom center, outfield top
+      // x: left(-) right(+), y: depth forward(+)
+      const rad = sprayAngleDeg * Math.PI/180;
+      const x = Math.sin(rad) * dist;
+      const y = Math.cos(rad) * dist;
+
+      const ball = { x, y, dist, sprayAngleDeg, launchAngleDeg, exitV, ts: now() };
+      state.sim.battedBalls.unshift(ball);
+      state.sim.lastContact = ball;
+
+      // cap history
+      if(state.sim.battedBalls.length > 200) state.sim.battedBalls.length = 200;
+
+      log(`Contact: EV ${exitV.toFixed(1)} mph • LA ${launchAngleDeg.toFixed(1)}° • Dist ${dist.toFixed(0)} ft`);
+      return ball;
+    }
+
+    /***********************
+     * Canvas drawing (field + pitch + batted balls)
+     ***********************/
+    const canvas = $("#simCanvas");
+    const ctx = canvas.getContext("2d");
+
+    function resizeCanvas(){
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.floor(rect.width * dpr);
+      canvas.height = Math.floor(rect.height * dpr);
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+    }
+    window.addEventListener("resize", () => { resizeCanvas(); });
+    resizeCanvas();
+
+    function drawFieldBase(w,h){
+      ctx.clearRect(0,0,w,h);
+
+      // background grid
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(255,255,255,.08)";
+      for(let x=0;x<w;x+=44){
+        ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke();
+      }
+      for(let y=0;y<h;y+=44){
+        ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke();
+      }
+
+      // strike zone box (visual reference)
+      const zx = w*0.72;
+      const zy = h*0.40;
+      const zw = w*0.18;
+      const zh = h*0.26;
+      ctx.strokeStyle = "rgba(0,255,200,.35)";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(zx, zy, zw, zh);
+
+      ctx.fillStyle = "rgba(255,255,255,.70)";
+      ctx.font = "12px " + getComputedStyle(document.body).fontFamily;
+      ctx.fillText("Strike Zone", zx, zy - 8);
+
+      // field wedge (for landings)
+      const homeX = w*0.18;
+      const homeY = h*0.82;
+      ctx.strokeStyle = "rgba(0,170,255,.25)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(homeX, homeY);
+      ctx.lineTo(homeX + w*0.58, homeY - h*0.72);
+      ctx.moveTo(homeX, homeY);
+      ctx.lineTo(homeX + w*0.58, homeY + h*0.00);
+      ctx.stroke();
+
+      ctx.fillStyle = "rgba(255,255,255,.55)";
+      ctx.fillText("Home", homeX - 4, homeY + 14);
+    }
+
+    function drawPitch(w,h){
+      const p = state.sim.currentPitch;
+      if(!p) return;
+
+      ctx.strokeStyle = "rgba(0,170,255,.65)";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+
+      const map = (pt) => {
+        const px = w*0.20 + (pt.u * w*0.55) + pt.x * w*0.08;
+        const py = h*0.55 - (pt.y * h*0.22);
+        return {px,py};
+      };
+
+      p.points.forEach((pt, i) => {
+        const {px,py} = map(pt);
+        if(i===0) ctx.moveTo(px,py);
+        else ctx.lineTo(px,py);
+      });
+      ctx.stroke();
+
+      // ball marker
+      const u = clamp(state.sim.t % 1, 0, 1);
+      const idx = Math.floor(u * (p.points.length-1));
+      const {px,py} = map(p.points[idx]);
+
+      ctx.fillStyle = "rgba(0,255,200,.95)";
+      ctx.beginPath();
+      ctx.arc(px,py, 6, 0, Math.PI*2);
+      ctx.fill();
+
+      ctx.fillStyle = "rgba(255,255,255,.85)";
+      ctx.fillText(`${p.type} • ${p.vMph.toFixed(1)} mph • break ${p.breakIn.toFixed(1)} in`, 14, 20);
+    }
+
+    function drawLandings(w,h){
+      // draw recent batted balls as points in field wedge
+      const balls = state.sim.battedBalls;
+      if(!balls.length) return;
+
+      const homeX = w*0.18;
+      const homeY = h*0.82;
+
+      // scale: 450ft corresponds to ~0.72h in y
+      const maxDist = 450;
+      const sx = (w*0.58) / maxDist;
+      const sy = (h*0.72) / maxDist;
+
+      // draw last 80
+      const max = Math.min(80, balls.length);
+      for(let i=0;i<max;i++){
+        const b = balls[i];
+        const px = homeX + b.x * sx;
+        const py = homeY - b.y * sy;
+        const alpha = clamp(0.85 - i*(0.85/max), 0.12, 0.85);
+
+        ctx.fillStyle = `rgba(255,255,255,${alpha*0.20})`;
+        ctx.beginPath();
+        ctx.arc(px,py, 6, 0, Math.PI*2);
+        ctx.fill();
+
+        ctx.fillStyle = `rgba(0,255,200,${alpha*0.70})`;
+        ctx.beginPath();
+        ctx.arc(px,py, 3, 0, Math.PI*2);
+        ctx.fill();
+      }
+
+      // label last contact
+      if(state.sim.lastContact){
+        const b = state.sim.lastContact;
+        const px = homeX + b.x * sx;
+        const py = homeY - b.y * sy;
+        ctx.fillStyle = "rgba(255,255,255,.85)";
+        ctx.fillText(`Last: ${b.dist.toFixed(0)}ft @ ${b.sprayAngleDeg.toFixed(0)}°`, px + 8, py - 8);
+      }
+    }
+
+    function draw(){
+      const w = canvas.getBoundingClientRect().width;
+      const h = canvas.getBoundingClientRect().height;
+
+      drawFieldBase(w,h);
+      drawPitch(w,h);
+      drawLandings(w,h);
+
+      requestAnimationFrame(draw);
+    }
+    requestAnimationFrame(draw);
+
+    function tickSim(){
+      if(!state.sim.running || state.sim.paused) return;
+      state.sim.t += 0.012;
+    }
+    setInterval(tickSim, 16);
+
+    /***********************
+     * Footer controls rendering (stable + reliable)
+     ***********************/
+    function renderFooterControls(){
+      const root = $("#footControls");
+      if(!root) return;
+
+      root.innerHTML = `
+        <div class="small" style="margin-bottom:8px;">
+          <b>Footer Controls</b><br/>
+          Layout + calibration are saved automatically. Use buttons if you want manual control.
+        </div>
+
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn" data-act="saveLayout">Save Layout</button>
+          <button class="btn" data-act="resetLayout">Reset Layout</button>
+          <button class="btn" data-act="clearLogs">Clear Logs</button>
+          <button class="btn" data-act="saveSettings">Save Tuners</button>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="small">
+          <b>Calibration:</b> <span data-cal="statusText">—</span><br/>
+          <b>Active Profile:</b> <span data-cal="profileText">—</span>
+        </div>
+      `;
+
+      root.querySelector('[data-act="saveLayout"]').onclick = () => { saveLayout(); log("Layout saved."); };
+      root.querySelector('[data-act="resetLayout"]').onclick = () => { localStorage.removeItem(STORAGE_KEY); location.reload(); };
+      root.querySelector('[data-act="clearLogs"]').onclick = () => { $("#timeline").innerHTML = ""; log("Logs cleared."); };
+      root.querySelector('[data-act="saveSettings"]').onclick = () => { saveSettings(); log("Tuners saved."); };
+
+      updateCalibrationUI();
+    }
+
+    function updateCalibrationUI(){
+      const calOk = calibrationIsValid();
+      const when = state.settings.calibratedAt ? new Date(state.settings.calibratedAt).toLocaleString() : "Not calibrated";
+      const profile = state.settings.calibrationProfile || "default";
+
+      const loginText = $("#calStatusLogin");
+      if(loginText){
+        loginText.textContent = calOk ? `Calibrated (${when})` : "NOT calibrated (Run Setup Wizard)";
+      }
+
+      const statusText = document.querySelector('[data-cal="statusText"]');
+      const profileText = document.querySelector('[data-cal="profileText"]');
+      if(statusText) statusText.textContent = calOk ? `OK (${when})` : "NOT calibrated";
+      if(profileText) profileText.textContent = profile;
+    }
+
+    /***********************
+     * Quick Status (Startup reliability display)
+     ***********************/
+    function updateQuickStatus(){
+      const s = state.settings;
+      const role = state.session?.role || "—";
+      const mode = state.session?.mode || "—";
+      const name = state.session?.name || "—";
+
+      const calOk = calibrationIsValid();
+      const calWhen = s.calibratedAt ? new Date(s.calibratedAt).toLocaleString() : "Not calibrated";
+
+      $("#quickStatus").innerHTML = `
+        <div style="font-weight:950; color:var(--text); margin-bottom:6px;">Session</div>
+        <div class="small">
+          <b>User:</b> ${escapeHtml(name)}<br/>
+          <b>Role:</b> ${escapeHtml(role)}<br/>
+          <b>Mode:</b> ${escapeHtml(mode)}<br/>
+        </div>
+
+        <div class="divider"></div>
+
+        <div style="font-weight:950; color:var(--text); margin-bottom:6px;">Calibration</div>
+        <div class="statusRow">
+          <span class="badge ${calOk ? "good" : "bad"}">${calOk ? "CALIBRATED" : "NOT CALIBRATED"}</span>
+          <span class="badge ${calOk ? "good" : "warn"}">${escapeHtml(calWhen)}</span>
+          <span class="badge">${escapeHtml(s.calibrationProfile || "default")}</span>
+        </div>
+        <div class="small" style="margin-top:8px;">
+          <b>Timing Offset:</b> ${s.timingOffsetMs} ms • <b>Smoothing:</b> ${s.smoothing.toFixed(2)}<br/>
+          <b>Pitch Accuracy:</b> ${s.pitchAccuracy.toFixed(2)} • <b>Variability:</b> ${s.variability.toFixed(2)}
+        </div>
+
+        <div class="divider"></div>
+
+        <div style="font-weight:950; color:var(--text); margin-bottom:6px;">Hit / Landing Tuners</div>
+        <div class="small">
+          <b>Hit Power:</b> ${s.hitPower.toFixed(2)} • <b>Launch:</b> ${s.launchAngleDeg.toFixed(0)}° • <b>Spray Bias:</b> ${s.sprayBiasDeg.toFixed(0)}°
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="small">
+          <b>Startup rule:</b> If you change camera placement or device latency, run Wizard again.
+        </div>
+      `;
+
+      updateCalibrationUI();
+    }
+
+    /***********************
+     * Camera Tile (MediaPipe Hands optional) + external overlay
+     ***********************/
+    const cameraState = {
+      stream: null,
+      running: false,
+      handsEnabled: false,
+      lastHands: null, // {hands:[{landmarks:[{x,y,z}...]}]}
+      videoEl: null,
+      canvasEl: null,
+      ctx: null
+    };
+
+    async function startCamera(tile){
+      const status = tile.q('[data-role="camStatus"]');
+      try{
+        if(cameraState.running) return;
+        cameraState.running = true;
+
+        const video = tile.q('video[data-role="camVideo"]');
+        const overlay = tile.q('canvas[data-role="camOverlay"]');
+        cameraState.videoEl = video;
+        cameraState.canvasEl = overlay;
+        cameraState.ctx = overlay.getContext("2d");
+
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+        cameraState.stream = stream;
+        video.srcObject = stream;
+        await video.play();
+
+        status.textContent = "Camera: ON";
+        log("Camera started.");
+
+        // draw loop for landmarks overlay
+        requestAnimationFrame(() => drawHandsOverlayLoop());
+      }catch(err){
+        cameraState.running = false;
+        if(status) status.textContent = "Camera: ERROR (permission?)";
+        log("Camera failed to start (permission or device).");
+        console.error(err);
+      }
+    }
+
+    function stopCamera(tile){
+      const status = tile?.q('[data-role="camStatus"]');
+      try{
+        if(cameraState.stream){
+          cameraState.stream.getTracks().forEach(t => t.stop());
+        }
+      }catch(_){}
+      cameraState.stream = null;
+      cameraState.running = false;
+      if(status) status.textContent = "Camera: OFF";
+      log("Camera stopped.");
+    }
+
+    function fitOverlayCanvas(){
+      const v = cameraState.videoEl;
+      const c = cameraState.canvasEl;
+      if(!v || !c) return;
+      const rect = v.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      c.width = Math.floor(rect.width * dpr);
+      c.height = Math.floor(rect.height * dpr);
+      const ctx2 = cameraState.ctx;
+      if(ctx2) ctx2.setTransform(dpr,0,0,dpr,0,0);
+    }
+
+    function drawHandsOverlayLoop(){
+      if(!cameraState.canvasEl || !cameraState.ctx || !cameraState.videoEl){
+        requestAnimationFrame(drawHandsOverlayLoop);
+        return;
+      }
+      fitOverlayCanvas();
+
+      const ctx2 = cameraState.ctx;
+      const w = cameraState.canvasEl.getBoundingClientRect().width;
+      const h = cameraState.canvasEl.getBoundingClientRect().height;
+
+      ctx2.clearRect(0,0,w,h);
+
+      const hands = cameraState.lastHands?.hands || [];
+      if(hands.length){
+        // draw landmarks
+        ctx2.lineWidth = 2;
+        ctx2.strokeStyle = "rgba(0,255,200,.65)";
+        ctx2.fillStyle = "rgba(0,170,255,.55)";
+
+        for(const hand of hands){
+          const lm = hand.landmarks || [];
+          for(const p of lm){
+            const x = p.x * w;
+            const y = p.y * h;
+            ctx2.beginPath();
+            ctx2.arc(x,y, 4, 0, Math.PI*2);
+            ctx2.fill();
+          }
+        }
+
+        ctx2.fillStyle = "rgba(255,255,255,.75)";
+        ctx2.font = "12px " + getComputedStyle(document.body).fontFamily;
+        ctx2.fillText(`Hands: ${hands.length}`, 10, 18);
+      } else {
+        ctx2.fillStyle = "rgba(255,255,255,.45)";
+        ctx2.font = "12px " + getComputedStyle(document.body).fontFamily;
+        ctx2.fillText("Hand overlay: waiting for input (MediaPipe or HUD.onHands())", 10, 18);
+      }
+
+      requestAnimationFrame(drawHandsOverlayLoop);
+    }
+
+    /***********************
+     * Batter Cage View Tile + Landing Map Tile (own canvases)
+     ***********************/
+    function drawCageView(tile){
+      const c = tile.q('canvas[data-role="cageCanvas"]');
+      if(!c) return;
+      const ctx = c.getContext("2d");
+      const rect = c.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      c.width = Math.floor(rect.width*dpr);
+      c.height = Math.floor(rect.height*dpr);
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+
+      const w = rect.width;
+      const h = rect.height;
+      ctx.clearRect(0,0,w,h);
+
+      // target zone (centered)
+      ctx.strokeStyle = "rgba(0,255,200,.35)";
+      ctx.lineWidth = 2;
+      const boxW = w*0.30;
+      const boxH = h*0.40;
+      const bx = w*0.55 - boxW/2;
+      const by = h*0.30 - boxH/2;
+      ctx.strokeRect(bx,by,boxW,boxH);
+
+      // last pitch target
+      const p = state.sim.currentPitch;
+      if(p){
+        ctx.fillStyle = "rgba(0,170,255,.65)";
+        const tx = w*0.55 + p.tx * w*0.12;
+        const ty = h*0.30 - p.ty * h*0.12;
+        ctx.beginPath();
+        ctx.arc(tx, ty, 6, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = "rgba(255,255,255,.80)";
+        ctx.font = "12px " + getComputedStyle(document.body).fontFamily;
+        ctx.fillText("Pitch Target", tx+10, ty-10);
+      }
+
+      // last landing summary
+      const b = state.sim.lastContact;
+      ctx.fillStyle = "rgba(255,255,255,.70)";
+      ctx.font = "12px " + getComputedStyle(document.body).fontFamily;
+      ctx.fillText("Cage View: Target + Landing + History", 10, 18);
+
+      if(b){
+        ctx.fillStyle = "rgba(0,255,200,.75)";
+        ctx.fillText(`Last: EV ${b.exitV.toFixed(1)} mph  LA ${b.launchAngleDeg.toFixed(1)}°  Dist ${b.dist.toFixed(0)} ft`, 10, h-14);
+      } else {
+        ctx.fillStyle = "rgba(255,255,255,.50)";
+        ctx.fillText("No contact yet. Use Sim Hit or Batting tile.", 10, h-14);
+      }
+
+      // history strip
+      const list = state.sim.battedBalls.slice(0, 10);
+      const sx = 10, sy = 34;
+      for(let i=0;i<list.length;i++){
+        const bb = list[i];
+        ctx.fillStyle = `rgba(255,255,255,${0.55 - i*0.04})`;
+        ctx.fillText(`#${i+1}  ${bb.dist.toFixed(0)}ft  @${bb.sprayAngleDeg.toFixed(0)}°  EV${bb.exitV.toFixed(0)}`, sx, sy + i*16);
+      }
+    }
+
+    function drawLandingMap(tile){
+      const c = tile.q('canvas[data-role="landCanvas"]');
+      if(!c) return;
+      const ctx = c.getContext("2d");
+      const rect = c.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      c.width = Math.floor(rect.width*dpr);
+      c.height = Math.floor(rect.height*dpr);
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+
+      const w = rect.width;
+      const h = rect.height;
+      ctx.clearRect(0,0,w,h);
+
+      // field arc
+      const homeX = w*0.50;
+      const homeY = h*0.88;
+      const maxDist = 450;
+      const scale = Math.min(w,h)*0.78 / maxDist;
+
+      ctx.strokeStyle = "rgba(255,255,255,.10)";
+      ctx.lineWidth = 2;
+
+      // foul lines
+      ctx.beginPath();
+      ctx.moveTo(homeX, homeY);
+      ctx.lineTo(homeX - 450*scale*Math.sin(Math.PI/4), homeY - 450*scale*Math.cos(Math.PI/4));
+      ctx.moveTo(homeX, homeY);
+      ctx.lineTo(homeX + 450*scale*Math.sin(Math.PI/4), homeY - 450*scale*Math.cos(Math.PI/4));
+      ctx.stroke();
+
+      // distance arcs
+      ctx.strokeStyle = "rgba(0,170,255,.12)";
+      for(const d of [100,200,300,400]){
+        ctx.beginPath();
+        ctx.arc(homeX, homeY, d*scale, Math.PI*1.25, Math.PI*1.75);
+        ctx.stroke();
+        ctx.fillStyle = "rgba(255,255,255,.40)";
+        ctx.font = "12px " + getComputedStyle(document.body).fontFamily;
+        ctx.fillText(`${d}ft`, homeX + 6, homeY - d*scale - 2);
+      }
+
+      // points
+      const balls = state.sim.battedBalls.slice(0, 120);
+      for(let i=0;i<balls.length;i++){
+        const b = balls[i];
+        const alpha = clamp(0.88 - i*(0.88/balls.length), 0.12, 0.88);
+
+        // convert x,y field coords
+        const px = homeX + (b.x * scale);
+        const py = homeY - (b.y * scale);
+
+        ctx.fillStyle = `rgba(0,255,200,${alpha*0.75})`;
+        ctx.beginPath();
+        ctx.arc(px, py, 3.5, 0, Math.PI*2);
+        ctx.fill();
+
+        ctx.fillStyle = `rgba(255,255,255,${alpha*0.25})`;
+        ctx.beginPath();
+        ctx.arc(px, py, 7, 0, Math.PI*2);
+        ctx.fill();
+      }
+
+      // label
+      ctx.fillStyle = "rgba(255,255,255,.75)";
+      ctx.font = "12px " + getComputedStyle(document.body).fontFamily;
+      ctx.fillText("Field Landing Map (Batted Balls)", 10, 18);
+
+      if(state.sim.lastContact){
+        const b = state.sim.lastContact;
+        ctx.fillStyle = "rgba(255,255,255,.85)";
+        ctx.fillText(`Last: ${b.dist.toFixed(0)}ft • EV ${b.exitV.toFixed(1)} • LA ${b.launchAngleDeg.toFixed(1)}° • Spray ${b.sprayAngleDeg.toFixed(0)}°`, 10, 36);
+      }
+    }
+
+    /***********************
+     * Tuners (Master panel + role panels)
+     ***********************/
+    function applyPreset(name){
+      // reliable, deterministic presets
+      if(name === "Command"){
+        state.settings.pitchAccuracy = 0.94;
+        state.settings.variability = 0.10;
+        state.settings.smoothing = 0.28;
+        state.settings.calibrationProfile = "Command";
+      } else if(name === "Game"){
+        state.settings.pitchAccuracy = 0.88;
+        state.settings.variability = 0.16;
+        state.settings.smoothing = 0.22;
+        state.settings.calibrationProfile = "Game";
+      } else if(name === "Wild"){
+        state.settings.pitchAccuracy = 0.78;
+        state.settings.variability = 0.28;
+        state.settings.smoothing = 0.18;
+        state.settings.calibrationProfile = "Wild";
+      }
+      saveSettings();
+      log(`Preset applied: ${name}`);
+      // sync any tuner tile UIs
+      syncTunersUI();
+    }
+
+    function syncTunersUI(){
+      // update inputs in tiles if present
+      const tuners = state.tiles.get("tuners");
+      if(tuners && tuners.visible){
+        tuners.qa('[data-key]').forEach(inp => {
+          const key = inp.getAttribute("data-key");
+          if(key in state.settings){
+            if(inp.type === "checkbox") inp.checked = !!state.settings[key];
+            else inp.value = String(state.settings[key]);
+          }
+        });
+      }
+
+      const ai = state.tiles.get("aiPitch");
+      if(ai && ai.visible){
+        ai.qa('[data-key]').forEach(inp => {
+          const key = inp.getAttribute("data-key");
+          if(key in state.settings){
+            if(inp.type === "checkbox") inp.checked = !!state.settings[key];
+            else inp.value = String(state.settings[key]);
+          }
+        });
+      }
+
+      const bat = state.tiles.get("batting");
+      if(bat && bat.visible){
+        bat.qa('[data-key]').forEach(inp => {
+          const key = inp.getAttribute("data-key");
+          if(key in state.settings){
+            if(inp.type === "checkbox") inp.checked = !!state.settings[key];
+            else inp.value = String(state.settings[key]);
+          }
+        });
+      }
+
+      const cat = state.tiles.get("catching");
+      if(cat && cat.visible){
+        cat.qa('[data-key]').forEach(inp => {
+          const key = inp.getAttribute("data-key");
+          if(key in state.settings){
+            if(inp.type === "checkbox") inp.checked = !!state.settings[key];
+            else inp.value = String(state.settings[key]);
+          }
+        });
+      }
+
+      const fld = state.tiles.get("fielding");
+      if(fld && fld.visible){
+        fld.qa('[data-key]').forEach(inp => {
+          const key = inp.getAttribute("data-key");
+          if(key in state.settings){
+            if(inp.type === "checkbox") inp.checked = !!state.settings[key];
+            else inp.value = String(state.settings[key]);
+          }
+        });
+      }
+    }
+
+    function readSettingsFromTile(tileObj){
+      tileObj.qa('[data-key]').forEach(inp => {
+        const key = inp.getAttribute("data-key");
+        if(!(key in state.settings)) return;
+
+        if(inp.type === "checkbox"){
+          state.settings[key] = !!inp.checked;
+        } else {
+          const n = Number(inp.value);
+          // keep strings if non-numeric, but here all are numeric or bool
+          state.settings[key] = isFinite(n) ? n : inp.value;
+        }
+      });
+      saveSettings();
+      syncTunersUI();
+    }
+
+    /***********************
+     * Tiles Definitions (FULL set requested)
+     ***********************/
+    const TILE_DEFS = [
+      {
+        id:"startup",
+        title:"Startup Checklist",
+        tag:"RELIABLE",
+        defaultDock:"right",
+        content: () => `
+          <div class="small">
+            This panel enforces <b>reliable startup</b> by showing calibration and critical tuners.
+          </div>
+
+          <div class="divider"></div>
+
+          <div data-role="startupBadges"></div>
+
+          <div class="divider"></div>
+
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn on" data-act="runWizard">Run Setup Wizard</button>
+            <button class="btn" data-act="openTuners">Open Tuners</button>
+            <button class="btn" data-act="applyCommand">Command</button>
+            <button class="btn" data-act="applyGame">Game</button>
+            <button class="btn" data-act="applyWild">Wild</button>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="small" data-role="startupText"></div>
+        `,
+        onMount: (tile) => {
+          const badges = tile.q('[data-role="startupBadges"]');
+          const text = tile.q('[data-role="startupText"]');
+
+          function refresh(){
+            const calOk = calibrationIsValid();
+            const when = state.settings.calibratedAt ? new Date(state.settings.calibratedAt).toLocaleString() : "Not calibrated";
+
+            badges.innerHTML = `
+              <div class="statusRow">
+                <span class="badge ${calOk ? "good" : "bad"}">${calOk ? "CALIBRATED" : "NOT CALIBRATED"}</span>
+                <span class="badge ${calOk ? "good" : "warn"}">${escapeHtml(when)}</span>
+                <span class="badge">Profile: ${escapeHtml(state.settings.calibrationProfile || "default")}</span>
+              </div>
+              <div class="statusRow">
+                <span class="badge">Offset: ${state.settings.timingOffsetMs}ms</span>
+                <span class="badge">Smooth: ${state.settings.smoothing.toFixed(2)}</span>
+                <span class="badge">Acc: ${state.settings.pitchAccuracy.toFixed(2)}</span>
+                <span class="badge">Var: ${state.settings.variability.toFixed(2)}</span>
+              </div>
+            `;
+
+            text.innerHTML = `
+              <b>Reliable rule:</b> If camera/input changes, rerun Wizard.<br/>
+              <b>Tip:</b> If your AR cursor jitters, raise smoothing and verify timing offset.
+            `;
+          }
+
+          tile.q('[data-act="runWizard"]').onclick = () => openWizard();
+          tile.q('[data-act="openTuners"]').onclick = () => { ensureTile("tuners"); showTile("tuners"); dockTile("tuners","right"); setMinimized(state.tiles.get("tuners"), false); };
+          tile.q('[data-act="applyCommand"]').onclick = () => applyPreset("Command");
+          tile.q('[data-act="applyGame"]').onclick = () => applyPreset("Game");
+          tile.q('[data-act="applyWild"]').onclick = () => applyPreset("Wild");
+
+          refresh();
+          // keep updated when settings change
+          tile._refresh = refresh;
+        }
+      },
+      {
+        id:"tuners",
+        title:"Master Tuners",
+        tag:"TUNE",
+        defaultDock:"right",
+        content: () => `
+          <div class="small">
+            Master tuners apply across pitching, batting, catching, and fielding. Saved on apply.
+          </div>
+          <div class="divider"></div>
+
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn" data-act="presetCommand">Command</button>
+            <button class="btn" data-act="presetGame">Game</button>
+            <button class="btn" data-act="presetWild">Wild</button>
+            <button class="btn on" data-act="applySave">Apply + Save</button>
+          </div>
+
+          <div class="divider"></div>
+
+          <label>Pitch Accuracy (0..1)</label>
+          <input data-key="pitchAccuracy" type="number" step="0.01" min="0" max="1"/>
+
+          <label>Variability (0..1)</label>
+          <input data-key="variability" type="number" step="0.01" min="0" max="1"/>
+
+          <label>Smoothing (0..1)</label>
+          <input data-key="smoothing" type="number" step="0.01" min="0" max="1"/>
+
+          <label>Timing Offset (ms)</label>
+          <input data-key="timingOffsetMs" type="number" step="1"/>
+
+          <div class="divider"></div>
+
+          <label>Hit Power (0..1)</label>
+          <input data-key="hitPower" type="number" step="0.01" min="0" max="1"/>
+
+          <label>Launch Angle (deg)</label>
+          <input data-key="launchAngleDeg" type="number" step="1"/>
+
+          <label>Spray Bias (deg, pull - / oppo +)</label>
+          <input data-key="sprayBiasDeg" type="number" step="1"/>
+
+          <div class="divider"></div>
+
+          <label><input data-key="batterTimingAssist" type="checkbox" /> Batter Timing Assist</label>
+          <label><input data-key="catcherFramingAssist" type="checkbox" /> Catcher Framing Assist</label>
+          <label><input data-key="fieldingAssist" type="checkbox" /> Fielding Assist</label>
+
+          <div class="divider"></div>
+
+          <div class="small">
+            <b>Calibration Profile:</b> <span data-role="profile"></span><br/>
+            <b>Calibrated At:</b> <span data-role="calAt"></span>
+          </div>
+        `,
+        onMount: (tile) => {
+          tile.qa('[data-key]').forEach(inp => {
+            const key = inp.getAttribute("data-key");
+            if(inp.type === "checkbox") inp.checked = !!state.settings[key];
+            else inp.value = String(state.settings[key]);
+          });
+
+          const prof = tile.q('[data-role="profile"]');
+          const calAt = tile.q('[data-role="calAt"]');
+
+          function refreshMeta(){
+            prof.textContent = state.settings.calibrationProfile || "default";
+            calAt.textContent = state.settings.calibratedAt ? new Date(state.settings.calibratedAt).toLocaleString() : "Not calibrated";
+          }
+          refreshMeta();
+
+          tile.q('[data-act="presetCommand"]').onclick = () => applyPreset("Command");
+          tile.q('[data-act="presetGame"]').onclick = () => applyPreset("Game");
+          tile.q('[data-act="presetWild"]').onclick = () => applyPreset("Wild");
+
+          tile.q('[data-act="applySave"]').onclick = () => {
+            readSettingsFromTile(tile);
+            refreshMeta();
+            log("Master tuners applied.");
+          };
+
+          tile._refreshMeta = refreshMeta;
+        }
+      },
+      {
+        id:"aiPitch",
+        title:"AI Pitch",
+        tag:"PITCH",
+        defaultDock:"right",
+        content: () => `
+          <div class="small">Accurate command depends on calibration (zone + release + timing).</div>
+          <div class="divider"></div>
+
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn on" data-act="throwPitch">Throw Pitch</button>
+            <button class="btn" data-act="randomPitch">Random Drill</button>
+            <button class="btn" data-act="save">Save</button>
+          </div>
+
+          <div class="divider"></div>
+
+          <label>Accuracy (0..1)</label>
+          <input data-key="pitchAccuracy" type="number" step="0.01" min="0" max="1"/>
+
+          <label>Variability (0..1)</label>
+          <input data-key="variability" type="number" step="0.01" min="0" max="1"/>
+
+          <label>Smoothing (0..1)</label>
+          <input data-key="smoothing" type="number" step="0.01" min="0" max="1"/>
+
+          <label>Timing Offset (ms)</label>
+          <input data-key="timingOffsetMs" type="number" step="1"/>
+
+          <div class="divider"></div>
+
+          <label>Strike Zone Center X</label>
+          <input data-key="strikeZoneX" type="number" step="0.01"/>
+
+          <label>Strike Zone Center Y</label>
+          <input data-key="strikeZoneY" type="number" step="0.01"/>
+
+          <label>Release Point X</label>
+          <input data-key="releasePointX" type="number" step="0.01"/>
+
+          <label>Release Point Y</label>
+          <input data-key="releasePointY" type="number" step="0.01"/>
+
+          <div class="divider"></div>
+
+          <div class="small" data-role="pitchMeta"></div>
+        `,
+        onMount: (tile) => {
+          tile.qa('[data-key]').forEach(inp => {
+            const key = inp.getAttribute("data-key");
+            if(inp.type === "checkbox") inp.checked = !!state.settings[key];
+            else inp.value = String(state.settings[key]);
+          });
+
+          const meta = tile.q('[data-role="pitchMeta"]');
+          function refreshMeta(){
+            const p = state.sim.currentPitch;
+            meta.innerHTML = p
+              ? `<b>Last:</b> ${escapeHtml(p.type)} • ${p.vMph.toFixed(1)} mph • break ${p.breakIn.toFixed(1)} in`
+              : "No pitch yet.";
+          }
+          refreshMeta();
+
+          tile.q('[data-act="save"]').onclick = () => {
+            readSettingsFromTile(tile);
+            refreshMeta();
+            log("AI Pitch settings saved.");
+          };
+
+          tile.q('[data-act="throwPitch"]').onclick = () => {
+            readSettingsFromTile(tile);
+            const p = makePitch({drill:"targeted"});
+            state.sim.currentPitch = p;
+            state.sim.pitchHistory.unshift({ t: now(), p });
+            if(state.sim.pitchHistory.length > 60) state.sim.pitchHistory.length = 60;
+            log(`Pitch thrown: ${p.type} • v=${p.vMph.toFixed(1)} mph • break=${p.breakIn.toFixed(1)} in`);
+            refreshMeta();
+            refreshDependentTiles();
+          };
+
+          tile.q('[data-act="randomPitch"]').onclick = () => {
+            readSettingsFromTile(tile);
+            const p = makePitch({drill:"random"});
+            state.sim.currentPitch = p;
+            state.sim.pitchHistory.unshift({ t: now(), p });
+            if(state.sim.pitchHistory.length > 60) state.sim.pitchHistory.length = 60;
+            log(`Random pitch: ${p.type} • v=${p.vMph.toFixed(1)} mph`);
+            refreshMeta();
+            refreshDependentTiles();
+          };
+
+          tile._refreshMeta = refreshMeta;
+        }
+      },
+      {
+        id:"batting",
+        title:"Batting",
+        tag:"HIT",
+        defaultDock:"right",
+        content: () => `
+          <div class="small">Controls batting assists and contact settings used by the simulator.</div>
+          <div class="divider"></div>
+
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn on" data-act="start">Start Bat Drill</button>
+            <button class="btn" data-act="stop">Stop</button>
+            <button class="btn" data-act="hit">Sim Hit</button>
+            <button class="btn" data-act="save">Save</button>
+          </div>
+
+          <div class="divider"></div>
+
+          <label><input data-key="batterTimingAssist" type="checkbox" /> Timing Assist</label>
+
+          <label>Hit Power (0..1)</label>
+          <input data-key="hitPower" type="number" step="0.01" min="0" max="1"/>
+
+          <label>Launch Angle (deg)</label>
+          <input data-key="launchAngleDeg" type="number" step="1"/>
+
+          <label>Spray Bias (deg)</label>
+          <input data-key="sprayBiasDeg" type="number" step="1"/>
+
+          <div class="divider"></div>
+          <div class="small" data-role="batMeta"></div>
+        `,
+        onMount: (tile) => {
+          tile.qa('[data-key]').forEach(inp => {
+            const key = inp.getAttribute("data-key");
+            if(inp.type === "checkbox") inp.checked = !!state.settings[key];
+            else inp.value = String(state.settings[key]);
+          });
+
+          const meta = tile.q('[data-role="batMeta"]');
+          function refreshMeta(){
+            const b = state.sim.lastContact;
+            meta.innerHTML = b
+              ? `<b>Last contact:</b> EV ${b.exitV.toFixed(1)} • LA ${b.launchAngleDeg.toFixed(1)}° • Dist ${b.dist.toFixed(0)}ft`
+              : "No contact yet.";
+          }
+          refreshMeta();
+
+          tile.q('[data-act="start"]').onclick = () => {
+            readSettingsFromTile(tile);
+            state.sim.drills.bat = true;
+            log(`Bat drill started • Assist: ${state.settings.batterTimingAssist ? "ON" : "OFF"}`);
+          };
+          tile.q('[data-act="stop"]').onclick = () => {
+            state.sim.drills.bat = false;
+            log("Bat drill stopped.");
+          };
+          tile.q('[data-act="hit"]').onclick = () => {
+            readSettingsFromTile(tile);
+            simulateContact();
+            refreshMeta();
+            refreshDependentTiles();
+          };
+          tile.q('[data-act="save"]').onclick = () => {
+            readSettingsFromTile(tile);
+            log("Batting settings saved.");
+            refreshMeta();
+          };
+
+          tile._refreshMeta = refreshMeta;
+        }
+      },
+      {
+        id:"catching",
+        title:"Catching",
+        tag:"CATCH",
+        defaultDock:"right",
+        content: () => `
+          <div class="small">Catcher framing assist and timing reliability settings.</div>
+          <div class="divider"></div>
+
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn on" data-act="start">Start Catch Drill</button>
+            <button class="btn" data-act="stop">Stop</button>
+            <button class="btn" data-act="save">Save</button>
+          </div>
+
+          <div class="divider"></div>
+
+          <label><input data-key="catcherFramingAssist" type="checkbox" /> Framing Assist</label>
+          <label>Timing Offset (ms)</label>
+          <input data-key="timingOffsetMs" type="number" step="1"/>
+
+          <div class="divider"></div>
+          <div class="small">
+            Tip: If glove events feel late/early vs pitch arrival, adjust timing offset and save.
+          </div>
+        `,
+        onMount: (tile) => {
+          tile.qa('[data-key]').forEach(inp => {
+            const key = inp.getAttribute("data-key");
+            if(inp.type === "checkbox") inp.checked = !!state.settings[key];
+            else inp.value = String(state.settings[key]);
+          });
+
+          tile.q('[data-act="start"]').onclick = () => {
+            readSettingsFromTile(tile);
+            state.sim.drills.catch = true;
+            log(`Catch drill started • Framing: ${state.settings.catcherFramingAssist ? "ON" : "OFF"}`);
+          };
+          tile.q('[data-act="stop"]').onclick = () => {
+            state.sim.drills.catch = false;
+            log("Catch drill stopped.");
+          };
+          tile.q('[data-act="save"]').onclick = () => {
+            readSettingsFromTile(tile);
+            log("Catching settings saved.");
+          };
+        }
+      },
+      {
+        id:"fielding",
+        title:"Fielding",
+        tag:"FIELD",
+        defaultDock:"right",
+        content: () => `
+          <div class="small">Field assists influence route suggestions and landing map drills.</div>
+          <div class="divider"></div>
+
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn on" data-act="start">Start Field Drill</button>
+            <button class="btn" data-act="stop">Stop</button>
+            <button class="btn" data-act="save">Save</button>
+          </div>
+
+          <div class="divider"></div>
+
+          <label><input data-key="fieldingAssist" type="checkbox" /> Fielding Assist</label>
+          <label>Smoothing (0..1)</label>
+          <input data-key="smoothing" type="number" step="0.01" min="0" max="1"/>
+
+          <div class="divider"></div>
+          <div class="small">
+            Tip: For AR route stability, increase smoothing slightly (0.22–0.32).
+          </div>
+        `,
+        onMount: (tile) => {
+          tile.qa('[data-key]').forEach(inp => {
+            const key = inp.getAttribute("data-key");
+            if(inp.type === "checkbox") inp.checked = !!state.settings[key];
+            else inp.value = String(state.settings[key]);
+          });
+
+          tile.q('[data-act="start"]').onclick = () => {
+            readSettingsFromTile(tile);
+            state.sim.drills.field = true;
+            log(`Field drill started • Assist: ${state.settings.fieldingAssist ? "ON" : "OFF"}`);
+          };
+          tile.q('[data-act="stop"]').onclick = () => {
+            state.sim.drills.field = false;
+            log("Field drill stopped.");
+          };
+          tile.q('[data-act="save"]').onclick = () => {
+            readSettingsFromTile(tile);
+            log("Fielding settings saved.");
+          };
+        }
+      },
+      {
+        id:"cageView",
+        title:"Batter Cage View",
+        tag:"TARGET",
+        defaultDock:"right",
+        content: () => `
+          <div class="small">Target + Landing + History (compact view)</div>
+          <div class="divider"></div>
+          <div class="mediaBox" style="height: 260px;">
+            <canvas data-role="cageCanvas"></canvas>
+          </div>
+          <div class="divider"></div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn" data-act="refresh">Refresh</button>
+            <button class="btn" data-act="detach">Detach</button>
+          </div>
+        `,
+        onMount: (tile) => {
+          const refresh = () => drawCageView(tile);
+          tile.q('[data-act="refresh"]').onclick = refresh;
+          tile.q('[data-act="detach"]').onclick = () => floatTile(tile.id);
+          tile._refresh = refresh;
+          refresh();
+          window.addEventListener("resize", refresh);
+        }
+      },
+      {
+        id:"landingMap",
+        title:"Field Landing Map",
+        tag:"MAP",
+        defaultDock:"right",
+        content: () => `
+          <div class="small">Batted Balls plotted on a field map</div>
+          <div class="divider"></div>
+          <div class="mediaBox" style="height: 280px;">
+            <canvas data-role="landCanvas"></canvas>
+          </div>
+          <div class="divider"></div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn" data-act="refresh">Refresh</button>
+            <button class="btn" data-act="clear">Clear</button>
+            <button class="btn" data-act="detach">Detach</button>
+          </div>
+        `,
+        onMount: (tile) => {
+          const refresh = () => drawLandingMap(tile);
+          tile.q('[data-act="refresh"]').onclick = refresh;
+          tile.q('[data-act="clear"]').onclick = () => {
+            state.sim.battedBalls = [];
+            state.sim.lastContact = null;
+            log("Landing map cleared.");
+            refreshDependentTiles();
+          };
+          tile.q('[data-act="detach"]').onclick = () => floatTile(tile.id);
+          tile._refresh = refresh;
+          refresh();
+          window.addEventListener("resize", refresh);
+        }
+      },
+      {
+        id:"camera",
+        title:"Camera (Hands)",
+        tag:"CAM",
+        defaultDock:"right",
+        defaultW: 420,
+        defaultH: 340,
+        content: () => `
+          <div class="small">
+            Free-floating supported. Hand overlay accepts MediaPipe OR external <span class="kbd">HUD.onHands()</span>.
+          </div>
+          <div class="divider"></div>
+
+          <div class="mediaBox" style="height: 240px;">
+            <video data-role="camVideo" playsinline muted style="width:100%; height:100%; object-fit:cover;"></video>
+            <canvas data-role="camOverlay" class="mediaOverlay"></canvas>
+          </div>
+
+          <div class="divider"></div>
+
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn on" data-act="start">Start</button>
+            <button class="btn" data-act="stop">Stop</button>
+            <button class="btn" data-act="detach">Detach</button>
+          </div>
+
+          <div class="statusRow">
+            <span class="badge" data-role="camStatus">Camera: OFF</span>
+            <span class="badge" data-role="handStatus">Hands: 0</span>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="small">
+            Optional: if you load MediaPipe Hands externally, you can feed landmarks into <span class="kbd">HUD.onHands({hands:[...]})</span>.
+          </div>
+        `,
+        onMount: (tile) => {
+          const camStatus = tile.q('[data-role="camStatus"]');
+          const handStatus = tile.q('[data-role="handStatus"]');
+
+          tile.q('[data-act="start"]').onclick = () => startCamera(tile);
+          tile.q('[data-act="stop"]').onclick = () => stopCamera(tile);
+          tile.q('[data-act="detach"]').onclick = () => floatTile(tile.id);
+
+          tile._setHandCount = (n) => {
+            if(handStatus) handStatus.textContent = `Hands: ${n}`;
+          };
+
+          // default: if user asked for camera tile free-floating, you can uncomment next line:
+          // floatTile(tile.id);
+
+          // keep status safe
+          if(camStatus) camStatus.textContent = cameraState.running ? "Camera: ON" : "Camera: OFF";
+        }
+      },
+      {
+        id:"connections",
+        title:"Connections",
+        tag:"LINK",
+        defaultDock:"footer",
+        content: () => `
+          <div class="small">
+            AR/PC bridge hooks for your tracker system (pinch / cursor / hands / telemetry).
+          </div>
+          <div class="divider"></div>
+
+          <div class="small">
+            <b>Pointer:</b> <span class="kbd">HUD.injectPointer({x,y,down,id})</span><br/>
+            <b>Active Tile:</b> <span class="kbd">HUD.setActiveTile(tileId)</span><br/>
+            <b>Pinch Resize:</b> <span class="kbd">HUD.injectPinchResize({tileId,x1,y1,x2,y2,active})</span><br/>
+            <b>Hands:</b> <span class="kbd">HUD.onHands({hands:[{landmarks:[{x,y,z}...]}]})</span><br/>
+            <b>Telemetry:</b> <span class="kbd">HUD.onTelemetry(data)</span>
+          </div>
+
+          <div class="divider"></div>
+
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn" data-act="mockOn">Start Mock Telemetry</button>
+            <button class="btn" data-act="mockOff">Stop</button>
+          </div>
+        `,
+        onMount: (tile) => {
+          let timer = null;
+
+          tile.q('[data-act="mockOn"]').onclick = () => {
+            if(timer) return;
+            log("Mock telemetry started.");
+            timer = setInterval(() => {
+              // mock: random hands + occasional hit
+              if(Math.random() > 0.88){
+                simulateContact();
+                refreshDependentTiles();
+              }
+              const hands = (Math.random() > 0.6) ? 1 : 0;
+              if(hands){
+                const lm = [];
+                for(let i=0;i<21;i++){
+                  lm.push({ x: Math.random(), y: Math.random(), z: 0 });
+                }
+                window.HUD.onHands({ hands: [{ landmarks: lm }] });
+              } else {
+                window.HUD.onHands({ hands: [] });
+              }
+              window.HUD.onTelemetry({ ts: now(), note:"mock" });
+            }, 420);
+            window.__mockTimer = timer;
+          };
+
+          tile.q('[data-act="mockOff"]').onclick = () => {
+            if(window.__mockTimer){
+              clearInterval(window.__mockTimer);
+              window.__mockTimer = null;
+              timer = null;
+              log("Mock telemetry stopped.");
+            }
+          };
+        }
+      },
+      {
+        id:"help",
+        title:"Help / How-To",
+        tag:"GUIDE",
+        defaultDock:"right",
+        content: () => `
+          <div style="font-weight:950; color: var(--text); margin-bottom:6px;">HUD Usage</div>
+          <div class="small">
+            <ul>
+              <li><b>Drag</b> a tile by its header (click-hold / touch-hold).</li>
+              <li><b>Resize</b> with the corner handle or <b>two-point pinch</b>.</li>
+              <li><b>Dock snapping:</b> Drag near right dock or footer → releases and snaps back.</li>
+              <li><b>Detach:</b> Any docked tile detaches automatically when dragged.</li>
+            </ul>
+
+            <div class="divider"></div>
+
+            <div style="font-weight:950; color: var(--text); margin-bottom:6px;">Startup Reliability</div>
+            <ul>
+              <li>Settings auto-load and are validated on startup.</li>
+              <li>If calibration is missing, <b>Wizard</b> is recommended immediately.</li>
+              <li>Tuners persist: Accuracy/Variability/Smoothing/Timing/Hit tuners.</li>
+            </ul>
+
+            <div class="divider"></div>
+
+            <div style="font-weight:950; color: var(--text); margin-bottom:6px;">AR Bridge</div>
+            Use your AR cursor/gesture engine to call:
+            <div style="margin-top:6px;">
+              <span class="kbd">HUD.injectPointer({x,y,down,id})</span><br/>
+              <span class="kbd">HUD.setActiveTile("camera")</span><br/>
+              <span class="kbd">HUD.injectPinchResize({tileId:"camera",x1,y1,x2,y2,active:true})</span>
+            </div>
+          </div>
+        `
+      }
+    ];
+
+    function refreshDependentTiles(){
+      const c = state.tiles.get("cageView");
+      if(c?.visible && c._refresh) c._refresh();
+
+      const m = state.tiles.get("landingMap");
+      if(m?.visible && m._refresh) m._refresh();
+
+      const a = state.tiles.get("aiPitch");
+      if(a?.visible && a._refreshMeta) a._refreshMeta();
+
+      const b = state.tiles.get("batting");
+      if(b?.visible && b._refreshMeta) b._refreshMeta();
+
+      const st = state.tiles.get("startup");
+      if(st?.visible && st._refresh) st._refresh();
+
+      updateQuickStatus();
+    }
+
+    /***********************
+     * Setup Wizard (full calibration path)
+     ***********************/
+    const wizard = {
+      step: 0,
+      steps: [
+        {
+          name: "Environment",
+          left: () => `
+            <div style="font-weight:950; color:var(--text); margin-bottom:6px;">Step 1 • Environment</div>
+            <div class="small">Enter geometry for stable scale mapping.</div>
+            <label>Mound Distance (ft)</label>
+            <input id="wiz_mound" type="number" step="0.5" value="${state.settings.moundDistanceFt}" />
+            <label>Plate Width (in)</label>
+            <input id="wiz_plate" type="number" step="0.5" value="${state.settings.plateWidthIn}" />
+            <label>Zone Width (in)</label>
+            <input id="wiz_zoneW" type="number" step="0.5" value="${state.settings.zoneWidthIn}" />
+            <label>Zone Height (in)</label>
+            <input id="wiz_zoneH" type="number" step="0.5" value="${state.settings.zoneHeightIn}" />
+          `,
+          right: () => `
+            <div style="font-weight:950; color:var(--text); margin-bottom:6px;">What this fixes</div>
+            <div class="small">
+              <ul>
+                <li>Strike zone mismatch</li>
+                <li>Pitch scale feels wrong</li>
+                <li>Field landing distances inconsistent</li>
+              </ul>
+            </div>
+          `,
+          apply: () => {
+            state.settings.moundDistanceFt = Number($("#wiz_mound").value) || state.settings.moundDistanceFt;
+            state.settings.plateWidthIn   = Number($("#wiz_plate").value) || state.settings.plateWidthIn;
+            state.settings.zoneWidthIn    = Number($("#wiz_zoneW").value) || state.settings.zoneWidthIn;
+            state.settings.zoneHeightIn   = Number($("#wiz_zoneH").value) || state.settings.zoneHeightIn;
+          }
+        },
+        {
+          name: "Strike Zone",
+          left: () => `
+            <div style="font-weight:950; color:var(--text); margin-bottom:6px;">Step 2 • Strike Zone Center</div>
+            <div class="small">Adjust strike zone offsets until test pitch approaches center.</div>
+            <label>Zone Center X</label>
+            <input id="wiz_zx" type="number" step="0.01" value="${state.settings.strikeZoneX}" />
+            <label>Zone Center Y</label>
+            <input id="wiz_zy" type="number" step="0.01" value="${state.settings.strikeZoneY}" />
+            <div class="divider"></div>
+            <button class="btn on" id="wiz_testPitch">Test Pitch</button>
+          `,
+          right: () => `
+            <div style="font-weight:950; color:var(--text); margin-bottom:6px;">How to verify</div>
+            <div class="small">
+              Click <b>Test Pitch</b>. If it lands off center, adjust X/Y slightly.
+            </div>
+          `,
+          onMount: () => {
+            $("#wiz_testPitch").onclick = () => {
+              state.settings.strikeZoneX = Number($("#wiz_zx").value) || 0;
+              state.settings.strikeZoneY = Number($("#wiz_zy").value) || 0;
+              state.sim.currentPitch = makePitch({drill:"targeted"});
+              log("Wizard test pitch thrown.");
+              refreshDependentTiles();
+            };
+          },
+          apply: () => {
+            state.settings.strikeZoneX = Number($("#wiz_zx").value) || state.settings.strikeZoneX;
+            state.settings.strikeZoneY = Number($("#wiz_zy").value) || state.settings.strikeZoneY;
+          }
+        },
+        {
+          name: "Release Point",
+          left: () => `
+            <div style="font-weight:950; color:var(--text); margin-bottom:6px;">Step 3 • Release Point</div>
+            <div class="small">Align where the pitch starts for believable trajectories.</div>
+            <label>Release X</label>
+            <input id="wiz_rx" type="number" step="0.01" value="${state.settings.releasePointX}" />
+            <label>Release Y</label>
+            <input id="wiz_ry" type="number" step="0.01" value="${state.settings.releasePointY}" />
+            <div class="divider"></div>
+            <button class="btn on" id="wiz_releaseTest">Test</button>
+          `,
+          right: () => `
+            <div style="font-weight:950; color:var(--text); margin-bottom:6px;">What this fixes</div>
+            <div class="small">
+              <ul>
+                <li>Pitch starts from the wrong spot</li>
+                <li>Ball approach angle looks off</li>
+                <li>Catcher/batter timing feels inconsistent</li>
+              </ul>
+            </div>
+          `,
+          onMount: () => {
+            $("#wiz_releaseTest").onclick = () => {
+              state.settings.releasePointX = Number($("#wiz_rx").value) || state.settings.releasePointX;
+              state.settings.releasePointY = Number($("#wiz_ry").value) || state.settings.releasePointY;
+              state.sim.currentPitch = makePitch({drill:"targeted"});
+              log("Wizard release test pitch thrown.");
+              refreshDependentTiles();
+            };
+          },
+          apply: () => {
+            state.settings.releasePointX = Number($("#wiz_rx").value) || state.settings.releasePointX;
+            state.settings.releasePointY = Number($("#wiz_ry").value) || state.settings.releasePointY;
+          }
+        },
+        {
+          name: "Timing & Smoothing",
+          left: () => `
+            <div style="font-weight:950; color:var(--text); margin-bottom:6px;">Step 4 • Timing & Smoothing</div>
+            <div class="small">Stabilizes AR cursor + aligns events (bat/glove/camera).</div>
+            <label>Timing Offset (ms)</label>
+            <input id="wiz_to" type="number" step="1" value="${state.settings.timingOffsetMs}" />
+            <label>Smoothing (0..1)</label>
+            <input id="wiz_sm" type="number" step="0.01" min="0" max="1" value="${state.settings.smoothing}" />
+            <div class="divider"></div>
+            <div class="small">
+              Rule:
+              <ul>
+                <li>Visuals late → negative offset</li>
+                <li>Visuals early → positive offset</li>
+                <li>Jitter → increase smoothing</li>
+              </ul>
+            </div>
+          `,
+          right: () => `
+            <div style="font-weight:950; color:var(--text); margin-bottom:6px;">Finish</div>
+            <div class="small">Click <b>Apply & Save</b> to lock reliability for startup.</div>
+            <div class="divider"></div>
+            <button class="btn on" id="wiz_saveAll">Apply & Save</button>
+          `,
+          onMount: () => {
+            $("#wiz_saveAll").onclick = () => {
+              wizardApplyCurrent();
+              // mark calibration valid
+              state.settings.calibratedAt = now();
+              if(!state.settings.calibrationProfile) state.settings.calibrationProfile = "default";
+              saveSettings();
+              log("Wizard applied + calibration saved.");
+              closeWizard();
+              refreshDependentTiles();
+            };
+          },
+          apply: () => {
+            state.settings.timingOffsetMs = Number($("#wiz_to").value) || 0;
+            state.settings.smoothing = clamp(Number($("#wiz_sm").value) || state.settings.smoothing, 0, 1);
+          }
+        }
+      ]
+    };
+
+    function openWizard(){
+      $("#wizardOverlay").style.display = "flex";
+      renderWizardStep(0);
+    }
+    function closeWizard(){
+      $("#wizardOverlay").style.display = "none";
+      updateCalibrationUI();
+      updateQuickStatus();
+      syncTunersUI();
+    }
+    function wizardApplyCurrent(){
+      const stepDef = wizard.steps[wizard.step];
+      stepDef.apply && stepDef.apply();
+      validateSettings();
+      saveSettings();
+    }
+    function renderWizardStep(i){
+      wizard.step = clamp(i, 0, wizard.steps.length-1);
+      const stepDef = wizard.steps[wizard.step];
+
+      $("#wizardLeft").innerHTML = `
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+          <div style="font-weight:950;">${escapeHtml(stepDef.name)}</div>
+          <div style="display:flex; gap:8px;">
+            <button class="btn" id="wiz_prev">Prev</button>
+            <button class="btn" id="wiz_next">Next</button>
+          </div>
+        </div>
+        <div class="divider"></div>
+        ${stepDef.left()}
+      `;
+
+      $("#wizardRight").innerHTML = `
+        ${stepDef.right()}
+        <div class="divider"></div>
+        <div class="small">Step ${wizard.step+1} / ${wizard.steps.length}</div>
+      `;
+
+      $("#wiz_prev").onclick = () => { wizardApplyCurrent(); renderWizardStep(wizard.step-1); };
+      $("#wiz_next").onclick = () => { wizardApplyCurrent(); renderWizardStep(wizard.step+1); };
+
+      queueMicrotask(() => stepDef.onMount && stepDef.onMount());
+    }
+
+    /***********************
+     * Right dock collapse/expand
+     ***********************/
+    function setRightDockWidth(px){
+      px = clamp(px, 260, 560);
+      state.ui.rightW = px;
+      document.documentElement.style.setProperty("--rightW", px + "px");
+    }
+
+    $("#btnRightCollapse").onclick = () => {
+      state.ui.rightCollapsed = true;
+      setRightDockWidth(280);
+      log("Right dock collapsed.");
+    };
+    $("#btnRightExpand").onclick = () => {
+      state.ui.rightCollapsed = false;
+      setRightDockWidth(360);
+      log("Right dock expanded.");
+    };
+
+    /***********************
+     * Footer detach/attach
+     ***********************/
+    function detachFooter(){
+      if(state.ui.footerDetached) return;
+      state.ui.footerDetached = true;
+      document.body.classList.add("footerDetached");
+      $("#btnDetachFooter").style.display = "none";
+      $("#btnAttachFooter").style.display = "";
+      // create footer tile and move host into it
+      const footerTileId = "__footerPanel";
+      if(!state.tiles.has(footerTileId)){
+        const def = {
+          id: footerTileId,
+          title: "Footer Panel",
+          tag: "FOOTER",
+          defaultDock: "floating",
+          defaultW: 780,
+          defaultH: 240,
+          content: () => `
+            <div class="small">Detached footer (timeline + controls). Drag near footer to snap back.</div>
+            <div class="divider"></div>
+            <div data-role="mount"></div>
+          `,
+          onMount: (tile) => {
+            const mount = tile.q('[data-role="mount"]');
+            mount.appendChild($("#footerHost"));
+          }
+        };
+        createTile(def);
+      } else {
+        // move host into existing tile mount
+        const t = state.tiles.get(footerTileId);
+        const mount = t.q('[data-role="mount"]');
+        if(mount && $("#footerHost")) mount.appendChild($("#footerHost"));
+        showTile(footerTileId);
+        floatTile(footerTileId);
+      }
+      log("Footer detached.");
+      saveLayout();
+    }
+
+    function attachFooter(){
+      if(!state.ui.footerDetached) return;
+      state.ui.footerDetached = false;
+      document.body.classList.remove("footerDetached");
+      $("#btnDetachFooter").style.display = "";
+      $("#btnAttachFooter").style.display = "none";
+
+      // move host back
+      const host = $("#footerHost");
+      $("#footerDock").appendChild(host);
+
+      // hide footer tile if exists
+      const footerTileId = "__footerPanel";
+      if(state.tiles.has(footerTileId)){
+        hideTile(footerTileId);
+      }
+      log("Footer attached.");
+      saveLayout();
+    }
+
+    $("#btnDetachFooter").onclick = detachFooter;
+    $("#btnAttachFooter").onclick = attachFooter;
+
+    /***********************
+     * Dock resizing handles
+     ***********************/
+    (function initDockResizers(){
+      // right width
+      const h = $("#rightResizeHandle");
+      let active = false;
+      let startX = 0;
+      let startW = state.ui.rightW;
+
+      h.addEventListener("pointerdown", (e) => {
+        active = true;
+        startX = e.clientX;
+        startW = state.ui.rightW;
+        h.setPointerCapture(e.pointerId);
+      });
+
+      h.addEventListener("pointermove", (e) => {
+        if(!active) return;
+        const dx = startX - e.clientX; // drag left increases width
+        setRightDockWidth(startW + dx);
+      });
+
+      const end = (e) => { active = false; try{ h.releasePointerCapture(e.pointerId);}catch(_){}
+        saveLayout();
+      };
+      h.addEventListener("pointerup", end);
+      h.addEventListener("pointercancel", end);
+
+      // footer height
+      const fh = $("#footerResizeHandle");
+      let factive = false;
+      let fstartY = 0;
+      let fstartH = state.ui.footerH;
+
+      fh.addEventListener("pointerdown", (e) => {
+        if(state.ui.footerDetached) return;
+        factive = true;
+        fstartY = e.clientY;
+        fstartH = state.ui.footerH;
+        fh.setPointerCapture(e.pointerId);
+      });
+
+      fh.addEventListener("pointermove", (e) => {
+        if(!factive) return;
+        const dy = fstartY - e.clientY; // drag up increases height
+        const newH = clamp(fstartH + dy, 80, 360);
+        state.ui.footerH = newH;
+        document.documentElement.style.setProperty("--footerH", newH + "px");
+      });
+
+      const fend = (e) => { factive = false; try{ fh.releasePointerCapture(e.pointerId);}catch(_){}
+        saveLayout();
+      };
+      fh.addEventListener("pointerup", fend);
+      fh.addEventListener("pointercancel", fend);
+    })();
+
+    /***********************
+     * Login overlay role tabs
+     ***********************/
+    function renderRoleTabs(){
+      const tabs = $("#roleTabs");
+      tabs.innerHTML = "";
+      Object.keys(ROLE_GUIDES).forEach(role => {
+        const b = document.createElement("div");
+        b.className = "step";
+        b.textContent = role;
+        b.onclick = () => setRoleTab(role);
+        tabs.appendChild(b);
+      });
+      setRoleTab($("#loginRole").value);
+    }
+
+    function setRoleTab(role){
+      $$(".step", $("#roleTabs")).forEach(el => {
+        el.classList.toggle("on", el.textContent === role);
+      });
+      $("#roleHowTo").innerHTML = ROLE_GUIDES[role] || "";
+    }
+    $("#loginRole").addEventListener("change", (e)=> setRoleTab(e.target.value));
+
+    /***********************
+     * Header UI bindings
+     ***********************/
+    $("#btnHUD").onclick = () => {
+      state.hudMode = !state.hudMode;
+      document.body.classList.toggle("hudmode", state.hudMode);
+      log(`HUD mode: ${state.hudMode ? "ON" : "OFF"}`);
+    };
+
+    $("#btnWizard").onclick = openWizard;
+
+    $("#btnHelp").onclick = () => {
+      ensureTile("help");
+      showTile("help");
+      dockTile("help", "right");
+      setMinimized(state.tiles.get("help"), false);
+      enforceRightDockMaxExpanded();
+      log("Help opened.");
+    };
+
+    $("#btnOpenTuners").onclick = () => {
+      ensureTile("tuners");
+      showTile("tuners");
+      dockTile("tuners", "right");
+      setMinimized(state.tiles.get("tuners"), false);
+      enforceRightDockMaxExpanded();
+      log("Tuners opened.");
+    };
+
+    $("#btnLogout").onclick = () => {
+      state.session = null;
+      localStorage.removeItem(SESSION_KEY);
+      updateSessionUI();
+      showLogin();
+      log("Logged out.");
+    };
+
+    $("#btnWizardFromLogin").onclick = openWizard;
+
+    $("#btnHelpFromLogin").onclick = () => {
+      ensureTile("help");
+      hideLogin();
+      showTile("help");
+      dockTile("help", "right");
+      setMinimized(state.tiles.get("help"), false);
+      enforceRightDockMaxExpanded();
+      log("Help opened from login.");
+    };
+
+    $("#btnDemo").onclick = () => {
+      $("#loginName").value = "Demo";
+      $("#loginRole").value = "Pitcher";
+      $("#loginMode").value = "Simulation";
+      $("#loginNotes").value = "Demo session: dock snapping + tuners + pinch resize + camera overlay.";
+      setRoleTab("Pitcher");
+      log("Demo fields filled.");
+    };
+
+    $("#btnLogin").onclick = () => {
+      const name = ($("#loginName").value || "Player").trim();
+      const role = $("#loginRole").value;
+      const mode = $("#loginMode").value;
+      const notes= ($("#loginNotes").value || "").trim();
+
+      state.session = { name, role, mode, notes, ts: now() };
+      saveSession();
+      updateSessionUI();
+      hideLogin();
+      log(`Session started: ${name} • ${role} • ${mode}`);
+
+      // Reliable startup: open required tiles for role, plus Startup + Tuners
+      ensureTile("startup");
+      ensureTile("tuners");
+      showTile("startup"); dockTile("startup","right"); setMinimized(state.tiles.get("startup"), false);
+      showTile("tuners"); dockTile("tuners","right"); setMinimized(state.tiles.get("tuners"), true); // keep tuners available but minimized
+
+      // role-specific
+      if(role === "Pitcher"){ ensureTile("aiPitch"); showTile("aiPitch"); dockTile("aiPitch","right"); }
+      if(role === "Batter"){ ensureTile("batting"); showTile("batting"); dockTile("batting","right"); }
+      if(role === "Catcher"){ ensureTile("catching"); showTile("catching"); dockTile("catching","right"); }
+      if(role === "Fielder"){ ensureTile("fielding"); showTile("fielding"); dockTile("fielding","right"); }
+
+      // requested right-panel modules
+      ensureTile("camera");
+      ensureTile("cageView");
+      ensureTile("landingMap");
+
+      // keep landing/map/cage minimized by default (user can open from right tabs)
+      showTile("camera"); dockTile("camera","right"); setMinimized(state.tiles.get("camera"), true);
+      showTile("cageView"); dockTile("cageView","right"); setMinimized(state.tiles.get("cageView"), true);
+      showTile("landingMap"); dockTile("landingMap","right"); setMinimized(state.tiles.get("landingMap"), true);
+
+      // connections in footer for stability
+      ensureTile("connections");
+      showTile("connections");
+      dockTile("connections","footer");
+
+      enforceRightDockMaxExpanded();
+      syncSelectorButtons();
+      syncTunersUI();
+      updateQuickStatus();
+      renderFooterControls();
+      saveLayout();
+
+      // Reliability on startup: if not calibrated, prompt wizard immediately
+      if(!calibrationIsValid()){
+        log("Calibration missing: opening Setup Wizard for reliable startup.");
+        openWizard();
+      }
+    };
+
+    /***********************
+     * Sim control buttons
+     ***********************/
+    $("#btnSimStart").onclick = () => { state.sim.running = true; state.sim.paused = false; log("Simulation started."); };
+    $("#btnSimPause").onclick = () => { state.sim.paused = !state.sim.paused; log(`Simulation ${state.sim.paused ? "paused" : "resumed"}.`); };
+    $("#btnSimReset").onclick = () => {
+      state.sim.t = 0;
+      state.sim.currentPitch = null;
+      state.sim.pitchHistory = [];
+      state.sim.battedBalls = [];
+      state.sim.lastContact = null;
+      log("Simulation reset.");
+      refreshDependentTiles();
+    };
+    $("#btnSimPitch").onclick = () => {
+      const p = makePitch({drill:"random"});
+      state.sim.currentPitch = p;
+      state.sim.pitchHistory.unshift({ t: now(), p });
+      if(state.sim.pitchHistory.length > 60) state.sim.pitchHistory.length = 60;
+      log(`Pitch thrown: ${p.type} • v=${p.vMph.toFixed(1)} mph`);
+      refreshDependentTiles();
+    };
+    $("#btnSimHit").onclick = () => {
+      simulateContact();
+      refreshDependentTiles();
+    };
+
+    /***********************
+     * External input bridge (TRUE pinch resize without DOM multi-touch)
+     ***********************/
+    function pinchResizeTile(tileId, x1,y1,x2,y2, active){
+      const id = tileId || state.input.activeTileId;
+      const t = state.tiles.get(id);
+      if(!t) return;
+      if(!t.visible) showTile(id);
+      if(t.docked !== "floating") floatTile(id);
+
+      const p1 = {x:x1,y:y1};
+      const p2 = {x:x2,y:y2};
+      const d = dist(p1,p2);
+
+      if(active){
+        if(!state.input.pinch || state.input.pinch.tileId !== id){
+          state.input.pinch = {
+            tileId: id,
+            startDist: d || 1,
+            startW: t.w,
+            startH: t.h,
+            cx: t.x + t.w/2,
+            cy: t.y + t.h/2
+          };
+        } else {
+          const pin = state.input.pinch;
+          const scale = d / (pin.startDist || 1);
+          const newW = clamp(pin.startW * scale, 240, Math.min(window.innerWidth - 20, 1400));
+          const newH = clamp(pin.startH * scale, 140, Math.min(window.innerHeight - 20, 1000));
+          t.w = newW; t.h = newH;
+          t.x = clamp(pin.cx - newW/2, 0, window.innerWidth - 40);
+          t.y = clamp(pin.cy - newH/2, 0, window.innerHeight - 40);
+          t.z = getMaxZ() + 1;
+          applyFloatingGeometry(t);
+
+          // allow snap hints if you resize and then move near dock later; we keep snap logic separate
+        }
+      } else {
+        state.input.pinch = null;
+        saveLayout();
+      }
+    }
+
+    window.HUD = {
+      injectPointer({x,y,down,id=1}){
+        // Conservative event injection (for cursor systems). For full fidelity, drive via real PointerEvents.
+        const hit = document.elementFromPoint(x,y);
+        if(!hit) return;
+        const evtType = down ? "pointerdown" : "pointerup";
+        const evt = new PointerEvent(evtType, {
+          clientX:x, clientY:y,
+          pointerId:id,
+          bubbles:true,
+          pointerType:"mouse",
+          isPrimary:true
+        });
+        hit.dispatchEvent(evt);
+      },
+
+      setActiveTile(tileId){
+        state.input.activeTileId = tileId;
+      },
+
+      injectPinchResize({tileId, x1,y1,x2,y2, active=true}){
+        pinchResizeTile(tileId, x1,y1,x2,y2, active);
+      },
+
+      onHands(payload){
+        // payload: {hands:[{landmarks:[{x,y,z}...]}...]}
+        cameraState.lastHands = payload || {hands:[]};
+
+        // update camera tile badge if present
+        const camTile = state.tiles.get("camera");
+        const n = (payload?.hands?.length) || 0;
+        if(camTile && camTile._setHandCount) camTile._setHandCount(n);
+      },
+
+      onTelemetry(data){
+        // placeholder hook for your pipeline
+        // Example: you can call HUD.setActiveTile("camera") then HUD.injectPinchResize(...)
+      }
+    };
+
+    /***********************
+     * Right quick tabs and selector init
+     ***********************/
+    function initUI(){
+      renderSelectors();
+      renderRightQuickTabs();
+      renderRoleTabs();
+      renderFooterControls();
+      updateSessionUI();
+      updateQuickStatus();
+      updateCalibrationUI();
+    }
+
+    /***********************
+     * Startup sequence (reliable)
+     ***********************/
+    function init(){
+      loadSettings();
+      loadSession();
+      initUI();
+
+      // Load layout after tiles are potentially created by session
+      // If session exists, we skip login and restore layout + required tiles
+      if(state.session){
+        hideLogin();
+        log("Restored session from previous run.");
+
+        // Ensure core reliability tiles exist (startup + tuners + connections)
+        ensureTile("startup");
+        ensureTile("tuners");
+        ensureTile("connections");
+
+        showTile("startup"); dockTile("startup","right");
+        showTile("tuners"); dockTile("tuners","right"); setMinimized(state.tiles.get("tuners"), true);
+        showTile("connections"); dockTile("connections","footer");
+
+        // Requested right panel modules
+        ensureTile("camera");
+        ensureTile("cageView");
+        ensureTile("landingMap");
+        showTile("camera"); dockTile("camera","right"); setMinimized(state.tiles.get("camera"), true);
+        showTile("cageView"); dockTile("cageView","right"); setMinimized(state.tiles.get("cageView"), true);
+        showTile("landingMap"); dockTile("landingMap","right"); setMinimized(state.tiles.get("landingMap"), true);
+
+        // Role tile
+        const role = state.session.role;
+        if(role === "Pitcher"){ ensureTile("aiPitch"); showTile("aiPitch"); dockTile("aiPitch","right"); }
+        if(role === "Batter"){ ensureTile("batting"); showTile("batting"); dockTile("batting","right"); }
+        if(role === "Catcher"){ ensureTile("catching"); showTile("catching"); dockTile("catching","right"); }
+        if(role === "Fielder"){ ensureTile("fielding"); showTile("fielding"); dockTile("fielding","right"); }
+
+        // Restore persisted tile positions/sizes/docks
+        loadLayout();
+        syncTunersUI();
+        enforceRightDockMaxExpanded();
+        syncSelectorButtons();
+        refreshDependentTiles();
+
+        // If calibration missing, open wizard automatically for reliability
+        if(!calibrationIsValid()){
+          log("Calibration missing: opening Setup Wizard.");
+          openWizard();
+        }
+      } else {
+        showLogin();
+      }
+
+      // Default dock sizes from memory (if present)
+      document.documentElement.style.setProperty("--rightW", state.ui.rightW + "px");
+      document.documentElement.style.setProperty("--footerH", state.ui.footerH + "px");
+
+      log("HUD initialized.");
+    }
+
+    /***********************
+     * Start
+     ***********************/
+    init();
+  </script>
+</body>
+</html>
