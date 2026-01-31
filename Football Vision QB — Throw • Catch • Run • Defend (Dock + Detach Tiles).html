@@ -1,0 +1,2562 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Football Vision QB — Throw • Catch • Run • Defend (Dock + Detach Tiles)</title>
+
+  <style>
+    :root{
+      --bg:#05060a;
+      --panel:rgba(12,14,22,.74);
+      --panel2:rgba(12,14,22,.62);
+      --border:rgba(255,255,255,.10);
+      --text:rgba(255,255,255,.92);
+      --muted:rgba(255,255,255,.72);
+      --chip:rgba(255,255,255,.08);
+      --chip2:rgba(120,180,255,.18);
+      --good:#60e38b;
+      --bad:#ff6c6c;
+      --warn:#ffd96a;
+      --cyan:#50d2ff;
+    }
+
+    html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New"}
+
+    canvas#threeCanvas{position:fixed;inset:0;z-index:1;display:block}
+
+    .uiRoot{position:fixed;inset:0;z-index:30;pointer-events:none}
+    .uiRoot *{pointer-events:auto}
+
+    #callout{
+      position:fixed;left:50%;top:18px;transform:translateX(-50%);
+      z-index:80;pointer-events:none;
+      font-weight:950;letter-spacing:.3px;
+      padding:10px 14px;border-radius:999px;
+      background:rgba(12,14,22,.55);border:1px solid rgba(255,255,255,.10);
+      backdrop-filter:blur(10px);color:rgba(255,255,255,.92);
+      opacity:0;transition:opacity 120ms ease;
+    }
+
+    /* ---------- MINI HUD ---------- */
+    #topHUD{
+      position:fixed;left:50%;top:10px;transform:translateX(-50%);
+      z-index:60;display:flex;gap:10px;align-items:stretch;flex-wrap:wrap;
+      max-width:calc(100vw - 20px);
+      pointer-events:none;
+    }
+    .hudCard{
+      pointer-events:none;
+      background:rgba(12,14,22,.62);
+      border:1px solid rgba(255,255,255,.10);
+      backdrop-filter:blur(10px);
+      border-radius:16px;
+      padding:10px 12px;
+      box-shadow:0 10px 40px rgba(0,0,0,.35);
+      color:rgba(255,255,255,.92);
+      display:flex;flex-direction:column;gap:4px;
+      min-width:260px;
+    }
+    .hudRow{display:flex;gap:10px;flex-wrap:wrap;font-size:12px;line-height:1.2}
+    .hudTiny{font-size:11px;opacity:.85;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New"}
+    .pill{
+      display:inline-flex;align-items:center;gap:6px;
+      padding:3px 9px;border-radius:999px;
+      border:1px solid rgba(255,255,255,.12);
+      background:rgba(255,255,255,.06);
+      font-size:11px;font-weight:850;opacity:.92;
+    }
+    .dot{width:8px;height:8px;border-radius:999px;display:inline-block}
+    .dotGood{background:var(--good)}
+    .dotBad{background:var(--bad)}
+    .dotWarn{background:var(--warn)}
+    .kbd{
+      font-family:ui-monospace,Menlo,Consolas,monospace;
+      font-size:11px;opacity:.85;padding:2px 7px;border-radius:999px;
+      border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06)
+    }
+
+    /* ---------- RIGHT DOCK ---------- */
+    #rightDock{
+      position:fixed;right:14px;top:14px;bottom:14px;
+      width:360px;max-width:calc(100vw - 28px);
+      z-index:55;
+      background:rgba(12,14,22,.55);
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:18px;
+      backdrop-filter:blur(10px);
+      box-shadow:0 10px 40px rgba(0,0,0,.35);
+      color:rgba(255,255,255,.92);
+      display:flex;flex-direction:column;
+      user-select:none;
+      overflow:hidden;
+    }
+    #rightDock.collapsed{width:72px}
+    #dockHeader{
+      padding:10px;
+      border-bottom:1px solid rgba(255,255,255,.10);
+      background:linear-gradient(to bottom, rgba(12,14,22,.92), rgba(12,14,22,.62));
+      display:flex;flex-direction:column;gap:10px;
+    }
+    .dockTopRow{display:flex;align-items:center;justify-content:space-between;gap:10px}
+    .dockTitle{font-weight:950;letter-spacing:.3px;font-size:12px;opacity:.95}
+    .dockHint{font-size:11px;opacity:.75;font-weight:850}
+    .dockBtns{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    #rightDock.collapsed .dockBtns{grid-template-columns:1fr}
+    .dockBtn{
+      appearance:none;border:1px solid rgba(255,255,255,.16);
+      background:rgba(255,255,255,.08);
+      color:var(--text);
+      padding:10px 10px;border-radius:14px;cursor:pointer;font-weight:950;
+      display:flex;align-items:center;justify-content:space-between;gap:10px;
+    }
+    .dockBtn:hover{background:rgba(255,255,255,.12)}
+    .dockBtn.primary{background:var(--chip2);border-color:rgba(120,180,255,.30)}
+    #rightDock.collapsed .dockBtn span.label{display:none}
+    #rightDock.collapsed .dockBtn{justify-content:center}
+    #dockSlots{
+      flex:1;
+      padding:10px;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      overflow:hidden;
+    }
+    #rightDock.collapsed #dockSlots{display:none}
+    #dockWidthResizer{
+      position:absolute;left:-6px;top:0;bottom:0;width:12px;
+      cursor:ew-resize;
+    }
+
+    /* ---------- FOOTER DOCK ---------- */
+    #footerDock{
+      position:fixed;left:14px;right:14px;bottom:14px;
+      height:220px;
+      z-index:58;
+      border-radius:18px;
+      background:rgba(12,14,22,.55);
+      border:1px solid rgba(255,255,255,.10);
+      backdrop-filter:blur(10px);
+      box-shadow:0 10px 40px rgba(0,0,0,.35);
+      overflow:hidden;
+      display:flex;flex-direction:column;
+      user-select:none;
+    }
+    #footerDock.collapsed{height:54px}
+    #footerTopResizer{
+      position:absolute;left:0;right:0;top:-6px;height:12px;
+      cursor:ns-resize;
+    }
+    #footerHost{flex:1;display:flex;flex-direction:column;overflow:hidden}
+
+    /* ---------- TILE ---------- */
+    .tile{
+      background:var(--panel);
+      border:1px solid var(--border);
+      border-radius:18px;
+      box-shadow:0 10px 40px rgba(0,0,0,.45);
+      color:var(--text);
+      overflow:hidden;
+      user-select:none;
+    }
+    .tile.docked{position:relative;display:flex;flex-direction:column;flex:1 1 0px;min-height:140px}
+    .tile.footerAttached{position:relative;display:flex;flex-direction:column;flex:1 1 0px;min-height:0}
+    .tile.floating{
+      position:fixed;z-index:75;min-width:260px;min-height:140px;
+      max-width:calc(100vw - 24px);max-height:calc(100vh - 24px);
+      display:flex;flex-direction:column;
+    }
+    .tile.hidden{display:none}
+
+    .tileHeader{
+      display:flex;align-items:center;justify-content:space-between;gap:10px;
+      padding:10px 10px;
+      background:linear-gradient(to bottom, rgba(12,14,22,.92), rgba(12,14,22,.62));
+      border-bottom:1px solid rgba(255,255,255,.10);
+    }
+    .tileLeft{display:flex;align-items:center;gap:10px;min-width:0}
+    .tileIcons{display:flex;gap:6px;align-items:center}
+    .tileIcon{
+      width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;
+      border-radius:8px;border:1px solid rgba(255,255,255,.14);
+      background:rgba(255,255,255,.06);font-size:13px;
+    }
+    .tileTitle{
+      font-weight:950;letter-spacing:.3px;font-size:12px;opacity:.95;
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    }
+    .tileBtns{display:flex;gap:8px;align-items:center}
+    .tbtn{
+      appearance:none;border:1px solid rgba(255,255,255,.16);
+      background:rgba(255,255,255,.08);color:var(--text);
+      padding:6px 8px;border-radius:12px;cursor:pointer;font-weight:950;font-size:12px;
+    }
+    .tbtn:hover{background:rgba(255,255,255,.12)}
+    .tbtn.primary{background:var(--chip2);border-color:rgba(120,180,255,.30)}
+    .tileGrip{
+      width:28px;height:22px;display:inline-flex;align-items:center;justify-content:center;
+      border-radius:10px;border:1px solid rgba(255,255,255,.14);
+      background:rgba(255,255,255,.08);
+      cursor:grab;font-size:14px;touch-action:none;
+    }
+    .tileGrip:active{cursor:grabbing}
+    .tileBody{padding:10px;overflow:auto;flex:1;min-height:0}
+
+    .dockHeightResizer{
+      height:10px;cursor:ns-resize;background:rgba(255,255,255,.03);
+      border-top:1px solid rgba(255,255,255,.06);touch-action:none;
+    }
+    .tileResize{
+      position:absolute;right:6px;bottom:6px;width:26px;height:26px;border-radius:10px;
+      border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.08);
+      display:flex;align-items:center;justify-content:center;
+      cursor:nwse-resize;touch-action:none;
+    }
+    .tileResize::before{content:"◢";opacity:.85;font-size:14px;line-height:1}
+
+    /* ---------- CONTENT WIDGETS ---------- */
+    #aimPad{
+      width:100%;
+      aspect-ratio:16/9;
+      border-radius:14px;
+      background:rgba(255,255,255,.04);
+      border:1px solid rgba(255,255,255,.14);
+      position:relative;
+      overflow:hidden;
+    }
+    #aimPad canvas{position:absolute;inset:0;width:100%;height:100%}
+    #aimHint{margin-top:8px;font-size:11px;opacity:.85}
+    #camWrap{
+      width:100%;border-radius:14px;overflow:hidden;border:1px solid rgba(255,255,255,.14);
+      background:rgba(255,255,255,.04);position:relative;aspect-ratio:4/3
+    }
+    #video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);opacity:.92}
+    #overlay{position:absolute;inset:0;width:100%;height:100%;transform:scaleX(-1);pointer-events:none}
+
+    #fieldMapWrap{
+      width:100%;
+      border-radius:14px;overflow:hidden;
+      border:1px solid rgba(255,255,255,.14);
+      background:rgba(255,255,255,.04);
+      aspect-ratio:16/9;
+      position:relative;
+    }
+    #fieldMap{position:absolute;inset:0;width:100%;height:100%}
+
+    #controlsGrid{display:grid;grid-template-columns:1fr;gap:10px}
+    .controlRow{
+      display:flex;gap:10px;align-items:center;flex-wrap:wrap;
+      padding:10px;border-radius:14px;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.04);
+    }
+    .controlRow label{font-size:11px;opacity:.82;font-weight:850;white-space:nowrap}
+    .controlRow select{
+      background:rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.14);
+      color:var(--text);border-radius:12px;
+      padding:7px 9px;outline:none;font-weight:900;font-size:12px;
+    }
+    .controlButtons{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .controlButtons button{
+      appearance:none;border:1px solid rgba(255,255,255,.16);
+      background:rgba(255,255,255,.08);color:var(--text);
+      padding:9px 10px;border-radius:14px;cursor:pointer;font-weight:950;
+    }
+    .controlButtons button:hover{background:rgba(255,255,255,.12)}
+    .controlButtons button.primary{background:var(--chip2);border-color:rgba(120,180,255,.30)}
+
+    details{border-top:1px solid rgba(255,255,255,.10);padding-top:10px;margin-top:10px}
+    summary{
+      list-style:none;cursor:pointer;font-size:12px;font-weight:950;letter-spacing:.3px;
+      opacity:.92;display:flex;align-items:center;justify-content:space-between;
+    }
+    summary::-webkit-details-marker{display:none}
+    summary .tag{
+      font-size:11px;font-weight:900;opacity:.8;background:rgba(255,255,255,.06);
+      padding:3px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.10)
+    }
+    .row{display:flex;gap:10px;align-items:center;margin:8px 0}
+    .row label{flex:1 1 auto;font-size:12px;opacity:.88}
+    .row input[type="range"]{width:100%}
+    .row select{
+      background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);
+      color:var(--text);border-radius:12px;padding:6px 8px;outline:none;flex:1 1 auto
+    }
+    .btnrow{display:flex;gap:10px;margin-top:10px;flex-wrap:wrap}
+    .btnrow button{
+      appearance:none;border:1px solid rgba(255,255,255,.16);
+      background:rgba(255,255,255,.08);color:var(--text);
+      padding:9px 10px;border-radius:14px;cursor:pointer;font-weight:900;
+      flex:1 1 140px;
+    }
+    .btnrow button:hover{background:rgba(255,255,255,.12)}
+    .btnrow button.primary{background:var(--chip2);border-color:rgba(120,180,255,.30)}
+    .btnrow button.primary:hover{background:rgba(120,180,255,.24)}
+    .small{font-size:11px;opacity:.82}
+
+    @media (pointer:coarse){
+      #rightDock{width:380px}
+      .dockBtn{padding:12px 12px}
+      .tbtn{padding:8px 10px}
+      .tileGrip{width:34px;height:26px}
+      .tileResize{width:34px;height:34px}
+      .controlButtons button{padding:12px 12px}
+    }
+  </style>
+</head>
+
+<body>
+  <div class="uiRoot">
+    <div id="callout" class="mono">—</div>
+
+    <!-- Mini HUD -->
+    <div id="topHUD">
+      <div class="hudCard">
+        <div class="hudRow">
+          <span class="pill"><b>Q</b>&nbsp;<span id="qMini">1</span></span>
+          <span class="pill"><b>Down</b>&nbsp;<span id="downMini">1st</span></span>
+          <span class="pill"><b>To Go</b>&nbsp;<span id="togoMini">10</span>y</span>
+          <span class="pill"><b>Ball</b>&nbsp;<span id="ballMini">25</span>y</span>
+        </div>
+        <div class="hudRow">
+          <span class="pill"><b>Score</b>&nbsp;A <span id="awayMini">0</span> — H <span id="homeMini">0</span></span>
+          <span class="pill"><b>Mode</b>&nbsp;<span id="modeMini">Huddle</span></span>
+          <span class="pill"><b>Player</b>&nbsp;<span id="playerMini">QB</span></span>
+        </div>
+        <div class="hudTiny">Last: <span id="lastMini">—</span></div>
+      </div>
+
+      <div class="hudCard">
+        <div class="hudTiny">Target: <span id="targetMini">—</span></div>
+        <div class="hudTiny">Ball: <span id="ballStateMini">held</span></div>
+        <div class="hudTiny">CV: <span id="cvMini">OFF</span> • Gesture: <span id="gestureMini">—</span></div>
+        <div class="hudTiny">Tip: <span class="kbd">WASD</span> move • <span class="kbd">T</span> throw • <span class="kbd">C</span> catch • <span class="kbd">Tab</span> switch</div>
+      </div>
+    </div>
+
+    <!-- RIGHT DOCK -->
+    <div id="rightDock" class="uiPanel">
+      <div id="dockWidthResizer" title="Drag to resize dock"></div>
+
+      <div id="dockHeader">
+        <div class="dockTopRow">
+          <div class="dockTitle mono">Right Panel Dock</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <span class="dockHint mono" id="dockSlotsHint">slots: 0/3</span>
+            <button class="tbtn" id="dockCollapseBtn" title="Collapse/Expand">⇔</button>
+          </div>
+        </div>
+
+        <div class="dockBtns">
+          <button class="dockBtn primary" data-open="controls">
+            <span class="label">🎛️ Controls</span><span class="kbd">footer</span>
+          </button>
+          <button class="dockBtn" data-open="aim">
+            <span class="label">🎯 Aim</span><span class="kbd">dock</span>
+          </button>
+          <button class="dockBtn" data-open="field">
+            <span class="label">🗺️ Field</span><span class="kbd">dock</span>
+          </button>
+          <button class="dockBtn" data-open="cam">
+            <span class="label">🧑✋ Camera</span><span class="kbd">dock</span>
+          </button>
+          <button class="dockBtn" data-open="settings">
+            <span class="label">⚙️ Settings</span><span class="kbd">dock</span>
+          </button>
+          <button class="dockBtn" data-open="hideAll">
+            <span class="label">🙈 Hide</span><span class="kbd">all</span>
+          </button>
+        </div>
+      </div>
+
+      <div id="dockSlots"></div>
+    </div>
+
+    <!-- FOOTER DOCK -->
+    <div id="footerDock" class="uiPanel">
+      <div id="footerTopResizer" title="Drag to resize footer height"></div>
+      <div id="footerHost"></div>
+    </div>
+  </div>
+
+  <!-- TILES -->
+
+  <!-- CONTROLS TILE -->
+  <div id="tile-controls" class="tile">
+    <div class="tileHeader">
+      <div class="tileLeft">
+        <div class="tileIcons"><span class="tileIcon">🎛️</span></div>
+        <div class="tileTitle mono">Controls (Footer / Detach)</div>
+      </div>
+      <div class="tileBtns">
+        <button class="tbtn primary" id="startCamBtnQ">Start Camera</button>
+        <button class="tbtn" id="controlsDockBtn" title="Attach to footer">Footer</button>
+        <button class="tbtn" id="controlsDetachBtn" title="Detach as floating">Detach</button>
+        <button class="tbtn" id="controlsMinBtn" title="Collapse tile">Min</button>
+        <button class="tbtn" id="controlsHideBtn" title="Hide tile">Hide</button>
+        <div class="tileGrip" data-grip="controls" title="Hold/drag (2-finger pinch to resize)">▦</div>
+      </div>
+    </div>
+    <div class="tileBody">
+      <div id="controlsGrid">
+        <div class="controlRow">
+          <label>Role</label>
+          <select id="roleSel">
+            <option value="qb">Quarterback (throw)</option>
+            <option value="receiver">Receiver (catch + run)</option>
+            <option value="defender">Defender (tackle / pick)</option>
+            <option value="spectator">Spectator (AI vs AI)</option>
+          </select>
+
+          <label>Move Ctrl</label>
+          <select id="moveCtrlSel">
+            <option value="keyboard">Keyboard (WASD)</option>
+            <option value="gesture">Gesture (hand)</option>
+            <option value="ai">AI</option>
+          </select>
+
+          <label>Throw/Catch</label>
+          <select id="skillCtrlSel">
+            <option value="keyboard">Keyboard</option>
+            <option value="gesture">Gesture</option>
+            <option value="ai">AI</option>
+          </select>
+
+          <label>View</label>
+          <select id="viewSel">
+            <option value="qb">QB (behind)</option>
+            <option value="follow">Follow Player</option>
+            <option value="ball">Follow Ball</option>
+            <option value="broadcast">Broadcast</option>
+            <option value="top">Top Down</option>
+          </select>
+        </div>
+
+        <div class="controlRow">
+          <div class="controlButtons">
+            <button class="primary" id="startPlayBtn">Start Play <span class="kbd">Enter</span></button>
+            <button id="throwBtn">Throw <span class="kbd">T</span></button>
+            <button id="catchBtn">Catch <span class="kbd">C</span></button>
+            <button id="switchBtn">Switch <span class="kbd">Tab</span></button>
+            <button id="resetBtnQ">Reset</button>
+            <button id="toggleDockBtnQ">Toggle Right Dock</button>
+            <button id="toggleFooterBtnQ">Toggle Footer</button>
+          </div>
+        </div>
+
+        <div class="small mono" style="opacity:.88;line-height:1.35">
+          Keys: <span class="kbd">WASD</span> move • <span class="kbd">Shift</span> sprint •
+          <span class="kbd">T</span> throw • <span class="kbd">C</span> catch • <span class="kbd">Tab</span> switch player •
+          <span class="kbd">Enter</span> start play. <br/>
+          Gesture: <b>Throw</b> = fist → open (release). <b>Catch</b> = pinch. <b>Move</b> = open palm + hand position.
+        </div>
+      </div>
+    </div>
+    <div class="dockHeightResizer" data-dock-resize="controls"></div>
+    <div class="tileResize" data-resize="controls"></div>
+  </div>
+
+  <!-- AIM TILE -->
+  <div id="tile-aim" class="tile">
+    <div class="tileHeader">
+      <div class="tileLeft">
+        <div class="tileIcons"><span class="tileIcon">🎯</span></div>
+        <div class="tileTitle mono">Throw Target (Click to set pass target)</div>
+      </div>
+      <div class="tileBtns">
+        <button class="tbtn" data-up="aim">↑</button>
+        <button class="tbtn" data-down="aim">↓</button>
+        <button class="tbtn" data-dock="aim">Dock</button>
+        <button class="tbtn" data-detach="aim">Detach</button>
+        <button class="tbtn" data-min="aim">Min</button>
+        <button class="tbtn" data-hide="aim">Hide</button>
+        <div class="tileGrip" data-grip="aim" title="Hold/drag (2-finger pinch to resize)">▦</div>
+      </div>
+    </div>
+    <div class="tileBody">
+      <div id="aimPad"><canvas id="aimCanvas"></canvas></div>
+      <div id="aimHint" class="mono">
+        Target: <b><span id="targetReadout">—</span></b> • Receiver: <b><span id="rcvReadout">WR1</span></b>
+        &nbsp; <span class="kbd">1</span>/<span class="kbd">2</span> choose receiver
+      </div>
+      <div class="small mono" style="margin-top:6px;opacity:.86">
+        Tip: click ahead of the receiver to “lead” the throw. Higher up = more air (lob).
+      </div>
+    </div>
+    <div class="dockHeightResizer" data-dock-resize="aim"></div>
+    <div class="tileResize" data-resize="aim"></div>
+  </div>
+
+  <!-- FIELD MAP TILE -->
+  <div id="tile-field" class="tile">
+    <div class="tileHeader">
+      <div class="tileLeft">
+        <div class="tileIcons"><span class="tileIcon">🗺️</span></div>
+        <div class="tileTitle mono">Field Map (Top-down)</div>
+      </div>
+      <div class="tileBtns">
+        <button class="tbtn" data-up="field">↑</button>
+        <button class="tbtn" data-down="field">↓</button>
+        <button class="tbtn" data-dock="field">Dock</button>
+        <button class="tbtn" data-detach="field">Detach</button>
+        <button class="tbtn" data-min="field">Min</button>
+        <button class="tbtn" data-hide="field">Hide</button>
+        <div class="tileGrip" data-grip="field" title="Hold/drag (2-finger pinch to resize)">▦</div>
+      </div>
+    </div>
+    <div class="tileBody">
+      <div id="fieldMapWrap"><canvas id="fieldMap"></canvas></div>
+      <div class="small mono" style="margin-top:8px;opacity:.86">
+        Offense = cyan • Defense = red • Ball = yellow • Target = white ring
+      </div>
+    </div>
+    <div class="dockHeightResizer" data-dock-resize="field"></div>
+    <div class="tileResize" data-resize="field"></div>
+  </div>
+
+  <!-- CAMERA TILE -->
+  <div id="tile-cam" class="tile">
+    <div class="tileHeader">
+      <div class="tileLeft">
+        <div class="tileIcons">
+          <span class="tileIcon">🧑</span>
+          <span class="tileIcon">✋</span>
+        </div>
+        <div class="tileTitle mono">Camera (MediaPipe Hands)</div>
+      </div>
+      <div class="tileBtns">
+        <button class="tbtn primary" id="startCamBtn">Start</button>
+        <button class="tbtn" data-up="cam">↑</button>
+        <button class="tbtn" data-down="cam">↓</button>
+        <button class="tbtn" data-dock="cam">Dock</button>
+        <button class="tbtn" data-detach="cam">Detach</button>
+        <button class="tbtn" data-min="cam">Min</button>
+        <button class="tbtn" data-hide="cam">Hide</button>
+        <div class="tileGrip" data-grip="cam" title="Hold/drag (2-finger pinch to resize)">▦</div>
+      </div>
+    </div>
+    <div class="tileBody">
+      <div id="camWrap">
+        <video id="video" playsinline muted></video>
+        <canvas id="overlay"></canvas>
+      </div>
+      <div id="statusLine" class="mono" style="margin-top:8px">Status: camera OFF</div>
+      <div class="small mono" style="margin-top:6px;opacity:.85">Camera requires localhost or https.</div>
+    </div>
+    <div class="dockHeightResizer" data-dock-resize="cam"></div>
+    <div class="tileResize" data-resize="cam"></div>
+  </div>
+
+  <!-- SETTINGS TILE -->
+  <div id="tile-settings" class="tile">
+    <div class="tileHeader">
+      <div class="tileLeft">
+        <div class="tileIcons"><span class="tileIcon">⚙️</span></div>
+        <div class="tileTitle mono">Settings + Game Readouts</div>
+      </div>
+      <div class="tileBtns">
+        <button class="tbtn" data-up="settings">↑</button>
+        <button class="tbtn" data-down="settings">↓</button>
+        <button class="tbtn" data-dock="settings">Dock</button>
+        <button class="tbtn" data-detach="settings">Detach</button>
+        <button class="tbtn" data-min="settings">Min</button>
+        <button class="tbtn" data-hide="settings">Hide</button>
+        <div class="tileGrip" data-grip="settings" title="Hold/drag (2-finger pinch to resize)">▦</div>
+      </div>
+    </div>
+
+    <div class="tileBody">
+      <div class="btnrow">
+        <button class="primary" id="aiBtn">AI: ON</button>
+        <button id="cvBtn">CV Gestures: OFF</button>
+        <button id="slowBtn">SlowMo: OFF</button>
+        <button id="resetBtn">Reset Drive</button>
+      </div>
+
+      <details open>
+        <summary><span>Throw + Aim</span> <span class="tag">QB</span></summary>
+
+        <div class="row">
+          <label>Aim Assist <span class="mono" id="aimAssistLabel">35%</span></label>
+          <input id="aimAssist" type="range" min="0" max="100" step="1" value="35"/>
+        </div>
+
+        <div class="row">
+          <label>Throw Power <span class="mono" id="throwPowLabel">42 m/s</span></label>
+          <input id="throwPower" type="range" min="18" max="70" step="1" value="42"/>
+        </div>
+
+        <div class="row">
+          <label>Lob Lift <span class="mono" id="lobLabel">0.35</span></label>
+          <input id="lobLift" type="range" min="0.05" max="0.85" step="0.01" value="0.35"/>
+        </div>
+
+        <div class="row">
+          <label>Throw Scatter <span class="mono" id="scatterLabel">0.35m</span></label>
+          <input id="throwScatter" type="range" min="0.00" max="1.20" step="0.01" value="0.35"/>
+        </div>
+      </details>
+
+      <details open>
+        <summary><span>Catch + Defense</span> <span class="tag">WR/DB</span></summary>
+
+        <div class="row">
+          <label>Catch Radius <span class="mono" id="catchRadLabel">0.85m</span></label>
+          <input id="catchRadius" type="range" min="0.35" max="1.60" step="0.01" value="0.85"/>
+        </div>
+
+        <div class="row">
+          <label>Tackle Radius <span class="mono" id="tackleRadLabel">0.95m</span></label>
+          <input id="tackleRadius" type="range" min="0.55" max="1.60" step="0.01" value="0.95"/>
+        </div>
+
+        <div class="row">
+          <label>Defense Speed <span class="mono" id="defSpdLabel">6.8</span></label>
+          <input id="defSpeed" type="range" min="3.5" max="9.5" step="0.1" value="6.8"/>
+        </div>
+
+        <div class="row">
+          <label>Offense Speed <span class="mono" id="offSpdLabel">6.2</span></label>
+          <input id="offSpeed" type="range" min="3.5" max="9.5" step="0.1" value="6.2"/>
+        </div>
+      </details>
+
+      <details open>
+        <summary><span>Computer Vision Gestures</span> <span class="tag">hands</span></summary>
+
+        <div class="row">
+          <label>Pinch Threshold <span class="mono" id="pinchLabel">0.42</span></label>
+          <input id="pinchThresh" type="range" min="0.20" max="0.75" step="0.01" value="0.42"/>
+        </div>
+
+        <div class="row">
+          <label>Throw Gesture Sensitivity <span class="mono" id="throwSensLabel">1.00</span></label>
+          <input id="throwSens" type="range" min="0.40" max="2.20" step="0.01" value="1.00"/>
+        </div>
+
+        <div class="small mono">Throw = fist → open. Catch = pinch. Move = open palm + wrist position.</div>
+      </details>
+
+      <details open>
+        <summary><span>Game Readouts</span> <span class="tag">live</span></summary>
+        <div class="mono" style="line-height:1.35;margin-top:8px">
+          <b>Q:</b> <span id="qRead">1</span> &nbsp; <b>Down:</b> <span id="downRead">1st</span>
+          &nbsp; <b>ToGo:</b> <span id="togoRead">10</span>y &nbsp; <b>Ball:</b> <span id="ballRead">25</span>y<br/>
+          <b>Score:</b> Away <span id="awayRead">0</span> — Home <span id="homeRead">0</span><br/>
+          <b>Play:</b> <span id="playRead">Huddle</span> &nbsp; <b>Poss:</b> <span id="possRead">Home</span><br/>
+          <b>Last:</b> <span id="lastRead">—</span><br/>
+          <b>Target:</b> <span id="targetRead">—</span><br/>
+          <b>Ball State:</b> <span id="ballStateRead">held</span>
+        </div>
+      </details>
+    </div>
+
+    <div class="dockHeightResizer" data-dock-resize="settings"></div>
+    <div class="tileResize" data-resize="settings"></div>
+  </div>
+
+  <!-- libs -->
+  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+
+  <script>
+    // -----------------------------
+    // Helpers
+    // -----------------------------
+    const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+    const lerp  = (a,b,t)=>a+(b-a)*t;
+    const nowS  = ()=>performance.now()/1000;
+    const el    = id => document.getElementById(id);
+
+    function showCallout(text, ms=800){
+      const calloutEl = el('callout');
+      calloutEl.textContent = text;
+      calloutEl.style.opacity = 1;
+      setTimeout(()=>{ calloutEl.style.opacity = 0; }, ms);
+    }
+
+    // -----------------------------
+    // Tile Manager (dock + footer + floating)
+    // -----------------------------
+    const rightDock = el('rightDock');
+    const dockSlots = el('dockSlots');
+    const dockSlotsHint = el('dockSlotsHint');
+    const footerDock = el('footerDock');
+    const footerHost = el('footerHost');
+
+    const MAX_DOCK_TILES = 3;
+    let topZ = 100;
+
+    const Tile = {
+      map: new Map(),
+      dockOrder: [],
+      dockCollapsed: false,
+      footerCollapsed: false
+    };
+
+    function bringToFront(tileEl){
+      topZ += 1;
+      tileEl.style.zIndex = String(topZ);
+    }
+    function updateDockHint(){
+      dockSlotsHint.textContent = `slots: ${Tile.dockOrder.length}/${MAX_DOCK_TILES}`;
+    }
+    function registerTile(id, tileEl){
+      Tile.map.set(id, {
+        el: tileEl,
+        state: "hidden", // "dock" | "float" | "footer" | "hidden"
+        minimized: false,
+        last: { x: 80 + Math.random()*180, y: 120 + Math.random()*140, w: 420, h: 320 },
+        fixedH: null
+      });
+      tileEl.classList.add('hidden');
+    }
+    function setMinimized(id, on){
+      const t = Tile.map.get(id);
+      if (!t) return;
+      t.minimized = on;
+      t.el.querySelector('.tileBody').style.display = on ? "none" : "";
+      const dh = t.el.querySelector('.dockHeightResizer');
+      if (dh) dh.style.display = on ? "none" : "";
+      const rh = t.el.querySelector('.tileResize');
+      if (rh) rh.style.display = on ? "none" : "";
+    }
+    function setHidden(id, hidden){
+      const t = Tile.map.get(id);
+      if (!t) return;
+      if (hidden){
+        if (t.state === "dock"){
+          Tile.dockOrder = Tile.dockOrder.filter(x => x !== id);
+          renderDock();
+        }
+        if (t.state === "footer"){
+          footerHost.innerHTML = "";
+        }
+        t.state = "hidden";
+        t.el.classList.add('hidden');
+      }else{
+        t.el.classList.remove('hidden');
+      }
+      updateDockHint();
+    }
+    function renderDock(){
+      dockSlots.innerHTML = "";
+      for (const id of Tile.dockOrder){
+        const t = Tile.map.get(id);
+        if (!t || t.state !== "dock") continue;
+        dockSlots.appendChild(t.el);
+      }
+      updateDockHint();
+    }
+    function focusTile(id){
+      const t = Tile.map.get(id);
+      if (!t) return;
+      if (t.state === "float") bringToFront(t.el);
+    }
+    function dockTileRight(id, {focus=true}={}){
+      const t = Tile.map.get(id);
+      if (!t) return;
+      if (id === "controls") return attachToFooter(id, {focus});
+
+      t.el.classList.remove('hidden');
+      if (t.state === "float"){
+        const r = t.el.getBoundingClientRect();
+        t.last = { x:r.left, y:r.top, w:r.width, h:r.height };
+      }
+      if (!Tile.dockOrder.includes(id) && Tile.dockOrder.length >= MAX_DOCK_TILES){
+        const evictId = Tile.dockOrder[Tile.dockOrder.length - 1];
+        setHidden(evictId, true);
+      }
+      if (!Tile.dockOrder.includes(id)) Tile.dockOrder.unshift(id);
+
+      t.state = "dock";
+      t.el.classList.remove('floating','footerAttached');
+      t.el.classList.add('docked');
+      t.el.style.left = ""; t.el.style.top = ""; t.el.style.width=""; t.el.style.height="";
+      t.el.style.maxHeight = "";
+      t.el.style.zIndex = "";
+      t.el.style.flex = t.fixedH ? `0 0 ${t.fixedH}px` : "1 1 0px";
+
+      renderDock();
+      if (focus) focusTile(id);
+      updateDockHint();
+    }
+    function attachToFooter(id, {focus=true}={}){
+      const t = Tile.map.get(id);
+      if (!t) return;
+      t.el.classList.remove('hidden');
+
+      if (t.state === "float"){
+        const r = t.el.getBoundingClientRect();
+        t.last = { x:r.left, y:r.top, w:r.width, h:r.height };
+      }
+      t.state = "footer";
+      t.el.classList.remove('floating','docked');
+      t.el.classList.add('footerAttached');
+      t.el.style.left = ""; t.el.style.top = ""; t.el.style.width=""; t.el.style.height="";
+      t.el.style.zIndex = "";
+      footerHost.innerHTML = "";
+      footerHost.appendChild(t.el);
+      t.el.style.flex = "1 1 0px";
+      if (focus) focusTile(id);
+    }
+    function detachToFloating(id, {x=null,y=null,w=null,h=null,focus=true}={}){
+      const t = Tile.map.get(id);
+      if (!t) return;
+      t.el.classList.remove('hidden');
+
+      if (t.state === "dock"){
+        Tile.dockOrder = Tile.dockOrder.filter(v => v !== id);
+        renderDock();
+      }
+      if (t.state === "footer") footerHost.innerHTML = "";
+
+      t.state = "float";
+      t.el.classList.remove('docked','footerAttached');
+      t.el.classList.add('floating');
+
+      const L = (x!==null) ? x : t.last.x;
+      const T = (y!==null) ? y : t.last.y;
+      const W = (w!==null) ? w : t.last.w;
+      const H = (h!==null) ? h : t.last.h;
+
+      t.el.style.left = clamp(L, 8, window.innerWidth - 280) + "px";
+      t.el.style.top  = clamp(T, 8, window.innerHeight - 160) + "px";
+      t.el.style.width  = clamp(W, 260, window.innerWidth - 16) + "px";
+      t.el.style.height = clamp(H, 140, window.innerHeight - 16) + "px";
+
+      document.body.appendChild(t.el);
+      bringToFront(t.el);
+      if (focus) focusTile(id);
+      updateDockHint();
+    }
+    function moveDockTile(id, dir){
+      const idx = Tile.dockOrder.indexOf(id);
+      if (idx < 0) return;
+      const ni = clamp(idx + dir, 0, Tile.dockOrder.length - 1);
+      if (ni === idx) return;
+      const arr = Tile.dockOrder.slice();
+      const [x] = arr.splice(idx,1);
+      arr.splice(ni,0,x);
+      Tile.dockOrder = arr;
+      renderDock();
+    }
+
+    // Dock width resize
+    (function dockWidthResize(){
+      const grip = el('dockWidthResizer');
+      let active = false;
+      grip.addEventListener('pointerdown', (e)=>{
+        active = true;
+        grip.setPointerCapture(e.pointerId);
+        e.preventDefault();
+      });
+      grip.addEventListener('pointermove', (e)=>{
+        if (!active || rightDock.classList.contains('collapsed')) return;
+        const right = 14;
+        const newW = clamp((window.innerWidth - e.clientX) - right, 260, 520);
+        rightDock.style.width = newW + "px";
+      });
+      grip.addEventListener('pointerup', ()=>{ active=false; });
+      grip.addEventListener('pointercancel', ()=>{ active=false; });
+    })();
+
+    // Footer height resize
+    (function footerHeightResize(){
+      const grip = el('footerTopResizer');
+      let active = false;
+      grip.addEventListener('pointerdown', (e)=>{
+        active = true;
+        grip.setPointerCapture(e.pointerId);
+        e.preventDefault();
+      });
+      grip.addEventListener('pointermove', (e)=>{
+        if (!active || footerDock.classList.contains('collapsed')) return;
+        const bottom = 14;
+        const newH = clamp((window.innerHeight - e.clientY) - bottom, 54, Math.floor(window.innerHeight*0.60));
+        footerDock.style.height = newH + "px";
+      });
+      grip.addEventListener('pointerup', ()=>{ active=false; });
+      grip.addEventListener('pointercancel', ()=>{ active=false; });
+    })();
+
+    // Floating drag + pinch resize + corner resize
+    function enableFloatingGestures(id){
+      const t = Tile.map.get(id);
+      if (!t) return;
+      const tileEl = t.el;
+      const grip = tileEl.querySelector(`[data-grip="${id}"]`);
+      const resizeHandle = tileEl.querySelector(`[data-resize="${id}"]`);
+
+      const pointers = new Map();
+      let mode = "none";
+      let startRect = null;
+      let startCenter = null;
+      let startDist = 0;
+
+      const getRect = ()=>tileEl.getBoundingClientRect();
+
+      function beginDrag(){
+        if (t.state !== "float") return;
+        mode = "drag";
+        bringToFront(tileEl);
+        const r = getRect();
+        startRect = { left:r.left, top:r.top, width:r.width, height:r.height };
+      }
+      function beginResize(){
+        if (t.state !== "float") return;
+        mode = "resize";
+        bringToFront(tileEl);
+        const r = getRect();
+        startRect = { left:r.left, top:r.top, width:r.width, height:r.height };
+      }
+      function beginPinchIfNeeded(){
+        if (t.state !== "float") return;
+        if (pointers.size !== 2) return;
+        mode = "pinch";
+        bringToFront(tileEl);
+        const pts = Array.from(pointers.values());
+        startCenter = { x:(pts[0].x+pts[1].x)/2, y:(pts[0].y+pts[1].y)/2 };
+        startDist = Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y);
+        const r = getRect();
+        startRect = { left:r.left, top:r.top, width:r.width, height:r.height };
+      }
+
+      function applyDrag(e){
+        if (mode !== "drag" || !startRect) return;
+        const p = pointers.get(e.pointerId);
+        if (!p) return;
+        const dx = p.x - p.sx;
+        const dy = p.y - p.sy;
+        const newL = clamp(startRect.left + dx, 8, window.innerWidth - 260);
+        const newT = clamp(startRect.top  + dy, 8, window.innerHeight - 140);
+        tileEl.style.left = newL + "px";
+        tileEl.style.top  = newT + "px";
+        t.last.x = newL; t.last.y = newT;
+      }
+      function applyResize(e){
+        if (mode !== "resize" || !startRect) return;
+        const p = pointers.get(e.pointerId);
+        if (!p) return;
+        const dx = p.x - p.sx;
+        const dy = p.y - p.sy;
+        const newW = clamp(startRect.width + dx, 260, window.innerWidth - 16);
+        const newH = clamp(startRect.height + dy, 140, window.innerHeight - 16);
+        tileEl.style.width  = newW + "px";
+        tileEl.style.height = newH + "px";
+        t.last.w = newW; t.last.h = newH;
+      }
+      function applyPinch(){
+        if (mode !== "pinch" || !startRect || pointers.size !== 2) return;
+        const pts = Array.from(pointers.values());
+        const center = { x:(pts[0].x+pts[1].x)/2, y:(pts[0].y+pts[1].y)/2 };
+        const dist = Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y);
+        const scale = clamp(dist / (startDist || 1), 0.65, 2.2);
+        const newW = clamp(startRect.width * scale, 260, window.innerWidth - 16);
+        const newH = clamp(startRect.height * scale, 140, window.innerHeight - 16);
+
+        const cx0 = startRect.left + startRect.width/2;
+        const cy0 = startRect.top  + startRect.height/2;
+        const dxC = center.x - startCenter.x;
+        const dyC = center.y - startCenter.y;
+
+        const newL = clamp((cx0 + dxC) - newW/2, 8, window.innerWidth - 260);
+        const newT = clamp((cy0 + dyC) - newH/2, 8, window.innerHeight - 140);
+
+        tileEl.style.left = newL + "px";
+        tileEl.style.top  = newT + "px";
+        tileEl.style.width  = newW + "px";
+        tileEl.style.height = newH + "px";
+
+        t.last = { x:newL, y:newT, w:newW, h:newH };
+      }
+
+      function onPointerDown(e, kind){
+        if (t.state !== "float") return;
+        pointers.set(e.pointerId, { x:e.clientX, y:e.clientY, sx:e.clientX, sy:e.clientY });
+        (kind === "resize") ? beginResize() : beginDrag();
+        e.target.setPointerCapture(e.pointerId);
+        e.preventDefault();
+        beginPinchIfNeeded();
+      }
+      function onPointerMove(e){
+        const p = pointers.get(e.pointerId);
+        if (!p) return;
+        p.x = e.clientX; p.y = e.clientY;
+        if (t.state !== "float") return;
+        if (pointers.size === 2){
+          beginPinchIfNeeded();
+          applyPinch();
+          return;
+        }
+        if (mode === "drag") applyDrag(e);
+        if (mode === "resize") applyResize(e);
+      }
+      function onPointerUp(e){
+        pointers.delete(e.pointerId);
+        if (pointers.size < 2 && mode === "pinch"){
+          mode = "none"; startRect = null; startCenter = null; startDist = 0;
+        }
+        if (pointers.size === 0){
+          mode = "none"; startRect = null; startCenter = null; startDist = 0;
+        }
+      }
+
+      if (grip){
+        grip.addEventListener('pointerdown', (e)=>onPointerDown(e, "drag"));
+        grip.addEventListener('pointermove', onPointerMove);
+        grip.addEventListener('pointerup', onPointerUp);
+        grip.addEventListener('pointercancel', onPointerUp);
+      }
+      if (resizeHandle){
+        resizeHandle.addEventListener('pointerdown', (e)=>onPointerDown(e, "resize"));
+        resizeHandle.addEventListener('pointermove', onPointerMove);
+        resizeHandle.addEventListener('pointerup', onPointerUp);
+        resizeHandle.addEventListener('pointercancel', onPointerUp);
+      }
+      tileEl.addEventListener('pointerdown', ()=>{
+        if (t.state === "float") bringToFront(tileEl);
+      });
+    }
+
+    // Docked height resizer
+    function enableDockHeightResize(id){
+      const t = Tile.map.get(id);
+      if (!t) return;
+      const bar = t.el.querySelector(`[data-dock-resize="${id}"]`);
+      if (!bar) return;
+
+      let active = false;
+      let startY = 0;
+      let startH = 0;
+
+      bar.addEventListener('pointerdown', (e)=>{
+        if (t.state !== "dock") return;
+        active = true;
+        startY = e.clientY;
+        startH = t.el.getBoundingClientRect().height;
+        bar.setPointerCapture(e.pointerId);
+        e.preventDefault();
+      });
+      bar.addEventListener('pointermove', (e)=>{
+        if (!active || t.state !== "dock") return;
+        const dy = e.clientY - startY;
+        const newH = clamp(startH + dy, 120, Math.floor(window.innerHeight*0.78));
+        t.fixedH = newH;
+        t.el.style.flex = `0 0 ${newH}px`;
+      });
+      bar.addEventListener('pointerup', ()=>{ active=false; });
+      bar.addEventListener('pointercancel', ()=>{ active=false; });
+    }
+
+    // Wire tile buttons
+    function wireTileButtons(){
+      document.querySelectorAll('[data-up]').forEach(btn=>{
+        btn.addEventListener('click', ()=>moveDockTile(btn.getAttribute('data-up'), -1));
+      });
+      document.querySelectorAll('[data-down]').forEach(btn=>{
+        btn.addEventListener('click', ()=>moveDockTile(btn.getAttribute('data-down'), +1));
+      });
+      document.querySelectorAll('[data-dock]').forEach(btn=>{
+        btn.addEventListener('click', ()=>dockTileRight(btn.getAttribute('data-dock')));
+      });
+      document.querySelectorAll('[data-detach]').forEach(btn=>{
+        btn.addEventListener('click', ()=>detachToFloating(btn.getAttribute('data-detach')));
+      });
+      document.querySelectorAll('[data-hide]').forEach(btn=>{
+        btn.addEventListener('click', ()=>setHidden(btn.getAttribute('data-hide'), true));
+      });
+      document.querySelectorAll('[data-min]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const id = btn.getAttribute('data-min');
+          const t = Tile.map.get(id);
+          const next = !t.minimized;
+          setMinimized(id, next);
+          btn.textContent = next ? "Max" : "Min";
+        });
+      });
+
+      el('controlsDockBtn').addEventListener('click', ()=>attachToFooter('controls'));
+      el('controlsDetachBtn').addEventListener('click', ()=>detachToFloating('controls'));
+      el('controlsHideBtn').addEventListener('click', ()=>setHidden('controls', true));
+      el('controlsMinBtn').addEventListener('click', ()=>{
+        const t = Tile.map.get('controls');
+        const next = !t.minimized;
+        setMinimized('controls', next);
+        el('controlsMinBtn').textContent = next ? "Max" : "Min";
+      });
+    }
+
+    // Dock selectors
+    function wireDockSelectors(){
+      document.querySelectorAll('.dockBtn').forEach(b=>{
+        b.addEventListener('click', ()=>{
+          const which = b.getAttribute('data-open');
+          if (which === "hideAll"){
+            ['aim','field','cam','settings'].forEach(id=>setHidden(id,true));
+            return;
+          }
+          if (which === "controls"){
+            attachToFooter('controls');
+            footerDock.classList.remove('collapsed');
+            Tile.footerCollapsed = false;
+            return;
+          }
+          dockTileRight(which);
+        });
+      });
+      el('dockCollapseBtn').addEventListener('click', ()=>{
+        Tile.dockCollapsed = !Tile.dockCollapsed;
+        rightDock.classList.toggle('collapsed', Tile.dockCollapsed);
+      });
+    }
+
+    // Quick toggles
+    el('toggleDockBtnQ').addEventListener('click', ()=>{
+      Tile.dockCollapsed = !Tile.dockCollapsed;
+      rightDock.classList.toggle('collapsed', Tile.dockCollapsed);
+    });
+    el('toggleFooterBtnQ').addEventListener('click', ()=>{
+      Tile.footerCollapsed = !Tile.footerCollapsed;
+      footerDock.classList.toggle('collapsed', Tile.footerCollapsed);
+    });
+
+    // Register tiles
+    registerTile('controls', el('tile-controls'));
+    registerTile('aim',      el('tile-aim'));
+    registerTile('field',    el('tile-field'));
+    registerTile('cam',      el('tile-cam'));
+    registerTile('settings', el('tile-settings'));
+
+    ['controls','aim','field','cam','settings'].forEach(id=>{
+      enableFloatingGestures(id);
+      enableDockHeightResize(id);
+    });
+
+    wireTileButtons();
+    wireDockSelectors();
+
+    // Default layout
+    attachToFooter('controls');
+    dockTileRight('aim', {focus:false});
+    dockTileRight('cam', {focus:false});
+    dockTileRight('settings', {focus:false});
+    setHidden('field', false);
+    dockTileRight('field', {focus:false});
+
+    // -----------------------------
+    // Three.js Football Scene
+    // -----------------------------
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.Fog(0x05060a, 25, 180);
+
+    const renderer = new THREE.WebGLRenderer({ antialias:true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.domElement.id = "threeCanvas";
+    document.body.insertBefore(renderer.domElement, document.body.firstChild);
+
+    const camera = new THREE.PerspectiveCamera(58, innerWidth/innerHeight, 0.05, 500);
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+    const keyLight = new THREE.DirectionalLight(0xffffff, 1.05);
+    keyLight.position.set(10,14,12);
+    scene.add(keyLight);
+
+    const rim = new THREE.DirectionalLight(0x9bd0ff, 0.28);
+    rim.position.set(-18,10,-22);
+    scene.add(rim);
+
+    // Field dimensions in "yards" as world units (easy)
+    const FIELD_W = 53.3;
+    const FIELD_L = 120; // includes end zones: 0..120 (goal lines at 10 and 110)
+    const PLAY_L0 = 10;  // start of playable field
+    const PLAY_L1 = 110; // end of playable field (end zone starts)
+    const GOAL_0  = 10;
+    const GOAL_1  = 110;
+
+    const field = new THREE.Mesh(
+      new THREE.PlaneGeometry(FIELD_W, FIELD_L),
+      new THREE.MeshStandardMaterial({ color:0x0a2a17, roughness:0.96 })
+    );
+    field.rotation.x = -Math.PI/2;
+    field.position.set(0,0, FIELD_L/2);
+    scene.add(field);
+
+    // Yard lines
+    const yardGroup = new THREE.Group();
+    scene.add(yardGroup);
+
+    function addYardLine(z, thick=0.06, alpha=0.28){
+      const g = new THREE.PlaneGeometry(FIELD_W, thick);
+      const m = new THREE.MeshBasicMaterial({ color:0xffffff, transparent:true, opacity:alpha, side:THREE.DoubleSide });
+      const line = new THREE.Mesh(g,m);
+      line.rotation.x = -Math.PI/2;
+      line.position.set(0, 0.021, z);
+      yardGroup.add(line);
+    }
+
+    for (let y=0; y<=120; y+=5){
+      const thick = (y % 10 === 0) ? 0.12 : 0.06;
+      const alpha = (y % 10 === 0) ? 0.38 : 0.22;
+      addYardLine(y, thick, alpha);
+    }
+
+    // End zones tint
+    function endZone(zCenter, color){
+      const ez = new THREE.Mesh(
+        new THREE.PlaneGeometry(FIELD_W, 10),
+        new THREE.MeshStandardMaterial({ color, roughness:0.95, transparent:true, opacity:0.40 })
+      );
+      ez.rotation.x = -Math.PI/2;
+      ez.position.set(0, 0.02, zCenter);
+      scene.add(ez);
+    }
+    endZone(5, 0x203a5a);
+    endZone(115, 0x5a2020);
+
+    // Goal posts (simple)
+    function goalPost(z){
+      const mat = new THREE.MeshStandardMaterial({ color:0xffd96a, roughness:0.55, emissive:0x221a00, emissiveIntensity:0.35 });
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.18,0.18,6.4,18), mat);
+      pole.position.set(0, 3.2, z);
+      const cross = new THREE.Mesh(new THREE.CylinderGeometry(0.14,0.14,6.0,16), mat);
+      cross.rotation.z = Math.PI/2;
+      cross.position.set(0, 6.0, z);
+      const uprL = new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.12,5.2,16), mat);
+      const uprR = uprL.clone();
+      uprL.position.set(-3.0, 8.6, z);
+      uprR.position.set( 3.0, 8.6, z);
+      scene.add(pole, cross, uprL, uprR);
+    }
+    goalPost(10.2);
+    goalPost(109.8);
+
+    // Players
+    function makePlayerMesh(color){
+      const grp = new THREE.Group();
+      const mat = new THREE.MeshStandardMaterial({ color, roughness:0.92, emissive:0x0b0e18, emissiveIntensity:0.28 });
+      const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.55, 1.05, 6, 14), mat);
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.40, 18, 12), mat);
+      head.position.y = 1.40;
+      grp.add(body, head);
+
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.65, 0.85, 40),
+        new THREE.MeshBasicMaterial({ color:0xffffff, transparent:true, opacity:0.0, side:THREE.DoubleSide })
+      );
+      ring.rotation.x = -Math.PI/2;
+      ring.position.y = 0.03;
+      grp.add(ring);
+      grp.userData.selectRing = ring;
+      return grp;
+    }
+
+    const team = {
+      offenseColor: 0x50d2ff,
+      defenseColor: 0xff6c6c
+    };
+
+    const offense = [
+      { name:"QB",  mesh: makePlayerMesh(team.offenseColor), pos:new THREE.Vector3(0,0,25), vel:new THREE.Vector3(), speed:6.2, role:"qb" },
+      { name:"WR1", mesh: makePlayerMesh(team.offenseColor), pos:new THREE.Vector3(-10,0,25), vel:new THREE.Vector3(), speed:6.2, role:"wr" },
+      { name:"WR2", mesh: makePlayerMesh(team.offenseColor), pos:new THREE.Vector3( 10,0,25), vel:new THREE.Vector3(), speed:6.2, role:"wr" }
+    ];
+    const defense = [
+      { name:"CB1", mesh: makePlayerMesh(team.defenseColor), pos:new THREE.Vector3(-8,0,34), vel:new THREE.Vector3(), speed:6.8, role:"db" },
+      { name:"CB2", mesh: makePlayerMesh(team.defenseColor), pos:new THREE.Vector3( 8,0,34), vel:new THREE.Vector3(), speed:6.8, role:"db" },
+      { name:"S",   mesh: makePlayerMesh(team.defenseColor), pos:new THREE.Vector3( 0,0,38), vel:new THREE.Vector3(), speed:6.8, role:"db" }
+    ];
+
+    for (const p of [...offense, ...defense]) scene.add(p.mesh);
+
+    // Football (texture via SVG)
+    function footballSVG(){
+      return `
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="512" viewBox="0 0 1024 512">
+  <defs>
+    <linearGradient id="g" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#7b3f24"/>
+      <stop offset="0.55" stop-color="#5b2a16"/>
+      <stop offset="1" stop-color="#3b1a0d"/>
+    </linearGradient>
+    <radialGradient id="shine" cx="35%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#9a5a34" stop-opacity="0.9"/>
+      <stop offset="55%" stop-color="#6a341c" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#2b1208" stop-opacity="0.35"/>
+    </radialGradient>
+  </defs>
+  <rect width="1024" height="512" fill="#000" fill-opacity="0"/>
+  <ellipse cx="512" cy="256" rx="470" ry="190" fill="url(#g)"/>
+  <ellipse cx="512" cy="256" rx="470" ry="190" fill="url(#shine)"/>
+  <ellipse cx="512" cy="256" rx="470" ry="190" fill="none" stroke="#000" stroke-opacity="0.25" stroke-width="26"/>
+  <path d="M140 256 Q512 90 884 256 Q512 422 140 256 Z" fill="none" stroke="#1a0b05" stroke-opacity="0.25" stroke-width="10"/>
+  <path d="M300 256 H724" stroke="#f0f0f0" stroke-width="26" stroke-linecap="round" />
+  <path d="M360 256 H664" stroke="#d8d8d8" stroke-width="18" stroke-linecap="round" />
+  <g stroke="#f7f7f7" stroke-width="10" stroke-linecap="round">
+    <path d="M420 220 V292"/>
+    <path d="M470 214 V298"/>
+    <path d="M520 212 V300"/>
+    <path d="M570 214 V298"/>
+    <path d="M620 220 V292"/>
+  </g>
+  <g stroke="#e6e6e6" stroke-width="18" stroke-linecap="round" opacity="0.85">
+    <path d="M115 256 Q170 180 205 140"/>
+    <path d="M909 256 Q854 180 819 140"/>
+    <path d="M115 256 Q170 332 205 372"/>
+    <path d="M909 256 Q854 332 819 372"/>
+  </g>
+</svg>`;
+    }
+    function makeSVGTexture(svgText){
+      return new Promise((resolve)=>{
+        const img = new Image();
+        img.onload = ()=>{
+          const c = document.createElement('canvas');
+          c.width=1024; c.height=512;
+          const ctx = c.getContext('2d');
+          ctx.drawImage(img,0,0);
+          const tex = new THREE.CanvasTexture(c);
+          tex.colorSpace = THREE.SRGBColorSpace;
+          tex.anisotropy = 8;
+          tex.needsUpdate = true;
+          resolve(tex);
+        };
+        img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgText);
+      });
+    }
+
+    const ball = {
+      mesh: null,
+      pos: new THREE.Vector3(0, 1.6, 25),
+      vel: new THREE.Vector3(),
+      omega: new THREE.Vector3(),
+      state: "held", // held | thrown | loose | dead
+      holder: 0,     // index in offense/defense arrays tracked via holderTeam/holderIdx
+      holderTeam: "offense", // offense | defense
+      lastThrownAt: -999
+    };
+
+    const ballGeo = new THREE.SphereGeometry(0.38, 48, 32);
+    const ballMat = new THREE.MeshStandardMaterial({ color:0xffffff, roughness:0.45, metalness:0.0, emissive:0x101010, emissiveIntensity:0.22 });
+    const ballMesh = new THREE.Mesh(ballGeo, ballMat);
+    ballMesh.scale.set(1.6, 1.0, 1.0); // squish to football-ish
+    scene.add(ballMesh);
+    ball.mesh = ballMesh;
+
+    makeSVGTexture(footballSVG()).then(tex=>{
+      ballMat.map = tex;
+      ballMat.needsUpdate = true;
+    });
+
+    function spinBall(dt){
+      // gentle spiral based on omega
+      const w = ball.omega.length();
+      if (w < 1e-4) return;
+      const axis = ball.omega.clone().normalize();
+      const dTheta = clamp(w * dt, 0, 2.0);
+      ball.mesh.rotateOnWorldAxis(axis, dTheta);
+    }
+
+    // -----------------------------
+    // Game State (downs + yards)
+    // -----------------------------
+    const game = {
+      quarter: 1,
+      down: 1,
+      toGo: 10,
+      ballOn: 25,        // line of scrimmage (playable 0..100)
+      poss: "Home",
+      away: 0,
+      home: 0,
+      playState: "Huddle", // Huddle | Live | Dead
+      last: "—",
+      aiOn: true
+    };
+
+    function downText(d){
+      return d===1?"1st":d===2?"2nd":d===3?"3rd":"4th";
+    }
+
+    // UI refs
+    const qMini = el('qMini'), downMini=el('downMini'), togoMini=el('togoMini'), ballMini=el('ballMini');
+    const awayMini=el('awayMini'), homeMini=el('homeMini'), modeMini=el('modeMini'), playerMini=el('playerMini');
+    const lastMini=el('lastMini'), targetMini=el('targetMini'), ballStateMini=el('ballStateMini'), cvMini=el('cvMini'), gestureMini=el('gestureMini');
+
+    const qRead=el('qRead'), downRead=el('downRead'), togoRead=el('togoRead'), ballRead=el('ballRead');
+    const awayRead=el('awayRead'), homeRead=el('homeRead'), playRead=el('playRead'), possRead=el('possRead');
+    const lastRead=el('lastRead'), targetRead=el('targetRead'), ballStateRead=el('ballStateRead');
+
+    function syncHUD(){
+      qMini.textContent = String(game.quarter);
+      downMini.textContent = downText(game.down);
+      togoMini.textContent = String(game.toGo);
+      ballMini.textContent = String(Math.round(game.ballOn));
+      awayMini.textContent = String(game.away);
+      homeMini.textContent = String(game.home);
+      modeMini.textContent = game.playState;
+      lastMini.textContent = game.last;
+      ballStateMini.textContent = ball.state;
+
+      qRead.textContent = String(game.quarter);
+      downRead.textContent = downText(game.down);
+      togoRead.textContent = String(game.toGo);
+      ballRead.textContent = String(Math.round(game.ballOn));
+      awayRead.textContent = String(game.away);
+      homeRead.textContent = String(game.home);
+      playRead.textContent = game.playState;
+      possRead.textContent = game.poss;
+      lastRead.textContent = game.last;
+      ballStateRead.textContent = ball.state;
+    }
+
+    // -----------------------------
+    // Controls + Settings
+    // -----------------------------
+    const roleSel = el('roleSel');
+    const moveCtrlSel = el('moveCtrlSel');
+    const skillCtrlSel = el('skillCtrlSel');
+    const viewSel = el('viewSel');
+
+    const startPlayBtn = el('startPlayBtn');
+    const throwBtn = el('throwBtn');
+    const catchBtn = el('catchBtn');
+    const switchBtn = el('switchBtn');
+    const resetBtnQ = el('resetBtnQ');
+
+    const aiBtn = el('aiBtn');
+    const cvBtn = el('cvBtn');
+    const slowBtn = el('slowBtn');
+    const resetBtn = el('resetBtn');
+
+    // sliders
+    const aimAssist = el('aimAssist');
+    const throwPower = el('throwPower');
+    const lobLift = el('lobLift');
+    const throwScatter = el('throwScatter');
+    const catchRadius = el('catchRadius');
+    const tackleRadius = el('tackleRadius');
+    const defSpeed = el('defSpeed');
+    const offSpeed = el('offSpeed');
+    const pinchThresh = el('pinchThresh');
+    const throwSens = el('throwSens');
+
+    const aimAssistLabel = el('aimAssistLabel');
+    const throwPowLabel = el('throwPowLabel');
+    const lobLabel = el('lobLabel');
+    const scatterLabel = el('scatterLabel');
+    const catchRadLabel = el('catchRadLabel');
+    const tackleRadLabel = el('tackleRadLabel');
+    const defSpdLabel = el('defSpdLabel');
+    const offSpdLabel = el('offSpdLabel');
+    const pinchLabel = el('pinchLabel');
+    const throwSensLabel = el('throwSensLabel');
+
+    function syncLabels(){
+      aimAssistLabel.textContent = `${aimAssist.value}%`;
+      throwPowLabel.textContent  = `${throwPower.value} m/s`;
+      lobLabel.textContent       = Number(lobLift.value).toFixed(2);
+      scatterLabel.textContent   = `${Number(throwScatter.value).toFixed(2)}m`;
+      catchRadLabel.textContent  = `${Number(catchRadius.value).toFixed(2)}m`;
+      tackleRadLabel.textContent = `${Number(tackleRadius.value).toFixed(2)}m`;
+      defSpdLabel.textContent    = Number(defSpeed.value).toFixed(1);
+      offSpdLabel.textContent    = Number(offSpeed.value).toFixed(1);
+      pinchLabel.textContent     = Number(pinchThresh.value).toFixed(2);
+      throwSensLabel.textContent = Number(throwSens.value).toFixed(2);
+
+      for (const p of offense) p.speed = Number(offSpeed.value);
+      for (const p of defense) p.speed = Number(defSpeed.value);
+    }
+    [aimAssist,throwPower,lobLift,throwScatter,catchRadius,tackleRadius,defSpeed,offSpeed,pinchThresh,throwSens]
+      .forEach(x=>x.addEventListener('input', syncLabels));
+    syncLabels();
+
+    // toggles
+    let slowMo = false;
+    slowBtn.addEventListener('click', ()=>{
+      slowMo = !slowMo;
+      slowBtn.textContent = `SlowMo: ${slowMo ? "ON" : "OFF"}`;
+    });
+
+    aiBtn.addEventListener('click', ()=>{
+      game.aiOn = !game.aiOn;
+      aiBtn.textContent = `AI: ${game.aiOn ? "ON" : "OFF"}`;
+      showCallout(game.aiOn ? "AI ON" : "AI OFF", 600);
+    });
+
+    // -----------------------------
+    // Player Selection
+    // -----------------------------
+    let controlledTeam = "offense"; // offense|defense
+    let controlledIdx = 0;          // index into that team array
+    let selectedReceiver = 1;       // offense index 1 or 2 (WR1/WR2)
+    el('rcvReadout').textContent = offense[selectedReceiver].name;
+
+    function controlledPlayer(){
+      return (controlledTeam === "offense") ? offense[controlledIdx] : defense[controlledIdx];
+    }
+
+    function setSelectedRing(){
+      for (const p of [...offense, ...defense]){
+        p.mesh.userData.selectRing.material.opacity = 0.0;
+      }
+      const p = controlledPlayer();
+      p.mesh.userData.selectRing.material.opacity = 0.55;
+    }
+
+    function updatePlayerMini(){
+      const p = controlledPlayer();
+      playerMini.textContent = p.name;
+      setSelectedRing();
+      syncHUD();
+    }
+
+    function cyclePlayer(){
+      if (roleSel.value === "defender"){
+        controlledTeam = "defense";
+        controlledIdx = (controlledIdx + 1) % defense.length;
+      } else {
+        controlledTeam = "offense";
+        controlledIdx = (controlledIdx + 1) % offense.length;
+      }
+      updatePlayerMini();
+      showCallout(`You: ${controlledPlayer().name}`, 650);
+    }
+
+    function snapControlToRole(){
+      if (roleSel.value === "defender"){
+        controlledTeam = "defense";
+        controlledIdx = 0;
+      } else {
+        controlledTeam = "offense";
+        controlledIdx = 0; // QB by default
+      }
+      updatePlayerMini();
+    }
+    roleSel.addEventListener('change', snapControlToRole);
+    snapControlToRole();
+
+    // -----------------------------
+    // Play reset / formations
+    // -----------------------------
+    function setFormationAt(ballOn){
+      // clamp ballOn to playable (0..100)
+      game.ballOn = clamp(ballOn, 1, 99);
+      const zLOS = GOAL_0 + game.ballOn; // world z (goal line is at 10)
+      offense[0].pos.set(0,0, zLOS - 3.0);
+      offense[1].pos.set(-12,0, zLOS + 0.2);
+      offense[2].pos.set( 12,0, zLOS + 0.2);
+
+      defense[0].pos.set(-10,0, zLOS + 9.0);
+      defense[1].pos.set( 10,0, zLOS + 9.0);
+      defense[2].pos.set( 0,0, zLOS + 13.5);
+
+      for (const p of [...offense, ...defense]){
+        p.vel.set(0,0,0);
+        p.mesh.position.set(p.pos.x, 0.0, p.pos.z);
+      }
+
+      // ball held by QB
+      ball.state = "held";
+      ball.holderTeam = "offense";
+      ball.holder = 0;
+      ball.vel.set(0,0,0);
+      ball.pos.set(offense[0].pos.x, 1.6, offense[0].pos.z - 0.6);
+
+      game.playState = "Huddle";
+      game.last = "Ready";
+      syncHUD();
+
+      // default target: ahead of WR1
+      passTargetWorld.x = offense[selectedReceiver].pos.x;
+      passTargetWorld.z = offense[selectedReceiver].pos.z + 18;
+      passTargetWorld.y = 2.0;
+      updateTargetReadouts();
+      drawAimPad();
+    }
+
+    function resetDrive(){
+      game.quarter = 1;
+      game.down = 1;
+      game.toGo = 10;
+      game.away = 0;
+      game.home = 0;
+      game.poss = "Home";
+      setFormationAt(25);
+      showCallout("NEW DRIVE (Ball on 25)", 900);
+    }
+
+    resetBtn.addEventListener('click', resetDrive);
+    resetBtnQ.addEventListener('click', resetDrive);
+
+    // -----------------------------
+    // Aim Pad (click to set pass target)
+    // -----------------------------
+    const aimCanvas = el('aimCanvas');
+    const aimPad = el('aimPad');
+    const targetReadout = el('targetReadout');
+    const targetReadoutMini = el('targetMini');
+    const targetRead = el('targetRead');
+    const rcvReadout = el('rcvReadout');
+
+    const actx = aimCanvas.getContext('2d');
+    const passTargetWorld = new THREE.Vector3(0,2, GOAL_0 + 25 + 18); // x,y,z
+
+    function resizeAimPad(){
+      const w = aimCanvas.clientWidth || 640;
+      const h = aimCanvas.clientHeight || 360;
+      aimCanvas.width = Math.floor(w * devicePixelRatio);
+      aimCanvas.height = Math.floor(h * devicePixelRatio);
+      actx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+      drawAimPad();
+    }
+    new ResizeObserver(resizeAimPad).observe(aimPad);
+
+    function worldToAim(x,z){
+      // map a "local play area" around LOS: width +/- 26, depth LOS..LOS+45
+      const w = aimCanvas.clientWidth || 640;
+      const h = aimCanvas.clientHeight || 360;
+      const zLOS = GOAL_0 + game.ballOn;
+      const px = (x + 26) / 52;
+      const pz = (z - zLOS) / 45;
+      return { x: clamp(px,0,1)*w, y: clamp(1-pz,0,1)*h };
+    }
+
+    function aimToWorld(px,py){
+      const r = aimPad.getBoundingClientRect();
+      const xN = clamp((px - r.left)/r.width, 0, 1);
+      const yN = clamp((py - r.top)/r.height, 0, 1);
+
+      const zLOS = GOAL_0 + game.ballOn;
+      const x = (xN * 52) - 26;
+      const z = zLOS + (1 - yN) * 45;
+      const y = 2.0 + (1 - yN) * 1.6; // higher up = more air
+      return new THREE.Vector3(x,y,z);
+    }
+
+    function updateTargetReadouts(){
+      const zLOS = GOAL_0 + game.ballOn;
+      const depth = (passTargetWorld.z - zLOS);
+      const txt = `x=${passTargetWorld.x.toFixed(1)} • +${depth.toFixed(1)}y • air=${passTargetWorld.y.toFixed(1)}`;
+      targetReadout.textContent = txt;
+      targetReadoutMini.textContent = txt;
+      targetRead.textContent = txt;
+    }
+
+    function drawAimPad(){
+      const w = aimCanvas.clientWidth || 640;
+      const h = aimCanvas.clientHeight || 360;
+      actx.clearRect(0,0,w,h);
+
+      // background
+      actx.fillStyle = "rgba(255,255,255,0.02)";
+      actx.fillRect(0,0,w,h);
+
+      // LOS line + hashes
+      actx.strokeStyle = "rgba(255,255,255,0.22)";
+      actx.lineWidth = 2;
+      actx.beginPath();
+      actx.moveTo(0, h*0.95);
+      actx.lineTo(w, h*0.95);
+      actx.stroke();
+
+      actx.strokeStyle = "rgba(255,255,255,0.12)";
+      actx.lineWidth = 1;
+      for (let i=1;i<=9;i++){
+        const yy = h*0.95 - (h*0.85)*(i/10);
+        actx.beginPath(); actx.moveTo(0,yy); actx.lineTo(w,yy); actx.stroke();
+      }
+
+      // players + ball + target
+      const zLOS = GOAL_0 + game.ballOn;
+
+      // offense
+      for (const p of offense){
+        const P = worldToAim(p.pos.x, p.pos.z);
+        actx.fillStyle = "rgba(80,210,255,0.85)";
+        actx.beginPath(); actx.arc(P.x, P.y, 6, 0, Math.PI*2); actx.fill();
+        actx.fillStyle = "rgba(255,255,255,0.75)";
+        actx.font = "11px ui-monospace, Menlo, Consolas";
+        actx.fillText(p.name, P.x+8, P.y-8);
+      }
+      // defense
+      for (const p of defense){
+        const P = worldToAim(p.pos.x, p.pos.z);
+        actx.fillStyle = "rgba(255,108,108,0.85)";
+        actx.beginPath(); actx.arc(P.x, P.y, 6, 0, Math.PI*2); actx.fill();
+      }
+      // target ring
+      const T = worldToAim(passTargetWorld.x, passTargetWorld.z);
+      actx.strokeStyle = "rgba(255,255,255,0.85)";
+      actx.lineWidth = 2;
+      actx.beginPath(); actx.arc(T.x, T.y, 12, 0, Math.PI*2); actx.stroke();
+
+      // ball
+      const B = worldToAim(ball.pos.x, ball.pos.z);
+      actx.fillStyle = "rgba(255,217,106,0.95)";
+      actx.beginPath(); actx.arc(B.x, B.y, 5, 0, Math.PI*2); actx.fill();
+
+      // hint reticle for selected receiver
+      const rcv = offense[selectedReceiver];
+      const R = worldToAim(rcv.pos.x, rcv.pos.z);
+      actx.strokeStyle = "rgba(255,255,255,0.30)";
+      actx.lineWidth = 1.5;
+      actx.beginPath(); actx.arc(R.x, R.y, 16, 0, Math.PI*2); actx.stroke();
+
+      updateTargetReadouts();
+    }
+
+    aimPad.addEventListener('pointerdown', (e)=>{
+      passTargetWorld.copy(aimToWorld(e.clientX, e.clientY));
+      updateTargetReadouts();
+      drawAimPad();
+    });
+
+    // receiver select
+    addEventListener('keydown', (e)=>{
+      if (e.code === "Digit1"){ selectedReceiver = 1; rcvReadout.textContent = offense[selectedReceiver].name; drawAimPad(); }
+      if (e.code === "Digit2"){ selectedReceiver = 2; rcvReadout.textContent = offense[selectedReceiver].name; drawAimPad(); }
+    });
+
+    // -----------------------------
+    // Field Map (top-down full field)
+    // -----------------------------
+    const fieldMap = el('fieldMap');
+    const fctx = fieldMap.getContext('2d');
+
+    function resizeFieldMap(){
+      const w = fieldMap.clientWidth || 640;
+      const h = fieldMap.clientHeight || 360;
+      fieldMap.width = Math.floor(w * devicePixelRatio);
+      fieldMap.height = Math.floor(h * devicePixelRatio);
+      fctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+      drawFieldMap();
+    }
+    new ResizeObserver(resizeFieldMap).observe(el('fieldMapWrap'));
+
+    function worldToFieldMap(x,z){
+      const w = fieldMap.clientWidth || 640;
+      const h = fieldMap.clientHeight || 360;
+      const px = (x + FIELD_W/2) / FIELD_W;
+      const pz = z / FIELD_L;
+      return { x: clamp(px,0,1)*w, y: clamp(1-pz,0,1)*h };
+    }
+
+    function drawFieldMap(){
+      const w = fieldMap.clientWidth || 640;
+      const h = fieldMap.clientHeight || 360;
+      fctx.clearRect(0,0,w,h);
+
+      // bg
+      fctx.fillStyle = "rgba(255,255,255,0.02)";
+      fctx.fillRect(0,0,w,h);
+
+      // end zones
+      const ez0 = worldToFieldMap(0, 10);
+      const ez1 = worldToFieldMap(0, 0);
+      fctx.fillStyle = "rgba(80,210,255,0.08)";
+      fctx.fillRect(0, ez0.y, w, ez1.y - ez0.y);
+
+      const ez2 = worldToFieldMap(0, 120);
+      const ez3 = worldToFieldMap(0, 110);
+      fctx.fillStyle = "rgba(255,108,108,0.08)";
+      fctx.fillRect(0, ez2.y, w, ez3.y - ez2.y);
+
+      // yard lines
+      fctx.strokeStyle = "rgba(255,255,255,0.14)";
+      fctx.lineWidth = 1;
+      for (let y=0;y<=120;y+=5){
+        const P = worldToFieldMap(0, y);
+        fctx.beginPath(); fctx.moveTo(0,P.y); fctx.lineTo(w,P.y); fctx.stroke();
+      }
+
+      // LOS
+      const zLOS = GOAL_0 + game.ballOn;
+      const L = worldToFieldMap(0, zLOS);
+      fctx.strokeStyle = "rgba(255,255,255,0.38)";
+      fctx.lineWidth = 2;
+      fctx.beginPath(); fctx.moveTo(0,L.y); fctx.lineTo(w,L.y); fctx.stroke();
+
+      // first down marker
+      const zFD = GOAL_0 + (game.ballOn + game.toGo);
+      const F = worldToFieldMap(0, zFD);
+      fctx.strokeStyle = "rgba(255,217,106,0.38)";
+      fctx.lineWidth = 2;
+      fctx.beginPath(); fctx.moveTo(0,F.y); fctx.lineTo(w,F.y); fctx.stroke();
+
+      // players
+      for (const p of offense){
+        const P = worldToFieldMap(p.pos.x, p.pos.z);
+        fctx.fillStyle = "rgba(80,210,255,0.92)";
+        fctx.beginPath(); fctx.arc(P.x,P.y,5,0,Math.PI*2); fctx.fill();
+      }
+      for (const p of defense){
+        const P = worldToFieldMap(p.pos.x, p.pos.z);
+        fctx.fillStyle = "rgba(255,108,108,0.92)";
+        fctx.beginPath(); fctx.arc(P.x,P.y,5,0,Math.PI*2); fctx.fill();
+      }
+
+      // target
+      const T = worldToFieldMap(passTargetWorld.x, passTargetWorld.z);
+      fctx.strokeStyle = "rgba(255,255,255,0.85)";
+      fctx.lineWidth = 2;
+      fctx.beginPath(); fctx.arc(T.x,T.y,8,0,Math.PI*2); fctx.stroke();
+
+      // ball
+      const B = worldToFieldMap(ball.pos.x, ball.pos.z);
+      fctx.fillStyle = "rgba(255,217,106,0.98)";
+      fctx.beginPath(); fctx.arc(B.x,B.y,4,0,Math.PI*2); fctx.fill();
+    }
+
+    // -----------------------------
+    // Physics + Gameplay
+    // -----------------------------
+    const g = new THREE.Vector3(0,-9.81,0);
+
+    // ball ground bounce (soft)
+    function stepBall(dt){
+      if (ball.state === "held"){
+        const holder = (ball.holderTeam === "offense") ? offense[ball.holder] : defense[ball.holder];
+        ball.pos.set(holder.pos.x, 1.6, holder.pos.z - 0.55);
+        ball.vel.set(0,0,0);
+        ball.omega.set(0,18,0);
+      } else if (ball.state === "thrown" || ball.state === "loose"){
+        // air drag (light)
+        const drag = 0.04;
+        ball.vel.multiplyScalar(1 - clamp(drag*dt, 0, 0.08));
+        ball.vel.addScaledVector(g, dt);
+        ball.pos.addScaledVector(ball.vel, dt);
+
+        // ground
+        if (ball.pos.y < 0.38){
+          ball.pos.y = 0.38;
+          if (Math.abs(ball.vel.y) > 2.0){
+            ball.vel.y *= -0.22;
+            ball.vel.x *= 0.75;
+            ball.vel.z *= 0.75;
+          } else {
+            // settle -> dead ball
+            ball.vel.set(0,0,0);
+            if (ball.state === "thrown"){
+              endPlay("Incomplete");
+            } else {
+              endPlay("Down");
+            }
+          }
+        }
+        // spiral: rotate around velocity axis
+        const v = ball.vel.clone();
+        if (v.length() > 0.5){
+          const axis = v.normalize();
+          ball.omega.copy(axis.multiplyScalar(22));
+        }
+      }
+
+      // apply to mesh
+      ball.mesh.position.copy(ball.pos);
+      spinBall(dt);
+    }
+
+    function clampInBounds(p){
+      p.pos.x = clamp(p.pos.x, -FIELD_W/2 + 1.2, FIELD_W/2 - 1.2);
+      p.pos.z = clamp(p.pos.z, 0.5, FIELD_L - 0.5);
+    }
+
+    function stepPlayers(dt){
+      // sync speeds from sliders
+      for (const p of offense) p.speed = Number(offSpeed.value);
+      for (const p of defense) p.speed = Number(defSpeed.value);
+
+      // AI routes (simple)
+      if (game.playState === "Live"){
+        // WRs run forward with slight divergence
+        offense[1].vel.z = 1.0;
+        offense[1].vel.x = -0.12;
+        offense[2].vel.z = 1.0;
+        offense[2].vel.x =  0.12;
+
+        // QB drift if AI or not controlled
+        offense[0].vel.z = 0.10;
+        offense[0].vel.x = 0.0;
+
+        // AI defense chases ball (or receiver pre-throw)
+        const chasePoint = (ball.state === "held")
+          ? offense[selectedReceiver].pos
+          : ball.pos;
+
+        for (const d of defense){
+          const to = chasePoint.clone().sub(d.pos);
+          to.y = 0;
+          const dist = to.length();
+          if (dist > 1e-3){
+            to.multiplyScalar(1/dist);
+            d.vel.x = lerp(d.vel.x, to.x, 0.22);
+            d.vel.z = lerp(d.vel.z, to.z, 0.22);
+          }
+        }
+      } else {
+        // huddle: stop
+        for (const p of [...offense, ...defense]) p.vel.set(0,0,0);
+      }
+
+      // Apply user movement
+      const user = controlledPlayer();
+      const moveCtrl = moveCtrlSel.value;
+
+      if (game.playState === "Live" && roleSel.value !== "spectator"){
+        if (moveCtrl === "keyboard"){
+          const spd = user.speed * (keys.ShiftLeft || keys.ShiftRight ? 1.25 : 1.0);
+          const dir = new THREE.Vector3(
+            (keys.KeyD?1:0) - (keys.KeyA?1:0),
+            0,
+            (keys.KeyW?1:0) - (keys.KeyS?1:0)
+          );
+          if (dir.length() > 0.01){
+            dir.normalize().multiplyScalar(spd);
+            user.vel.x = lerp(user.vel.x, dir.x, 0.35);
+            user.vel.z = lerp(user.vel.z, dir.z, 0.35);
+          } else {
+            user.vel.x = lerp(user.vel.x, 0, 0.35);
+            user.vel.z = lerp(user.vel.z, 0, 0.35);
+          }
+        } else if (moveCtrl === "gesture" && cvEnabled && handState.hasHand){
+          // open palm to move, fist to stop (simple)
+          if (handState.open){
+            const spd = user.speed * 0.95;
+            const dx = clamp((handState.wrist.x - 0.5) * 2.2, -1, 1);
+            const dz = clamp((0.55 - handState.wrist.y) * 2.2, -1, 1);
+            const dir = new THREE.Vector3(dx,0,dz);
+            if (dir.length() > 0.10){
+              dir.normalize().multiplyScalar(spd);
+              user.vel.x = lerp(user.vel.x, dir.x, 0.25);
+              user.vel.z = lerp(user.vel.z, dir.z, 0.25);
+            }
+          } else if (handState.fist){
+            user.vel.x = lerp(user.vel.x, 0, 0.25);
+            user.vel.z = lerp(user.vel.z, 0, 0.25);
+          }
+        }
+      }
+
+      // Integrate
+      for (const p of [...offense, ...defense]){
+        p.pos.x += p.vel.x * p.speed * dt;
+        p.pos.z += p.vel.z * p.speed * dt;
+        clampInBounds(p);
+        p.mesh.position.set(p.pos.x, 0.0, p.pos.z);
+      }
+    }
+
+    // Catch / intercept logic
+    function tryAutoCatch(){
+      if (game.playState !== "Live") return;
+
+      const cr = Number(catchRadius.value);
+      if (ball.state !== "thrown" && ball.state !== "loose") return;
+
+      const candidates = [...offense, ...defense];
+      let best = null;
+      let bestD = 999;
+
+      for (let i=0;i<candidates.length;i++){
+        const p = candidates[i];
+        const d = Math.hypot(ball.pos.x - p.pos.x, ball.pos.z - p.pos.z) + Math.abs(ball.pos.y - 1.6);
+        if (d < bestD){
+          bestD = d;
+          best = p;
+        }
+      }
+
+      if (!best || bestD > cr) return;
+
+      // user catch requires input if user is that player and using keyboard/gesture
+      const user = controlledPlayer();
+      const userControlsThis = (best === user);
+      const skillCtrl = skillCtrlSel.value;
+
+      const isOffense = offense.includes(best);
+      const teamName = isOffense ? "offense" : "defense";
+      const idx = isOffense ? offense.indexOf(best) : defense.indexOf(best);
+
+      // AI catch chance
+      const aiCatchChance = isOffense ? 0.88 : 0.72;
+
+      if (userControlsThis && roleSel.value !== "spectator"){
+        // wait for explicit catch input handled elsewhere
+        return;
+      } else if (game.aiOn){
+        if (Math.random() < aiCatchChance){
+          secureCatch(teamName, idx, isOffense ? "Catch!" : "Interception!");
+        }
+      }
+    }
+
+    function secureCatch(teamName, idx, msg){
+      ball.state = "held";
+      ball.holderTeam = teamName;
+      ball.holder = idx;
+      game.last = msg;
+      showCallout(msg.toUpperCase(), 900);
+
+      // if defense catches, play ends immediately (turnover)
+      if (teamName === "defense"){
+        endPlay("Picked!");
+        turnover();
+      } else {
+        // offense caught: now run after catch
+        // make controlled player follow if you're QB (optional: auto switch to receiver)
+        if (roleSel.value === "qb" && controlledTeam === "offense"){
+          controlledIdx = idx;
+          updatePlayerMini();
+          showCallout(`RUN: ${offense[idx].name}`, 700);
+        }
+      }
+      syncHUD();
+    }
+
+    // tackle logic (when ball held by offense)
+    function checkTackle(){
+      if (game.playState !== "Live") return;
+      if (ball.state !== "held") return;
+      if (ball.holderTeam !== "offense") return;
+
+      const carrier = offense[ball.holder];
+      const tr = Number(tackleRadius.value);
+
+      for (const d of defense){
+        const dist = Math.hypot(d.pos.x - carrier.pos.x, d.pos.z - carrier.pos.z);
+        if (dist <= tr){
+          endPlay("Tackled");
+          return;
+        }
+      }
+    }
+
+    // play progression
+    let playStartBallOn = 25;
+
+    function startPlay(){
+      if (game.playState === "Live") return;
+      game.playState = "Live";
+      game.last = "Ball snapped";
+      playStartBallOn = game.ballOn;
+
+      // if user role is receiver/defender, switch control to that side
+      if (roleSel.value === "receiver"){
+        controlledTeam = "offense";
+        controlledIdx = selectedReceiver;
+      }
+      if (roleSel.value === "defender"){
+        controlledTeam = "defense";
+        controlledIdx = 0;
+      }
+      updatePlayerMini();
+      showCallout("PLAY LIVE", 700);
+      syncHUD();
+    }
+
+    function endPlay(reason){
+      if (game.playState !== "Live") return;
+      game.playState = "Dead";
+      game.last = reason;
+      showCallout(reason.toUpperCase(), 850);
+
+      // spot the ball
+      if (ball.state === "held"){
+        const holder = (ball.holderTeam === "offense") ? offense[ball.holder] : defense[ball.holder];
+        // compute ballOn from world z (minus GOAL_0)
+        const spot = clamp(holder.pos.z - GOAL_0, 0, 100);
+        game.ballOn = spot;
+      }
+
+      // scoring check (only if offense is moving to +z end zone at 110 => playable 100)
+      if (ball.holderTeam === "offense" && ball.state === "held"){
+        if (game.ballOn >= 100){
+          game.home += 6;
+          game.last = "Touchdown!";
+          showCallout("TOUCHDOWN! +6", 1200);
+          // reset drive
+          game.down = 1; game.toGo = 10;
+          setFormationAt(25);
+          return;
+        }
+      }
+
+      // down/distance update (ignore for incompletions)
+      if (reason === "Incomplete"){
+        game.down += 1;
+      } else {
+        const gained = Math.max(0, Math.round(game.ballOn - playStartBallOn));
+        game.toGo = Math.max(0, game.toGo - gained);
+        if (game.toGo <= 0){
+          game.down = 1;
+          game.toGo = 10;
+          game.last = `First down! (+${gained}y)`;
+          showCallout("FIRST DOWN!", 900);
+        } else {
+          game.down += 1;
+          game.last = `${reason} (+${gained}y)`;
+        }
+      }
+
+      // turnover on downs
+      if (game.down >= 5){
+        game.last = "Turnover on downs";
+        showCallout("TURNOVER", 950);
+        turnover();
+        return;
+      }
+
+      // return to huddle after a beat
+      setTimeout(()=>{
+        if (game.playState === "Dead"){
+          game.playState = "Huddle";
+          setFormationAt(game.ballOn);
+          syncHUD();
+        }
+      }, 650);
+
+      syncHUD();
+    }
+
+    function turnover(){
+      // flip field: ballOn -> 100 - ballOn
+      game.ballOn = clamp(100 - game.ballOn, 1, 99);
+      game.down = 1;
+      game.toGo = 10;
+
+      // swap score "possession" label
+      game.poss = (game.poss === "Home") ? "Away" : "Home";
+
+      // re-spot
+      setFormationAt(game.ballOn);
+      syncHUD();
+    }
+
+    // -----------------------------
+    // Throw mechanics
+    // -----------------------------
+    function computeAimDir(from){
+      // aim assist nudges toward selected receiver
+      const assist = Number(aimAssist.value)/100;
+      const rcv = offense[selectedReceiver];
+      const lead = rcv.pos.clone().add(new THREE.Vector3(0,0, 8.0));
+      const targetBase = passTargetWorld.clone();
+      // blend user target with a lead point on receiver
+      const tgt = targetBase.lerp(new THREE.Vector3(lead.x, 2.0 + targetBase.y*0.15, lead.z), assist);
+      const dir = tgt.clone().sub(from);
+      dir.y += Number(lobLift.value) * 2.6;
+      return dir.normalize();
+    }
+
+    function scatterVec(){
+      const s = Number(throwScatter.value);
+      // small 2D gaussian-ish
+      const r = (Math.random()+Math.random()+Math.random()+Math.random()-2) * 0.5;
+      const r2= (Math.random()+Math.random()+Math.random()+Math.random()-2) * 0.5;
+      return new THREE.Vector3(r*s, r2*s*0.7, r*s);
+    }
+
+    function requestThrow(strengthOverride=null){
+      if (game.playState !== "Live") return;
+      if (ball.state !== "held") return;
+
+      // Only QB can throw (or whoever is holding the ball)
+      if (ball.holderTeam !== "offense") return;
+      const holder = offense[ball.holder];
+      if (holder.name !== "QB") return;
+
+      const from = new THREE.Vector3(holder.pos.x, 1.75, holder.pos.z - 0.2);
+      const dir = computeAimDir(from).add(scatterVec()).normalize();
+      const spd = (strengthOverride !== null) ? strengthOverride : Number(throwPower.value);
+
+      ball.state = "thrown";
+      ball.pos.copy(from);
+      ball.vel.copy(dir.multiplyScalar(spd));
+      ball.lastThrownAt = nowS();
+
+      // ball spiral axis roughly along velocity
+      ball.omega.copy(ball.vel.clone().normalize().multiplyScalar(22));
+
+      game.last = "Throw";
+      showCallout("THROW!", 650);
+      syncHUD();
+    }
+
+    // Catch request
+    function requestCatch(){
+      if (game.playState !== "Live") return;
+      if (ball.state !== "thrown" && ball.state !== "loose") return;
+      const p = controlledPlayer();
+      const cr = Number(catchRadius.value);
+      const d = Math.hypot(ball.pos.x - p.pos.x, ball.pos.z - p.pos.z) + Math.abs(ball.pos.y - 1.6);
+
+      if (d <= cr){
+        const isOff = offense.includes(p);
+        const teamName = isOff ? "offense" : "defense";
+        const idx = isOff ? offense.indexOf(p) : defense.indexOf(p);
+        secureCatch(teamName, idx, isOff ? "Catch!" : "Interception!");
+      } else {
+        showCallout("NO CATCH (too far)", 700);
+      }
+    }
+
+    // -----------------------------
+    // Input
+    // -----------------------------
+    const keys = {};
+    addEventListener('keydown',(e)=>{
+      keys[e.code] = true;
+
+      if (e.code === "Enter"){ e.preventDefault(); startPlay(); }
+      if (e.code === "KeyT"){ e.preventDefault(); requestThrow(); }
+      if (e.code === "KeyC"){ e.preventDefault(); requestCatch(); }
+      if (e.code === "Tab"){ e.preventDefault(); cyclePlayer(); }
+      if (e.code === "Digit1"){ selectedReceiver = 1; rcvReadout.textContent = offense[selectedReceiver].name; drawAimPad(); }
+      if (e.code === "Digit2"){ selectedReceiver = 2; rcvReadout.textContent = offense[selectedReceiver].name; drawAimPad(); }
+    });
+    addEventListener('keyup',(e)=>{ keys[e.code] = false; });
+
+    startPlayBtn.addEventListener('click', startPlay);
+    throwBtn.addEventListener('click', ()=>requestThrow());
+    catchBtn.addEventListener('click', requestCatch);
+    switchBtn.addEventListener('click', cyclePlayer);
+
+    // -----------------------------
+    // Camera modes
+    // -----------------------------
+    const lookAt = new THREE.Vector3(0,1.2, GOAL_0 + 25);
+    const orbit = { theta:Math.PI, phi:0.18, radius:18.0, dragging:false, lx:0, ly:0 };
+
+    function updateOrbitCamera(){
+      orbit.phi = clamp(orbit.phi, -0.08, 0.78);
+      orbit.radius = clamp(orbit.radius, 8, 140);
+      const x = lookAt.x + orbit.radius * Math.sin(orbit.theta) * Math.cos(orbit.phi);
+      const y = lookAt.y + orbit.radius * Math.sin(orbit.phi) + 0.2;
+      const z = lookAt.z + orbit.radius * Math.cos(orbit.theta) * Math.cos(orbit.phi);
+      camera.position.set(x,y,z);
+      camera.lookAt(lookAt);
+    }
+
+    function setViewMode(mode){
+      const p = controlledPlayer();
+      if (mode === "qb"){
+        lookAt.set(offense[0].pos.x, 1.1, offense[0].pos.z + 4.0);
+        orbit.theta = Math.PI; orbit.phi = 0.10; orbit.radius = 18.0;
+      } else if (mode === "follow"){
+        lookAt.set(p.pos.x, 1.1, p.pos.z + 2.0);
+        orbit.theta = Math.PI; orbit.phi = 0.18; orbit.radius = 16.0;
+      } else if (mode === "ball"){
+        lookAt.set(ball.pos.x, 1.2, ball.pos.z);
+        orbit.theta = Math.PI; orbit.phi = 0.22; orbit.radius = 20.0;
+      } else if (mode === "broadcast"){
+        lookAt.set(0, 1.2, ball.pos.z + 8.0);
+        orbit.theta = -0.75; orbit.phi = 0.22; orbit.radius = 32.0;
+      } else if (mode === "top"){
+        lookAt.set(0, 0.0, ball.pos.z);
+        orbit.theta = Math.PI; orbit.phi = 0.74; orbit.radius = 78.0;
+      }
+      updateOrbitCamera();
+    }
+
+    viewSel.addEventListener('change', ()=>setViewMode(viewSel.value));
+    setViewMode("qb");
+
+    // Orbit mouse controls
+    function isInUI(target){
+      return !!(target.closest && (target.closest('.tile') || target.closest('#rightDock') || target.closest('#footerDock') || target.closest('#topHUD')));
+    }
+    renderer.domElement.addEventListener('pointerdown', e=>{
+      if (isInUI(e.target)) return;
+      orbit.dragging=true; orbit.lx=e.clientX; orbit.ly=e.clientY;
+      renderer.domElement.setPointerCapture(e.pointerId);
+    });
+    renderer.domElement.addEventListener('pointermove', e=>{
+      if (!orbit.dragging) return;
+      const dx=e.clientX-orbit.lx, dy=e.clientY-orbit.ly;
+      orbit.lx=e.clientX; orbit.ly=e.clientY;
+      orbit.theta -= dx*0.004;
+      orbit.phi   -= dy*0.003;
+      updateOrbitCamera();
+    });
+    renderer.domElement.addEventListener('pointerup', ()=> orbit.dragging=false );
+    renderer.domElement.addEventListener('wheel', e=>{
+      orbit.radius += e.deltaY*0.01;
+      updateOrbitCamera();
+    }, { passive:true });
+
+    // -----------------------------
+    // Computer Vision (MediaPipe Hands)
+    // -----------------------------
+    const videoEl = el('video');
+    const overlayEl = el('overlay');
+    const octx = overlayEl.getContext('2d');
+    const statusLine = el('statusLine');
+
+    let cvEnabled = false;
+    let camStarted = false;
+    let mpHands = null;
+    let mpCam = null;
+
+    const handState = {
+      hasHand:false,
+      wrist:{x:0.5,y:0.5},
+      pinch:false,
+      fist:false,
+      open:false,
+      lastOpen:false,
+      lastFist:false,
+      wristVX:0,
+      wristVY:0,
+      lastWrist:{x:0.5,y:0.5, t:0}
+    };
+
+    function dist2(a,b){ const dx=a.x-b.x, dy=a.y-b.y; return Math.hypot(dx,dy); }
+
+    function isFist(lm){
+      // finger curled heuristic: tip below (greater y) than MCP
+      const tips=[8,12,16,20];
+      const mcps=[5,9,13,17];
+      let curled=0;
+      for (let i=0;i<4;i++){
+        if (lm[tips[i]].y > lm[mcps[i]].y + 0.02) curled++;
+      }
+      return curled >= 3;
+    }
+
+    function isOpenPalm(lm){
+      const tips=[8,12,16,20];
+      const mcps=[5,9,13,17];
+      let extended=0;
+      for (let i=0;i<4;i++){
+        if (lm[tips[i]].y < lm[mcps[i]].y - 0.02) extended++;
+      }
+      return extended >= 3;
+    }
+
+    async function startCamera(){
+      if (camStarted) return;
+      camStarted = true;
+
+      statusLine.textContent = "Status: starting camera…";
+      cvMini.textContent = cvEnabled ? "ON" : "OFF";
+
+      overlayEl.width = overlayEl.clientWidth;
+      overlayEl.height = overlayEl.clientHeight;
+
+      mpHands = new Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+      });
+      mpHands.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.6,
+        minTrackingConfidence: 0.6
+      });
+
+      mpHands.onResults((results)=>{
+        const w = overlayEl.width, h = overlayEl.height;
+        octx.clearRect(0,0,w,h);
+
+        handState.hasHand = false;
+        if (results.multiHandLandmarks && results.multiHandLandmarks.length){
+          const lm = results.multiHandLandmarks[0];
+          handState.hasHand = true;
+
+          // draw
+          drawConnectors(octx, lm, HAND_CONNECTIONS, {color:'rgba(255,255,255,0.35)', lineWidth:2});
+          drawLandmarks(octx, lm, {color:'rgba(80,210,255,0.85)', lineWidth:1});
+
+          // wrist + velocity
+          const wrist = lm[0];
+          const t = performance.now()/1000;
+          const dt = Math.max(1e-3, t - (handState.lastWrist.t || t));
+          handState.wristVX = (wrist.x - handState.lastWrist.x) / dt;
+          handState.wristVY = (wrist.y - handState.lastWrist.y) / dt;
+          handState.lastWrist = { x:wrist.x, y:wrist.y, t };
+
+          handState.wrist.x = wrist.x;
+          handState.wrist.y = wrist.y;
+
+          // pinch
+          const thumb = lm[4];
+          const idx = lm[8];
+          const pd = dist2(thumb, idx);
+          handState.pinch = (pd < Number(pinchThresh.value));
+
+          // fist/open
+          handState.fist = isFist(lm);
+          handState.open = isOpenPalm(lm);
+
+          // gesture label
+          gestureMini.textContent =
+            handState.pinch ? "pinch" :
+            handState.fist  ? "fist" :
+            handState.open  ? "open" : "—";
+
+          // Throw gesture: fist -> open
+          if (cvEnabled && skillCtrlSel.value === "gesture"){
+            const wasFist = handState.lastFist;
+            const nowOpen = handState.open;
+            if (wasFist && nowOpen){
+              // scale throw strength by wrist speed
+              const v = Math.hypot(handState.wristVX, handState.wristVY) * Number(throwSens.value);
+              const strength = clamp(Number(throwPower.value) + v*10, 18, 80);
+              requestThrow(strength);
+            }
+          }
+
+          // Catch gesture: pinch
+          if (cvEnabled && skillCtrlSel.value === "gesture" && handState.pinch){
+            requestCatch();
+          }
+
+          handState.lastFist = handState.fist;
+          handState.lastOpen = handState.open;
+        } else {
+          gestureMini.textContent = "—";
+        }
+      });
+
+      mpCam = new Camera(videoEl, {
+        onFrame: async () => {
+          await mpHands.send({ image: videoEl });
+        },
+        width: 1280,
+        height: 720
+      });
+
+      mpCam.start();
+      statusLine.textContent = "Status: camera ON";
+      showCallout("CAMERA ON", 700);
+    }
+
+    el('startCamBtn').addEventListener('click', startCamera);
+    el('startCamBtnQ').addEventListener('click', startCamera);
+
+    cvBtn.addEventListener('click', ()=>{
+      cvEnabled = !cvEnabled;
+      cvBtn.textContent = `CV Gestures: ${cvEnabled ? "ON" : "OFF"}`;
+      cvMini.textContent = cvEnabled ? "ON" : "OFF";
+      showCallout(cvEnabled ? "CV ON" : "CV OFF", 650);
+    });
+
+    // -----------------------------
+    // Frame Loop
+    // -----------------------------
+    function updateMeshes(){
+      for (const p of [...offense, ...defense]){
+        p.mesh.position.set(p.pos.x, 0.0, p.pos.z);
+      }
+      ball.mesh.position.copy(ball.pos);
+    }
+
+    function updateCameraFollow(){
+      // update lookAt based on view selection in real time
+      const mode = viewSel.value;
+      if (mode === "follow"){
+        const p = controlledPlayer();
+        lookAt.lerp(new THREE.Vector3(p.pos.x, 1.1, p.pos.z + 1.6), 0.18);
+      } else if (mode === "ball"){
+        lookAt.lerp(new THREE.Vector3(ball.pos.x, 1.25, ball.pos.z), 0.20);
+      } else if (mode === "qb"){
+        lookAt.lerp(new THREE.Vector3(offense[0].pos.x, 1.1, offense[0].pos.z + 4.0), 0.18);
+      } else if (mode === "broadcast"){
+        lookAt.lerp(new THREE.Vector3(0, 1.2, ball.pos.z + 8.0), 0.12);
+      } else if (mode === "top"){
+        lookAt.lerp(new THREE.Vector3(0, 0.0, ball.pos.z), 0.12);
+      }
+      updateOrbitCamera();
+    }
+
+    let lastT = performance.now();
+    function tick(){
+      const t = performance.now();
+      let dt = (t - lastT)/1000;
+      lastT = t;
+      if (slowMo) dt *= 0.35;
+      dt = clamp(dt, 0, 0.033);
+
+      // keep ball held to QB in huddle
+      if (game.playState === "Huddle"){
+        // keep holders synced
+        ball.holderTeam = "offense";
+        ball.holder = 0;
+        ball.state = "held";
+      }
+
+      // step
+      stepPlayers(dt);
+      stepBall(dt);
+
+      // catches + tackles
+      tryAutoCatch();
+      checkTackle();
+
+      // visuals
+      updateCameraFollow();
+      drawAimPad();
+      drawFieldMap();
+      updateMeshes();
+
+      syncHUD();
+
+      renderer.render(scene, camera);
+      requestAnimationFrame(tick);
+    }
+
+    // -----------------------------
+    // Buttons wiring
+    // -----------------------------
+    startPlayBtn.addEventListener('click', startPlay);
+    throwBtn.addEventListener('click', ()=>requestThrow());
+    catchBtn.addEventListener('click', requestCatch);
+    switchBtn.addEventListener('click', cyclePlayer);
+
+    // Reset drive (also used by controls reset)
+    resetBtnQ.addEventListener('click', resetDrive);
+
+    // -----------------------------
+    // Init
+    // -----------------------------
+    function onResize(){
+      renderer.setSize(innerWidth, innerHeight);
+      camera.aspect = innerWidth/innerHeight;
+      camera.updateProjectionMatrix();
+    }
+    addEventListener('resize', onResize);
+
+    // initial formation + UI
+    resetDrive();
+    setSelectedRing();
+    syncHUD();
+    drawAimPad();
+    drawFieldMap();
+    updateOrbitCamera();
+
+    // Start tile state
+    // (already placed: controls footer, aim/cam/settings/field docked)
+    updatePlayerMini();
+
+    // -----------------------------
+    // Footer + Dock toggle buttons (already wired)
+    // -----------------------------
+    el('toggleDockBtnQ').addEventListener('click', ()=>{
+      Tile.dockCollapsed = !Tile.dockCollapsed;
+      rightDock.classList.toggle('collapsed', Tile.dockCollapsed);
+    });
+    el('toggleFooterBtnQ').addEventListener('click', ()=>{
+      Tile.footerCollapsed = !Tile.footerCollapsed;
+      footerDock.classList.toggle('collapsed', Tile.footerCollapsed);
+    });
+
+    // Kick off loop
+    requestAnimationFrame(tick);
+  </script>
+</body>
+</html>

@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Gesture Football Game (Camera + Buttons Fixed)</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    body { margin: 0; background:#0b0f14; color:#e9eef5; }
+    .wrap { display:grid; grid-template-columns: 360px 1fr; gap: 14px; padding: 14px; }
+    .panel {
+      background:#111826; border:1px solid #22304a; border-radius:14px;
+      padding: 12px; box-shadow: 0 8px 30px rgba(0,0,0,.25);
+    }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    button, input[type="range"], input[type="checkbox"] { cursor:pointer; }
+    button {
+      background:#1b2a44; color:#e9eef5; border:1px solid #2c3e61;
+      padding:10px 12px; border-radius:12px; font-weight:600;
+    }
+    button:hover { filter: brightness(1.12); }
+    button:disabled { opacity:.55; cursor:not-allowed; }
+    .danger { background:#4b1f25; border-color:#7a2b35; }
+    .good { background:#1b3a2a; border-color:#2b6a48; }
+    .kv { display:grid; grid-template-columns: 1fr 1fr; gap:8px; }
+    .kv .item { background:#0e1420; border:1px solid #22304a; border-radius:12px; padding:10px; }
+    .label { font-size:12px; opacity:.9; margin-bottom:6px; }
+    .value { font-size:14px; font-weight:650; }
+    .slider { display:grid; grid-template-columns: 1fr 90px; gap:10px; align-items:center; }
+    .hint { font-size:12px; opacity:.78; line-height:1.35; }
+    .stage { position:relative; background:#0a0f18; border:1px solid #22304a; border-radius:14px; overflow:hidden; }
+    canvas { display:block; width:100%; height: calc(100vh - 28px); background:#0a0f18; }
+    /* Keep the video hidden but alive; debug can show overlay */
+    video { position:absolute; right:12px; bottom:12px; width: 240px; height:auto; border-radius:12px; border:1px solid #22304a; display:none; }
+    .showVideo video { display:block; }
+    .status {
+      margin-top:10px; background:#0e1420; border:1px solid #22304a; border-radius:12px;
+      padding:10px; font-size:12px; white-space:pre-wrap;
+    }
+    .chip { display:inline-flex; align-items:center; gap:8px; background:#0e1420; border:1px solid #22304a; border-radius:999px; padding:8px 10px; }
+    .dot { width:10px; height:10px; border-radius:50%; background:#999; }
+    .dot.on { background:#39d98a; }
+    .dot.warn { background:#ffcc00; }
+    .dot.off { background:#ff5a5f; }
+    .small { font-size:12px; opacity:.85; }
+  </style>
+
+  <!-- MediaPipe Hands (CDN) -->
+  <script src="Gesture%20Football%20Game%20(Camera%20+%20Buttons%20Fixed)_files/hands.js"></script>
+  <script src="Gesture%20Football%20Game%20(Camera%20+%20Buttons%20Fixed)_files/camera_utils.js"></script>
+  <script src="Gesture%20Football%20Game%20(Camera%20+%20Buttons%20Fixed)_files/drawing_utils.js"></script>
+</head>
+
+<body>
+  <div class="wrap">
+    <!-- CONTROL PANEL -->
+    <div class="panel">
+      <div class="row" style="justify-content:space-between;">
+        <div class="chip">
+          <div id="camDot" class="dot off"></div>
+          <div>
+            <div style="font-weight:700;">Camera</div>
+            <div id="camText" class="small">Off</div>
+          </div>
+        </div>
+        <div class="chip">
+          <div id="handDot" class="dot warn"></div>
+          <div>
+            <div style="font-weight:700;">Hand</div>
+            <div id="handText" class="small">Not running</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:10px;">
+        <button id="btnStart" class="good">Start (Camera + Game)</button>
+        <button id="btnPause">Pause</button>
+        <button id="btnReset" class="danger">Reset</button>
+        <button id="btnStopCam">Stop Camera</button>
+      </div>
+
+      <div class="row" style="margin-top:10px;">
+        <label class="chip">
+          <input id="chkGesture" type="checkbox" checked="checked">
+          <span>Gesture Control</span>
+        </label>
+        <label class="chip">
+          <input id="chkMirror" type="checkbox" checked="checked">
+          <span>Mirror Camera</span>
+        </label>
+        <label class="chip">
+          <input id="chkShowVideo" type="checkbox">
+          <span>Show Video</span>
+        </label>
+        <label class="chip">
+          <input id="chkDebug" type="checkbox">
+          <span>Debug Landmarks</span>
+        </label>
+      </div>
+
+      <div class="row" style="margin-top:10px;">
+        <button id="btnCalibrate">Calibrate (Neutral Hand Position)</button>
+      </div>
+
+      <div style="margin-top:12px;" class="kv">
+        <div class="item">
+          <div class="label">Controls</div>
+          <div class="value">Hand move = steer</div>
+          <div class="hint">
+            Fist = sprint<br>
+            Pinch = kick/throw<br>
+            Keyboard fallback: WASD/arrows, Space kick, Shift sprint
+          </div>
+        </div>
+
+        <div class="item">
+          <div class="label">Goal</div>
+          <div class="value">Score touchdowns</div>
+          <div class="hint">
+            Carry the ball to the end zone (right side).<br>
+            Defenders slow you down; sprint helps.
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:12px;" class="item">
+        <div class="label">Tuning</div>
+
+        <div class="slider">
+          <div>
+            <div class="label">Sensitivity</div>
+            <input id="rngSens" type="range" min="0.2" max="4" step="0.1" value="1.4">
+          </div>
+          <div class="value" id="valSens">1.4</div>
+        </div>
+
+        <div class="slider">
+          <div>
+            <div class="label">Deadzone</div>
+            <input id="rngDead" type="range" min="0.00" max="0.25" step="0.01" value="0.06">
+          </div>
+          <div class="value" id="valDead">0.06</div>
+        </div>
+
+        <div class="slider">
+          <div>
+            <div class="label">Kick Strength</div>
+            <input id="rngKick" type="range" min="6" max="28" step="1" value="16">
+          </div>
+          <div class="value" id="valKick">16</div>
+        </div>
+
+        <div class="slider">
+          <div>
+            <div class="label">Sprint Multiplier</div>
+            <input id="rngSprint" type="range" min="1.0" max="2.8" step="0.1" value="1.8">
+          </div>
+          <div class="value" id="valSprint">1.8</div>
+        </div>
+
+        <div class="slider">
+          <div>
+            <div class="label">Pinch Threshold</div>
+            <input id="rngPinch" type="range" min="0.02" max="0.12" step="0.005" value="0.05">
+          </div>
+          <div class="value" id="valPinch">0.050</div>
+        </div>
+
+        <div class="slider">
+          <div>
+            <div class="label">Fist Threshold</div>
+            <input id="rngFist" type="range" min="0.05" max="0.22" step="0.005" value="0.13">
+          </div>
+          <div class="value" id="valFist">0.130</div>
+        </div>
+
+        <div class="hint">
+          If movement feels inverted, toggle “Mirror Camera”. If drift happens, hit Calibrate again.
+        </div>
+      </div>
+
+      <div id="status" class="status">Ready. Click Start to begin.
+Tip: Run on https:// or localhost for camera permissions.</div>
+    </div>
+
+    <!-- GAME STAGE -->
+    <div id="stage" class="stage">
+      <canvas id="c" width="1082" height="891"></canvas>
+      <video id="v" autoplay="autoplay" playsinline="" muted="muted"></video>
+    </div>
+  </div>
+
+<script>
+(() => {
+  // ---------------------------
+  // DOM
+  // ---------------------------
+  const stage = document.getElementById('stage');
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+
+  const video = document.getElementById('v');
+
+  const btnStart = document.getElementById('btnStart');
+  const btnPause = document.getElementById('btnPause');
+  const btnReset = document.getElementById('btnReset');
+  const btnStopCam = document.getElementById('btnStopCam');
+  const btnCalibrate = document.getElementById('btnCalibrate');
+
+  const chkGesture = document.getElementById('chkGesture');
+  const chkMirror = document.getElementById('chkMirror');
+  const chkShowVideo = document.getElementById('chkShowVideo');
+  const chkDebug = document.getElementById('chkDebug');
+
+  const rngSens = document.getElementById('rngSens');
+  const rngDead = document.getElementById('rngDead');
+  const rngKick = document.getElementById('rngKick');
+  const rngSprint = document.getElementById('rngSprint');
+  const rngPinch = document.getElementById('rngPinch');
+  const rngFist = document.getElementById('rngFist');
+
+  const valSens = document.getElementById('valSens');
+  const valDead = document.getElementById('valDead');
+  const valKick = document.getElementById('valKick');
+  const valSprint = document.getElementById('valSprint');
+  const valPinch = document.getElementById('valPinch');
+  const valFist = document.getElementById('valFist');
+
+  const statusEl = document.getElementById('status');
+
+  const camDot = document.getElementById('camDot');
+  const camText = document.getElementById('camText');
+  const handDot = document.getElementById('handDot');
+  const handText = document.getElementById('handText');
+
+  function logStatus(msg) {
+    statusEl.textContent = msg;
+  }
+
+  function setCamState(state, text) {
+    camDot.classList.remove('on','warn','off');
+    camDot.classList.add(state);
+    camText.textContent = text;
+  }
+
+  function setHandState(state, text) {
+    handDot.classList.remove('on','warn','off');
+    handDot.classList.add(state);
+    handText.textContent = text;
+  }
+
+  // ---------------------------
+  // Responsive canvas
+  // ---------------------------
+  function resize() {
+    const rect = stage.getBoundingClientRect();
+    canvas.width = Math.floor(rect.width);
+    canvas.height = Math.floor(rect.height);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ---------------------------
+  // Game state
+  // ---------------------------
+  const game = {
+    running: false,
+    paused: false,
+    score: 0,
+    downs: 1,
+    time: 0,
+    lastKickAt: 0,
+    kickCooldownMs: 350,
+    field: { pad: 50 },
+    goal: { x: 0, y: 0, w: 0, h: 0 },
+    player: { x: 200, y: 200, r: 14, vx: 0, vy: 0, speed: 220, sprinting: false, dirX: 1, dirY: 0 },
+    ball: { x: 260, y: 220, r: 9, vx: 0, vy: 0, held: false },
+    defenders: [],
+    message: "",
+    msgUntil: 0
+  };
+
+  function resetPositions() {
+    const W = canvas.width, H = canvas.height;
+    game.field.pad = Math.min(70, Math.max(40, Math.floor(Math.min(W,H) * 0.06)));
+
+    // Right side end zone goal area
+    game.goal.w = Math.max(40, Math.floor(W * 0.05));
+    game.goal.h = Math.floor(H * 0.50);
+    game.goal.x = W - game.field.pad - game.goal.w;
+    game.goal.y = Math.floor((H - game.goal.h) / 2);
+
+    game.player.x = game.field.pad + 90;
+    game.player.y = Math.floor(H / 2);
+    game.player.vx = game.player.vy = 0;
+    game.player.dirX = 1; game.player.dirY = 0;
+
+    game.ball.x = game.player.x + 50;
+    game.ball.y = game.player.y;
+    game.ball.vx = game.ball.vy = 0;
+    game.ball.held = false;
+
+    // Defenders
+    game.defenders = [];
+    const n = 6;
+    for (let i=0; i<n; i++) {
+      game.defenders.push({
+        x: game.field.pad + 220 + i * 90,
+        y: game.field.pad + (i % 3) * 140 + 80,
+        r: 14,
+        speed: 140 + (i%3)*20,
+        vx: 0,
+        vy: 0
+      });
+    }
+  }
+  resetPositions();
+
+  function showMsg(text, ms=1200) {
+    game.message = text;
+    game.msgUntil = performance.now() + ms;
+  }
+
+  // ---------------------------
+  // Input (gesture + keyboard)
+  // ---------------------------
+  const input = {
+    moveX: 0, moveY: 0,
+    sprint: false,
+    kick: false,
+    handOk: false,
+    pinch: false,
+    fist: false,
+  };
+
+  const keys = new Set();
+  window.addEventListener('keydown', (e) => {
+    // Prevent page scroll on arrows/space
+    if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," "].includes(e.key)) e.preventDefault();
+    keys.add(e.key.toLowerCase());
+  }, { passive:false });
+
+  window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
+
+  function applyKeyboardFallback(dt) {
+    let mx = 0, my = 0;
+    if (keys.has('arrowleft') || keys.has('a')) mx -= 1;
+    if (keys.has('arrowright') || keys.has('d')) mx += 1;
+    if (keys.has('arrowup') || keys.has('w')) my -= 1;
+    if (keys.has('arrowdown') || keys.has('s')) my += 1;
+
+    const mag = Math.hypot(mx, my) || 1;
+    mx /= mag; my /= mag;
+
+    const sprint = keys.has('shift');
+    const kick = keys.has(' ');
+    return { mx, my, sprint, kick };
+  }
+
+  // ---------------------------
+  // Gesture tracking (MediaPipe)
+  // ---------------------------
+  let hands = null;
+  let cam = null;
+  let mpRunning = false;
+
+  // Calibration: neutral palm center (normalized 0..1)
+  const calib = { x: 0.5, y: 0.5, ready: false };
+
+  function updateSliderLabels() {
+    valSens.textContent = Number(rngSens.value).toFixed(1);
+    valDead.textContent = Number(rngDead.value).toFixed(2);
+    valKick.textContent = String(Number(rngKick.value));
+    valSprint.textContent = Number(rngSprint.value).toFixed(1);
+    valPinch.textContent = Number(rngPinch.value).toFixed(3);
+    valFist.textContent = Number(rngFist.value).toFixed(3);
+  }
+  [rngSens,rngDead,rngKick,rngSprint,rngPinch,rngFist].forEach(el => el.addEventListener('input', updateSliderLabels));
+  updateSliderLabels();
+
+  function dist(a,b) {
+    const dx = a.x-b.x, dy = a.y-b.y;
+    return Math.hypot(dx,dy);
+  }
+
+  function palmCenter(lm) {
+    // Use wrist + MCPs average for a stable palm center
+    const idx = [0,5,9,13,17];
+    let x=0,y=0;
+    for (const i of idx) { x += lm[i].x; y += lm[i].y; }
+    x/=idx.length; y/=idx.length;
+    return { x, y };
+  }
+
+  function isPinch(lm, thresh) {
+    // thumb tip (4) to index tip (8)
+    return dist(lm[4], lm[8]) < thresh;
+  }
+
+  function isFist(lm, thresh) {
+    // average fingertip distance to palm center
+    const pc = palmCenter(lm);
+    const tips = [8,12,16,20];
+    let s = 0;
+    for (const t of tips) s += dist(lm[t], pc);
+    const avg = s / tips.length;
+    return avg < thresh;
+  }
+
+  function setControlFromHand(lm) {
+    const pc = palmCenter(lm);
+    if (!calib.ready) { calib.x = pc.x; calib.y = pc.y; calib.ready = true; }
+
+    let dx = pc.x - calib.x;
+    let dy = pc.y - calib.y;
+
+    // Mirror (typical front camera experience)
+    if (chkMirror.checked) dx = -dx;
+
+    const sens = Number(rngSens.value);
+    const dead = Number(rngDead.value);
+
+    // Deadzone
+    if (Math.abs(dx) < dead) dx = 0;
+    if (Math.abs(dy) < dead) dy = 0;
+
+    // Scale
+    dx *= sens;
+    dy *= sens;
+
+    // Normalize to [-1..1] ish
+    const mx = Math.max(-1, Math.min(1, dx * 3.0));
+    const my = Math.max(-1, Math.min(1, dy * 3.0));
+
+    input.moveX = mx;
+    input.moveY = my;
+
+    const pinchThresh = Number(rngPinch.value);
+    const fistThresh = Number(rngFist.value);
+
+    input.pinch = isPinch(lm, pinchThresh);
+    input.fist = isFist(lm, fistThresh);
+    input.sprint = input.fist;
+    input.kick = input.pinch;
+
+    input.handOk = true;
+  }
+
+  function clearHandControl() {
+    input.handOk = false;
+    input.pinch = false;
+    input.fist = false;
+    input.sprint = false;
+    input.kick = false;
+    // soften movement decay rather than hard stop
+    input.moveX *= 0.85;
+    input.moveY *= 0.85;
+    if (Math.abs(input.moveX) < 0.02) input.moveX = 0;
+    if (Math.abs(input.moveY) < 0.02) input.moveY = 0;
+  }
+
+  async function startCameraAndHands() {
+    if (mpRunning) return;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error("getUserMedia not available. Use a modern browser + https/localhost.");
+    }
+
+    setCamState('warn', 'Requesting permission...');
+    logStatus("Requesting camera permission...");
+
+    // Create MediaPipe Hands
+    hands = new Hands({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+    });
+
+    hands.setOptions({
+      maxNumHands: 1,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.6
+    });
+
+    hands.onResults((results) => {
+      if (!chkGesture.checked) {
+        clearHandControl();
+        setHandState('warn', 'Gesture off');
+        return;
+      }
+
+      const lm = results.multiHandLandmarks?.[0];
+      if (!lm) {
+        clearHandControl();
+        setHandState('warn', 'No hand');
+        return;
+      }
+
+      setControlFromHand(lm);
+      setHandState('on', input.fist ? 'Fist (Sprint)' : (input.pinch ? 'Pinch (Kick)' : 'Tracking'));
+
+      if (chkDebug.checked) {
+        // Draw landmarks on top of the game (non-interactive)
+        drawDebugLandmarks(lm);
+      }
+    });
+
+    // Start camera frames feeding into MediaPipe
+    cam = new Camera(video, {
+      onFrame: async () => {
+        try {
+          await hands.send({ image: video });
+        } catch (e) {
+          // If something fails in send, don’t kill buttons
+          console.error(e);
+        }
+      },
+      width: 640,
+      height: 480
+    });
+
+    await cam.start();
+    mpRunning = true;
+    setCamState('on', 'On');
+    setHandState('warn', 'Looking for hand...');
+    logStatus("Camera running. Move your hand, then click Calibrate if needed.");
+  }
+
+  async function stopCamera() {
+    try {
+      if (cam) { cam.stop(); }
+    } catch (_) {}
+    cam = null;
+
+    // Stop any active video tracks too
+    const stream = video.srcObject;
+    if (stream && stream.getTracks) {
+      stream.getTracks().forEach(t => t.stop());
+    }
+    video.srcObject = null;
+
+    mpRunning = false;
+    hands = null;
+
+    setCamState('off', 'Off');
+    setHandState('warn', 'Not running');
+    logStatus("Camera stopped.");
+  }
+
+  // Debug drawing: render landmarks in corner overlay area
+  function drawDebugLandmarks(lm) {
+    const w = canvas.width, h = canvas.height;
+
+    // small debug viewport box
+    const boxW = 220, boxH = 165;
+    const x0 = w - boxW - 14;
+    const y0 = 14;
+
+    ctx.save();
+    ctx.globalAlpha = 0.92;
+    ctx.fillStyle = "#0e1420";
+    ctx.strokeStyle = "#22304a";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(x0, y0, boxW, boxH, 12);
+    ctx.fill();
+    ctx.stroke();
+
+    // plot points
+    ctx.fillStyle = "#e9eef5";
+    for (const p of lm) {
+      let px = p.x, py = p.y;
+      if (chkMirror.checked) px = 1 - px;
+      const sx = x0 + 10 + px * (boxW - 20);
+      const sy = y0 + 10 + py * (boxH - 20);
+      ctx.beginPath();
+      ctx.arc(sx, sy, 2.5, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    // gesture label
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "#cfe3ff";
+    ctx.font = "12px system-ui";
+    ctx.fillText(`pinch:${input.pinch} fist:${input.fist}`, x0 + 12, y0 + boxH - 10);
+    ctx.restore();
+  }
+
+  // ---------------------------
+  // Game mechanics
+  // ---------------------------
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+  function circleHit(ax, ay, ar, bx, by, br) {
+    return Math.hypot(ax-bx, ay-by) <= (ar+br);
+  }
+
+  function insideRect(px, py, r) {
+    const g = game.goal;
+    return (px + r > g.x && px - r < g.x + g.w && py + r > g.y && py - r < g.y + g.h);
+  }
+
+  function kickBall() {
+    const now = performance.now();
+    if (now - game.lastKickAt < game.kickCooldownMs) return;
+
+    // Must have ball held OR near player
+    if (!game.ball.held && !circleHit(game.player.x, game.player.y, game.player.r+12, game.ball.x, game.ball.y, game.ball.r)) {
+      return;
+    }
+
+    game.lastKickAt = now;
+
+    const strength = Number(rngKick.value);
+    // kick direction = player's facing dir, default to right
+    let dx = game.player.dirX, dy = game.player.dirY;
+    const mag = Math.hypot(dx,dy) || 1;
+    dx /= mag; dy /= mag;
+
+    game.ball.held = false;
+    game.ball.x = game.player.x + dx * (game.player.r + game.ball.r + 2);
+    game.ball.y = game.player.y + dy * (game.player.r + game.ball.r + 2);
+    game.ball.vx = dx * strength;
+    game.ball.vy = dy * strength;
+
+    showMsg("KICK!", 600);
+  }
+
+  function update(dt) {
+    if (!game.running || game.paused) return;
+
+    // Controls: gesture if enabled & running & hand present, else keyboard
+    let mx = 0, my = 0, sprint = false, kick = false;
+
+    if (chkGesture.checked && mpRunning && input.handOk) {
+      mx = input.moveX;
+      my = input.moveY;
+      sprint = input.sprint;
+      kick = input.kick;
+    } else {
+      const kb = applyKeyboardFallback(dt);
+      mx = kb.mx; my = kb.my; sprint = kb.sprint; kick = kb.kick;
+    }
+
+    // player velocity
+    const baseSpeed = game.player.speed;
+    const sprintMul = Number(rngSprint.value);
+    const speed = sprint ? baseSpeed * sprintMul : baseSpeed;
+
+    // smooth movement
+    const targetVx = mx * speed;
+    const targetVy = my * speed;
+    const accel = 10.5; // responsiveness
+    game.player.vx += (targetVx - game.player.vx) * clamp(dt * accel, 0, 1);
+    game.player.vy += (targetVy - game.player.vy) * clamp(dt * accel, 0, 1);
+
+    // update facing direction if moving
+    if (Math.hypot(game.player.vx, game.player.vy) > 10) {
+      const mag = Math.hypot(game.player.vx, game.player.vy) || 1;
+      game.player.dirX = game.player.vx / mag;
+      game.player.dirY = game.player.vy / mag;
+    }
+
+    // position
+    game.player.x += game.player.vx * dt;
+    game.player.y += game.player.vy * dt;
+
+    // keep within field bounds
+    const pad = game.field.pad;
+    game.player.x = clamp(game.player.x, pad + game.player.r, canvas.width - pad - game.player.r);
+    game.player.y = clamp(game.player.y, pad + game.player.r, canvas.height - pad - game.player.r);
+
+    // ball pickup
+    const nearBall = circleHit(game.player.x, game.player.y, game.player.r+10, game.ball.x, game.ball.y, game.ball.r);
+    const ballSlow = Math.hypot(game.ball.vx, game.ball.vy) < 40;
+    if (!game.ball.held && nearBall && ballSlow) {
+      game.ball.held = true;
+      game.ball.vx = game.ball.vy = 0;
+      showMsg("BALL!", 500);
+    }
+
+    // kick
+    if (kick) kickBall();
+
+    // ball physics
+    if (game.ball.held) {
+      game.ball.x = game.player.x + game.player.dirX * (game.player.r + game.ball.r + 2);
+      game.ball.y = game.player.y + game.player.dirY * (game.player.r + game.ball.r + 2);
+    } else {
+      game.ball.x += game.ball.vx * dt;
+      game.ball.y += game.ball.vy * dt;
+      const damp = Math.pow(0.001, dt); // exponential-ish damping
+      game.ball.vx *= damp;
+      game.ball.vy *= damp;
+
+      // bounce off field boundaries
+      const minX = pad + game.ball.r, maxX = canvas.width - pad - game.ball.r;
+      const minY = pad + game.ball.r, maxY = canvas.height - pad - game.ball.r;
+      if (game.ball.x < minX) { game.ball.x = minX; game.ball.vx *= -0.65; }
+      if (game.ball.x > maxX) { game.ball.x = maxX; game.ball.vx *= -0.65; }
+      if (game.ball.y < minY) { game.ball.y = minY; game.ball.vy *= -0.65; }
+      if (game.ball.y > maxY) { game.ball.y = maxY; game.ball.vy *= -0.65; }
+    }
+
+    // defenders chase player (and can "tackle")
+    for (const d of game.defenders) {
+      const dx = game.player.x - d.x;
+      const dy = game.player.y - d.y;
+      const dist = Math.hypot(dx,dy) || 1;
+
+      // move more aggressively if player has the ball
+      const aggro = game.ball.held ? 1.25 : 0.95;
+      const vx = (dx / dist) * d.speed * aggro;
+      const vy = (dy / dist) * d.speed * aggro;
+
+      d.vx += (vx - d.vx) * clamp(dt * 3.8, 0, 1);
+      d.vy += (vy - d.vy) * clamp(dt * 3.8, 0, 1);
+
+      d.x += d.vx * dt;
+      d.y += d.vy * dt;
+
+      d.x = clamp(d.x, pad + d.r, canvas.width - pad - d.r);
+      d.y = clamp(d.y, pad + d.r, canvas.height - pad - d.r);
+
+      // tackle
+      if (circleHit(d.x, d.y, d.r, game.player.x, game.player.y, game.player.r)) {
+        // slow player and maybe drop ball
+        game.player.vx *= 0.35;
+        game.player.vy *= 0.35;
+
+        if (game.ball.held) {
+          game.ball.held = false;
+          // ball pops loose
+          game.ball.vx = (Math.random()*2-1) * 180;
+          game.ball.vy = (Math.random()*2-1) * 180;
+          showMsg("TACKLED!", 900);
+        }
+      }
+    }
+
+    // touchdown: ball (held or rolling) in goal zone
+    if (insideRect(game.ball.x, game.ball.y, game.ball.r) || (game.ball.held && insideRect(game.player.x, game.player.y, game.player.r))) {
+      game.score += 7;
+      showMsg("TOUCHDOWN! +7", 1400);
+      resetPositions();
+    }
+
+    game.time += dt;
+  }
+
+  // ---------------------------
+  // Rendering
+  // ---------------------------
+  function drawField() {
+    const W = canvas.width, H = canvas.height;
+    const pad = game.field.pad;
+
+    // base
+    ctx.fillStyle = "#0a0f18";
+    ctx.fillRect(0,0,W,H);
+
+    // field rectangle
+    ctx.fillStyle = "#0e3b22";
+    ctx.strokeStyle = "#2a7b4a";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.roundRect(pad, pad, W - pad*2, H - pad*2, 18);
+    ctx.fill();
+    ctx.stroke();
+
+    // yard lines
+    ctx.strokeStyle = "rgba(233,238,245,0.20)";
+    ctx.lineWidth = 2;
+    const lines = 9;
+    for (let i=1; i<lines; i++) {
+      const x = pad + (W - pad*2) * (i/lines);
+      ctx.beginPath();
+      ctx.moveTo(x, pad);
+      ctx.lineTo(x, H - pad);
+      ctx.stroke();
+    }
+
+    // goal zone
+    const g = game.goal;
+    ctx.fillStyle = "rgba(255, 204, 0, 0.18)";
+    ctx.fillRect(g.x, g.y, g.w, g.h);
+    ctx.strokeStyle = "rgba(255, 204, 0, 0.55)";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(g.x, g.y, g.w, g.h);
+
+    // HUD
+    ctx.fillStyle = "#e9eef5";
+    ctx.font = "16px system-ui";
+    ctx.fillText(`Score: ${game.score}`, pad, pad - 16);
+    ctx.fillText(`Gesture: ${chkGesture.checked ? "ON" : "OFF"}  |  Camera: ${mpRunning ? "ON" : "OFF"}`, pad + 140, pad - 16);
+
+    // control hint
+    ctx.font = "12px system-ui";
+    ctx.fillStyle = "rgba(233,238,245,0.75)";
+    ctx.fillText(`Pinch = Kick | Fist = Sprint | Calibrate = neutral`, pad, H - 14);
+  }
+
+  function drawEntities() {
+    // defenders
+    for (const d of game.defenders) {
+      ctx.fillStyle = "#b54d57";
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, d.r, 0, Math.PI*2);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(0,0,0,0.35)";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    // ball
+    ctx.fillStyle = "#c79d6b";
+    ctx.beginPath();
+    ctx.arc(game.ball.x, game.ball.y, game.ball.r, 0, Math.PI*2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,0.35)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // player
+    ctx.fillStyle = "#4aa3ff";
+    ctx.beginPath();
+    ctx.arc(game.player.x, game.player.y, game.player.r, 0, Math.PI*2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,0.35)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // direction indicator
+    ctx.strokeStyle = "rgba(255,255,255,0.65)";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(game.player.x, game.player.y);
+    ctx.lineTo(game.player.x + game.player.dirX * 26, game.player.y + game.player.dirY * 26);
+    ctx.stroke();
+
+    // message
+    if (performance.now() < game.msgUntil) {
+      ctx.font = "bold 26px system-ui";
+      ctx.fillStyle = "rgba(255,255,255,0.92)";
+      ctx.fillText(game.message, 22, 54);
+    }
+  }
+
+  function render() {
+    drawField();
+    drawEntities();
+  }
+
+  // ---------------------------
+  // Main loop
+  // ---------------------------
+  let lastT = performance.now();
+  function loop(t) {
+    const dt = Math.min(0.05, (t - lastT) / 1000);
+    lastT = t;
+
+    update(dt);
+    render();
+
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  // ---------------------------
+  // Buttons / UI Wiring (no dead clicks)
+  // ---------------------------
+  function updateShowVideo() {
+    if (chkShowVideo.checked) stage.classList.add('showVideo');
+    else stage.classList.remove('showVideo');
+  }
+  chkShowVideo.addEventListener('change', updateShowVideo);
+  updateShowVideo();
+
+  btnStart.addEventListener('click', async () => {
+    try {
+      game.running = true;
+      game.paused = false;
+      btnPause.textContent = "Pause";
+
+      // Start camera only if gesture control is on
+      if (chkGesture.checked) {
+        await startCameraAndHands();
+      } else {
+        logStatus("Game running (gesture OFF). Use keyboard controls.");
+        setHandState('warn', 'Gesture off');
+      }
+    } catch (e) {
+      console.error(e);
+      setCamState('off', 'Off');
+      setHandState('warn', 'Not running');
+      logStatus("Start failed:\n" + (e?.message || e) + "\n\nFix: Use https:// or http://localhost and allow camera permissions.");
+      alert("Camera/Game start failed. Check console + permissions.");
+    }
+  });
+
+  btnPause.addEventListener('click', () => {
+    if (!game.running) return;
+    game.paused = !game.paused;
+    btnPause.textContent = game.paused ? "Resume" : "Pause";
+    showMsg(game.paused ? "PAUSED" : "GO!", 800);
+    logStatus(game.paused ? "Paused." : "Running.");
+  });
+
+  btnReset.addEventListener('click', () => {
+    game.score = 0;
+    resetPositions();
+    showMsg("RESET", 900);
+    logStatus("Game reset.");
+  });
+
+  btnStopCam.addEventListener('click', async () => {
+    await stopCamera();
+  });
+
+  btnCalibrate.addEventListener('click', () => {
+    // If hand is currently tracked, just set calib to that position next frame.
+    // Easiest: mark not ready and next valid hand will set it.
+    calib.ready = false;
+    showMsg("CALIBRATED", 900);
+    logStatus("Calibration requested. Hold your hand steady at your neutral position for a moment.");
+  });
+
+  chkGesture.addEventListener('change', async () => {
+    if (chkGesture.checked) {
+      logStatus("Gesture control ON. Click Start to enable camera, then Calibrate.");
+      setHandState('warn', 'Gesture on');
+    } else {
+      clearHandControl();
+      logStatus("Gesture control OFF. Use keyboard controls (WASD/arrows).");
+      setHandState('warn', 'Gesture off');
+    }
+  });
+
+  chkMirror.addEventListener('change', () => {
+    showMsg(chkMirror.checked ? "MIRROR ON" : "MIRROR OFF", 800);
+  });
+
+  chkDebug.addEventListener('change', () => {
+    showMsg(chkDebug.checked ? "DEBUG ON" : "DEBUG OFF", 800);
+  });
+
+  // Initial state
+  setCamState('off', 'Off');
+  setHandState('warn', 'Not running');
+  logStatus("Ready. Click Start to begin.\nTip: Run on https:// or localhost for camera permissions.");
+
+  // Polyfill for roundRect in some older browsers
+  if (!CanvasRenderingContext2D.prototype.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
+      r = Math.min(r, w/2, h/2);
+      this.beginPath();
+      this.moveTo(x+r, y);
+      this.arcTo(x+w, y, x+w, y+h, r);
+      this.arcTo(x+w, y+h, x, y+h, r);
+      this.arcTo(x, y+h, x, y, r);
+      this.arcTo(x, y, x+w, y, r);
+      this.closePath();
+      return this;
+    };
+  }
+})();
+</script>
+
+
+</body></html>

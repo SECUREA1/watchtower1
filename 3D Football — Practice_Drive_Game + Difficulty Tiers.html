@@ -1,0 +1,1301 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>3D Football — Practice/Drive/Game + Difficulty Tiers</title>
+  <style>
+    html,body{margin:0;height:100%;overflow:hidden;background:#05060a;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    canvas{display:block}
+    #msg{
+      position:fixed;left:50%;top:16px;transform:translateX(-50%);z-index:10;
+      color:#fff;background:rgba(0,0,0,.45);
+      border:1px solid rgba(255,255,255,.14);border-radius:999px;padding:8px 12px;
+      font-weight:650;letter-spacing:.2px;opacity:0;transition:opacity .18s ease
+    }
+    .card{
+      position:fixed;z-index:10;color:#e8ebff;
+      background:rgba(10,12,20,.55);backdrop-filter:blur(6px);
+      border:1px solid rgba(140,160,255,.18);border-radius:14px;
+      padding:10px 12px;box-shadow:0 12px 40px rgba(0,0,0,.35)
+    }
+    #hud{left:12px;top:12px;min-width:320px}
+    #panel{right:12px;top:12px;min-width:320px}
+    .row{display:flex;justify-content:space-between;gap:12px;margin:2px 0}
+    .title{font-weight:800;letter-spacing:.3px}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    .small{opacity:.85;font-size:12px;line-height:1.25;margin-top:8px}
+    .bar{height:10px;border-radius:999px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.10);overflow:hidden;margin-top:8px}
+    .fill{height:100%;width:0%;background:linear-gradient(90deg,rgba(120,160,255,.95),rgba(255,180,90,.95))}
+    #panel label{display:flex;justify-content:space-between;gap:10px;font-size:12px;opacity:.9}
+    #panel input[type=range], #panel select{width:100%}
+    #panel .group{margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.08)}
+    select{
+      background:rgba(255,255,255,.08);
+      color:#e8ebff;
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:10px;
+      padding:6px 8px;
+      outline:none;
+    }
+    option{background:#0c1020;color:#e8ebff}
+  </style>
+</head>
+<body>
+  <div id="msg"></div>
+
+  <div id="hud" class="card">
+    <div class="row"><div class="title">3D Football</div><div class="mono" id="camName">CAM: QB</div></div>
+    <div class="row"><div>Mode</div><div class="mono" id="modeLbl">PRACTICE</div></div>
+    <div class="row"><div>Difficulty</div><div class="mono" id="diffLbl">ROOKIE</div></div>
+    <div class="row"><div>Score</div><div class="mono" id="score">0 - 0</div></div>
+    <div class="row"><div>Ball Spot</div><div class="mono" id="ballSpot">-</div></div>
+    <div class="row"><div>Down & Dist</div><div class="mono" id="downDist">-</div></div>
+    <div class="row"><div>Clock</div><div class="mono" id="clock">-</div></div>
+    <div class="row"><div>Play</div><div class="mono" id="playName">GO</div></div>
+    <div class="row"><div>Target</div><div class="mono" id="targetName">WR1</div></div>
+    <div class="bar"><div class="fill" id="powerFill"></div></div>
+    <div class="small">
+      <div><b>Space</b> Snap • <b>WASD</b> Move (QB pre-throw, carrier after) • <b>Tab</b> Target</div>
+      <div><b>Hold LMB</b> Power • <b>Release</b> Throw • <b>Shift</b> Bullet • <b>H</b> Handoff (run plays)</div>
+      <div><b>E</b> Catch (Pro/All-Pro) • <b>1–6</b> Plays • <b>C</b> Camera</div>
+    </div>
+  </div>
+
+  <div id="panel" class="card">
+    <div class="title">Game Tiers / Tuners</div>
+
+    <div class="group">
+      <label><span>Game Tier (Mode)</span><span class="mono" id="mUi">-</span></label>
+      <select id="modeSel">
+        <option value="practice">Practice</option>
+        <option value="drive">Drive</option>
+        <option value="game">Full Game</option>
+      </select>
+
+      <label style="margin-top:8px;"><span>Difficulty Tier</span><span class="mono" id="dUi">-</span></label>
+      <select id="diffSel">
+        <option value="rookie">Rookie</option>
+        <option value="pro">Pro</option>
+        <option value="allpro">All-Pro</option>
+      </select>
+    </div>
+
+    <div class="group">
+      <label><span>Max Throw Power</span><span class="mono" id="tMaxLbl"></span></label>
+      <input id="tMax" type="range" min="24" max="62" value="46" step="1"/>
+      <label><span>Lob Loft (deg)</span><span class="mono" id="lobLbl"></span></label>
+      <input id="lob" type="range" min="14" max="50" value="26" step="1"/>
+      <label><span>Bullet Loft (deg)</span><span class="mono" id="bulLbl"></span></label>
+      <input id="bul" type="range" min="4" max="18" value="9" step="1"/>
+    </div>
+
+    <div class="group">
+      <label><span>Air Drag</span><span class="mono" id="dragLbl"></span></label>
+      <input id="drag" type="range" min="0.65" max="1.35" value="1.00" step="0.02"/>
+      <label><span>Spiral Spin (rpm)</span><span class="mono" id="spinLbl"></span></label>
+      <input id="spin" type="range" min="450" max="2200" value="1400" step="50"/>
+      <label><span>Catch Radius</span><span class="mono" id="catchLbl"></span></label>
+      <input id="catchR" type="range" min="0.40" max="1.10" value="0.78" step="0.01"/>
+    </div>
+
+    <div class="group">
+      <label><span>Defense Speed</span><span class="mono" id="defLbl"></span></label>
+      <input id="defSpd" type="range" min="4.5" max="9.0" value="6.2" step="0.1"/>
+      <label><span>Carrier Speed</span><span class="mono" id="carLbl"></span></label>
+      <input id="carSpd" type="range" min="5.0" max="9.5" value="7.5" step="0.1"/>
+    </div>
+  </div>
+
+  <!-- three.js -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+
+  <script>
+  /****************
+   * Backend Hook
+   ****************/
+  function emitBackendEvent(type, payload){
+    // Plug into your backend (Socket.IO / REST / etc.)
+    // socket.emit(type, payload)
+    // console.log("[EVENT]", type, payload);
+  }
+
+  /****************
+   * Helpers
+   ****************/
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+  const lerp=(a,b,t)=>a+(b-a)*t;
+  const v3=(x=0,y=0,z=0)=>new THREE.Vector3(x,y,z);
+
+  function showMsg(text, ms=900){
+    const el=document.getElementById("msg");
+    el.textContent=text;
+    el.style.opacity="1";
+    clearTimeout(showMsg._t);
+    showMsg._t=setTimeout(()=>el.style.opacity="0", ms);
+  }
+
+  /****************
+   * Field units
+   ****************/
+  const YD=0.9144;
+  const FIELD={ width:53.333*YD, length:120*YD, endzone:10*YD };
+  const Z_MIN=-FIELD.length/2, Z_MAX=FIELD.length/2;
+  const GOAL_HOME=Z_MIN+FIELD.endzone;
+  const GOAL_AWAY=Z_MAX-FIELD.endzone;
+
+  function metersToYards(m){ return m/YD; }
+
+  /****************
+   * Scene
+   ****************/
+  const scene=new THREE.Scene();
+  scene.fog=new THREE.Fog(0x05060a, 30, 520);
+
+  const camera=new THREE.PerspectiveCamera(58, innerWidth/innerHeight, 0.05, 1400);
+  camera.position.set(0, 8, -18);
+
+  const renderer=new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.shadowMap.enabled=true;
+  document.body.appendChild(renderer.domElement);
+
+  const hemi=new THREE.HemisphereLight(0xbfd6ff, 0x1a1f2a, 0.9);
+  scene.add(hemi);
+
+  const sun=new THREE.DirectionalLight(0xffffff, 1.05);
+  sun.position.set(-40, 75, -30);
+  sun.castShadow=true;
+  sun.shadow.mapSize.set(2048,2048);
+  sun.shadow.camera.near=5; sun.shadow.camera.far=260;
+  sun.shadow.camera.left=-90; sun.shadow.camera.right=90;
+  sun.shadow.camera.top=90; sun.shadow.camera.bottom=-90;
+  scene.add(sun);
+
+  /****************
+   * Field texture
+   ****************/
+  function makeFieldTexture(){
+    const w=2048,h=4096;
+    const c=document.createElement("canvas"); c.width=w; c.height=h;
+    const g=c.getContext("2d");
+
+    g.fillStyle="#1b5f34"; g.fillRect(0,0,w,h);
+
+    for(let i=0;i<22;i++){
+      g.fillStyle=i%2?"rgba(255,255,255,0.03)":"rgba(0,0,0,0.04)";
+      g.fillRect(0,(i*h/22),w,h/22);
+    }
+
+    const ez=(FIELD.endzone/FIELD.length)*h;
+    g.fillStyle="rgba(20,35,80,0.62)"; g.fillRect(0,0,w,ez);
+    g.fillStyle="rgba(80,25,20,0.62)"; g.fillRect(0,h-ez,w,ez);
+
+    g.strokeStyle="rgba(255,255,255,0.86)";
+    g.lineWidth=6;
+    g.strokeRect(40,40,w-80,h-80);
+
+    const playStartZ=GOAL_HOME, playEndZ=GOAL_AWAY;
+    const playFieldLen=100*YD;
+
+    function zToPy(z){
+      const t=(z - Z_MIN)/(Z_MAX - Z_MIN);
+      return (1-t)*(h-80)+40;
+    }
+
+    for(let yds=0; yds<=100; yds+=5){
+      const z=playStartZ + (yds*YD);
+      const py=zToPy(z);
+
+      g.beginPath();
+      g.moveTo(40,py); g.lineTo(w-40,py);
+      g.stroke();
+
+      // hashes
+      const hashLeft=40+(w-80)*0.36, hashRight=40+(w-80)*0.64;
+      g.lineWidth=4;
+      g.beginPath();
+      g.moveTo(hashLeft,py); g.lineTo(hashLeft+45,py);
+      g.moveTo(hashRight-45,py); g.lineTo(hashRight,py);
+      g.stroke();
+      g.lineWidth=6;
+
+      // numbers every 10
+      if(yds%10===0 && yds>0 && yds<100){
+        g.fillStyle="rgba(255,255,255,0.74)";
+        g.font="bold 72px system-ui, Arial";
+        const n=yds<=50?yds:(100-yds);
+        g.fillText(String(n), 70, py-12);
+        g.save();
+        g.translate(w-70, py+12);
+        g.rotate(Math.PI);
+        g.fillText(String(n), 0, 0);
+        g.restore();
+      }
+    }
+
+    const tex=new THREE.CanvasTexture(c);
+    tex.anisotropy=8;
+    tex.wrapS=tex.wrapT=THREE.ClampToEdgeWrapping;
+    return tex;
+  }
+
+  const field=new THREE.Mesh(
+    new THREE.PlaneGeometry(FIELD.width, FIELD.length, 1, 1),
+    new THREE.MeshStandardMaterial({map:makeFieldTexture(), roughness:0.95, metalness:0})
+  );
+  field.rotation.x=-Math.PI/2;
+  field.receiveShadow=true;
+  scene.add(field);
+
+  function addLine(z,color=0xffffff,alpha=0.65){
+    const m=new THREE.Mesh(
+      new THREE.PlaneGeometry(FIELD.width, 0.12),
+      new THREE.MeshBasicMaterial({color,transparent:true,opacity:alpha})
+    );
+    m.rotation.x=-Math.PI/2;
+    m.position.set(0,0.01,z);
+    scene.add(m);
+  }
+  addLine(GOAL_HOME,0xffffff,0.75);
+  addLine(GOAL_AWAY,0xffffff,0.75);
+
+  /****************
+   * Players
+   ****************/
+  function makePlayer(color){
+    const grp=new THREE.Group();
+    const body=new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.35, 1.15, 6, 12),
+      new THREE.MeshStandardMaterial({color, roughness:0.65, metalness:0.05})
+    );
+    body.castShadow=true;
+    body.position.y=1.05;
+    grp.add(body);
+
+    const head=new THREE.Mesh(
+      new THREE.SphereGeometry(0.25, 16, 16),
+      new THREE.MeshStandardMaterial({color:0xe7d9c5, roughness:0.85})
+    );
+    head.castShadow=true;
+    head.position.y=1.95;
+    grp.add(head);
+
+    const hand=new THREE.Mesh(
+      new THREE.SphereGeometry(0.08, 10, 10),
+      new THREE.MeshBasicMaterial({color:0xffffff})
+    );
+    hand.position.set(0, 1.55, 0.38);
+    grp.add(hand);
+    grp.userData.hand=hand;
+
+    return grp;
+  }
+
+  function entity(name, mesh, x,z){
+    return { name, mesh, pos:v3(x,0,z), vel:v3(), yaw:0, speed:7.0, hasBall:false, isEligible:true };
+  }
+
+  const qb = entity("QB",  makePlayer(0x6da7ff),  0, -18);
+  const rb = entity("RB",  makePlayer(0x7effb2),  2.2, -16.5);
+  const wr1= entity("WR1", makePlayer(0xffd166), -5.0, -16);
+  const wr2= entity("WR2", makePlayer(0xffc8ff),  5.0, -16);
+  const te = entity("TE",  makePlayer(0xd0b3ff),  0.0, -16);
+
+  scene.add(qb.mesh, rb.mesh, wr1.mesh, wr2.mesh, te.mesh);
+
+  const offense=[qb,rb,wr1,wr2,te];
+
+  const defenders=[];
+  for(let i=0;i<6;i++){
+    const d = entity("D"+(i+1), makePlayer(0xff5a5f), (i-2.5)*3.0, -4 + i*1.9);
+    d.isEligible=false;
+    d.speed=6.2;
+    defenders.push(d);
+    scene.add(d.mesh);
+  }
+
+  function syncEntity(e){
+    e.mesh.position.copy(e.pos);
+    e.mesh.rotation.y=e.yaw;
+  }
+
+  /****************
+   * Football
+   ****************/
+  const football={
+    mode:"idle", // idle | pass | carrier
+    pos:v3(),
+    vel:v3(),
+    omega:v3(),
+    carrier:null
+  };
+
+  const ballMesh=new THREE.Mesh(
+    new THREE.SphereGeometry(0.20, 18, 18),
+    new THREE.MeshStandardMaterial({color:0x8b5a2b, roughness:0.65, metalness:0.05})
+  );
+  ballMesh.scale.set(0.7,0.7,1.35);
+  ballMesh.castShadow=true;
+  scene.add(ballMesh);
+
+  const stripeGeo=new THREE.TorusGeometry(0.16,0.012,10,20);
+  const stripeMat=new THREE.MeshStandardMaterial({color:0xf2f2f2, roughness:0.5});
+  const stripe1=new THREE.Mesh(stripeGeo, stripeMat);
+  const stripe2=new THREE.Mesh(stripeGeo, stripeMat);
+  stripe1.rotation.x=Math.PI/2; stripe2.rotation.x=Math.PI/2;
+  stripe1.position.z=0.17; stripe2.position.z=-0.17;
+  ballMesh.add(stripe1,stripe2);
+
+  // aim ring (catch point)
+  const aimRing=new THREE.Mesh(
+    new THREE.RingGeometry(0.25,0.35,24),
+    new THREE.MeshBasicMaterial({color:0x9fd0ff,transparent:true,opacity:0.86,side:THREE.DoubleSide})
+  );
+  aimRing.rotation.x=-Math.PI/2;
+  aimRing.position.set(0,0.03,-5);
+  scene.add(aimRing);
+
+  /****************
+   * Game Tiers + Difficulty Tiers
+   ****************/
+  const game={
+    mode:"practice", // practice | drive | game
+    diff:"rookie",   // rookie | pro | allpro
+    possession:"home", // home throws toward +z (player offense)
+    losZ:-18,
+    down:1,
+    toGo:10*YD,
+    play:1, // 1..6
+    snapped:false,
+    phase:"presnap", // presnap | live | dead
+    camMode:0, // 0 QB, 1 Broadcast, 2 Target, 3 Ball
+    scoreHome:0, scoreAway:0,
+
+    // full game clock
+    quarter:1,
+    clockSec: 6*60, // 6 min quarters (feel free to change)
+  };
+
+  const PLAYBOOK=[
+    {id:1,name:"GO (Deep)", type:"pass"},
+    {id:2,name:"CROSS", type:"pass"},
+    {id:3,name:"POST", type:"pass"},
+    {id:4,name:"CORNER", type:"pass"},
+    {id:5,name:"DIVE (Run)", type:"run"},
+    {id:6,name:"SWEEP (Run)", type:"run"},
+  ];
+
+  // difficulty presets (also affects required catch)
+  function applyDifficulty(){
+    let defSpd = Number(document.getElementById("defSpd").value);
+    let catchR = Number(document.getElementById("catchR").value);
+
+    if(game.diff==="rookie"){
+      defSpd *= 0.88;
+      catchR *= 1.15;
+    } else if(game.diff==="pro"){
+      defSpd *= 1.00;
+      catchR *= 1.00;
+    } else {
+      defSpd *= 1.12;
+      catchR *= 0.88;
+    }
+
+    defenders.forEach(d=>d.speed=defSpd);
+    document.getElementById("catchR").dataset.effective = String(catchR);
+  }
+
+  function getEffectiveCatchRadius(){
+    const ui = document.getElementById("catchR");
+    const eff = Number(ui.dataset.effective || ui.value);
+    return eff;
+  }
+
+  function spotText(z){
+    const ydLineFromHomeGoal = clamp((z - GOAL_HOME), 0, 100*YD);
+    const yd = Math.round(metersToYards(ydLineFromHomeGoal));
+    const display = yd <= 50 ? yd : 100-yd;
+    const side = yd <= 50 ? "H" : "A";
+    return `${side} ${display}`;
+  }
+
+  function updateHUD(){
+    const camNames=["QB","BCAST","TARGET","BALL"];
+    document.getElementById("camName").textContent = "CAM: "+camNames[game.camMode];
+    document.getElementById("modeLbl").textContent = game.mode.toUpperCase();
+    document.getElementById("diffLbl").textContent = (game.diff==="allpro"?"ALL-PRO":game.diff.toUpperCase());
+    document.getElementById("score").textContent = `${game.scoreHome} - ${game.scoreAway}`;
+    document.getElementById("ballSpot").textContent = spotText(game.losZ);
+    document.getElementById("downDist").textContent =
+      (game.mode==="practice")
+        ? "—"
+        : `${game.down}&${Math.max(1,Math.round(metersToYards(game.toGo)))} @ ${spotText(game.losZ)}`;
+    document.getElementById("playName").textContent = PLAYBOOK[game.play-1].name;
+    document.getElementById("targetName").textContent = target.name;
+
+    if(game.mode!=="game"){
+      document.getElementById("clock").textContent = "—";
+    } else {
+      const m = Math.floor(game.clockSec/60);
+      const s = Math.floor(game.clockSec%60);
+      document.getElementById("clock").textContent = `Q${game.quarter} ${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+    }
+  }
+
+  function resetFormation(keepClock=false){
+    game.snapped=false;
+    game.phase="presnap";
+    offense.forEach(p=>p.hasBall=false);
+
+    // ball spot
+    qb.pos.set(0,0,game.losZ);
+    rb.pos.set(2.2,0,game.losZ+1.2);
+    wr1.pos.set(-6.0,0,game.losZ+2.2);
+    wr2.pos.set( 6.0,0,game.losZ+2.2);
+    te.pos.set(0.0,0,game.losZ+2.0);
+
+    defenders.forEach((d,i)=>{
+      d.pos.set((i-2.5)*3.0,0, game.losZ + 12 + i*1.2);
+      d.vel.set(0,0,0);
+    });
+
+    // football in QB hand
+    football.mode="idle";
+    football.carrier=qb;
+    football.pos.copy(qb.pos).add(v3(0.35,1.55,0.90));
+    football.vel.set(0,0,0);
+    football.omega.set(0,0,0);
+
+    controlled = qb;
+    showMsg("READY • SPACE TO SNAP", 900);
+
+    emitBackendEvent("reset", { mode:game.mode, diff:game.diff, losZ:game.losZ, down:game.down, toGo:game.toGo, play:game.play });
+    updateHUD();
+  }
+
+  function touchdown(){
+    game.scoreHome += 7;
+    showMsg("TOUCHDOWN!", 1500);
+    emitBackendEvent("touchdown", { side:"home" });
+
+    // restart drive
+    game.down=1; game.toGo=10*YD;
+    game.losZ = -18;
+    if(game.mode==="game"){
+      // take some clock
+      game.clockSec = Math.max(0, game.clockSec - 35);
+    }
+    resetFormation(true);
+  }
+
+  function turnoverOnDowns(){
+    showMsg("TURNOVER ON DOWNS", 1400);
+    emitBackendEvent("turnover", { reason:"downs" });
+
+    // simple: restart drive at own 25-ish
+    game.down=1; game.toGo=10*YD;
+    game.losZ = -18;
+    resetFormation(true);
+  }
+
+  function advanceSpot(newZ){
+    const gained = newZ - game.losZ;
+    if(gained >= game.toGo - 0.01){
+      showMsg("FIRST DOWN!", 900);
+      emitBackendEvent("first_down", { gained, newZ });
+      game.losZ = newZ;
+      game.down = 1;
+      game.toGo = 10*YD;
+    } else {
+      game.losZ = newZ;
+      game.toGo -= gained;
+      game.down += 1;
+      if(game.down > 4){
+        turnoverOnDowns();
+        return;
+      }
+    }
+  }
+
+  /****************
+   * Modes / Difficulty UI
+   ****************/
+  const modeSel=document.getElementById("modeSel");
+  const diffSel=document.getElementById("diffSel");
+  document.getElementById("mUi").textContent = modeSel.value.toUpperCase();
+  document.getElementById("dUi").textContent = diffSel.value.toUpperCase();
+
+  modeSel.addEventListener("change", ()=>{
+    game.mode = modeSel.value;
+    document.getElementById("mUi").textContent = game.mode.toUpperCase();
+
+    // reset clocks/rules
+    if(game.mode==="practice"){
+      game.down=1; game.toGo=10*YD; game.losZ=-18;
+    }
+    if(game.mode==="drive"){
+      game.down=1; game.toGo=10*YD; game.losZ=-18;
+    }
+    if(game.mode==="game"){
+      game.scoreHome=0; game.scoreAway=0;
+      game.quarter=1; game.clockSec=6*60;
+      game.down=1; game.toGo=10*YD; game.losZ=-18;
+    }
+    resetFormation();
+  });
+
+  diffSel.addEventListener("change", ()=>{
+    game.diff = diffSel.value;
+    document.getElementById("dUi").textContent = game.diff.toUpperCase();
+    applyDifficulty();
+    updateHUD();
+  });
+
+  /****************
+   * Tuners
+   ****************/
+  const tMaxEl=document.getElementById("tMax");
+  const lobEl=document.getElementById("lob");
+  const bulEl=document.getElementById("bul");
+  const dragEl=document.getElementById("drag");
+  const spinEl=document.getElementById("spin");
+  const catchEl=document.getElementById("catchR");
+  const defEl=document.getElementById("defSpd");
+  const carEl=document.getElementById("carSpd");
+
+  function syncTuners(){
+    document.getElementById("tMaxLbl").textContent = `${tMaxEl.value} m/s`;
+    document.getElementById("lobLbl").textContent  = `${lobEl.value}°`;
+    document.getElementById("bulLbl").textContent  = `${bulEl.value}°`;
+    document.getElementById("dragLbl").textContent = `${Number(dragEl.value).toFixed(2)}×`;
+    document.getElementById("spinLbl").textContent = `${spinEl.value}`;
+    document.getElementById("catchLbl").textContent= `${Number(catchEl.value).toFixed(2)} m`;
+    document.getElementById("defLbl").textContent  = `${Number(defEl.value).toFixed(1)} m/s`;
+    document.getElementById("carLbl").textContent  = `${Number(carEl.value).toFixed(1)} m/s`;
+
+    defenders.forEach(d=>d.speed = Number(defEl.value));
+    [qb,rb,wr1,wr2,te].forEach(p=>p.speed = Number(carEl.value));
+    qb.speed = 4.8; // QB slower
+    applyDifficulty();
+  }
+
+  [tMaxEl,lobEl,bulEl,dragEl,spinEl,catchEl,defEl,carEl].forEach(el=>el.addEventListener("input", syncTuners));
+  syncTuners();
+
+  /****************
+   * Controls
+   ****************/
+  const keys={};
+  addEventListener("keydown",(e)=>{
+    keys[e.code]=true;
+
+    if(e.code==="Space" && !game.snapped && game.phase==="presnap"){
+      game.snapped=true;
+      game.phase="live";
+      snapTime=clock.elapsedTime;
+      showMsg("SNAP!", 500);
+      emitBackendEvent("snap", { play:game.play, losZ:game.losZ, mode:game.mode, diff:game.diff });
+    }
+
+    if(e.code==="KeyC"){
+      game.camMode=(game.camMode+1)%4;
+      updateHUD();
+    }
+
+    if(e.code==="Tab"){
+      e.preventDefault();
+      cycleTarget();
+    }
+
+    // plays 1-6
+    if(e.code.startsWith("Digit")){
+      const n=Number(e.code.replace("Digit",""));
+      if(n>=1 && n<=6){
+        game.play=n;
+        showMsg("PLAY: "+PLAYBOOK[n-1].name, 800);
+        emitBackendEvent("play_select", { play:n });
+        updateHUD();
+      }
+    }
+
+    // handoff
+    if(e.code==="KeyH"){
+      attemptHandoff();
+    }
+  });
+  addEventListener("keyup",(e)=>{ keys[e.code]=false; });
+
+  let mouseDown=false;
+  let powerStart=0;
+
+  addEventListener("mousedown",(e)=>{
+    if(e.button!==0) return;
+    mouseDown=true;
+    powerStart=performance.now();
+  });
+
+  addEventListener("mouseup",(e)=>{
+    if(e.button!==0) return;
+    mouseDown=false;
+    const held=clamp((performance.now()-powerStart)/780, 0, 1);
+    attemptThrow(held);
+  });
+
+  /****************
+   * Targeting
+   ****************/
+  const eligible=[wr1,wr2,te,rb];
+  let target = wr1;
+
+  function cycleTarget(){
+    const idx=eligible.indexOf(target);
+    target = eligible[(idx+1)%eligible.length];
+    showMsg("TARGET: "+target.name, 650);
+    updateHUD();
+  }
+
+  /****************
+   * Mouse aiming + predicted catch spot
+   ****************/
+  const raycaster=new THREE.Raycaster();
+  const mouseNDC=new THREE.Vector2(0,0);
+  addEventListener("mousemove",(e)=>{
+    mouseNDC.x=(e.clientX/innerWidth)*2-1;
+    mouseNDC.y=-(e.clientY/innerHeight)*2+1;
+  });
+
+  let aimPoint=v3(0,0,0);
+
+  function routeTargets(t){
+    // returns desired positions for WR/TE/RB based on play type
+    const baseZ=game.losZ+2.2;
+
+    const go = (p, x)=>v3(x,0, baseZ + 7 + t*11);
+    const cross=(x0, dir)=> {
+      const d1=Math.min(t,0.8), d2=Math.max(0,t-0.8);
+      return v3(x0 + dir*(d1/0.8)*9.0, 0, baseZ + 6 + d1*7 + d2*10);
+    };
+    const post=(x0)=> {
+      const d1=Math.min(t,1.0), d2=Math.max(0,t-1.0);
+      return v3(x0 + Math.min(1,d2/1.0)*6.5*(x0<0?1:-1), 0, baseZ + 7 + d1*9 + d2*8);
+    };
+    const corner=(x0)=> {
+      const d1=Math.min(t,1.0), d2=Math.max(0,t-1.0);
+      return v3(x0 + (x0<0?-1:1)*Math.min(1,d2/1.0)*10.0, 0, baseZ + 7 + d1*8 + d2*7);
+    };
+
+    // run plays = RB path
+    const dive = ()=>v3(0.6,0, baseZ + 3 + t*7.5);
+    const sweep=()=>v3(4.5,0, baseZ + 2 + t*7.0);
+
+    const out={};
+
+    if(game.play===1){ out.wr1=go(wr1,-6); out.wr2=go(wr2,6); out.te=go(te,0); out.rb=v3(2.2,0,baseZ+1.2); }
+    if(game.play===2){ out.wr1=cross(-6, +1); out.wr2=go(wr2,6); out.te=v3(0,0,baseZ+5+t*7); out.rb=v3(2.2,0,baseZ+1.2); }
+    if(game.play===3){ out.wr1=post(-6); out.wr2=go(wr2,6); out.te=v3(0,0,baseZ+6+t*7); out.rb=v3(2.2,0,baseZ+1.2); }
+    if(game.play===4){ out.wr1=corner(-6); out.wr2=corner(6); out.te=v3(0,0,baseZ+6+t*7); out.rb=v3(2.2,0,baseZ+1.2); }
+    if(game.play===5){ out.wr1=v3(-6,0,baseZ+7+t*7); out.wr2=v3(6,0,baseZ+7+t*7); out.te=v3(0,0,baseZ+7+t*7); out.rb=dive(); }
+    if(game.play===6){ out.wr1=v3(-6,0,baseZ+7+t*7); out.wr2=v3(6,0,baseZ+7+t*7); out.te=v3(0,0,baseZ+7+t*7); out.rb=sweep(); }
+
+    return out;
+  }
+
+  function updateAim(){
+    // if snapped, reticle predicts target player's near-future position (lead)
+    // else mouse raycast point on ground
+    if(game.phase==="live"){
+      const lead=0.35; // lead time
+      const pred = target.pos.clone().add(target.vel.clone().multiplyScalar(lead));
+      pred.x = clamp(pred.x, -FIELD.width/2+1, FIELD.width/2-1);
+      pred.z = clamp(pred.z, Z_MIN-10, Z_MAX+40);
+      pred.y = 0;
+      aimPoint.copy(pred);
+    } else {
+      raycaster.setFromCamera(mouseNDC, camera);
+      const plane=new THREE.Plane(new THREE.Vector3(0,1,0), 0);
+      const hit=new THREE.Vector3();
+      raycaster.ray.intersectPlane(plane, hit);
+      hit.x=clamp(hit.x, -FIELD.width/2+1, FIELD.width/2-1);
+      hit.z=clamp(hit.z, Z_MIN-10, Z_MAX+40);
+      hit.y=0;
+      aimPoint.copy(hit);
+    }
+
+    aimRing.position.set(aimPoint.x, 0.03, aimPoint.z);
+    aimRing.material.color.setHex((mouseDown && game.phase==="live" && football.mode==="idle") ? 0xffc26a : 0x9fd0ff);
+  }
+
+  /****************
+   * Power bar
+   ****************/
+  function updatePowerBar(){
+    const fill=document.getElementById("powerFill");
+    if(mouseDown){
+      const held=clamp((performance.now()-powerStart)/780, 0, 1);
+      fill.style.width=`${held*100}%`;
+    } else fill.style.width="0%";
+  }
+
+  /****************
+   * Football throw: deep distance capable
+   ****************/
+  const GRAV=9.81;
+  const air={ rho:1.225, Cd:0.20, area:Math.PI*(0.095*0.095), mass:0.41 };
+
+  function attemptThrow(power01){
+    if(game.phase!=="live") return;
+    if(!game.snapped) return;
+    if(football.mode!=="idle") return;
+    if(football.carrier!==qb) return;
+
+    // run plays: allow throw too (RPO style), but you can handoff with H
+    const maxSpd=Number(tMaxEl.value);
+    const isBullet=!!keys["ShiftLeft"]||!!keys["ShiftRight"];
+    const loftDeg=isBullet ? Number(bulEl.value) : Number(lobEl.value);
+    const loft=THREE.MathUtils.degToRad(loftDeg);
+
+    // baseball-ish power: speed scales strongly with hold
+    const speed = lerp(18, maxSpd, power01);
+
+    const start = qb.mesh.userData.hand.getWorldPosition(new THREE.Vector3());
+    const targetGround = aimPoint.clone();
+
+    const dx=targetGround.x-start.x;
+    const dz=targetGround.z-start.z;
+    const dist=Math.max(1.0, Math.hypot(dx,dz));
+    const flatDir=v3(dx,0,dz).normalize();
+
+    // time-of-flight based on chosen speed and loft
+    const horizSpeed = Math.max(6.0, speed*Math.cos(loft));
+    let T = clamp(dist / horizSpeed, 0.35, 3.0);
+
+    // try to meet catch height (football catch window)
+    const desiredY = 1.55;
+    const dy = desiredY - start.y;
+    let vy = (dy + 0.5*GRAV*T*T) / T;
+
+    // horizontal component aiming
+    const vxz = flatDir.clone().multiplyScalar(dist / T);
+    let v0 = v3(vxz.x, vy, vxz.z);
+
+    // cap to max speed while preserving direction
+    if(v0.length() > speed){
+      v0.normalize().multiplyScalar(speed);
+    }
+
+    // spiral spin around forward direction
+    const rpm=Number(spinEl.value);
+    const w=(rpm*2*Math.PI)/60;
+    const dir=v0.clone().normalize();
+    football.omega.copy(dir.clone().multiplyScalar(w));
+
+    football.pos.copy(start);
+    football.vel.copy(v0);
+    football.mode="pass";
+    football.carrier=null;
+
+    // after release, QB is no longer controlled (until next play)
+    controlled = qb;
+
+    emitBackendEvent("throw", {
+      play:game.play, target:target.name,
+      start:{x:start.x,y:start.y,z:start.z},
+      aim:{x:targetGround.x,z:targetGround.z},
+      speed, loftDeg, bullet:isBullet, power:power01
+    });
+
+    showMsg(isBullet ? "BULLET!" : "LOFT!", 650);
+  }
+
+  /****************
+   * Handoff (run plays)
+   ****************/
+  function attemptHandoff(){
+    if(game.phase!=="live") return;
+    if(!game.snapped) return;
+    if(football.mode!=="idle") return;
+    if(football.carrier!==qb) return;
+
+    const pb=PLAYBOOK[game.play-1];
+    if(pb.type!=="run"){
+      showMsg("HANDOFF: Pick a RUN play (5–6)", 900);
+      return;
+    }
+
+    // handoff to RB
+    football.mode="carrier";
+    football.carrier=rb;
+    rb.hasBall=true;
+    controlled=rb;
+
+    emitBackendEvent("handoff", { play:game.play });
+    showMsg("HANDOFF!", 700);
+  }
+
+  /****************
+   * Ball physics
+   ****************/
+  function updateBall(dt){
+    if(football.mode==="idle" && football.carrier){
+      const hand=football.carrier.mesh.userData.hand.getWorldPosition(new THREE.Vector3());
+      football.pos.copy(hand);
+      football.vel.set(0,0,0);
+      ballMesh.position.copy(football.pos);
+      return;
+    }
+
+    if(football.mode==="carrier" && football.carrier){
+      const c=football.carrier;
+      football.pos.copy(c.pos).add(v3(0.22,1.45,0.28));
+      football.vel.set(0,0,0);
+      ballMesh.position.copy(football.pos);
+      return;
+    }
+
+    if(football.mode!=="pass") return;
+
+    const v=football.vel;
+    const speed=v.length();
+    const dragScale=Number(dragEl.value);
+
+    if(speed>0.02){
+      const Cd=air.Cd*dragScale;
+      const Fd=0.5*air.rho*Cd*air.area*speed*speed;
+      const ad=Fd/air.mass;
+      v.add(v.clone().multiplyScalar(-ad/speed).multiplyScalar(dt));
+    }
+
+    v.y -= GRAV*dt;
+    football.pos.add(v.clone().multiplyScalar(dt));
+
+    // ground
+    if(football.pos.y < 0.20){
+      football.pos.y=0.20;
+      if(football.vel.y < -1.0){
+        football.vel.y *= -0.25;
+        football.vel.x *= 0.78;
+        football.vel.z *= 0.78;
+      }
+    }
+
+    ballMesh.position.copy(football.pos);
+
+    // align + spiral
+    if(speed>0.25){
+      const forward=football.vel.clone().normalize();
+      const up=v3(0,1,0);
+      const right=v3().crossVectors(up,forward).normalize();
+      const trueUp=v3().crossVectors(forward,right).normalize();
+      const m=new THREE.Matrix4().makeBasis(right,trueUp,forward);
+      ballMesh.quaternion.setFromRotationMatrix(m);
+
+      const w=football.omega.length();
+      if(w>0.01) ballMesh.rotateZ(w*dt*0.55);
+    }
+  }
+
+  /****************
+   * Movement + routes
+   ****************/
+  let snapTime=0;
+  let controlled=qb;
+
+  function moveControlled(dt){
+    const spd=controlled.speed;
+    const mv=v3(
+      (keys["KeyD"]?1:0)-(keys["KeyA"]?1:0),
+      0,
+      (keys["KeyW"]?1:0)-(keys["KeyS"]?1:0)
+    );
+
+    if(mv.length()>0.01){
+      mv.normalize().multiplyScalar(spd);
+      controlled.pos.add(mv.multiplyScalar(dt));
+      controlled.yaw=Math.atan2(mv.x,mv.z);
+    }
+
+    // keep in bounds
+    controlled.pos.x=clamp(controlled.pos.x, -FIELD.width/2+0.7, FIELD.width/2-0.7);
+    controlled.pos.z=clamp(controlled.pos.z, Z_MIN+0.7, Z_MAX-0.7);
+  }
+
+  function updateOffense(dt, tNow){
+    // presnap sync
+    if(game.phase==="presnap"){
+      offense.forEach(syncEntity);
+      return;
+    }
+
+    const t = tNow - snapTime;
+    const r = routeTargets(t);
+
+    // WR/TE auto-route until they become carrier
+    function steer(p, tgt, runSpd){
+      if(p.hasBall) return;
+      if(p===controlled && controlled!==qb) return;
+
+      const to=tgt.clone().sub(p.pos); to.y=0;
+      const dist=to.length();
+      if(dist>0.08){
+        to.normalize();
+        p.vel.copy(to).multiplyScalar(runSpd);
+        p.pos.add(p.vel.clone().multiplyScalar(dt));
+        p.yaw=Math.atan2(p.vel.x,p.vel.z);
+      } else {
+        p.vel.multiplyScalar(0.5);
+      }
+    }
+
+    steer(wr1, r.wr1, 7.1);
+    steer(wr2, r.wr2, 7.0);
+    steer(te,  r.te,  6.6);
+
+    // RB follows run path only if not yet handed off
+    if(!rb.hasBall){
+      steer(rb, r.rb, 6.6);
+    }
+
+    // QB faces aim/target
+    const face = aimPoint.clone().sub(qb.pos); face.y=0;
+    if(face.length()>0.1) qb.yaw=Math.atan2(face.x, face.z);
+
+    // user moves QB pre-throw, or moves carrier after catch/handoff
+    if(controlled){
+      if(game.phase==="live"){
+        // allow QB movement only while he still has ball
+        if(controlled===qb && football.mode==="idle" && football.carrier===qb){
+          moveControlled(dt);
+        }
+        // allow carrier movement
+        if((controlled===rb && rb.hasBall) || (controlled.hasBall && controlled!==qb)){
+          moveControlled(dt);
+        }
+      }
+    }
+
+    offense.forEach(syncEntity);
+  }
+
+  /****************
+   * Defense AI
+   ****************/
+  function defend(dt){
+    if(game.phase!=="live") return;
+
+    const carrier = (football.mode==="carrier") ? football.carrier : null;
+
+    defenders.forEach((d,i)=>{
+      let targetPos;
+
+      if(carrier){
+        targetPos = carrier.pos.clone();
+      } else if(football.mode==="pass"){
+        targetPos = football.pos.clone();
+      } else {
+        // cover nearest eligible
+        const opts=[wr1,wr2,te,rb];
+        let best=opts[0], bestDist=Infinity;
+        for(const p of opts){
+          const dist=d.pos.distanceTo(p.pos);
+          if(dist<bestDist){bestDist=dist; best=p;}
+        }
+        targetPos = best.pos.clone().add(v3(0,0,2.0));
+      }
+
+      const to=targetPos.clone().sub(d.pos); to.y=0;
+      const dist=to.length();
+      if(dist>0.02){
+        to.normalize();
+        d.vel.copy(to).multiplyScalar(d.speed);
+        d.pos.add(d.vel.clone().multiplyScalar(dt));
+        d.yaw=Math.atan2(d.vel.x, d.vel.z);
+      } else d.vel.set(0,0,0);
+
+      // keep in bounds
+      d.pos.x=clamp(d.pos.x, -FIELD.width/2+0.7, FIELD.width/2-0.7);
+      d.pos.z=clamp(d.pos.z, Z_MIN+0.7, Z_MAX-0.7);
+    });
+
+    defenders.forEach(syncEntity);
+  }
+
+  /****************
+   * Catch logic (tiers)
+   ****************/
+  let catchPrompt=false;
+  let allProWindow=0;
+
+  function canCatchNow(p){
+    const hand=p.mesh.userData.hand.getWorldPosition(new THREE.Vector3());
+    const d=football.pos.distanceTo(hand);
+    const yOk = football.pos.y>0.6 && football.pos.y<2.7;
+    return (d < getEffectiveCatchRadius()) && yOk;
+  }
+
+  function tryCatchInput(){
+    // Pro: press E
+    // All-Pro: press E inside a tight window
+    if(game.diff==="rookie") return;
+    if(!keys["KeyE"]) return;
+    if(!catchPrompt) return;
+
+    if(game.diff==="pro"){
+      completeCatch();
+    } else {
+      // all-pro
+      if(allProWindow > 0){
+        completeCatch();
+      } else {
+        showMsg("MISS!", 500);
+      }
+    }
+  }
+
+  function completeCatch(){
+    // find best eligible catcher
+    const elig=[wr1,wr2,te,rb];
+    let best=null, bestD=Infinity;
+    for(const p of elig){
+      const hand=p.mesh.userData.hand.getWorldPosition(new THREE.Vector3());
+      const dd=football.pos.distanceTo(hand);
+      if(dd<bestD){bestD=dd; best=p;}
+    }
+    if(!best) return;
+
+    football.mode="carrier";
+    football.carrier=best;
+    best.hasBall=true;
+    controlled=best;
+
+    emitBackendEvent("catch", { by:best.name, x:football.pos.x, y:football.pos.y, z:football.pos.z });
+    showMsg("CAUGHT!", 900);
+  }
+
+  function checkCatch(dt){
+    if(football.mode!=="pass") { catchPrompt=false; allProWindow=0; return; }
+
+    // rookie auto-catch
+    if(game.diff==="rookie"){
+      const elig=[wr1,wr2,te,rb];
+      for(const p of elig){
+        if(canCatchNow(p)){
+          completeCatch();
+          return;
+        }
+      }
+      return;
+    }
+
+    // pro/allpro: show prompt if catchable
+    const elig=[wr1,wr2,te,rb];
+    let ok=false;
+    for(const p of elig){
+      if(canCatchNow(p)){ ok=true; break; }
+    }
+    catchPrompt = ok;
+
+    if(game.diff==="allpro"){
+      if(ok){
+        allProWindow = Math.min(0.22, allProWindow + dt); // tiny window
+      } else {
+        allProWindow = 0;
+      }
+    }
+
+    if(ok){
+      showMsg(game.diff==="pro" ? "PRESS E TO CATCH" : "E (TIMED CATCH)", 220);
+    }
+
+    tryCatchInput();
+  }
+
+  /****************
+   * Incomplete / Out of bounds / Tackle / TD
+   ****************/
+  function endPlayAtSpot(spotZ, label){
+    game.phase="dead";
+    emitBackendEvent("play_end", { result:label, spotZ });
+
+    showMsg(label, 900);
+
+    // drive/game rules
+    if(game.mode==="practice"){
+      // reset instantly at LOS
+      resetFormation(true);
+      return;
+    }
+
+    // clamp spot between goals
+    const s=clamp(spotZ, GOAL_HOME+0.2, GOAL_AWAY-0.2);
+    advanceSpot(s);
+
+    // clock tick for full game
+    if(game.mode==="game"){
+      game.clockSec = Math.max(0, game.clockSec - 25);
+      if(game.clockSec===0){
+        if(game.quarter<4){
+          game.quarter += 1;
+          game.clockSec = 6*60;
+          showMsg("NEW QUARTER", 1200);
+        } else {
+          showMsg("FINAL — RESETTING", 1500);
+          game.quarter=1; game.clockSec=6*60;
+          game.scoreHome=0; game.scoreAway=0;
+        }
+      }
+    }
+
+    resetFormation(true);
+  }
+
+  function checkDeadBall(){
+    if(game.phase!=="live") return;
+
+    // touchdown (home offense toward +z)
+    if(football.mode==="carrier" && football.carrier){
+      if(football.carrier.pos.z > GOAL_AWAY){
+        touchdown();
+        return;
+      }
+    }
+
+    // tackle
+    if(football.mode==="carrier" && football.carrier){
+      const c=football.carrier;
+      for(const d of defenders){
+        const dd=d.pos.clone().sub(c.pos); dd.y=0;
+        if(dd.length()<0.92){
+          endPlayAtSpot(c.pos.z, "TACKLED");
+          return;
+        }
+      }
+      // out of bounds
+      if(Math.abs(c.pos.x) > FIELD.width/2 - 0.35){
+        endPlayAtSpot(c.pos.z, "OUT OF BOUNDS");
+        return;
+      }
+      return;
+    }
+
+    // pass hits ground => incomplete
+    if(football.mode==="pass"){
+      if(football.pos.y <= 0.21){
+        // incomplete costs a down in Drive/Game
+        if(game.mode!=="practice"){
+          game.down += 1;
+          if(game.down > 4){ turnoverOnDowns(); return; }
+        }
+        endPlayAtSpot(game.losZ, "INCOMPLETE");
+        return;
+      }
+
+      // far OOB (low) => dead
+      const oob = Math.abs(football.pos.x) > FIELD.width/2 + 1.4;
+      if(oob && football.pos.y < 1.0){
+        if(game.mode!=="practice"){
+          game.down += 1;
+          if(game.down > 4){ turnoverOnDowns(); return; }
+        }
+        endPlayAtSpot(game.losZ, "OUT OF BOUNDS");
+      }
+    }
+  }
+
+  /****************
+   * Camera modes
+   ****************/
+  function updateCamera(dt){
+    const smooth = 1 - Math.pow(0.001, dt);
+
+    if(game.camMode===0){
+      // QB behind
+      const back=v3(Math.sin(qb.yaw),0,Math.cos(qb.yaw)).multiplyScalar(-7.8);
+      const camPos=qb.pos.clone().add(back).add(v3(0,4.4,0));
+      camera.position.lerp(camPos, smooth);
+      camera.lookAt(qb.pos.clone().add(v3(0,1.6,12)));
+      return;
+    }
+
+    if(game.camMode===1){
+      // broadcast
+      const camPos=v3(FIELD.width/2+18, 18, qb.pos.z+22);
+      camera.position.lerp(camPos, smooth);
+      camera.lookAt(v3(0,1.2,qb.pos.z+18));
+      return;
+    }
+
+    if(game.camMode===2){
+      // target cam
+      const p=target;
+      const f=v3(Math.sin(p.yaw),0,Math.cos(p.yaw));
+      const camPos=p.pos.clone().add(f.clone().multiplyScalar(-7)).add(v3(0,4.0,0));
+      camera.position.lerp(camPos, smooth);
+      camera.lookAt(p.pos.clone().add(v3(0,1.6,10)));
+      return;
+    }
+
+    // ball cam
+    const tgt=football.pos.clone();
+    const vel=football.vel.clone(); vel.y=0;
+    const dir=vel.length()>0.25 ? vel.normalize() : v3(0,0,1);
+    const camPos=tgt.clone().add(dir.clone().multiplyScalar(-11)).add(v3(0,6.0,0));
+    camera.position.lerp(camPos, smooth);
+    camera.lookAt(tgt.clone().add(v3(0,1.0,0)));
+  }
+
+  /****************
+   * Main loop
+   ****************/
+  const clock=new THREE.Clock();
+
+  function tick(){
+    const dt=Math.min(0.033, clock.getDelta());
+    const tNow=clock.elapsedTime;
+
+    updateAim();
+    updatePowerBar();
+
+    if(game.phase==="presnap"){
+      // keep snapTime ready
+      snapTime = tNow;
+    }
+
+    if(game.phase==="live"){
+      // full game clock drains slowly while live
+      if(game.mode==="game"){
+        game.clockSec = Math.max(0, game.clockSec - dt);
+        if(game.clockSec===0){
+          // quarter end on dead-ball, but if it hits 0 mid-play, allow it (arcade)
+        }
+      }
+    }
+
+    updateOffense(dt, tNow);
+    defend(dt);
+    updateBall(dt);
+
+    checkCatch(dt);
+    checkDeadBall();
+
+    updateCamera(dt);
+    updateHUD();
+
+    renderer.render(scene, camera);
+    requestAnimationFrame(tick);
+  }
+
+  addEventListener("resize", ()=>{
+    camera.aspect=innerWidth/innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+
+  // Initial
+  applyDifficulty();
+  resetFormation();
+  tick();
+  </script>
+</body>
+</html>

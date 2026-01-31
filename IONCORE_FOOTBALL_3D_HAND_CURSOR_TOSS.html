@@ -1,0 +1,3455 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Football 3D Pro — Dock + Detach Tiles (Gesture Throw/Catch/Tackle) • All Angles</title>
+
+  <style>
+    :root{
+      --bg:#05060a;
+      --panel:rgba(12,14,22,.74);
+      --panel2:rgba(12,14,22,.62);
+      --border:rgba(255,255,255,.10);
+      --text:rgba(255,255,255,.92);
+      --muted:rgba(255,255,255,.72);
+      --chip:rgba(255,255,255,.08);
+      --chip2:rgba(120,180,255,.18);
+      --good:#60e38b;
+      --bad:#ff6c6c;
+      --warn:#ffd96a;
+      --cyan:#50d2ff;
+      --purple:#b18cff;
+    }
+
+    html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New"}
+
+    /* Three canvas behind UI */
+    canvas#threeCanvas{position:fixed;inset:0;z-index:1;display:block}
+
+    /* ---------- UI ROOT ---------- */
+    .uiRoot{position:fixed;inset:0;z-index:30;pointer-events:none}
+    .uiRoot *{pointer-events:auto}
+
+    /* Callout */
+    #callout{
+      position:fixed;left:50%;top:18px;transform:translateX(-50%);
+      z-index:80;pointer-events:none;
+      font-weight:950;letter-spacing:.3px;
+      padding:10px 14px;border-radius:999px;
+      background:rgba(12,14,22,.55);border:1px solid rgba(255,255,255,.10);
+      backdrop-filter:blur(10px);color:rgba(255,255,255,.92);
+      opacity:0;transition:opacity 120ms ease;
+    }
+
+    /* ---------- MINI HUD ---------- */
+    #topHUD{
+      position:fixed;left:50%;top:10px;transform:translateX(-50%);
+      z-index:60;display:flex;gap:10px;align-items:stretch;flex-wrap:wrap;
+      max-width:calc(100vw - 20px);
+      pointer-events:none;
+    }
+    .hudCard{
+      pointer-events:none;
+      background:rgba(12,14,22,.62);
+      border:1px solid rgba(255,255,255,.10);
+      backdrop-filter:blur(10px);
+      border-radius:16px;
+      padding:10px 12px;
+      box-shadow:0 10px 40px rgba(0,0,0,.35);
+      color:rgba(255,255,255,.92);
+      display:flex;flex-direction:column;gap:4px;
+      min-width:270px;
+    }
+    .hudRow{display:flex;gap:10px;flex-wrap:wrap;font-size:12px;line-height:1.2}
+    .hudTiny{font-size:11px;opacity:.85;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New"}
+    .pill{
+      display:inline-flex;align-items:center;gap:6px;
+      padding:3px 9px;border-radius:999px;
+      border:1px solid rgba(255,255,255,.12);
+      background:rgba(255,255,255,.06);
+      font-size:11px;font-weight:850;opacity:.92;
+    }
+    .dot{width:8px;height:8px;border-radius:999px;display:inline-block}
+    .dotGood{background:var(--good)}
+    .dotBad{background:var(--bad)}
+    .dotWarn{background:var(--warn)}
+    .dotCyan{background:var(--cyan)}
+    .dotPurple{background:var(--purple)}
+
+    /* ---------- RIGHT DOCK ---------- */
+    #rightDock{
+      position:fixed;right:14px;top:14px;bottom:14px;
+      width:360px;max-width:calc(100vw - 28px);
+      z-index:55;
+      background:rgba(12,14,22,.55);
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:18px;
+      backdrop-filter:blur(10px);
+      box-shadow:0 10px 40px rgba(0,0,0,.35);
+      color:rgba(255,255,255,.92);
+      display:flex;flex-direction:column;
+      user-select:none;
+      overflow:hidden;
+    }
+    #rightDock.collapsed{width:72px}
+    #dockHeader{
+      padding:10px;
+      border-bottom:1px solid rgba(255,255,255,.10);
+      background:linear-gradient(to bottom, rgba(12,14,22,.92), rgba(12,14,22,.62));
+      display:flex;flex-direction:column;gap:10px;
+    }
+    .dockTopRow{display:flex;align-items:center;justify-content:space-between;gap:10px}
+    .dockTitle{font-weight:950;letter-spacing:.3px;font-size:12px;opacity:.95}
+    .dockHint{font-size:11px;opacity:.75;font-weight:850}
+    .dockBtns{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    #rightDock.collapsed .dockBtns{grid-template-columns:1fr}
+    .dockBtn{
+      appearance:none;border:1px solid rgba(255,255,255,.16);
+      background:rgba(255,255,255,.08);
+      color:var(--text);
+      padding:10px 10px;border-radius:14px;cursor:pointer;font-weight:950;
+      display:flex;align-items:center;justify-content:space-between;gap:10px;
+    }
+    .dockBtn:hover{background:rgba(255,255,255,.12)}
+    .dockBtn.primary{background:var(--chip2);border-color:rgba(120,180,255,.30)}
+    .kbd{
+      font-family:ui-monospace,Menlo,Consolas,monospace;
+      font-size:11px;opacity:.85;padding:2px 7px;border-radius:999px;
+      border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06)
+    }
+    #rightDock.collapsed .dockBtn span.label{display:none}
+    #rightDock.collapsed .dockBtn{justify-content:center}
+    #dockSlots{flex:1;padding:10px;display:flex;flex-direction:column;gap:10px;overflow:hidden}
+    #rightDock.collapsed #dockSlots{display:none}
+    #dockWidthResizer{position:absolute;left:-6px;top:0;bottom:0;width:12px;cursor:ew-resize}
+
+    /* ---------- FOOTER DOCK ---------- */
+    #footerDock{
+      position:fixed;left:14px;right:14px;bottom:14px;
+      height:220px;
+      z-index:58;
+      border-radius:18px;
+      background:rgba(12,14,22,.55);
+      border:1px solid rgba(255,255,255,.10);
+      backdrop-filter:blur(10px);
+      box-shadow:0 10px 40px rgba(0,0,0,.35);
+      overflow:hidden;
+      display:flex;flex-direction:column;
+      user-select:none;
+    }
+    #footerDock.collapsed{height:54px}
+    #footerTopResizer{position:absolute;left:0;right:0;top:-6px;height:12px;cursor:ns-resize}
+    #footerHost{flex:1;display:flex;flex-direction:column;overflow:hidden}
+
+    /* ---------- TILE ---------- */
+    .tile{
+      background:var(--panel);
+      border:1px solid var(--border);
+      border-radius:18px;
+      box-shadow:0 10px 40px rgba(0,0,0,.45);
+      color:var(--text);
+      overflow:hidden;
+      user-select:none;
+    }
+    .tile.docked{position:relative;display:flex;flex-direction:column;flex:1 1 0px;min-height:140px}
+    .tile.footerAttached{position:relative;display:flex;flex-direction:column;flex:1 1 0px;min-height:0}
+    .tile.floating{
+      position:fixed;z-index:75;
+      min-width:260px;min-height:140px;
+      max-width:calc(100vw - 24px);
+      max-height:calc(100vh - 24px);
+      display:flex;flex-direction:column;
+    }
+    .tile.hidden{display:none}
+
+    .tileHeader{
+      display:flex;align-items:center;justify-content:space-between;gap:10px;
+      padding:10px 10px;
+      background:linear-gradient(to bottom, rgba(12,14,22,.92), rgba(12,14,22,.62));
+      border-bottom:1px solid rgba(255,255,255,.10);
+    }
+    .tileLeft{display:flex;align-items:center;gap:10px;min-width:0}
+    .tileIcons{display:flex;gap:6px;align-items:center}
+    .tileIcon{
+      width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;
+      border-radius:8px;border:1px solid rgba(255,255,255,.14);
+      background:rgba(255,255,255,.06);font-size:13px;
+    }
+    .tileTitle{
+      font-weight:950;letter-spacing:.3px;font-size:12px;opacity:.95;
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    }
+    .tileBtns{display:flex;gap:8px;align-items:center}
+    .tbtn{
+      appearance:none;border:1px solid rgba(255,255,255,.16);
+      background:rgba(255,255,255,.08);color:var(--text);
+      padding:6px 8px;border-radius:12px;cursor:pointer;font-weight:950;font-size:12px;
+    }
+    .tbtn:hover{background:rgba(255,255,255,.12)}
+    .tbtn.primary{background:var(--chip2);border-color:rgba(120,180,255,.30)}
+    .tileGrip{
+      width:28px;height:22px;display:inline-flex;align-items:center;justify-content:center;
+      border-radius:10px;border:1px solid rgba(255,255,255,.14);
+      background:rgba(255,255,255,.08);
+      cursor:grab;
+      font-size:14px;
+      touch-action:none;
+    }
+    .tileGrip:active{cursor:grabbing}
+
+    .tileBody{padding:10px;overflow:auto;flex:1;min-height:0}
+    .dockHeightResizer{
+      height:10px;cursor:ns-resize;background:rgba(255,255,255,.03);
+      border-top:1px solid rgba(255,255,255,.06);touch-action:none;
+    }
+    .tileResize{
+      position:absolute;right:6px;bottom:6px;
+      width:26px;height:26px;border-radius:10px;
+      border:1px solid rgba(255,255,255,.14);
+      background:rgba(255,255,255,.08);
+      display:flex;align-items:center;justify-content:center;
+      cursor:nwse-resize;
+      touch-action:none;
+    }
+    .tileResize::before{content:"◢";opacity:.85;font-size:14px;line-height:1}
+
+    /* Controls content */
+    #controlsGrid{display:grid;grid-template-columns:1fr;gap:10px}
+    .controlRow{
+      display:flex;gap:10px;align-items:center;flex-wrap:wrap;
+      padding:10px;border-radius:14px;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.04);
+    }
+    .controlRow label{font-size:11px;opacity:.82;font-weight:850;white-space:nowrap}
+    .controlRow select{
+      background:rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.14);
+      color:var(--text);border-radius:12px;
+      padding:7px 9px;outline:none;font-weight:900;font-size:12px;
+    }
+    .controlButtons{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .controlButtons button{
+      appearance:none;border:1px solid rgba(255,255,255,.16);
+      background:rgba(255,255,255,.08);color:var(--text);
+      padding:9px 10px;border-radius:14px;cursor:pointer;font-weight:950;
+    }
+    .controlButtons button:hover{background:rgba(255,255,255,.12)}
+    .controlButtons button.primary{background:var(--chip2);border-color:rgba(120,180,255,.30)}
+    .small{font-size:11px;opacity:.82}
+    details{border-top:1px solid rgba(255,255,255,.10);padding-top:10px;margin-top:10px}
+    summary{
+      list-style:none;cursor:pointer;font-size:12px;font-weight:950;letter-spacing:.3px;
+      opacity:.92;display:flex;align-items:center;justify-content:space-between;
+    }
+    summary::-webkit-details-marker{display:none}
+    summary .tag{
+      font-size:11px;font-weight:900;opacity:.8;background:rgba(255,255,255,.06);
+      padding:3px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.10)
+    }
+    .row{display:flex;gap:10px;align-items:center;margin:8px 0}
+    .row label{flex:1 1 auto;font-size:12px;opacity:.88}
+    .row input[type="range"]{width:100%}
+    .row select{
+      background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);
+      color:var(--text);border-radius:12px;padding:6px 8px;outline:none;flex:1 1 auto
+    }
+
+    /* Camera tile */
+    #camWrap{
+      width:100%;border-radius:14px;overflow:hidden;border:1px solid rgba(255,255,255,.14);
+      background:rgba(255,255,255,.04);position:relative;aspect-ratio:4/3
+    }
+    #video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);opacity:.92}
+    #overlay{position:absolute;inset:0;width:100%;height:100%;transform:scaleX(-1);pointer-events:none}
+
+    /* Field map */
+    #fieldMapWrap{
+      width:100%;
+      border-radius:14px;overflow:hidden;
+      border:1px solid rgba(255,255,255,.14);
+      background:rgba(255,255,255,.04);
+      aspect-ratio:16/9;
+      position:relative;
+    }
+    #fieldMap{position:absolute;inset:0;width:100%;height:100%}
+
+    @media (pointer:coarse){
+      #rightDock{width:380px}
+      .dockBtn{padding:12px 12px}
+      .tbtn{padding:8px 10px}
+      .tileGrip{width:34px;height:26px}
+      .tileResize{width:34px;height:34px}
+      .controlButtons button{padding:12px 12px}
+    }
+  
+    /* Hand Cursor (CV pointer) */
+    #handCursor{
+      position:fixed;
+      left:0; top:0;
+      width:22px;height:22px;
+      border:2px solid rgba(255,217,106,0.95);
+      border-radius:999px;
+      box-shadow:0 0 18px rgba(255,217,106,0.35);
+      transform:translate(-50%,-50%) translate(-9999px,-9999px);
+      pointer-events:none;
+      z-index:60;
+      opacity:0;
+      transition:opacity .12s linear;
+      mix-blend-mode:screen;
+    }
+    #handCursor:after{
+      content:"";
+      position:absolute;left:50%;top:50%;
+      width:3px;height:3px;
+      background:rgba(255,217,106,0.90);
+      transform:translate(-50%,-50%);
+      border-radius:999px;
+    }
+    #handCursor .tag{
+      position:absolute;
+      left:50%; top:120%;
+      transform:translateX(-50%);
+      font:12px/1.1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      padding:3px 6px;
+      border-radius:999px;
+      background:rgba(0,0,0,0.55);
+      border:1px solid rgba(255,255,255,0.18);
+      color:rgba(255,255,255,0.88);
+      white-space:nowrap;
+      display:none;
+    }
+    #handCursor.showTag .tag{ display:block; }
+
+  </style>
+</head>
+
+<body>
+  <!-- UI -->
+  <div class="uiRoot">
+    <div id="callout" class="mono">—</div>
+    <div id="handCursor" aria-hidden="true"><div class="tag" id="handCursorTag">HAND</div></div>
+
+
+    <!-- Mini HUD -->
+    <div id="topHUD">
+      <div class="hudCard">
+        <div class="hudRow">
+          <span class="pill"><b>Style</b>&nbsp;<span id="styleMini">PASS</span></span>
+          <span class="pill"><b>Play</b>&nbsp;<span id="playMini">0</span></span>
+          <span class="pill"><b>Cam</b>&nbsp;<span id="camMini">QB</span></span>
+        </div>
+        <div class="hudRow">
+          <span class="pill"><b>Score</b>&nbsp;OFF <span id="offScoreMini">0</span> — DEF <span id="defScoreMini">0</span></span>
+          <span class="pill"><b>Ball</b>&nbsp;<span id="ballMini">—</span></span>
+        </div>
+        <div class="hudTiny">Last: <span id="lastMini">—</span></div>
+      </div>
+
+      <div class="hudCard">
+        <div class="hudTiny">Aim: <span id="aimMini">x=— z=—</span></div>
+        <div class="hudTiny">Throw: <span id="throwMini">spd=— spin=— wind=—</span></div>
+        <div class="hudTiny">Action: <span id="actionMini">—</span></div>
+      </div>
+    </div>
+
+    <!-- RIGHT DOCK -->
+    <div id="rightDock" class="uiPanel">
+      <div id="dockWidthResizer" title="Drag to resize dock"></div>
+
+      <div id="dockHeader">
+        <div class="dockTopRow">
+          <div class="dockTitle mono">Right Panel Dock</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <span class="dockHint mono" id="dockSlotsHint">slots: 0/3</span>
+            <button class="tbtn" id="dockCollapseBtn" title="Collapse/Expand">⇔</button>
+          </div>
+        </div>
+
+        <!-- Header selectors -->
+        <div class="dockBtns">
+          <button class="dockBtn primary" data-open="controls">
+            <span class="label">🎛️ Controls</span><span class="kbd">footer</span>
+          </button>
+          <button class="dockBtn" data-open="map">
+            <span class="label">🗺️ Map</span><span class="kbd">dock</span>
+          </button>
+          <button class="dockBtn" data-open="cam">
+            <span class="label">🧑✋ Camera</span><span class="kbd">dock</span>
+          </button>
+          <button class="dockBtn" data-open="settings">
+            <span class="label">⚙️ Settings</span><span class="kbd">dock</span>
+          </button>
+          <button class="dockBtn" data-open="hideAll">
+            <span class="label">🙈 Hide</span><span class="kbd">all</span>
+          </button>
+          <button class="dockBtn" data-open="showAll">
+            <span class="label">👁️ Show</span><span class="kbd">all</span>
+          </button>
+        </div>
+      </div>
+
+      <div id="dockSlots"></div>
+    </div>
+
+    <!-- FOOTER DOCK -->
+    <div id="footerDock" class="uiPanel">
+      <div id="footerTopResizer" title="Drag to resize footer height"></div>
+      <div id="footerHost"></div>
+    </div>
+  </div>
+
+  <!-- TILES -->
+
+  <!-- CONTROLS TILE -->
+  <div id="tile-controls" class="tile">
+    <div class="tileHeader">
+      <div class="tileLeft">
+        <div class="tileIcons"><span class="tileIcon">🎛️</span></div>
+        <div class="tileTitle mono">Controls (Footer / Detach)</div>
+      </div>
+      <div class="tileBtns">
+        <button class="tbtn primary" id="startCamBtnQ">Start Camera</button>
+        <button class="tbtn" id="controlsDockBtn" title="Attach to footer">Footer</button>
+        <button class="tbtn" id="controlsDetachBtn" title="Detach as floating">Detach</button>
+        <button class="tbtn" id="controlsMinBtn" title="Collapse tile">Min</button>
+        <button class="tbtn" id="controlsHideBtn" title="Hide tile">Hide</button>
+        <div class="tileGrip" data-grip="controls" title="Hold/drag (2-finger pinch to resize)">▦</div>
+      </div>
+    </div>
+
+    <div class="tileBody">
+      <div id="controlsGrid">
+        <div class="controlRow">
+          <label>Gameplay</label>
+          <select id="styleSel">
+            <option value="pass">PASS (You QB throw to AI WR)</option>
+            <option value="catch">CATCH (AI QB throw, You WR catch/run)</option>
+            <option value="tackle">TACKLE (You DEF chase & tackle AI runner)</option>
+          </select>
+
+          <label>Throw Ctrl</label>
+          <select id="throwCtrlSel">
+            <option value="gesture">Gesture</option>
+            <option value="keyboard">Keyboard</option>
+            <option value="ai">AI</option>
+          </select>
+
+          <label>Move Ctrl</label>
+          <select id="moveCtrlSel">
+            <option value="keyboard">Keyboard (WASD)</option>
+            <option value="ai">AI</option>
+          </select>
+
+          <label>View</label>
+          <select id="viewSel">
+            <option value="qb">QB (forward)</option>
+            <option value="endzone">Endzone</option>
+            <option value="sideline">Sideline</option>
+            <option value="overhead">Overhead</option>
+            <option value="follow">Follow Ball</option>
+            <option value="receiver">Receiver</option>
+            <option value="free">Free Orbit</option>
+          </select>
+
+          <label>Route</label>
+          <select id="routeSel">
+            <option value="go">GO</option>
+            <option value="slant">SLANT</option>
+            <option value="out">OUT</option>
+            <option value="curl">CURL</option>
+            <option value="post">POST</option>
+            <option value="corner">CORNER</option>
+          </select>
+        </div>
+
+        <div class="controlRow">
+          <div class="controlButtons">
+            <button class="primary" id="snapBtnQ">Snap / Start <span class="kbd">Enter</span></button>
+            <button id="throwBtnQ">Throw <span class="kbd">Space</span></button>
+            <button id="tossBtnQ">Toss <span class="kbd">G</span></button>
+            <button id="actionBtnQ">Catch / Tackle <span class="kbd">C</span></button>
+            <button id="resetBtnQ">Reset <span class="kbd">R</span></button>
+            <button id="toggleDockBtnQ">Toggle Right Dock</button>
+            <button id="toggleFooterBtnQ">Toggle Footer</button>
+          </div>
+        </div>
+
+        <div class="small mono" style="opacity:.88;line-height:1.35">
+          <b>Keyboard:</b> Aim = mouse/touch on field • Throw = <span class="kbd">Space</span> • Action = <span class="kbd">C</span> •
+          Move (WR/DEF) = <span class="kbd">WASD</span> • Cameras = <span class="kbd">1–7</span> • Snap = <span class="kbd">Enter</span> • Reset = <span class="kbd">R</span>.<br/>
+          <b>Gesture:</b> Throw = fist→open release • Toss (QB) = pinch→release • Catch = pinch or fist (config) • Tackle = pinch.
+        </div>
+      </div>
+    </div>
+
+    <div class="dockHeightResizer" data-dock-resize="controls"></div>
+    <div class="tileResize" data-resize="controls"></div>
+  </div>
+
+  <!-- MAP TILE -->
+  <div id="tile-map" class="tile">
+    <div class="tileHeader">
+      <div class="tileLeft">
+        <div class="tileIcons"><span class="tileIcon">🗺️</span></div>
+        <div class="tileTitle mono">Field Map (Ball + Players + History)</div>
+      </div>
+      <div class="tileBtns">
+        <button class="tbtn" data-up="map">↑</button>
+        <button class="tbtn" data-down="map">↓</button>
+        <button class="tbtn" data-dock="map">Dock</button>
+        <button class="tbtn" data-detach="map">Detach</button>
+        <button class="tbtn" data-min="map">Min</button>
+        <button class="tbtn" data-hide="map">Hide</button>
+        <div class="tileGrip" data-grip="map" title="Hold/drag (2-finger pinch to resize)">▦</div>
+      </div>
+    </div>
+
+    <div class="tileBody">
+      <div id="fieldMapWrap">
+        <canvas id="fieldMap"></canvas>
+      </div>
+      <div class="small mono" style="margin-top:8px;opacity:.86">
+        Legend:
+        <span class="chip"><span class="dot dotGood"></span> Complete</span>
+        <span class="chip"><span class="dot dotBad"></span> Incomplete</span>
+        <span class="chip"><span class="dot dotPurple"></span> INT</span>
+        <span class="chip"><span class="dot dotWarn"></span> TD</span>
+        <span class="chip"><span class="dot dotCyan"></span> Tackle</span>
+      </div>
+    </div>
+
+    <div class="dockHeightResizer" data-dock-resize="map"></div>
+    <div class="tileResize" data-resize="map"></div>
+  </div>
+
+  <!-- CAMERA TILE -->
+  <div id="tile-cam" class="tile">
+    <div class="tileHeader">
+      <div class="tileLeft">
+        <div class="tileIcons">
+          <span class="tileIcon">🧑</span>
+          <span class="tileIcon">✋</span>
+        </div>
+        <div class="tileTitle mono">Camera (MediaPipe Hands)</div>
+      </div>
+      <div class="tileBtns">
+        <button class="tbtn primary" id="startCamBtn">Start</button>
+        <button class="tbtn" data-up="cam">↑</button>
+        <button class="tbtn" data-down="cam">↓</button>
+        <button class="tbtn" data-dock="cam">Dock</button>
+        <button class="tbtn" data-detach="cam">Detach</button>
+        <button class="tbtn" data-min="cam">Min</button>
+        <button class="tbtn" data-hide="cam">Hide</button>
+        <div class="tileGrip" data-grip="cam" title="Hold/drag (2-finger pinch to resize)">▦</div>
+      </div>
+    </div>
+
+    <div class="tileBody">
+      <div id="camWrap">
+        <video id="video" playsinline muted></video>
+        <canvas id="overlay"></canvas>
+      </div>
+      <div id="statusLine" class="mono" style="margin-top:8px">Status: camera OFF</div>
+      <div class="small mono" style="margin-top:6px;opacity:.85">
+        Camera requires <b>https</b> or <b>localhost</b>. Gesture throw = fist→open. Pinch = catch/tackle.
+      </div>
+    </div>
+
+    <div class="dockHeightResizer" data-dock-resize="cam"></div>
+    <div class="tileResize" data-resize="cam"></div>
+  </div>
+
+  <!-- SETTINGS TILE -->
+  <div id="tile-settings" class="tile">
+    <div class="tileHeader">
+      <div class="tileLeft">
+        <div class="tileIcons"><span class="tileIcon">⚙️</span></div>
+        <div class="tileTitle mono">Settings + Readouts (Throw/Catch/Tackle/Physics)</div>
+      </div>
+      <div class="tileBtns">
+        <button class="tbtn" data-up="settings">↑</button>
+        <button class="tbtn" data-down="settings">↓</button>
+        <button class="tbtn" data-dock="settings">Dock</button>
+        <button class="tbtn" data-detach="settings">Detach</button>
+        <button class="tbtn" data-min="settings">Min</button>
+        <button class="tbtn" data-hide="settings">Hide</button>
+        <div class="tileGrip" data-grip="settings" title="Hold/drag (2-finger pinch to resize)">▦</div>
+      </div>
+    </div>
+
+    <div class="tileBody">
+      <details open>
+        <summary><span>Throw + Aim Tuners</span> <span class="tag">QB / pass</span></summary>
+
+        <div class="row">
+          <label>Aim Assist <span class="mono" id="aimAssistLabel">35%</span></label>
+          <input id="aimAssist" type="range" min="0" max="100" step="1" value="35"/>
+        </div>
+
+        <div class="row">
+          <label>Throw Scatter <span class="mono" id="scatterLabel">0.8m</span></label>
+          <input id="scatterM" type="range" min="0" max="4.0" step="0.05" value="0.80"/>
+        </div>
+
+        <div class="row">
+          <label>Gesture Release Sensitivity <span class="mono" id="relLabel">0.16</span></label>
+          <input id="releaseThresh" type="range" min="0.05" max="0.45" step="0.01" value="0.16"/>
+        </div>
+
+        <div class="row">
+          <label>Gesture Velocity Range <span class="mono" id="velRangeLabel">0.95</span></label>
+          <input id="velRange" type="range" min="0.35" max="1.80" step="0.01" value="0.95"/>
+        </div>
+
+        <div class="row">
+          <label>Throw Speed Min/Max (m/s) <span class="mono" id="spdLabel">16–34</span></label>
+          <input id="spdMin" type="range" min="8" max="28" step="1" value="16"/>
+          <input id="spdMax" type="range" min="18" max="48" step="1" value="34"/>
+        </div>
+
+        <div class="row">
+          <label>Speed Curve (expo) <span class="mono" id="expoLabel">0.62</span></label>
+          <input id="velExpo" type="range" min="0.35" max="1.50" step="0.01" value="0.62"/>
+        </div>
+
+        <div class="row">
+          <label>Spiral Spin Gain <span class="mono" id="spinGainLabel">8.0</span></label>
+          <input id="spinGain" type="range" min="1.0" max="18.0" step="0.1" value="8.0"/>
+        </div>
+
+        <div class="row">
+          <label>Wind X (m/s) <span class="mono" id="windLabel">0.0</span></label>
+          <input id="wind" type="range" min="-8" max="8" step="0.1" value="0"/>
+        </div>
+      </details>
+
+
+      <details open>
+        <summary><span>Hand Cursor + Gestures</span> <span class="tag">CV</span></summary>
+
+        <div class="row">
+          <label>Cursor Mode <span class="mono" id="cursorModeLabel">Aim+Catch</span></label>
+          <select id="cursorMode">
+            <option value="off">Off</option>
+            <option value="aim">Aim only (QB)</option>
+            <option value="aimCatch" selected>Aim + Catch cursor</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <label>Cursor Offset Preset <span class="mono" id="cursorPresetLabel">CENTER</span></label>
+          <select id="cursorPreset">
+            <option value="center" selected>Center</option>
+            <option value="up">Up</option>
+            <option value="down">Down</option>
+            <option value="free">Free (use sliders)</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <label>Offset X <span class="mono" id="offXLabel">0px</span></label>
+          <input id="cursorOffX" type="range" min="-320" max="320" step="1" value="0"/>
+        </div>
+
+        <div class="row">
+          <label>Offset Y <span class="mono" id="offYLabel">0px</span></label>
+          <input id="cursorOffY" type="range" min="-320" max="320" step="1" value="0"/>
+        </div>
+
+        <div class="row">
+          <label>Cursor Smoothing <span class="mono" id="smoothLabel">0.22</span></label>
+          <input id="cursorSmooth" type="range" min="0.05" max="0.55" step="0.01" value="0.22"/>
+        </div>
+
+        <div class="row">
+          <label>Catch Gesture (WR)</label>
+          <select id="catchGesture">
+            <option value="pinch">Pinch</option>
+            <option value="fist">Fist</option>
+            <option value="either" selected>Pinch or Fist</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <label>Toss Gesture (QB)</label>
+          <select id="tossGesture">
+            <option value="off">Off</option>
+            <option value="pinchRelease" selected>Pinch → release</option>
+            <option value="pinchTap">Pinch tap</option>
+          </select>
+        </div>
+
+        <div class="small mono" style="opacity:.85;line-height:1.35;margin-top:6px">
+          Tip: Press <span class="kbd">O</span> to cycle offset presets (Center/Up/Down). Press <span class="kbd">G</span> to toss.
+        </div>
+      </details>
+
+
+      <details open>
+        <summary><span>Catch + Tackle Tuners</span> <span class="tag">WR / DEF</span></summary>
+
+        <div class="row">
+          <label>Catch Radius <span class="mono" id="catchRadLabel">1.30m</span></label>
+          <input id="catchRadius" type="range" min="0.6" max="2.4" step="0.05" value="1.30"/>
+        </div>
+
+        <div class="row">
+          <label>Catch Window <span class="mono" id="catchWinLabel">260ms</span></label>
+          <input id="catchWindowMs" type="range" min="120" max="520" step="10" value="260"/>
+        </div>
+
+        <div class="row">
+          <label>Tackle Radius <span class="mono" id="tackleRadLabel">1.55m</span></label>
+          <input id="tackleRadius" type="range" min="0.8" max="3.0" step="0.05" value="1.55"/>
+        </div>
+
+        <div class="row">
+          <label>Tackle Window <span class="mono" id="tackleWinLabel">280ms</span></label>
+          <input id="tackleWindowMs" type="range" min="120" max="600" step="10" value="280"/>
+        </div>
+
+        <div class="row">
+          <label>Carrier Speed <span class="mono" id="carrierSpdLabel">6.8</span></label>
+          <input id="carrierSpeed" type="range" min="3.0" max="10.0" step="0.1" value="6.8"/>
+        </div>
+
+        <div class="row">
+          <label>Defender Speed <span class="mono" id="defSpdLabel">7.3</span></label>
+          <input id="defSpeed" type="range" min="3.0" max="11.0" step="0.1" value="7.3"/>
+        </div>
+
+        <div class="row">
+          <label>AI Difficulty <span class="mono" id="aiLabel">0.70</span></label>
+          <input id="aiDiff" type="range" min="0.10" max="0.95" step="0.01" value="0.70"/>
+        </div>
+      </details>
+
+      <details>
+        <summary><span>Physics (Ball Flight)</span> <span class="tag">drag / curve</span></summary>
+
+        <div class="row">
+          <label>Drag Scale <span class="mono" id="dragLabel">1.00</span></label>
+          <input id="dragScale" type="range" min="0.50" max="1.80" step="0.01" value="1.00"/>
+        </div>
+
+        <div class="row">
+          <label>Magnus Scale <span class="mono" id="magLabel">1.00</span></label>
+          <input id="magnusScale" type="range" min="0.50" max="2.00" step="0.01" value="1.00"/>
+        </div>
+
+        <div class="row">
+          <label>Gravity Scale <span class="mono" id="gravLabel">1.00</span></label>
+          <input id="gravityScale" type="range" min="0.70" max="1.30" step="0.01" value="1.00"/>
+        </div>
+      </details>
+
+      <details open>
+        <summary><span>Full Readouts</span> <span class="tag">live</span></summary>
+        <div class="mono" style="line-height:1.35;margin-top:8px">
+          <b>Style:</b> <span id="styleRead">PASS</span> &nbsp; <b>Play:</b> <span id="playRead">0</span><br/>
+          <b>Score:</b> OFF <span id="offScore">0</span> — DEF <span id="defScore">0</span><br/>
+          <b>Ball:</b> <span id="ballStateRead">—</span><br/>
+          <b>Last:</b> <span id="lastCall">—</span><br/>
+          <b>Aim:</b> <span id="aimRead">—</span><br/>
+          <b>Throw:</b> <span id="throwRead">spd=— spin=— wind=—</span><br/>
+          <b>Gesture:</b> <span id="gestureRead">hand=— pinch=— v=— peak=—</span>
+        </div>
+      </details>
+    </div>
+
+    <div class="dockHeightResizer" data-dock-resize="settings"></div>
+    <div class="tileResize" data-resize="settings"></div>
+  </div>
+
+  <!-- libs -->
+  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+
+  <script>
+    // =========================================================
+    // Helpers
+    // =========================================================
+    const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+    const lerp  = (a,b,t)=>a+(b-a)*t;
+    const nowS = ()=>performance.now()/1000;
+    const el = id => document.getElementById(id);
+
+    function showCallout(text, ms=700){
+      const calloutEl = el('callout');
+      calloutEl.textContent = text;
+      calloutEl.style.opacity = 1;
+      setTimeout(()=>{ calloutEl.style.opacity = 0; }, ms);
+    }
+
+    // Optional backend hook:
+    function emitBackendEvent(type, payload={}){
+      try{
+        if (window.FOOTBALL_BACKEND && typeof window.FOOTBALL_BACKEND.onEvent === "function"){
+          window.FOOTBALL_BACKEND.onEvent({ type, t: Date.now(), ...payload });
+        }
+      }catch(e){}
+    }
+
+    // =========================================================
+    // Tile Manager (dock right, footer attach, detach floating)
+    // =========================================================
+    const rightDock = el('rightDock');
+    const dockSlots = el('dockSlots');
+    const dockSlotsHint = el('dockSlotsHint');
+    const footerDock = el('footerDock');
+    const footerHost = el('footerHost');
+
+    const MAX_DOCK_TILES = 3;
+    let topZ = 100;
+
+    const Tile = {
+      map: new Map(),
+      dockOrder: [],
+      dockCollapsed: false,
+      footerCollapsed: false
+    };
+
+    function bringToFront(tileEl){
+      topZ += 1;
+      tileEl.style.zIndex = String(topZ);
+    }
+    function updateDockHint(){
+      dockSlotsHint.textContent = `slots: ${Tile.dockOrder.length}/${MAX_DOCK_TILES}`;
+    }
+    function registerTile(id, tileEl){
+      Tile.map.set(id, {
+        el: tileEl,
+        state: "hidden",
+        minimized: false,
+        last: { x: 80 + Math.random()*180, y: 120 + Math.random()*140, w: 420, h: 320 },
+        fixedH: null
+      });
+      tileEl.classList.add('hidden');
+    }
+    function setMinimized(id, on){
+      const t = Tile.map.get(id);
+      if (!t) return;
+      t.minimized = on;
+      const body = t.el.querySelector('.tileBody');
+      if (body) body.style.display = on ? "none" : "";
+      const dh = t.el.querySelector('.dockHeightResizer');
+      if (dh) dh.style.display = on ? "none" : "";
+      const rh = t.el.querySelector('.tileResize');
+      if (rh) rh.style.display = on ? "none" : "";
+    }
+    function setHidden(id, hidden){
+      const t = Tile.map.get(id);
+      if (!t) return;
+      if (hidden){
+        if (t.state === "dock"){
+          Tile.dockOrder = Tile.dockOrder.filter(x => x !== id);
+          renderDock();
+        }
+        if (t.state === "footer"){
+          footerHost.innerHTML = "";
+        }
+        t.state = "hidden";
+        t.el.classList.add('hidden');
+      }else{
+        t.el.classList.remove('hidden');
+      }
+      updateDockHint();
+    }
+    function dockTileRight(id, {focus=true}={}){
+      const t = Tile.map.get(id);
+      if (!t) return;
+
+      if (id === "controls") return attachToFooter(id, {focus});
+
+      t.el.classList.remove('hidden');
+
+      if (t.state === "float"){
+        const r = t.el.getBoundingClientRect();
+        t.last = { x:r.left, y:r.top, w:r.width, h:r.height };
+      }
+
+      if (!Tile.dockOrder.includes(id) && Tile.dockOrder.length >= MAX_DOCK_TILES){
+        const evictId = Tile.dockOrder[Tile.dockOrder.length - 1];
+        setHidden(evictId, true);
+      }
+
+      if (!Tile.dockOrder.includes(id)){
+        Tile.dockOrder.unshift(id);
+      }
+
+      t.state = "dock";
+      t.el.classList.remove('floating','footerAttached');
+      t.el.classList.add('docked');
+      t.el.style.left = ""; t.el.style.top = ""; t.el.style.width=""; t.el.style.height="";
+      t.el.style.maxHeight = "";
+      t.el.style.zIndex = "";
+
+      if (t.fixedH){
+        t.el.style.flex = `0 0 ${t.fixedH}px`;
+      } else {
+        t.el.style.flex = "1 1 0px";
+      }
+
+      renderDock();
+      if (focus) focusTile(id);
+      updateDockHint();
+    }
+    function renderDock(){
+      dockSlots.innerHTML = "";
+      for (const id of Tile.dockOrder){
+        const t = Tile.map.get(id);
+        if (!t || t.state !== "dock") continue;
+        dockSlots.appendChild(t.el);
+      }
+      updateDockHint();
+    }
+    function attachToFooter(id, {focus=true}={}){
+      const t = Tile.map.get(id);
+      if (!t) return;
+      t.el.classList.remove('hidden');
+
+      if (t.state === "float"){
+        const r = t.el.getBoundingClientRect();
+        t.last = { x:r.left, y:r.top, w:r.width, h:r.height };
+      }
+
+      t.state = "footer";
+      t.el.classList.remove('floating','docked');
+      t.el.classList.add('footerAttached');
+      t.el.style.left = ""; t.el.style.top = ""; t.el.style.width=""; t.el.style.height="";
+      t.el.style.zIndex = "";
+      footerHost.innerHTML = "";
+      footerHost.appendChild(t.el);
+
+      t.el.style.flex = "1 1 0px";
+      if (focus) focusTile(id);
+    }
+    function detachToFloating(id, {x=null,y=null,w=null,h=null,focus=true}={}){
+      const t = Tile.map.get(id);
+      if (!t) return;
+      t.el.classList.remove('hidden');
+
+      if (t.state === "dock"){
+        Tile.dockOrder = Tile.dockOrder.filter(v => v !== id);
+        renderDock();
+      }
+      if (t.state === "footer"){
+        footerHost.innerHTML = "";
+      }
+
+      t.state = "float";
+      t.el.classList.remove('docked','footerAttached');
+      t.el.classList.add('floating');
+
+      const L = (x!==null) ? x : t.last.x;
+      const T = (y!==null) ? y : t.last.y;
+      const W = (w!==null) ? w : t.last.w;
+      const H = (h!==null) ? h : t.last.h;
+
+      t.el.style.left = clamp(L, 8, window.innerWidth - 280) + "px";
+      t.el.style.top  = clamp(T, 8, window.innerHeight - 160) + "px";
+      t.el.style.width  = clamp(W, 260, window.innerWidth - 16) + "px";
+      t.el.style.height = clamp(H, 140, window.innerHeight - 16) + "px";
+
+      document.body.appendChild(t.el);
+      bringToFront(t.el);
+      if (focus) focusTile(id);
+      updateDockHint();
+    }
+    function focusTile(id){
+      const t = Tile.map.get(id);
+      if (!t) return;
+      if (t.state === "float") bringToFront(t.el);
+    }
+    function moveDockTile(id, dir){
+      const idx = Tile.dockOrder.indexOf(id);
+      if (idx < 0) return;
+      const ni = clamp(idx + dir, 0, Tile.dockOrder.length - 1);
+      if (ni === idx) return;
+      const arr = Tile.dockOrder.slice();
+      const [x] = arr.splice(idx,1);
+      arr.splice(ni,0,x);
+      Tile.dockOrder = arr;
+      renderDock();
+    }
+
+    // Dock width resize
+    (function dockWidthResize(){
+      const grip = el('dockWidthResizer');
+      let active = false;
+      grip.addEventListener('pointerdown', (e)=>{
+        active = true;
+        grip.setPointerCapture(e.pointerId);
+        e.preventDefault();
+      });
+      grip.addEventListener('pointermove', (e)=>{
+        if (!active || rightDock.classList.contains('collapsed')) return;
+        const right = 14;
+        const newW = clamp((window.innerWidth - e.clientX) - right, 260, 520);
+        rightDock.style.width = newW + "px";
+      });
+      grip.addEventListener('pointerup', ()=>{ active=false; });
+      grip.addEventListener('pointercancel', ()=>{ active=false; });
+    })();
+
+    // Footer height resize
+    (function footerHeightResize(){
+      const grip = el('footerTopResizer');
+      let active = false;
+      grip.addEventListener('pointerdown', (e)=>{
+        active = true;
+        grip.setPointerCapture(e.pointerId);
+        e.preventDefault();
+      });
+      grip.addEventListener('pointermove', (e)=>{
+        if (!active || footerDock.classList.contains('collapsed')) return;
+        const bottom = 14;
+        const newH = clamp((window.innerHeight - e.clientY) - bottom, 54, Math.floor(window.innerHeight*0.70));
+        footerDock.style.height = newH + "px";
+      });
+      grip.addEventListener('pointerup', ()=>{ active=false; });
+      grip.addEventListener('pointercancel', ()=>{ active=false; });
+    })();
+
+    // Floating gestures: drag + pinch resize + corner resize
+    function enableFloatingGestures(id){
+      const t = Tile.map.get(id);
+      if (!t) return;
+
+      const tileEl = t.el;
+      const grip = tileEl.querySelector(`[data-grip="${id}"]`);
+      const resizeHandle = tileEl.querySelector(`[data-resize="${id}"]`);
+
+      const pointers = new Map();
+      let mode = "none"; // "drag" | "pinch" | "resize"
+      let startRect = null;
+      let startCenter = null;
+      let startDist = 0;
+
+      const getRect = ()=>tileEl.getBoundingClientRect();
+
+      function beginDrag(){
+        if (t.state !== "float") return;
+        mode = "drag";
+        bringToFront(tileEl);
+        const r = getRect();
+        startRect = { left:r.left, top:r.top, width:r.width, height:r.height };
+      }
+      function beginResize(){
+        if (t.state !== "float") return;
+        mode = "resize";
+        bringToFront(tileEl);
+        const r = getRect();
+        startRect = { left:r.left, top:r.top, width:r.width, height:r.height };
+      }
+      function beginPinchIfNeeded(){
+        if (t.state !== "float") return;
+        if (pointers.size !== 2) return;
+        mode = "pinch";
+        bringToFront(tileEl);
+        const pts = Array.from(pointers.values());
+        startCenter = { x:(pts[0].x+pts[1].x)/2, y:(pts[0].y+pts[1].y)/2 };
+        startDist = Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y);
+        const r = getRect();
+        startRect = { left:r.left, top:r.top, width:r.width, height:r.height };
+      }
+
+      function applyDrag(e){
+        if (mode !== "drag" || !startRect) return;
+        const p = pointers.get(e.pointerId);
+        if (!p) return;
+        const dx = p.x - p.sx;
+        const dy = p.y - p.sy;
+        const newL = clamp(startRect.left + dx, 8, window.innerWidth - 260);
+        const newT = clamp(startRect.top  + dy, 8, window.innerHeight - 140);
+        tileEl.style.left = newL + "px";
+        tileEl.style.top  = newT + "px";
+        t.last.x = newL; t.last.y = newT;
+      }
+      function applyResize(e){
+        if (mode !== "resize" || !startRect) return;
+        const p = pointers.get(e.pointerId);
+        if (!p) return;
+        const dx = p.x - p.sx;
+        const dy = p.y - p.sy;
+        const newW = clamp(startRect.width + dx, 260, window.innerWidth - 16);
+        const newH = clamp(startRect.height + dy, 140, window.innerHeight - 16);
+        tileEl.style.width  = newW + "px";
+        tileEl.style.height = newH + "px";
+        t.last.w = newW; t.last.h = newH;
+      }
+      function applyPinch(){
+        if (mode !== "pinch" || !startRect || pointers.size !== 2) return;
+        const pts = Array.from(pointers.values());
+        const center = { x:(pts[0].x+pts[1].x)/2, y:(pts[0].y+pts[1].y)/2 };
+        const dist = Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y);
+        const scale = clamp(dist / (startDist || 1), 0.65, 2.2);
+
+        const newW = clamp(startRect.width * scale, 260, window.innerWidth - 16);
+        const newH = clamp(startRect.height * scale, 140, window.innerHeight - 16);
+
+        const cx0 = startRect.left + startRect.width/2;
+        const cy0 = startRect.top  + startRect.height/2;
+        const dxC = center.x - startCenter.x;
+        const dyC = center.y - startCenter.y;
+
+        const newL = clamp((cx0 + dxC) - newW/2, 8, window.innerWidth - 260);
+        const newT = clamp((cy0 + dyC) - newH/2, 8, window.innerHeight - 140);
+
+        tileEl.style.left = newL + "px";
+        tileEl.style.top  = newT + "px";
+        tileEl.style.width  = newW + "px";
+        tileEl.style.height = newH + "px";
+
+        t.last = { x:newL, y:newT, w:newW, h:newH };
+      }
+
+      function onPointerDown(e, kind){
+        if (t.state !== "float") return;
+        pointers.set(e.pointerId, { x:e.clientX, y:e.clientY, sx:e.clientX, sy:e.clientY });
+        (kind === "resize") ? beginResize() : beginDrag();
+        e.target.setPointerCapture(e.pointerId);
+        e.preventDefault();
+        beginPinchIfNeeded();
+      }
+
+      function onPointerMove(e){
+        const p = pointers.get(e.pointerId);
+        if (!p) return;
+        p.x = e.clientX; p.y = e.clientY;
+        if (t.state !== "float") return;
+
+        if (pointers.size === 2){
+          beginPinchIfNeeded();
+          applyPinch();
+          return;
+        }
+        if (mode === "drag") applyDrag(e);
+        if (mode === "resize") applyResize(e);
+      }
+
+      function onPointerUp(e){
+        pointers.delete(e.pointerId);
+        if (pointers.size < 2 && mode === "pinch"){
+          mode = "none";
+          startRect = null; startCenter = null; startDist = 0;
+        }
+        if (pointers.size === 0){
+          mode = "none";
+          startRect = null; startCenter = null; startDist = 0;
+        }
+      }
+
+      if (grip){
+        grip.addEventListener('pointerdown', (e)=>onPointerDown(e, "drag"));
+        grip.addEventListener('pointermove', onPointerMove);
+        grip.addEventListener('pointerup', onPointerUp);
+        grip.addEventListener('pointercancel', onPointerUp);
+      }
+      if (resizeHandle){
+        resizeHandle.addEventListener('pointerdown', (e)=>onPointerDown(e, "resize"));
+        resizeHandle.addEventListener('pointermove', onPointerMove);
+        resizeHandle.addEventListener('pointerup', onPointerUp);
+        resizeHandle.addEventListener('pointercancel', onPointerUp);
+      }
+      tileEl.addEventListener('pointerdown', ()=>{
+        if (t.state === "float") bringToFront(tileEl);
+      });
+    }
+
+    // Docked tile height resizers
+    function enableDockHeightResize(id){
+      const t = Tile.map.get(id);
+      if (!t) return;
+      const bar = t.el.querySelector(`[data-dock-resize="${id}"]`);
+      if (!bar) return;
+
+      let active = false;
+      let startY = 0;
+      let startH = 0;
+
+      bar.addEventListener('pointerdown', (e)=>{
+        if (t.state !== "dock") return;
+        active = true;
+        startY = e.clientY;
+        startH = t.el.getBoundingClientRect().height;
+        bar.setPointerCapture(e.pointerId);
+        e.preventDefault();
+      });
+
+      bar.addEventListener('pointermove', (e)=>{
+        if (!active || t.state !== "dock") return;
+        const dy = e.clientY - startY;
+        const newH = clamp(startH + dy, 120, Math.floor(window.innerHeight*0.78));
+        t.fixedH = newH;
+        t.el.style.flex = `0 0 ${newH}px`;
+      });
+
+      bar.addEventListener('pointerup', ()=>{ active=false; });
+      bar.addEventListener('pointercancel', ()=>{ active=false; });
+    }
+
+    function wireTileButtons(){
+      document.querySelectorAll('[data-up]').forEach(btn=>{
+        btn.addEventListener('click', ()=>moveDockTile(btn.getAttribute('data-up'), -1));
+      });
+      document.querySelectorAll('[data-down]').forEach(btn=>{
+        btn.addEventListener('click', ()=>moveDockTile(btn.getAttribute('data-down'), +1));
+      });
+      document.querySelectorAll('[data-dock]').forEach(btn=>{
+        btn.addEventListener('click', ()=>dockTileRight(btn.getAttribute('data-dock')));
+      });
+      document.querySelectorAll('[data-detach]').forEach(btn=>{
+        btn.addEventListener('click', ()=>detachToFloating(btn.getAttribute('data-detach')));
+      });
+      document.querySelectorAll('[data-hide]').forEach(btn=>{
+        btn.addEventListener('click', ()=>setHidden(btn.getAttribute('data-hide'), true));
+      });
+      document.querySelectorAll('[data-min]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const id = btn.getAttribute('data-min');
+          const t = Tile.map.get(id);
+          const next = !t.minimized;
+          setMinimized(id, next);
+          btn.textContent = next ? "Max" : "Min";
+        });
+      });
+
+      el('controlsDockBtn').addEventListener('click', ()=>attachToFooter('controls'));
+      el('controlsDetachBtn').addEventListener('click', ()=>detachToFloating('controls'));
+      el('controlsHideBtn').addEventListener('click', ()=>setHidden('controls', true));
+      el('controlsMinBtn').addEventListener('click', ()=>{
+        const t = Tile.map.get('controls');
+        const next = !t.minimized;
+        setMinimized('controls', next);
+        el('controlsMinBtn').textContent = next ? "Max" : "Min";
+      });
+    }
+
+    function wireDockSelectors(){
+      document.querySelectorAll('.dockBtn').forEach(b=>{
+        b.addEventListener('click', ()=>{
+          const which = b.getAttribute('data-open');
+          if (which === "hideAll"){
+            ['map','cam','settings'].forEach(id=>setHidden(id,true));
+            return;
+          }
+          if (which === "showAll"){
+            ['map','cam','settings'].forEach(id=>dockTileRight(id));
+            return;
+          }
+          if (which === "controls"){
+            attachToFooter('controls');
+            footerDock.classList.remove('collapsed');
+            Tile.footerCollapsed = false;
+            return;
+          }
+          dockTileRight(which);
+        });
+      });
+
+      el('dockCollapseBtn').addEventListener('click', ()=>{
+        Tile.dockCollapsed = !Tile.dockCollapsed;
+        rightDock.classList.toggle('collapsed', Tile.dockCollapsed);
+      });
+    }
+
+    // Toggle dock/footer from controls tile
+    el('toggleDockBtnQ').addEventListener('click', ()=>{
+      Tile.dockCollapsed = !Tile.dockCollapsed;
+      rightDock.classList.toggle('collapsed', Tile.dockCollapsed);
+    });
+    el('toggleFooterBtnQ').addEventListener('click', ()=>{
+      Tile.footerCollapsed = !Tile.footerCollapsed;
+      footerDock.classList.toggle('collapsed', Tile.footerCollapsed);
+    });
+
+    // Register tiles
+    registerTile('controls', el('tile-controls'));
+    registerTile('map',      el('tile-map'));
+    registerTile('cam',      el('tile-cam'));
+    registerTile('settings', el('tile-settings'));
+
+    ['controls','map','cam','settings'].forEach(id=>{
+      enableFloatingGestures(id);
+      enableDockHeightResize(id);
+    });
+
+    wireTileButtons();
+    wireDockSelectors();
+
+    // Default layout
+    attachToFooter('controls');
+    dockTileRight('map', {focus:false});
+    dockTileRight('cam', {focus:false});
+    dockTileRight('settings', {focus:false});
+
+    // =========================================================
+    // Prevent orbit drag when interacting with UI
+    // =========================================================
+    function isInUI(target){
+      return !!(target.closest && (target.closest('.tile') || target.closest('#rightDock') || target.closest('#footerDock') || target.closest('#topHUD')));
+    }
+
+    // =========================================================
+    // THREE.JS FIELD + PLAYERS + BALL
+    // =========================================================
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.Fog(0x05060a, 25, 260);
+
+    const renderer = new THREE.WebGLRenderer({ antialias:true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.domElement.id = "threeCanvas";
+    document.body.insertBefore(renderer.domElement, document.body.firstChild);
+
+    const camera = new THREE.PerspectiveCamera(58, innerWidth/innerHeight, 0.05, 900);
+
+    // Lights
+    scene.add(new THREE.AmbientLight(0xffffff, 0.58));
+    const keyLight = new THREE.DirectionalLight(0xffffff, 1.08);
+    keyLight.position.set(22, 34, 18);
+    scene.add(keyLight);
+    const rimLight = new THREE.DirectionalLight(0x9bd0ff, 0.35);
+    rimLight.position.set(-30, 18, -28);
+    scene.add(rimLight);
+
+    // Field constants (approx meters; looks like football scale)
+    const FIELD = {
+      length: 120,   // endzone-to-endzone
+      width: 53.33,
+      endzone: 10
+    };
+    const Z_HOME_END = -FIELD.length/2;
+    const Z_AWAY_END =  FIELD.length/2;
+    const LOS_Z = -20; // line of scrimmage
+
+    function makeFieldTexture(){
+      const W = 2048, H = 1024;
+      const c = document.createElement('canvas');
+      c.width = W; c.height = H;
+      const g = c.getContext('2d');
+
+      g.fillStyle = '#0a2a17';
+      g.fillRect(0,0,W,H);
+
+      // soft stripes
+      for (let i=0;i<24;i++){
+        g.fillStyle = (i%2===0) ? 'rgba(255,255,255,0.035)' : 'rgba(0,0,0,0.03)';
+        g.fillRect(0, i*(H/24), W, H/24);
+      }
+
+      // endzones tint
+      const ezPx = Math.floor((FIELD.endzone / FIELD.length) * H);
+      g.fillStyle = 'rgba(120,180,255,0.12)';
+      g.fillRect(0, 0, W, ezPx);
+      g.fillRect(0, H-ezPx, W, ezPx);
+
+      // boundary
+      g.strokeStyle = 'rgba(255,255,255,0.32)';
+      g.lineWidth = 6;
+      g.strokeRect(8,8,W-16,H-16);
+
+      // yard lines every 5
+      for (let y=0;y<=FIELD.length;y+=5){
+        const py = (y/FIELD.length)*H;
+        const major = (y%10===0);
+        g.strokeStyle = major ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.24)';
+        g.lineWidth = major ? 4 : 2;
+        g.beginPath();
+        g.moveTo(0, py);
+        g.lineTo(W, py);
+        g.stroke();
+
+        // hash marks
+        g.strokeStyle = 'rgba(255,255,255,0.26)';
+        g.lineWidth = 2;
+        const leftHash = W*0.35, rightHash = W*0.65;
+        g.beginPath();
+        g.moveTo(leftHash, py);
+        g.lineTo(leftHash, py + 16);
+        g.moveTo(rightHash, py);
+        g.lineTo(rightHash, py + 16);
+        g.stroke();
+      }
+
+      // midfield ring
+      g.strokeStyle = 'rgba(255,255,255,0.12)';
+      g.lineWidth = 10;
+      g.beginPath();
+      g.arc(W/2, H/2, H*0.12, 0, Math.PI*2);
+      g.stroke();
+
+      const tex = new THREE.CanvasTexture(c);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.anisotropy = 8;
+      tex.needsUpdate = true;
+      return tex;
+    }
+
+    const field = new THREE.Mesh(
+      new THREE.PlaneGeometry(FIELD.width, FIELD.length, 1, 1),
+      new THREE.MeshStandardMaterial({ map: makeFieldTexture(), roughness: 0.95 })
+    );
+    field.rotation.x = -Math.PI/2;
+    field.position.set(0, 0, 0);
+    scene.add(field);
+
+    // Goalposts (simple)
+    function makeGoalpost(z){
+      const gp = new THREE.Group();
+      const mat = new THREE.MeshStandardMaterial({ color:0xffd96a, roughness:0.45, emissive:0x221a00, emissiveIntensity:0.25 });
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 8.0, 16), mat);
+      pole.position.set(0, 4.0, 0);
+      const cross = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 6.2, 16), mat);
+      cross.rotation.z = Math.PI/2;
+      cross.position.set(0, 6.2, 0);
+      const upL = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 6.0, 16), mat);
+      upL.position.set(-3.0, 9.2, 0);
+      const upR = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 6.0, 16), mat);
+      upR.position.set( 3.0, 9.2, 0);
+      gp.add(pole, cross, upL, upR);
+      gp.position.set(0, 0, z);
+      scene.add(gp);
+      return gp;
+    }
+    makeGoalpost(Z_HOME_END + 2.5);
+    makeGoalpost(Z_AWAY_END - 2.5);
+
+    // Stadium walls
+    const wallMat = new THREE.MeshStandardMaterial({ color:0x0b0e18, roughness:0.95, emissive:0x05060a, emissiveIntensity:0.5 });
+    function wall(w,h,d,x,y,z){
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), wallMat);
+      m.position.set(x,y,z);
+      scene.add(m);
+      return m;
+    }
+    wall(FIELD.width+28, 2.6, 2.0, 0, 1.3,  FIELD.length/2 + 2.0);
+    wall(FIELD.width+28, 2.6, 2.0, 0, 1.3, -FIELD.length/2 - 2.0);
+    wall(2.0, 2.6, FIELD.length+20, -FIELD.width/2 - 2.0, 1.3, 0);
+    wall(2.0, 2.6, FIELD.length+20,  FIELD.width/2 + 2.0, 1.3, 0);
+
+    // LOS line
+    const losLine = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-FIELD.width/2,0.02,LOS_Z), new THREE.Vector3(FIELD.width/2,0.02,LOS_Z)]),
+      new THREE.LineBasicMaterial({ color:0x50d2ff, transparent:true, opacity:0.55 })
+    );
+    scene.add(losLine);
+
+    // Players (capsule + head)
+    function makePlayer(colorHex){
+      const g = new THREE.Group();
+      const mat = new THREE.MeshStandardMaterial({ color:colorHex, roughness:0.92, emissive:0x0b0e18, emissiveIntensity:0.35 });
+      const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.55, 1.45, 8, 14), mat);
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.40, 18, 14), mat);
+      body.position.set(0, 1.15, 0);
+      head.position.set(0, 2.15, 0);
+      g.add(body, head);
+      return g;
+    }
+
+    const qb = makePlayer(0x2a2f3f);
+    scene.add(qb);
+
+    const wr = makePlayer(0x1b3b66);
+    scene.add(wr);
+
+    const cb = makePlayer(0x4a1b1b);
+    scene.add(cb);
+
+    const safety = makePlayer(0x3a173f);
+    scene.add(safety);
+
+    const runner = makePlayer(0x263a1a); // used in tackle drill
+    scene.add(runner);
+
+    // Football (scaled sphere)
+    const ballBaseR = 0.22;
+    const ballGeo = new THREE.SphereGeometry(ballBaseR, 28, 22);
+    const ballMat = new THREE.MeshStandardMaterial({ color:0x7a4a1c, roughness:0.55, emissive:0x1c0f06, emissiveIntensity:0.35 });
+    const ballMesh = new THREE.Mesh(ballGeo, ballMat);
+    ballMesh.scale.set(1.55, 1.0, 1.0); // prolate spheroid
+    scene.add(ballMesh);
+
+    // Laces ring
+    const lace = new THREE.Mesh(
+      new THREE.TorusGeometry(ballBaseR*0.65, 0.05, 10, 64),
+      new THREE.MeshStandardMaterial({ color:0xe6e6e6, roughness:0.65, emissive:0x111111, emissiveIntensity:0.3 })
+    );
+    lace.rotation.x = Math.PI/2;
+    ballMesh.add(lace);
+
+    // Aim ring
+    const aimRing = new THREE.Mesh(
+      new THREE.TorusGeometry(0.90, 0.07, 10, 56),
+      new THREE.MeshStandardMaterial({ color:0xffd96a, roughness:0.35, emissive:0x221a00, emissiveIntensity:0.8 })
+    );
+    aimRing.rotation.x = Math.PI/2;
+    aimRing.position.set(0, 0.06, 10);
+    scene.add(aimRing);
+
+
+    // Catch cursor (receiver hands target driven by hand cursor)
+    const catchCursorMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.16, 18, 14),
+      new THREE.MeshStandardMaterial({
+        color:0x50d2ff,
+        roughness:0.25,
+        emissive:0x001a22,
+        emissiveIntensity:0.9,
+        transparent:true,
+        opacity:0.95
+      })
+    );
+    catchCursorMesh.visible = false;
+    scene.add(catchCursorMesh);
+
+
+    // Ball trail
+    let trailOn = true;
+    const trailMax = 220;
+    const trailPositions = new Float32Array(trailMax*3);
+    const trailGeo = new THREE.BufferGeometry();
+    trailGeo.setAttribute('position', new THREE.BufferAttribute(trailPositions, 3));
+    trailGeo.setDrawRange(0,0);
+    const trailMat = new THREE.LineBasicMaterial({ color:0x50d2ff, transparent:true, opacity:0.55 });
+    const trailLine = new THREE.Line(trailGeo, trailMat);
+    scene.add(trailLine);
+    let trailCount = 0;
+
+    function trailReset(){ trailCount=0; trailGeo.setDrawRange(0,0); trailGeo.attributes.position.needsUpdate=true; }
+    function trailAdd(p){
+      if (!trailOn) return;
+      if (trailCount >= trailMax){
+        for (let i=1;i<trailMax;i++){
+          trailPositions[(i-1)*3+0]=trailPositions[i*3+0];
+          trailPositions[(i-1)*3+1]=trailPositions[i*3+1];
+          trailPositions[(i-1)*3+2]=trailPositions[i*3+2];
+        }
+        trailCount = trailMax-1;
+      }
+      trailPositions[trailCount*3+0]=p.x;
+      trailPositions[trailCount*3+1]=p.y;
+      trailPositions[trailCount*3+2]=p.z;
+      trailCount++;
+      trailGeo.setDrawRange(0, trailCount);
+      trailGeo.attributes.position.needsUpdate = true;
+    }
+
+    // =========================================================
+    // Camera modes (baseball-like orbit + presets)
+    // =========================================================
+    const CAM_MODES = { QB:0, ENDZONE:1, SIDELINE:2, OVERHEAD:3, FOLLOW:4, RECEIVER:5, FREE:6 };
+    let camMode = CAM_MODES.QB;
+
+    const lookAt = new THREE.Vector3(0,1.6,LOS_Z+10);
+    const orbit = { theta:Math.PI, phi:0.15, radius:22, dragging:false, lx:0, ly:0 };
+
+    function updateOrbitCamera(){
+      orbit.phi = clamp(orbit.phi, -0.20, 0.95);
+      orbit.radius = clamp(orbit.radius, 8, 160);
+      const x = lookAt.x + orbit.radius * Math.sin(orbit.theta) * Math.cos(orbit.phi);
+      const y = lookAt.y + orbit.radius * Math.sin(orbit.phi) + 0.4;
+      const z = lookAt.z + orbit.radius * Math.cos(orbit.theta) * Math.cos(orbit.phi);
+      camera.position.set(x,y,z);
+      camera.lookAt(lookAt);
+    }
+
+    function setCameraMode(mode){
+      camMode = mode;
+      const name =
+        mode===CAM_MODES.QB ? "QB" :
+        mode===CAM_MODES.ENDZONE ? "ENDZONE" :
+        mode===CAM_MODES.SIDELINE ? "SIDELINE" :
+        mode===CAM_MODES.OVERHEAD ? "OVERHEAD" :
+        mode===CAM_MODES.FOLLOW ? "FOLLOW" :
+        mode===CAM_MODES.RECEIVER ? "RECEIVER" : "FREE";
+      el('camMini').textContent = name;
+      showCallout(`CAM: ${name}`, 600);
+
+      if (mode === CAM_MODES.QB){
+        orbit.theta = Math.PI; orbit.phi = 0.12; orbit.radius = 24;
+        lookAt.set(0, 1.7, LOS_Z + 22);
+      }
+      if (mode === CAM_MODES.ENDZONE){
+        orbit.theta = 0.0; orbit.phi = 0.18; orbit.radius = 64;
+        lookAt.set(0, 1.8, LOS_Z - 10);
+      }
+      if (mode === CAM_MODES.SIDELINE){
+        orbit.theta = -Math.PI/2; orbit.phi = 0.16; orbit.radius = 54;
+        lookAt.set(0, 1.6, LOS_Z + 10);
+      }
+      if (mode === CAM_MODES.OVERHEAD){
+        orbit.theta = Math.PI; orbit.phi = 0.88; orbit.radius = 120;
+        lookAt.set(0, 0.0, 0.0);
+      }
+      if (mode === CAM_MODES.RECEIVER){
+        orbit.theta = Math.PI; orbit.phi = 0.10; orbit.radius = 14;
+        lookAt.copy(wr.position).add(new THREE.Vector3(0,1.5, 14));
+      }
+      if (mode === CAM_MODES.FREE){
+        // keep current orbit values
+      }
+
+      updateOrbitCamera();
+    }
+
+    function applyViewSelection(){
+      const v = el('viewSel').value;
+      if (v==="qb") setCameraMode(CAM_MODES.QB);
+      if (v==="endzone") setCameraMode(CAM_MODES.ENDZONE);
+      if (v==="sideline") setCameraMode(CAM_MODES.SIDELINE);
+      if (v==="overhead") setCameraMode(CAM_MODES.OVERHEAD);
+      if (v==="follow") setCameraMode(CAM_MODES.FOLLOW);
+      if (v==="receiver") setCameraMode(CAM_MODES.RECEIVER);
+      if (v==="free") setCameraMode(CAM_MODES.FREE);
+    }
+    el('viewSel').addEventListener('change', applyViewSelection);
+
+    // Orbit drag (FREE only) + aim drag otherwise
+    const raycaster = new THREE.Raycaster();
+    const ndc = new THREE.Vector2();
+    let aimDragging = false;
+
+    // Raycast helper: screen -> ground plane (y=0). Uses an infinite plane so you can still aim
+    // even if the cursor is not directly over the field mesh.
+    const _groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const _groundHit = new THREE.Vector3();
+    function raycastToField(clientX, clientY){
+      ndc.x = (clientX / innerWidth) * 2 - 1;
+      ndc.y = -(clientY / innerHeight) * 2 + 1;
+      raycaster.setFromCamera(ndc, camera);
+      const hit = raycaster.ray.intersectPlane(_groundPlane, _groundHit);
+      if (hit) return _groundHit;
+      return null;
+    }
+
+    renderer.domElement.addEventListener('pointerdown', (e)=>{
+      if (isInUI(e.target)) return;
+
+      if (camMode === CAM_MODES.FREE){
+        orbit.dragging=true; orbit.lx=e.clientX; orbit.ly=e.clientY;
+        renderer.domElement.setPointerCapture(e.pointerId);
+        return;
+      }
+
+      // aim drag
+      aimDragging = true;
+      const p = raycastToField(e.clientX, e.clientY);
+      if (p) setAim(p.x, p.z);
+      renderer.domElement.setPointerCapture(e.pointerId);
+    });
+
+    renderer.domElement.addEventListener('pointermove', (e)=>{
+      if (camMode === CAM_MODES.FREE){
+        if (!orbit.dragging) return;
+        const dx=e.clientX-orbit.lx, dy=e.clientY-orbit.ly;
+        orbit.lx=e.clientX; orbit.ly=e.clientY;
+        orbit.theta -= dx*0.004;
+        orbit.phi   -= dy*0.003;
+        updateOrbitCamera();
+        return;
+      }
+
+      if (!aimDragging) return;
+      const p = raycastToField(e.clientX, e.clientY);
+      if (p) setAim(p.x, p.z);
+    });
+
+    renderer.domElement.addEventListener('pointerup', ()=>{
+      orbit.dragging=false;
+      aimDragging=false;
+    });
+
+    renderer.domElement.addEventListener('wheel', (e)=>{
+      // Shift+wheel = power; otherwise zoom orbit only in FREE
+      if (e.shiftKey){
+        powerMul = clamp(powerMul + (e.deltaY>0 ? -0.03 : 0.03), 0.70, 1.70);
+        showCallout(`POWER ${powerMul.toFixed(2)}×`, 450);
+        return;
+      }
+      if (camMode === CAM_MODES.FREE){
+        orbit.radius += e.deltaY*0.02;
+        updateOrbitCamera();
+      }
+    }, { passive:true });
+
+    // =========================================================
+    // UI refs + tuners sync
+    // =========================================================
+    const styleSel = el('styleSel');
+    const throwCtrlSel = el('throwCtrlSel');
+    const moveCtrlSel = el('moveCtrlSel');
+    const routeSel = el('routeSel');
+
+    // HUD readouts
+    const styleMini = el('styleMini');
+    const playMini = el('playMini');
+    const offScoreMini = el('offScoreMini');
+    const defScoreMini = el('defScoreMini');
+    const ballMini = el('ballMini');
+    const lastMini = el('lastMini');
+    const aimMini = el('aimMini');
+    const throwMini = el('throwMini');
+    const actionMini = el('actionMini');
+
+    const styleRead = el('styleRead');
+    const playRead = el('playRead');
+    const offScore = el('offScore');
+    const defScore = el('defScore');
+    const ballStateRead = el('ballStateRead');
+    const lastCallEl = el('lastCall');
+    const aimRead = el('aimRead');
+    const throwRead = el('throwRead');
+    const gestureRead = el('gestureRead');
+
+    // Tuners inputs
+    const aimAssistEl = el('aimAssist');
+    const scatterMEl = el('scatterM');
+    const releaseThreshEl = el('releaseThresh');
+    const velRangeEl = el('velRange');
+    const spdMinEl = el('spdMin');
+    const spdMaxEl = el('spdMax');
+    const velExpoEl = el('velExpo');
+    const spinGainEl = el('spinGain');
+    const windEl = el('wind');
+
+
+    // Hand cursor + gesture settings (CV)
+    const cursorModeEl = el('cursorMode');
+    const cursorPresetEl = el('cursorPreset');
+    const cursorOffXEl = el('cursorOffX');
+    const cursorOffYEl = el('cursorOffY');
+    const cursorSmoothEl = el('cursorSmooth');
+    const catchGestureEl = el('catchGesture');
+    const tossGestureEl = el('tossGesture');
+
+    const cursorModeLabel = el('cursorModeLabel');
+    const cursorPresetLabel = el('cursorPresetLabel');
+    const offXLabel = el('offXLabel');
+    const offYLabel = el('offYLabel');
+    const smoothLabel = el('smoothLabel');
+
+
+    const catchRadiusEl = el('catchRadius');
+    const catchWindowMsEl = el('catchWindowMs');
+    const tackleRadiusEl = el('tackleRadius');
+    const tackleWindowMsEl = el('tackleWindowMs');
+    const carrierSpeedEl = el('carrierSpeed');
+    const defSpeedEl = el('defSpeed');
+    const aiDiffEl = el('aiDiff');
+
+    const dragScaleEl = el('dragScale');
+    const magnusScaleEl = el('magnusScale');
+    const gravityScaleEl = el('gravityScale');
+
+    // Labels
+    const aimAssistLabel = el('aimAssistLabel');
+    const scatterLabel = el('scatterLabel');
+    const relLabel = el('relLabel');
+    const velRangeLabel = el('velRangeLabel');
+    const spdLabel = el('spdLabel');
+    const expoLabel = el('expoLabel');
+    const spinGainLabel = el('spinGainLabel');
+    const windLabel = el('windLabel');
+
+    const catchRadLabel = el('catchRadLabel');
+    const catchWinLabel = el('catchWinLabel');
+    const tackleRadLabel = el('tackleRadLabel');
+    const tackleWinLabel = el('tackleWinLabel');
+    const carrierSpdLabel = el('carrierSpdLabel');
+    const defSpdLabel = el('defSpdLabel');
+    const aiLabel = el('aiLabel');
+
+    const dragLabel = el('dragLabel');
+    const magLabel = el('magLabel');
+    const gravLabel = el('gravLabel');
+
+    function syncHud(){
+      aimAssistLabel.textContent = `${aimAssistEl.value}%`;
+      scatterLabel.textContent = `${Number(scatterMEl.value).toFixed(2)}m`;
+      relLabel.textContent = Number(releaseThreshEl.value).toFixed(2);
+      velRangeLabel.textContent = Number(velRangeEl.value).toFixed(2);
+
+      const minS = Number(spdMinEl.value);
+      const maxS = Number(spdMaxEl.value);
+      if (maxS < minS + 1) spdMaxEl.value = String(minS + 1);
+      spdLabel.textContent = `${spdMinEl.value}–${spdMaxEl.value}`;
+
+      expoLabel.textContent = Number(velExpoEl.value).toFixed(2);
+      spinGainLabel.textContent = Number(spinGainEl.value).toFixed(1);
+      windLabel.textContent = Number(windEl.value).toFixed(1);
+
+      catchRadLabel.textContent = `${Number(catchRadiusEl.value).toFixed(2)}m`;
+      catchWinLabel.textContent = `${catchWindowMsEl.value}ms`;
+      tackleRadLabel.textContent = `${Number(tackleRadiusEl.value).toFixed(2)}m`;
+      tackleWinLabel.textContent = `${tackleWindowMsEl.value}ms`;
+      carrierSpdLabel.textContent = Number(carrierSpeedEl.value).toFixed(1);
+      defSpdLabel.textContent = Number(defSpeedEl.value).toFixed(1);
+      aiLabel.textContent = Number(aiDiffEl.value).toFixed(2);
+
+      dragLabel.textContent = Number(dragScaleEl.value).toFixed(2);
+      magLabel.textContent = Number(magnusScaleEl.value).toFixed(2);
+      gravLabel.textContent = Number(gravityScaleEl.value).toFixed(2);
+
+
+      // Hand cursor labels
+      if (cursorModeLabel && cursorModeEl){
+        const m = cursorModeEl.value;
+        cursorModeLabel.textContent = (m==="aimCatch") ? "Aim+Catch" : (m==="aim" ? "Aim" : "Off");
+      }
+      if (cursorPresetLabel && cursorPresetEl){
+        cursorPresetLabel.textContent = String(cursorPresetEl.value).toUpperCase();
+      }
+      if (offXLabel && cursorOffXEl) offXLabel.textContent = `${cursorOffXEl.value}px`;
+      if (offYLabel && cursorOffYEl) offYLabel.textContent = `${cursorOffYEl.value}px`;
+      if (smoothLabel && cursorSmoothEl) smoothLabel.textContent = Number(cursorSmoothEl.value).toFixed(2);
+    }
+    [
+      aimAssistEl, scatterMEl, releaseThreshEl, velRangeEl, spdMinEl, spdMaxEl, velExpoEl, spinGainEl, windEl,
+      catchRadiusEl, catchWindowMsEl, tackleRadiusEl, tackleWindowMsEl, carrierSpeedEl, defSpeedEl, aiDiffEl,
+      dragScaleEl, magnusScaleEl, gravityScaleEl,
+      cursorOffXEl, cursorOffYEl, cursorSmoothEl
+    ].forEach(x=>x.addEventListener('input', syncHud));
+
+    // selects
+    [cursorModeEl, cursorPresetEl, catchGestureEl, tossGestureEl].forEach(s=>{
+      if (!s) return;
+      s.addEventListener('change', syncHud);
+    });
+    syncHud();
+
+    // =========================================================
+    // Gameplay state
+    // =========================================================
+    const game = {
+      style: styleSel.value,      // pass | catch | tackle
+      play: 0,
+      off: 0,
+      def: 0,
+      last: "—",
+      active: false
+    };
+
+    const control = {
+      throwCtrl: throwCtrlSel.value,   // gesture | keyboard | ai
+      moveCtrl: moveCtrlSel.value,     // keyboard | ai
+      route: routeSel.value
+    };
+
+
+    // =========================================================
+    // Hand cursor + gesture settings
+    // =========================================================
+    const cvSettings = {
+      cursorMode: cursorModeEl ? cursorModeEl.value : "aimCatch",    // off | aim | aimCatch
+      preset: cursorPresetEl ? cursorPresetEl.value : "center",      // center | up | down | free
+      offX: cursorOffXEl ? Number(cursorOffXEl.value) : 0,
+      offY: cursorOffYEl ? Number(cursorOffYEl.value) : 0,
+      smooth: cursorSmoothEl ? Number(cursorSmoothEl.value) : 0.22,  // 0..1
+      catchGesture: catchGestureEl ? catchGestureEl.value : "either",// pinch | fist | either
+      tossGesture: tossGestureEl ? tossGestureEl.value : "pinchRelease" // off | pinchRelease | pinchTap
+    };
+
+    function syncCvSettings(){
+      if (!cursorModeEl) return;
+      cvSettings.cursorMode = cursorModeEl.value;
+      cvSettings.preset = cursorPresetEl.value;
+      cvSettings.offX = Number(cursorOffXEl.value);
+      cvSettings.offY = Number(cursorOffYEl.value);
+      cvSettings.smooth = Number(cursorSmoothEl.value);
+      cvSettings.catchGesture = catchGestureEl.value;
+      cvSettings.tossGesture = tossGestureEl.value;
+    }
+
+    function applyCursorPreset(showToast=false){
+      if (!cursorPresetEl || !cursorOffXEl || !cursorOffYEl) return;
+      const p = cursorPresetEl.value;
+      if (p==="center"){ cursorOffXEl.value = "0"; cursorOffYEl.value = "0"; }
+      if (p==="up"){ cursorOffXEl.value = "0"; cursorOffYEl.value = "-120"; }
+      if (p==="down"){ cursorOffXEl.value = "0"; cursorOffYEl.value = "120"; }
+      // free leaves sliders as-is
+      if (showToast) showCallout(`CURSOR: ${p.toUpperCase()}`, 550);
+      syncCvSettings();
+      syncHud();
+    }
+
+    function cycleCursorPreset(){
+      if (!cursorPresetEl) return;
+      const p = cursorPresetEl.value;
+      const next = (p==="center") ? "up" : (p==="up" ? "down" : "center");
+      cursorPresetEl.value = next;
+      applyCursorPreset(true);
+    }
+
+    if (cursorPresetEl) cursorPresetEl.addEventListener('change', ()=>applyCursorPreset(true));
+    if (cursorOffXEl) cursorOffXEl.addEventListener('input', ()=>{ cursorPresetEl.value="free"; syncCvSettings(); });
+    if (cursorOffYEl) cursorOffYEl.addEventListener('input', ()=>{ cursorPresetEl.value="free"; syncCvSettings(); });
+    if (cursorSmoothEl) cursorSmoothEl.addEventListener('input', syncCvSettings);
+    if (cursorModeEl) cursorModeEl.addEventListener('change', syncCvSettings);
+    if (catchGestureEl) catchGestureEl.addEventListener('change', syncCvSettings);
+    if (tossGestureEl) tossGestureEl.addEventListener('change', syncCvSettings);
+
+    // initialize
+    applyCursorPreset(false);
+
+    const handCursorEl = el('handCursor');
+    const handCursorTag = el('handCursorTag');
+    const handCursor = {
+      active:false,
+      rawX:0.5, rawY:0.5,
+      px: innerWidth*0.5,
+      py: innerHeight*0.5,
+      targetPx: innerWidth*0.5,
+      targetPy: innerHeight*0.5
+    };
+
+    function setHandCursorActive(on){
+      handCursor.active = !!on;
+      if (!handCursorEl) return;
+      handCursorEl.style.opacity = on ? "1" : "0";
+    }
+
+
+    function updateHandCursor(dt){
+      // keep cvSettings in sync with UI
+      syncCvSettings();
+
+      if (!handCursorEl) return;
+
+      const enabled = handCursor.active && (cvSettings.cursorMode !== "off");
+      if (!enabled){
+        handCursorEl.style.opacity = "0";
+        return;
+      }
+
+      const tx = handCursor.rawX * innerWidth + cvSettings.offX;
+      const ty = handCursor.rawY * innerHeight + cvSettings.offY;
+
+      handCursor.targetPx = clamp(tx, 0, innerWidth);
+      handCursor.targetPy = clamp(ty, 0, innerHeight);
+
+      const smooth = clamp(cvSettings.smooth, 0.05, 0.95);
+      const a = 1 - Math.pow(1 - smooth, dt * 60);
+
+      handCursor.px = lerp(handCursor.px, handCursor.targetPx, a);
+      handCursor.py = lerp(handCursor.py, handCursor.targetPy, a);
+
+      handCursorEl.style.transform = `translate(-50%,-50%) translate(${handCursor.px}px, ${handCursor.py}px)`;
+      handCursorEl.style.opacity = "1";
+
+      // optional tag (mode)
+      if (handCursorTag){
+        const tag = (cvSettings.cursorMode==="aimCatch") ? "AIM+CATCH" : (cvSettings.cursorMode==="aim" ? "AIM" : "OFF");
+        handCursorTag.textContent = tag;
+        handCursorEl.classList.toggle('showTag', cvSettings.cursorMode !== "off");
+      }
+    }
+
+
+    // Aim target (x,z)
+    const aim = { x: 0.0, z: LOS_Z + 25 };
+    function setAim(x,z){
+      // clamp to field
+      const ax = clamp(x, -FIELD.width/2 + 2, FIELD.width/2 - 2);
+      const az = clamp(z, Z_HOME_END + 6, Z_AWAY_END - 6);
+
+      // aim assist to center-ish lane: reduce out-of-bounds throws
+      const assist = Number(aimAssistEl.value)/100;
+      const ax2 = lerp(ax, clamp(ax, -FIELD.width/2+3, FIELD.width/2-3), assist);
+      const az2 = lerp(az, clamp(az, LOS_Z+3, Z_AWAY_END-6), assist);
+
+      aim.x = ax2;
+      aim.z = az2;
+
+      aimRing.position.set(aim.x, 0.06, aim.z);
+      aimMini.textContent = `x=${aim.x.toFixed(1)} z=${aim.z.toFixed(1)}`;
+      aimRead.textContent = `x=${aim.x.toFixed(2)} z=${aim.z.toFixed(2)}`;
+    }
+
+    // Ball simulation
+    const gVec = new THREE.Vector3(0, -9.81, 0);
+    const air = {
+      rho: 1.225,
+      Cd: 0.28,
+      area: Math.PI * (ballBaseR*ballBaseR),
+      mass: 0.41,         // football ~0.41kg
+      magnusK: 0.00055    // tuned for "fun"
+    };
+    function accelDrag(v){
+      const s = v.length();
+      if (s < 1e-5) return new THREE.Vector3();
+      const k = 0.5 * air.rho * air.Cd * air.area / air.mass;
+      return v.clone().multiplyScalar(-k * s);
+    }
+    function accelMagnus(v, omega){
+      return new THREE.Vector3().crossVectors(omega, v).multiplyScalar(air.magnusK);
+    }
+
+    const ball = {
+      mode: "idle", // idle | pass | carrier | dead
+      pos: new THREE.Vector3(0, 1.75, LOS_Z - 6.2),
+      vel: new THREE.Vector3(0, 0, 0),
+      omega: new THREE.Vector3(0, 0, 0),
+      carrier: null,       // "wr" | "runner" | "def"
+      intent: null,        // intended offensive target key ("wr" | "runner")
+      lastThrow: { spd:0, spin:0, wind:0 }
+    };
+
+    // Play actors
+    const actors = {
+      qb: { obj: qb, name:"QB", speed:0 },
+      wr: { obj: wr, name:"WR", speed:0 },
+      cb: { obj: cb, name:"CB", speed:0 },
+      safety: { obj: safety, name:"S", speed:0 },
+      runner: { obj: runner, name:"RUN", speed:0 }
+    };
+
+    // user role depends on style
+    let userRole = "qb"; // qb | wr | def
+
+    // key input
+    const keys = { w:false,a:false,s:false,d:false };
+    addEventListener('keydown', (e)=>{
+      if (e.code==="KeyW") keys.w=true;
+      if (e.code==="KeyA") keys.a=true;
+      if (e.code==="KeyS") keys.s=true;
+      if (e.code==="KeyD") keys.d=true;
+
+      if (e.code==="Enter"){ e.preventDefault(); snapPlay(); }
+      if (e.code==="Space"){ e.preventDefault(); requestThrow(); }
+      if (e.code==="KeyC"){ e.preventDefault(); requestAction(); }
+      if (e.code==="KeyR"){ e.preventDefault(); fullReset(); }
+      if (e.code==="KeyG"){ e.preventDefault(); requestToss(); }
+      if (e.code==="KeyO"){ e.preventDefault(); cycleCursorPreset(); }
+
+      // Cameras 1-7
+      if (e.code==="Digit1"){ el('viewSel').value="qb"; applyViewSelection(); }
+      if (e.code==="Digit2"){ el('viewSel').value="endzone"; applyViewSelection(); }
+      if (e.code==="Digit3"){ el('viewSel').value="sideline"; applyViewSelection(); }
+      if (e.code==="Digit4"){ el('viewSel').value="overhead"; applyViewSelection(); }
+      if (e.code==="Digit5"){ el('viewSel').value="follow"; applyViewSelection(); }
+      if (e.code==="Digit6"){ el('viewSel').value="receiver"; applyViewSelection(); }
+      if (e.code==="Digit7"){ el('viewSel').value="free"; applyViewSelection(); }
+    });
+    addEventListener('keyup', (e)=>{
+      if (e.code==="KeyW") keys.w=false;
+      if (e.code==="KeyA") keys.a=false;
+      if (e.code==="KeyS") keys.s=false;
+      if (e.code==="KeyD") keys.d=false;
+    });
+
+    // Controls buttons
+    el('snapBtnQ').addEventListener('click', snapPlay);
+    el('throwBtnQ').addEventListener('click', requestThrow);
+    el('tossBtnQ').addEventListener('click', requestToss);
+    el('actionBtnQ').addEventListener('click', requestAction);
+    el('resetBtnQ').addEventListener('click', fullReset);
+
+    styleSel.addEventListener('change', ()=>{
+      game.style = styleSel.value;
+      applyStyleMode();
+      showCallout(`STYLE: ${game.style.toUpperCase()}`, 700);
+    });
+    throwCtrlSel.addEventListener('change', ()=>{
+      control.throwCtrl = throwCtrlSel.value;
+      showCallout(`THROW: ${control.throwCtrl.toUpperCase()}`, 650);
+    });
+    moveCtrlSel.addEventListener('change', ()=>{
+      control.moveCtrl = moveCtrlSel.value;
+      showCallout(`MOVE: ${control.moveCtrl.toUpperCase()}`, 650);
+    });
+    routeSel.addEventListener('change', ()=>{
+      control.route = routeSel.value;
+      showCallout(`ROUTE: ${control.route.toUpperCase()}`, 650);
+      if (game.active) routeT = 0;
+    });
+
+    // =========================================================
+    // Field map (2D)
+    // =========================================================
+    const fieldMap = el('fieldMap');
+    const fctx = fieldMap.getContext('2d');
+    const marks = []; // {x,z,kind,t}
+
+    function resizeFieldMap(){
+      const w = fieldMap.clientWidth || 640;
+      const h = fieldMap.clientHeight || 360;
+      fieldMap.width = Math.floor(w * devicePixelRatio);
+      fieldMap.height = Math.floor(h * devicePixelRatio);
+      fctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+      drawFieldMap();
+    }
+    new ResizeObserver(resizeFieldMap).observe(el('fieldMapWrap'));
+
+    function worldToMap(x,z){
+      const w = fieldMap.clientWidth || 640;
+      const h = fieldMap.clientHeight || 360;
+      const px = (x + FIELD.width/2) / FIELD.width;
+      const pz = (z - Z_HOME_END) / (Z_AWAY_END - Z_HOME_END);
+      return { x: px*w, y: (1 - pz)*h };
+    }
+
+    function addMark(x,z,kind){
+      marks.push({x,z,kind,t:nowS()});
+      while (marks.length>38) marks.shift();
+      drawFieldMap();
+    }
+
+    function drawFieldMap(){
+      const w = fieldMap.clientWidth || 640;
+      const h = fieldMap.clientHeight || 360;
+      fctx.clearRect(0,0,w,h);
+
+      // background
+      fctx.fillStyle = "rgba(255,255,255,0.02)";
+      fctx.fillRect(0,0,w,h);
+
+      // field outline
+      fctx.strokeStyle = "rgba(255,255,255,0.30)";
+      fctx.lineWidth = 2;
+      fctx.strokeRect(6,6,w-12,h-12);
+
+      // LOS line
+      const losP = worldToMap(0, LOS_Z);
+      fctx.strokeStyle = "rgba(80,210,255,0.65)";
+      fctx.lineWidth = 2;
+      fctx.beginPath();
+      fctx.moveTo(6, losP.y);
+      fctx.lineTo(w-6, losP.y);
+      fctx.stroke();
+
+      // history marks
+      const tNow = nowS();
+      for (const m of marks){
+        const p = worldToMap(m.x, m.z);
+        const age = clamp((tNow - m.t)/10, 0, 1);
+        const alpha = 0.85 - age*0.55;
+
+        const col =
+          m.kind==="COMP" ? `rgba(96,227,139,${alpha})` :
+          m.kind==="INC"  ? `rgba(255,108,108,${alpha})` :
+          m.kind==="INT"  ? `rgba(177,140,255,${alpha})` :
+          m.kind==="TD"   ? `rgba(255,217,106,${alpha})` :
+          m.kind==="TACK" ? `rgba(80,210,255,${alpha})` :
+          `rgba(255,255,255,${alpha})`;
+
+        fctx.fillStyle = col;
+        fctx.beginPath();
+        fctx.arc(p.x, p.y, 5, 0, Math.PI*2);
+        fctx.fill();
+      }
+
+      // players
+      function drawDot(obj, col){
+        const p = worldToMap(obj.position.x, obj.position.z);
+        fctx.fillStyle = col;
+        fctx.beginPath();
+        fctx.arc(p.x,p.y,4.5,0,Math.PI*2);
+        fctx.fill();
+      }
+      drawDot(qb, "rgba(255,255,255,0.75)");
+      drawDot(wr, "rgba(120,180,255,0.85)");
+      drawDot(cb, "rgba(255,108,108,0.80)");
+      drawDot(safety, "rgba(177,140,255,0.78)");
+      if (game.style==="tackle" || game.style==="pass") drawDot(runner, "rgba(96,227,139,0.80)");
+
+      // ball
+      const bp = worldToMap(ball.pos.x, ball.pos.z);
+      fctx.fillStyle = "rgba(255,217,106,0.90)";
+      fctx.beginPath();
+      fctx.arc(bp.x,bp.y,4,0,Math.PI*2);
+      fctx.fill();
+    }
+
+    // =========================================================
+    // Routes
+    // =========================================================
+    let routeT = 0;
+    function routePos(t){
+      const startX = -10;
+      const startZ = LOS_Z + 0.5;
+      const speed = 7.8; // m/s-ish
+      const z = startZ + speed*t;
+
+      const r = control.route;
+
+      if (r==="go"){
+        return { x:startX, z };
+      }
+      if (r==="slant"){
+        return { x:startX + clamp(t*5.0, 0, 12), z };
+      }
+      if (r==="out"){
+        const breakT = 1.15;
+        if (t < breakT) return { x:startX, z };
+        return { x:startX + (t-breakT)*10.0, z: startZ + speed*breakT + (t-breakT)*2.4 };
+      }
+      if (r==="curl"){
+        const stopT = 1.30;
+        if (t < stopT) return { x:startX, z };
+        return { x:startX, z:startZ + speed*stopT };
+      }
+      if (r==="post"){
+        const breakT = 1.05;
+        if (t < breakT) return { x:startX, z };
+        return { x:startX + (t-breakT)*6.2, z:startZ + speed*breakT + (t-breakT)*7.0 };
+      }
+      // corner
+      const breakT = 1.10;
+      if (t < breakT) return { x:startX, z };
+      return { x:startX + (t-breakT)*8.2, z:startZ + speed*breakT + (t-breakT)*8.2 };
+    }
+
+    // =========================================================
+    // Setup play by style
+    // =========================================================
+    function applyStyleMode(){
+      // set user role defaults by style
+      if (game.style==="pass") userRole = "qb";
+      if (game.style==="catch") userRole = "wr";
+      if (game.style==="tackle") userRole = "def";
+
+      styleMini.textContent = game.style.toUpperCase();
+      styleRead.textContent = game.style.toUpperCase();
+
+      // auto camera suggestions
+      if (game.style==="pass") el('viewSel').value = "qb";
+      if (game.style==="catch") el('viewSel').value = "receiver";
+      if (game.style==="tackle") el('viewSel').value = "sideline";
+      applyViewSelection();
+
+      resetPlayPositions();
+      updateHUD();
+    }
+
+    function resetPlayPositions(){
+      // QB behind LOS
+      qb.position.set(0, 0, LOS_Z - 6);
+      qb.rotation.y = 0;
+
+      // WR start
+      wr.position.set(-10, 0, LOS_Z + 0.5);
+      wr.rotation.y = 0;
+
+      // Defenders
+      cb.position.set(-10, 0, LOS_Z + 2.0);
+      cb.rotation.y = Math.PI;
+
+      safety.position.set(0, 0, LOS_Z + 18);
+      safety.rotation.y = Math.PI;
+
+      // runner (RB). In PASS/CATCH we keep him near QB for toss plays.
+      if (game.style==="pass"){
+        runner.position.set(3.5, 0, LOS_Z - 4.0);
+        runner.rotation.y = 0;
+      } else {
+        // tackle drill runner lane
+        runner.position.set(-4, 0, LOS_Z + 6);
+        runner.rotation.y = 0;
+      }
+
+      // ball
+      ball.mode = "idle";
+      ball.carrier = null;
+      ball.intent = null;
+      ball.vel.set(0,0,0);
+      ball.omega.set(0,0,0);
+      trailReset();
+
+      // aim
+      setAim(0, LOS_Z + 25);
+
+      // place ball at QB hand
+      const hand = qb.position.clone().add(new THREE.Vector3(0.25, 1.65, 0.85));
+      ball.pos.copy(hand);
+      ballMesh.position.copy(ball.pos);
+
+      routeT = 0;
+      game.active = false;
+      game.last = "READY";
+      lastCallEl.textContent = game.last;
+      updateHUD();
+      drawFieldMap();
+    }
+
+    function snapPlay(){
+      resetPlayPositions();
+      game.active = true;
+      game.play += 1;
+      playMini.textContent = String(game.play);
+      playRead.textContent = String(game.play);
+
+      // for tackle drill: start with runner holding ball immediately
+      if (game.style==="tackle"){
+        ball.mode = "carrier";
+        ball.carrier = "runner";
+        game.last = "RUN LIVE";
+        lastCallEl.textContent = game.last;
+        showCallout("TACKLE DRILL: GO!", 700);
+        emitBackendEvent("snap", { style: game.style, play: game.play });
+        updateHUD();
+        return;
+      }
+
+      game.last = "SNAP";
+      lastCallEl.textContent = game.last;
+      showCallout("SNAP!", 600);
+      emitBackendEvent("snap", { style: game.style, play: game.play });
+
+      // In catch drill: AI auto throws after a brief delay
+      if (game.style==="catch"){
+        aiAutoThrowT = 0.85 + Math.random()*0.55;
+      }
+      updateHUD();
+    }
+
+    // =========================================================
+    // Throw mechanics
+    // =========================================================
+    let powerMul = 1.00;
+
+    function computeThrowSpeedFromPeak(peakVel){
+      const relThresh = Number(releaseThreshEl.value);
+      const velRange = Number(velRangeEl.value);
+      const expo = Number(velExpoEl.value);
+      const sMin = Number(spdMinEl.value);
+      const sMax = Number(spdMaxEl.value);
+
+      const v01 = clamp((peakVel - relThresh) / (velRange + 1e-9), 0, 1);
+      const curved = Math.pow(v01, expo);
+      return lerp(sMin, sMax, curved) * powerMul;
+    }
+
+    function randThrowSpeed(){
+      const sMin = Number(spdMinEl.value);
+      const sMax = Number(spdMaxEl.value);
+      const expo = Number(velExpoEl.value);
+      const r = Math.pow(Math.random(), expo);
+      return lerp(sMin, sMax, r) * powerMul;
+    }
+
+    function solveBallisticVelocity(start, target, speed){
+      const dx = target.x - start.x;
+      const dy = target.y - start.y;
+      const dz = target.z - start.z;
+
+      const g = 9.81 * Number(gravityScaleEl.value);
+      const tMin = 0.55;
+      const tMax = 1.85;
+
+      let bestT = 1.05;
+      let bestErr = 1e9;
+
+      for (let i=0;i<=180;i++){
+        const t = tMin + (tMax - tMin) * (i/180);
+        const vx = dx / t;
+        const vz = dz / t;
+        const vy = (dy + 0.5 * g * t * t) / t;
+        const s = Math.hypot(vx, vy, vz);
+        const err = Math.abs(s - speed);
+        if (err < bestErr){
+          bestErr = err;
+          bestT = t;
+        }
+      }
+      const t = bestT;
+      const vx = dx / t;
+      const vz = dz / t;
+      const vy = (dy + 0.5 * g * t * t) / t;
+      return new THREE.Vector3(vx, vy, vz);
+    }
+
+    function throwBallCommon({ speed, spinRpm=900, sideSpinPct=0, targetOverride=null, label="THROW", intent=null, scatterScale=1.0 }){
+      if (!game.active) return;
+      if (ball.mode !== "idle") return;
+      if (game.style==="tackle") return;
+
+      const scatter = Number(scatterMEl.value) * (scatterScale ?? 1.0);
+      const sx = (Math.random()*2-1) * scatter * 0.45;
+      const sz = (Math.random()*2-1) * scatter * 0.65;
+
+      // start at QB hand
+      const start = qb.position.clone().add(new THREE.Vector3(0.25, 1.65, 0.85));
+
+      // target is aim (or override target)
+      let tx = (targetOverride ? targetOverride.x : aim.x) + sx;
+      let tz = (targetOverride ? targetOverride.z : aim.z) + sz;
+
+      // in catch style, throw more toward user WR if they're far from aim
+      if (!targetOverride && game.style==="catch"){
+        tx = lerp(tx, wr.position.x, 0.55);
+        tz = lerp(tz, wr.position.z + 4.5, 0.60);
+      }
+
+      const target = new THREE.Vector3(
+        clamp(tx, -FIELD.width/2+2, FIELD.width/2-2),
+        1.75,
+        clamp(tz, LOS_Z+2, Z_AWAY_END-6)
+      );
+
+      // wind
+      const windX = Number(windEl.value);
+      windVec.set(windX, 0, 0);
+
+      // velocity solve
+      const v0 = solveBallisticVelocity(start, target, speed);
+
+      // omega: spiral mostly along velocity, plus small sideways component for magnus
+      const dir = v0.clone().normalize();
+      const w = (spinRpm * 2*Math.PI)/60;
+      const spiral = dir.clone().multiplyScalar(w);
+
+      const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0,1,0), dir);
+      if (right.length() < 1e-6) right.set(1,0,0);
+      right.normalize();
+      const side = right.multiplyScalar(w * (sideSpinPct/100));
+
+      ball.omega.copy(spiral.add(side));
+
+      ball.pos.copy(start);
+      ball.vel.copy(v0);
+
+      ball.mode = "pass";
+      ball.carrier = null;
+      ball.intent = intent || "wr";
+
+      trailReset();
+      showCallout(`${label}! spd=${speed.toFixed(0)}`, 650);
+
+      ball.lastThrow = { spd: speed, spin: spinRpm, wind: windX };
+
+      emitBackendEvent("throw", {
+        style: game.style,
+        play: game.play,
+        kind: label,
+        intent: (intent || "wr"),
+        speed,
+        spinRpm,
+        windX,
+        aim: { x: aim.x, z: aim.z },
+        target: { x: target.x, z: target.z }
+      });
+
+      updateHUD();
+    }
+
+    function requestThrow(){
+      normalizeControls();
+      if (!game.active) { showCallout("Press SNAP first", 700); return; }
+
+      // If AI throw selected, just throw
+      if (control.throwCtrl === "ai"){
+        const spd = randThrowSpeed();
+        const spin = clamp(650 + Math.random()*900, 200, 2200);
+        const side = (Math.random()*2-1) * 18;
+        throwBallCommon({ speed: spd, spinRpm: spin, sideSpinPct: side });
+        return;
+      }
+
+      // keyboard throw works only if user is QB (PASS style)
+      if (control.throwCtrl === "keyboard"){
+        if (game.style !== "pass"){
+          showCallout("Keyboard throw is mainly for PASS style (QB)", 850);
+        }
+        const spd = randThrowSpeed();
+        const spin = clamp(700 + Math.random()*800, 250, 2200);
+        const side = (Math.random()*2-1) * 12;
+        throwBallCommon({ speed: spd, spinRpm: spin, sideSpinPct: side });
+      }
+    }
+
+    function requestToss(){
+      normalizeControls();
+      syncCvSettings();
+      if (!game.active) { showCallout("Press SNAP first", 700); return; }
+      if (ball.mode !== "idle") return;
+
+      if (game.style !== "pass"){
+        showCallout("TOSS is designed for PASS style (QB → RB)", 900);
+      }
+
+      // shorter + safer than a full throw
+      const baseMin = Number(spdMinEl.value);
+      const baseMax = Number(spdMaxEl.value);
+      const spd = lerp(baseMin, baseMax, 0.30) * 0.85 * powerMul;
+
+      const spin = clamp(280 + Math.random()*520, 120, 1800);
+      const side = (Math.random()*2-1) * 8;
+
+      // target a few yards in front of the runner
+      const tgt = runner.position.clone().add(new THREE.Vector3(0, 0, 6.0));
+      throwBallCommon({
+        speed: spd,
+        spinRpm: spin,
+        sideSpinPct: side,
+        targetOverride: tgt,
+        label: "TOSS",
+        intent: "runner",
+        scatterScale: 0.25
+      });
+    }
+
+    // =========================================================
+    // Catch / Tackle actions
+    // =========================================================
+    let catchAttemptUntil = 0;
+    let tackleAttemptUntil = 0;
+
+    function requestAction(){
+      const t = nowS();
+      if (userRole === "wr"){
+        catchAttemptUntil = t + (Number(catchWindowMsEl.value)/1000);
+        showCallout("CATCH!", 450);
+      } else if (userRole === "def"){
+        tackleAttemptUntil = t + (Number(tackleWindowMsEl.value)/1000);
+        showCallout("TACKLE!", 450);
+      } else {
+        // QB: action can be "pump" for now
+        showCallout("QB ACTION", 450);
+      }
+      updateHUD();
+    }
+
+    // =========================================================
+    // Physics stepping
+    // =========================================================
+    const windVec = new THREE.Vector3(0,0,0);
+    function applyVisualSpin(dt){
+      const w = ball.omega.length();
+      if (w < 1e-4) return;
+      const axis = ball.omega.clone().normalize();
+      const visualScale = 0.22;
+      const dTheta = clamp(w * dt * visualScale, 0, 2.0);
+      ballMesh.rotateOnWorldAxis(axis, dTheta);
+    }
+
+    function stepBallPhysics(dt){
+      const dragScale = Number(dragScaleEl.value);
+      const magnusScale = Number(magnusScaleEl.value);
+      const gravScale = Number(gravityScaleEl.value);
+
+      // gravity + drag + magnus
+      const vAir = ball.vel.clone().sub(windVec);
+      const a = new THREE.Vector3();
+      a.addScaledVector(gVec, gravScale);
+      a.addScaledVector(accelDrag(vAir), dragScale);
+      a.addScaledVector(accelMagnus(vAir, ball.omega), magnusScale);
+
+      ball.vel.addScaledVector(a, dt);
+      ball.pos.addScaledVector(ball.vel, dt);
+
+      ballMesh.position.copy(ball.pos);
+      trailAdd(ball.pos);
+      applyVisualSpin(dt);
+    }
+
+    // =========================================================
+    // Catch + tackle resolution
+    // =========================================================
+    // temp vectors for catch cursor math
+    const _camRight = new THREE.Vector3();
+    const _camUp = new THREE.Vector3();
+    const _camFwd = new THREE.Vector3();
+    const _tmpCatch = new THREE.Vector3();
+
+    function catchPointFor(obj, key=""){
+      // User WR: catch point follows the hand cursor (screen-space -> camera plane),
+      // giving "pinch/fist catch cursor tracking" in 3D.
+      if (key==="wr" && userRole==="wr" && cvSettings.cursorMode==="aimCatch" && handCursor.active){
+        return catchCursorMesh.position;
+      }
+      // otherwise, approximate hands/upper chest
+      return obj.position.clone().add(new THREE.Vector3(0, 1.65, 0));
+    }
+    const _tmpCatchOff = new THREE.Vector3();
+    const _chestOffset = new THREE.Vector3(0, 1.65, 0);
+
+    function updateCatchCursor(){
+      if (!catchCursorMesh) return;
+
+      const show = (userRole==="wr")
+        && game.active
+        && (cvSettings.cursorMode === "aimCatch")
+        && handCursor.active;
+
+      catchCursorMesh.visible = show;
+      if (!show) return;
+
+      // screen-space deltas from center
+      const dx = clamp((handCursor.px / innerWidth  - 0.5) * 2, -1, 1);
+      const dy = clamp((handCursor.py / innerHeight - 0.5) * 2, -1, 1);
+
+      // camera basis vectors
+      camera.updateMatrixWorld();
+      _camRight.setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+      _camUp.setFromMatrixColumn(camera.matrixWorld, 1).normalize();
+      camera.getWorldDirection(_camFwd).normalize();
+
+      const reachX = 0.85;
+      const reachY = 0.75;
+      const reachF = 0.35;
+
+      const chest = _tmpCatch.copy(wr.position).add(_chestOffset);
+      catchCursorMesh.position.copy(chest)
+        .addScaledVector(_camRight, dx * reachX)
+        .addScaledVector(_camUp, (-dy) * reachY)
+        .addScaledVector(_camFwd, reachF);
+
+      // clamp maximum reach from chest
+      _tmpCatchOff.copy(catchCursorMesh.position).sub(chest);
+      const maxR = 1.25;
+      if (_tmpCatchOff.length() > maxR){
+        _tmpCatchOff.setLength(maxR);
+        catchCursorMesh.position.copy(chest).add(_tmpCatchOff);
+      }
+    }
+
+
+
+    function tryCatch(catcherKey){
+      ball.mode = "carrier";
+      ball.carrier = catcherKey;
+      ball.intent = null;
+      ball.vel.set(0,0,0);
+      ball.omega.set(0,0,0);
+      trailReset();
+
+      const offenseCatch = (catcherKey==="wr" || catcherKey==="runner");
+
+      game.last = offenseCatch ? (catcherKey==="runner" ? "PITCH" : "COMPLETE") : "INTERCEPTION";
+      lastCallEl.textContent = game.last;
+
+      if (offenseCatch){
+        game.off += 1;
+        addMark(ball.pos.x, ball.pos.z, "COMP");
+        showCallout(catcherKey==="runner" ? "TOSS COMPLETE!" : "COMPLETE!", 900);
+        emitBackendEvent("complete", { style: game.style, play: game.play, x: ball.pos.x, z: ball.pos.z, catcher: catcherKey });
+      } else {
+        game.def += 2;
+        addMark(ball.pos.x, ball.pos.z, "INT");
+        showCallout("INTERCEPTION!", 1100);
+        emitBackendEvent("interception", { style: game.style, play: game.play, x: ball.pos.x, z: ball.pos.z });
+        // end play on INT
+        endPlaySoon(0.45);
+      }
+
+      updateHUD();
+    }
+
+function endPlaySoon(delay=0.6){
+      game.active = false;
+      setTimeout(()=>{
+        if (game.active) return;
+        resetPlayPositions();
+      }, delay*1000);
+    }
+
+    function resolvePassStep(){
+      if (ball.mode !== "pass") return;
+
+      // ground
+      if (ball.pos.y <= ballBaseR){
+        ball.pos.y = ballBaseR;
+        ballMesh.position.copy(ball.pos);
+
+        game.last = "INCOMPLETE";
+        lastCallEl.textContent = game.last;
+        game.def += 1;
+        addMark(ball.pos.x, ball.pos.z, "INC");
+        showCallout("INCOMPLETE", 900);
+        emitBackendEvent("incomplete", { style: game.style, play: game.play, x: ball.pos.x, z: ball.pos.z });
+
+        ball.mode = "dead";
+        endPlaySoon(0.65);
+        updateHUD();
+        return;
+      }
+
+      const catchR = Number(catchRadiusEl.value);
+
+      // who can catch?
+      const pWR  = catchPointFor(wr, "wr");
+      const pRUN = catchPointFor(runner, "runner");
+      const pCB  = catchPointFor(cb, "cb");
+      const pS   = catchPointFor(safety, "safety");
+
+      // user catch attempt if user is WR
+      const t = nowS();
+      const userTryingCatch = (userRole==="wr") && (t <= catchAttemptUntil);
+
+      // AI offense attempt if WR/RUN is AI
+      const aiDiff = Number(aiDiffEl.value);
+      const aiOffTries = (userRole!=="wr") && (Math.random() < clamp(0.30 + aiDiff*0.70, 0.30, 0.95));
+
+      // defenders attempt intercept based on difficulty
+      const defTry = (Math.random() < clamp(0.15 + aiDiff*0.85, 0.15, 0.97));
+
+      const dWR  = ball.pos.distanceTo(pWR);
+      const dRUN = ball.pos.distanceTo(pRUN);
+      const dCB  = ball.pos.distanceTo(pCB);
+      const dS   = ball.pos.distanceTo(pS);
+
+      const wrIn  = dWR <= catchR;
+      const runIn = dRUN <= catchR;
+      const cbIn  = dCB <= (catchR*0.95);
+      const sIn   = dS  <= (catchR*0.95);
+
+      const intent = ball.intent || "wr";
+
+      // precedence: user catch > defender INT > AI catch
+      if (userTryingCatch && wrIn){
+        tryCatch("wr");
+        return;
+      }
+
+      if ((cbIn || sIn) && defTry){
+        const bestDef = (dCB < dS) ? "cb" : "safety";
+        tryCatch(bestDef);
+        return;
+      }
+
+      // offense AI catch (WR or RUNNER) depending on intent
+      if (intent === "runner"){
+        const runnerProb = clamp(0.60 + aiDiff*0.40, 0.60, 0.98);
+        if (runIn && Math.random() < runnerProb){
+          tryCatch("runner");
+          return;
+        }
+        // fallback: WR can still snag it
+        if (wrIn && aiOffTries){
+          tryCatch("wr");
+          return;
+        }
+      } else {
+        if (wrIn && aiOffTries){
+          tryCatch("wr");
+          return;
+        }
+      }
+
+      // out of bounds
+      if (Math.abs(ball.pos.x) > FIELD.width/2 + 3 || ball.pos.z < Z_HOME_END - 6 || ball.pos.z > Z_AWAY_END + 6){
+        game.last = "OUT OF BOUNDS";
+        lastCallEl.textContent = game.last;
+        game.def += 1;
+        addMark(ball.pos.x, ball.pos.z, "INC");
+        showCallout("OUT", 800);
+        emitBackendEvent("out_of_bounds", { style: game.style, play: game.play, x: ball.pos.x, z: ball.pos.z });
+        ball.mode = "dead";
+        endPlaySoon(0.55);
+        updateHUD();
+      }
+    }
+
+function resolveCarrierStep(dt){
+      if (ball.mode !== "carrier") return;
+
+      // attach ball to carrier
+      let carrierObj = null;
+      if (ball.carrier==="wr") carrierObj = wr;
+      if (ball.carrier==="runner") carrierObj = runner;
+      if (ball.carrier==="cb") carrierObj = cb;
+      if (ball.carrier==="safety") carrierObj = safety;
+
+      if (!carrierObj){
+        ball.mode = "dead";
+        endPlaySoon(0.5);
+        return;
+      }
+
+      const hold = carrierObj.position.clone().add(new THREE.Vector3(0.25, 1.55, 0.35));
+      ball.pos.copy(hold);
+      ballMesh.position.copy(ball.pos);
+
+      // touchdown if offense carrier reaches away endzone
+      if ((ball.carrier==="wr" || ball.carrier==="runner") && carrierObj.position.z >= (Z_AWAY_END - 3)){
+        game.last = "TOUCHDOWN!";
+        lastCallEl.textContent = game.last;
+        game.off += 7;
+        addMark(carrierObj.position.x, carrierObj.position.z, "TD");
+        showCallout("TOUCHDOWN!", 1200);
+        emitBackendEvent("touchdown", { style: game.style, play: game.play, x: carrierObj.position.x, z: carrierObj.position.z });
+
+        ball.mode = "dead";
+        endPlaySoon(0.85);
+        updateHUD();
+        return;
+      }
+
+      // tackle checks
+      const t = nowS();
+      const tackleR = Number(tackleRadiusEl.value);
+      const userTryingTackle = (userRole==="def") && (t <= tackleAttemptUntil);
+      const aiDiff = Number(aiDiffEl.value);
+      const aiTackleProb = clamp(0.25 + aiDiff*0.70, 0.25, 0.95);
+
+      // defenders that can tackle: CB and Safety (and user defender role means controlling one of them)
+      const pCB = cb.position.clone();
+      const pS  = safety.position.clone();
+
+      // if offense carrier, defenders try tackle
+      if (ball.carrier==="wr" || ball.carrier==="runner"){
+        const dCB = pCB.distanceTo(carrierObj.position);
+        const dS  = pS.distanceTo(carrierObj.position);
+
+        // user defender = you control CB by default
+        if (userRole==="def"){
+          if ((dCB <= tackleR) && userTryingTackle){
+            game.last = "TACKLE!";
+            lastCallEl.textContent = game.last;
+            game.def += 2;
+            addMark(carrierObj.position.x, carrierObj.position.z, "TACK");
+            showCallout("TACKLE!", 900);
+            emitBackendEvent("tackle", { style: game.style, play: game.play, x: carrierObj.position.x, z: carrierObj.position.z });
+            ball.mode = "dead";
+            endPlaySoon(0.75);
+            updateHUD();
+            return;
+          }
+        } else {
+          // AI defenders tackle automatically when close enough
+          if ((dCB <= tackleR && Math.random()<aiTackleProb) || (dS <= tackleR && Math.random()<aiTackleProb)){
+            game.last = "TACKLE";
+            lastCallEl.textContent = game.last;
+            game.def += 2;
+            addMark(carrierObj.position.x, carrierObj.position.z, "TACK");
+            showCallout("TACKLED", 850);
+            emitBackendEvent("tackle", { style: game.style, play: game.play, x: carrierObj.position.x, z: carrierObj.position.z });
+            ball.mode = "dead";
+            endPlaySoon(0.75);
+            updateHUD();
+            return;
+          }
+        }
+      }
+    }
+
+    // =========================================================
+    // AI + User movement
+    // =========================================================
+    let aiAutoThrowT = 0;
+
+    function moveToward(obj, target, speed, dt){
+      const dir = target.clone().sub(obj.position);
+      dir.y = 0;
+      const d = dir.length();
+      if (d < 1e-4) return;
+      dir.multiplyScalar(1/d);
+      obj.position.addScaledVector(dir, speed*dt);
+      obj.rotation.y = Math.atan2(dir.x, dir.z);
+    }
+
+    function userMove(obj, speed, dt){
+      let dx = 0, dz = 0;
+      if (keys.w) dz += 1;
+      if (keys.s) dz -= 1;
+      if (keys.a) dx -= 1;
+      if (keys.d) dx += 1;
+
+      const v = new THREE.Vector3(dx,0,dz);
+      if (v.length() > 1e-6){
+        v.normalize();
+        obj.position.addScaledVector(v, speed*dt);
+        obj.rotation.y = Math.atan2(v.x, v.z);
+      }
+
+      // clamp on field
+      obj.position.x = clamp(obj.position.x, -FIELD.width/2 + 1.5, FIELD.width/2 - 1.5);
+      obj.position.z = clamp(obj.position.z, Z_HOME_END + 2, Z_AWAY_END - 2);
+    }
+
+    function updateActors(dt){
+      if (!game.active) return;
+
+      const carrierSpd = Number(carrierSpeedEl.value);
+      const defSpd = Number(defSpeedEl.value);
+      const aiDiff = Number(aiDiffEl.value);
+
+      // PASS/CATCH: WR route if AI or if user not controlling WR movement
+      if (game.style !== "tackle"){
+        routeT += dt;
+        const rp = routePos(routeT);
+
+        if (userRole==="wr" && control.moveCtrl==="keyboard"){
+          userMove(wr, carrierSpd, dt);
+        } else {
+          const target = new THREE.Vector3(rp.x, 0, rp.z);
+          moveToward(wr, target, carrierSpd * (0.95 + aiDiff*0.15), dt);
+        }
+
+        // CB covers WR (simple man coverage)
+        const coverOffset = new THREE.Vector3(0.0, 0, -1.8);
+        const coverTarget = wr.position.clone().add(coverOffset);
+        moveToward(cb, coverTarget, defSpd * (0.95 + aiDiff*0.25), dt);
+
+        // Safety shades toward ball/WR
+        const shade = (ball.mode==="pass") ? ball.pos : wr.position;
+        const sTarget = shade.clone().add(new THREE.Vector3(0,0, 6));
+        moveToward(safety, sTarget, defSpd * (0.85 + aiDiff*0.35), dt);
+      }
+
+      // CATCH drill: AI QB throws after timer
+      if (game.style==="catch" && game.active && ball.mode==="idle"){
+        aiAutoThrowT -= dt;
+        if (aiAutoThrowT <= 0){
+          const spd = randThrowSpeed();
+          const spin = clamp(700 + Math.random()*900, 250, 2200);
+          const side = (Math.random()*2-1) * 10;
+          throwBallCommon({ speed: spd, spinRpm: spin, sideSpinPct: side });
+        }
+      }
+
+      // TACKLE drill: runner carries and runs, user controls CB as defender
+      if (game.style==="tackle" && game.active){
+        // runner runs forward (slight weave)
+        const weave = Math.sin(nowS()*1.6) * 0.9;
+        const runTarget = runner.position.clone().add(new THREE.Vector3(weave, 0, 16));
+        moveToward(runner, runTarget, carrierSpd * (0.95 + aiDiff*0.20), dt);
+
+        // user defender controls CB; safety AI pursues
+        if (userRole==="def" && control.moveCtrl==="keyboard"){
+          userMove(cb, defSpd, dt);
+        } else {
+          moveToward(cb, runner.position.clone(), defSpd, dt);
+        }
+        moveToward(safety, runner.position.clone().add(new THREE.Vector3(0,0,2.0)), defSpd*0.95, dt);
+      }
+
+      // After catch: if WR is carrier and user is WR, allow run
+      if (ball.mode==="carrier" && ball.carrier==="wr"){
+        if (userRole==="wr" && control.moveCtrl==="keyboard"){
+          userMove(wr, carrierSpd, dt);
+        } else {
+          // AI run to endzone
+          const lane = new THREE.Vector3(0,0, Z_AWAY_END);
+          moveToward(wr, lane, carrierSpd * (0.95 + aiDiff*0.18), dt);
+        }
+
+        // defenders pursue
+        moveToward(cb, wr.position.clone(), defSpd, dt);
+        moveToward(safety, wr.position.clone().add(new THREE.Vector3(0,0,1.5)), defSpd*0.98, dt);
+      }
+      if (ball.mode==="carrier" && ball.carrier==="runner" && game.style!=="tackle"){
+        // toss play: runner turns upfield
+        const lane = new THREE.Vector3(0,0, Z_AWAY_END);
+        moveToward(runner, lane, carrierSpd * (0.95 + aiDiff*0.18), dt);
+
+        // defenders pursue
+        moveToward(cb, runner.position.clone(), defSpd, dt);
+        moveToward(safety, runner.position.clone().add(new THREE.Vector3(0,0,1.5)), defSpd*0.98, dt);
+      }
+    }
+
+    // =========================================================
+    // Camera follow mode
+    // =========================================================
+    function updateFollowCamera(dt){
+      if (camMode !== CAM_MODES.FOLLOW) return;
+
+      // follow either flying ball or carrier
+      const targetPos = (ball.mode==="pass") ? ball.pos : (ball.mode==="carrier" ? ball.pos : qb.position.clone().add(new THREE.Vector3(0,1.5,0)));
+      const dir = (ball.mode==="pass") ? ball.vel.clone().normalize() : new THREE.Vector3(0,0,1);
+
+      if (dir.length() < 1e-6) dir.set(0,0,1);
+
+      const camPos = targetPos.clone().addScaledVector(dir, -12).add(new THREE.Vector3(0, 5.2, 0));
+      camera.position.lerp(camPos, clamp(dt*4.0, 0, 1));
+      camera.lookAt(targetPos.clone().addScaledVector(dir, 10));
+    }
+
+    // =========================================================
+    // HUD updates
+    // =========================================================
+    function updateHUD(){
+      styleMini.textContent = game.style.toUpperCase();
+      styleRead.textContent = game.style.toUpperCase();
+
+      playMini.textContent = String(game.play);
+      playRead.textContent = String(game.play);
+
+      offScoreMini.textContent = String(game.off);
+      defScoreMini.textContent = String(game.def);
+      offScore.textContent = String(game.off);
+      defScore.textContent = String(game.def);
+
+      lastMini.textContent = game.last;
+      lastCallEl.textContent = game.last;
+
+      ballMini.textContent = ball.mode.toUpperCase();
+      ballStateRead.textContent = ball.mode.toUpperCase();
+
+      aimMini.textContent = `x=${aim.x.toFixed(1)} z=${aim.z.toFixed(1)}`;
+      aimRead.textContent = `x=${aim.x.toFixed(2)} z=${aim.z.toFixed(2)}`;
+
+      throwMini.textContent = `spd=${ball.lastThrow.spd?ball.lastThrow.spd.toFixed(0):"—"} spin=${ball.lastThrow.spin?ball.lastThrow.spin.toFixed(0):"—"} wind=${Number(windEl.value).toFixed(1)}`;
+      throwRead.textContent = `spd=${ball.lastThrow.spd?ball.lastThrow.spd.toFixed(1):"—"} spin=${ball.lastThrow.spin?ball.lastThrow.spin.toFixed(0):"—"} wind=${Number(windEl.value).toFixed(1)}`;
+
+      let action = "—";
+      if (userRole==="wr") action = (nowS()<=catchAttemptUntil) ? "CATCH WINDOW" : "catch=ready";
+      if (userRole==="def") action = (nowS()<=tackleAttemptUntil) ? "TACKLE WINDOW" : "tackle=ready";
+      if (userRole==="qb") action = `power=${powerMul.toFixed(2)}×`;
+      actionMini.textContent = action;
+    }
+
+    function normalizeControls(){
+      game.style = styleSel.value;
+      control.throwCtrl = throwCtrlSel.value;
+      control.moveCtrl = moveCtrlSel.value;
+      control.route = routeSel.value;
+    }
+
+    // =========================================================
+    // Reset
+    // =========================================================
+    function fullReset(){
+      game.play=0; game.off=0; game.def=0;
+      game.last="RESET";
+      marks.splice(0);
+      catchAttemptUntil=0;
+      tackleAttemptUntil=0;
+      powerMul = 1.00;
+      aiAutoThrowT = 0;
+
+      resetPlayPositions();
+      showCallout("RESET", 700);
+      emitBackendEvent("reset", {});
+      updateHUD();
+      drawFieldMap();
+    }
+
+    // =========================================================
+    // MediaPipe Hands (gesture throw/catch/tackle)
+    // =========================================================
+    const video = el('video');
+    const overlay = el('overlay');
+    const octx = overlay.getContext('2d');
+    const statusLine = el('statusLine');
+    const startCamBtn = el('startCamBtn');
+    const startCamBtnQ = el('startCamBtnQ');
+
+    let cam = null;
+    let hands = null;
+    let cameraRunning = false;
+
+    const handState = {
+      present:false,
+      closed:false,
+      prevClosed:false,
+      pinching:false,
+      prevPinch:false,
+      wrist:{x:0.5,y:0.5,z:0},
+      prevWrist:null,
+      wristVel:0,
+      peakVel:0,
+      lastT:0,
+      prevAngle:null,
+      angVel:0,
+      palmNormalZ:0
+    };
+
+    function dist3(a,b){ const dx=a.x-b.x, dy=a.y-b.y, dz=a.z-b.z; return Math.hypot(dx,dy,dz); }
+    function unwrapAngle(prev, curr){
+      let d = curr - prev;
+      while (d > Math.PI) d -= 2*Math.PI;
+      while (d < -Math.PI) d += 2*Math.PI;
+      return prev + d;
+    }
+    function computePalmNormalZ(lm){
+      const w = lm[0], i = lm[5], p = lm[17];
+      const v1 = { x:i.x-w.x, y:i.y-w.y, z:i.z-w.z };
+      const v2 = { x:p.x-w.x, y:p.y-w.y, z:p.z-w.z };
+      const nx = v1.y*v2.z - v1.z*v2.y;
+      const ny = v1.z*v2.x - v1.x*v2.z;
+      const nz = v1.x*v2.y - v1.y*v2.x;
+      const mag = Math.hypot(nx,ny,nz) || 1;
+      return nz / mag;
+    }
+    function isHandClosed(lm){
+      const wrist = lm[0];
+      const idxM=lm[5], midM=lm[9], ringM=lm[13], pinkyM=lm[17];
+      const idxT=lm[8], midT=lm[12], ringT=lm[16], pinkyT=lm[20];
+      const base = (dist3(wrist, idxM)+dist3(wrist, midM)+dist3(wrist, ringM)+dist3(wrist, pinkyM))/4;
+      const curls = [
+        dist3(idxT, idxM)/base,
+        dist3(midT, midM)/base,
+        dist3(ringT, ringM)/base,
+        dist3(pinkyT, pinkyM)/base
+      ];
+      const curled = curls.filter(v=>v<0.72).length;
+      return curled >= 3;
+    }
+    function isPinching(lm){
+      const th = lm[4], ix = lm[8];
+      const wrist = lm[0];
+      const base = dist3(wrist, lm[5]) || 1e-6;
+      const d = dist3(th, ix) / base;
+      return d < 0.45; // fixed pinch threshold; tune if needed
+    }
+    function drawLandmarksOnOverlay(results){
+      octx.clearRect(0,0,overlay.width, overlay.height);
+      if (!results.multiHandLandmarks || !results.multiHandLandmarks.length) return;
+      for (const lm of results.multiHandLandmarks){
+        drawConnectors(octx, lm, HAND_CONNECTIONS, { color:'#5df', lineWidth:2 });
+        drawLandmarks(octx, lm, { color:'#f55', lineWidth:1, radius:2 });
+      }
+    }
+
+    // map wrist to aim (field) – fallback mapping (does not use cursor offsets)
+    function mapHandToAim(wrist){
+      const x = (wrist.x - 0.5) * (FIELD.width * 0.92);
+      const zNear = LOS_Z + 6;
+      const zFar  = Z_AWAY_END - 10;
+      const z = lerp(zFar, zNear, clamp(wrist.y, 0, 1)); // higher hand (small y) = farther
+      return { x, z };
+    }
+
+    // Use the hand cursor (screen-space) to drive aim (so offsets match what you see).
+    function updateAimFromHandCursor(){
+      if (cvSettings.cursorMode === "off") return false;
+      if (!handCursor.active) return false;
+      const p = raycastToField(handCursor.px, handCursor.py);
+      if (!p) return false;
+      setAim(p.x, p.z);
+      return true;
+    }
+
+    // Toss (QB): pinch gesture triggers a short pitch to the runner.
+    function handleGestureToss(){
+      if (!game.active) return;
+      if (control.throwCtrl !== "gesture") return;
+      if (userRole !== "qb") return;
+      if (ball.mode !== "idle") return;
+      if (game.style !== "pass") return;
+      if (cvSettings.tossGesture === "off") return;
+
+      const t = nowS();
+      // record pinch start for tap detection
+      if (!handState.prevPinch && handState.pinching){
+        handState.pinchT0 = t;
+      }
+      // on release, either toss always (pinchRelease) or only if it was a quick tap
+      if (handState.prevPinch && !handState.pinching){
+        if (cvSettings.tossGesture === "pinchRelease"){
+          requestToss();
+        } else if (cvSettings.tossGesture === "pinchTap"){
+          const dt = t - (handState.pinchT0 || 0);
+          if (dt > 0 && dt <= 0.22) requestToss();
+        }
+      }
+    }
+
+// throw on closed->open if peakVel above threshold (gesture throw ctrl)
+    function handleGestureThrow(){
+      if (!game.active) return;
+      if (control.throwCtrl !== "gesture") return;
+      if (userRole !== "qb") return;
+      if (ball.mode !== "idle") return;
+      if (game.style !== "pass") return;
+
+      const relThresh = Number(releaseThreshEl.value);
+      if (handState.prevClosed && !handState.closed && handState.peakVel > relThresh){
+        // aim from hand cursor (with offsets)
+        if (!updateAimFromHandCursor() && handState.wrist){
+          const a = mapHandToAim(handState.wrist);
+          setAim(a.x, a.z);
+        }
+
+        // speed from peakVel
+        const spd = computeThrowSpeedFromPeak(handState.peakVel);
+
+        // spin from angVel
+        const rpm = clamp(Math.abs((handState.angVel * 60) / (2*Math.PI)) * Number(spinGainEl.value), 0, 2400);
+        const side = clamp(handState.palmNormalZ * 35, -25, 25);
+
+        throwBallCommon({ speed: spd, spinRpm: lerp(900, rpm, 0.75), sideSpinPct: side });
+        handState.peakVel = 0;
+      }
+    }
+
+    function handleGestureAction(){
+      if (!handState.present) return;
+      const t = nowS();
+
+      // WR: catch window on pinch and/or fist (configurable)
+      if (userRole==="wr"){
+        const mode = cvSettings.catchGesture; // pinch | fist | either
+        let trigger = false;
+        if ((mode==="pinch" || mode==="either") && (!handState.prevPinch && handState.pinching)) trigger = true;
+        if ((mode==="fist"  || mode==="either") && (!handState.prevClosed && handState.closed)) trigger = true;
+
+        if (trigger){
+          catchAttemptUntil = t + (Number(catchWindowMsEl.value)/1000);
+          showCallout("CATCH!", 450);
+        }
+        return;
+      }
+
+      // DEF: tackle window (pinch)
+      if (userRole==="def"){
+        if (!handState.prevPinch && handState.pinching){
+          tackleAttemptUntil = t + (Number(tackleWindowMsEl.value)/1000);
+          showCallout("TACKLE!", 450);
+        }
+      }
+    }
+
+    async function startCamera(){
+      if (cameraRunning) return;
+      statusLine.textContent = "Status: requesting camera…";
+
+      // show camera tile if hidden
+      if (Tile.map.get('cam').state === "hidden") dockTileRight('cam');
+
+      const resizeOverlay = ()=>{
+        overlay.width = overlay.clientWidth;
+        overlay.height = overlay.clientHeight;
+      };
+      resizeOverlay();
+      new ResizeObserver(resizeOverlay).observe(el('camWrap'));
+
+      hands = new Hands({ locateFile:(file)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+      hands.setOptions({
+        maxNumHands:1,
+        modelComplexity:1,
+        minDetectionConfidence:0.7,
+        minTrackingConfidence:0.7
+      });
+
+      hands.onResults((results)=>{
+        drawLandmarksOnOverlay(results);
+        const t = nowS();
+
+        if (!results.multiHandLandmarks || !results.multiHandLandmarks.length){
+          handState.present = false;
+          setHandCursorActive(false);
+          statusLine.textContent = "Status: no hand detected";
+          gestureRead.textContent = "hand=OFF pinch=— v=— peak=—";
+          return;
+        }
+
+        const lm = results.multiHandLandmarks[0];
+        handState.present = true;
+
+
+        // Hand cursor source point (palm center) in normalized video coords
+        const palmX = (lm[0].x + lm[5].x + lm[17].x) / 3;
+        const palmY = (lm[0].y + lm[5].y + lm[17].y) / 3;
+        handCursor.rawX = clamp(palmX, 0, 1);
+        handCursor.rawY = clamp(palmY, 0, 1);
+        setHandCursorActive(true);
+
+        const wrist = lm[0];
+        handState.wrist = { x:wrist.x, y:wrist.y, z:wrist.z };
+
+        const dt = handState.lastT ? (t - handState.lastT) : 0;
+        handState.lastT = t;
+
+        if (dt > 0.0001 && handState.prevWrist){
+          const v = Math.hypot(wrist.x - handState.prevWrist.x, wrist.y - handState.prevWrist.y) / dt;
+          handState.wristVel = handState.wristVel ? lerp(handState.wristVel, v, 0.32) : v;
+          handState.peakVel = Math.max(handState.peakVel * 0.985, handState.wristVel);
+        }
+        handState.prevWrist = { x:wrist.x, y:wrist.y, z:wrist.z };
+
+        // angular velocity (index MCP->TIP angle)
+        const idxM = lm[5], idxT = lm[8];
+        let ang = Math.atan2(idxT.y - idxM.y, idxT.x - idxM.x);
+
+        if (handState.prevAngle !== null){
+          const unwrapped = unwrapAngle(handState.prevAngle, ang);
+          const d = unwrapped - handState.prevAngle;
+          if (dt > 0.0001) handState.angVel = lerp(handState.angVel, d/dt, 0.25);
+          handState.prevAngle = unwrapped;
+          ang = unwrapped;
+        } else {
+          handState.prevAngle = ang;
+          handState.angVel = 0;
+        }
+
+        handState.palmNormalZ = computePalmNormalZ(lm);
+
+        handState.prevClosed = handState.closed;
+        handState.closed = isHandClosed(lm);
+
+        handState.prevPinch = handState.pinching;
+        handState.pinching = isPinching(lm);
+
+        // live gesture readout
+        gestureRead.textContent =
+          `hand=ON pinch=${handState.pinching?"ON":"OFF"} v=${handState.wristVel.toFixed(2)} peak=${handState.peakVel.toFixed(2)}`;
+
+        statusLine.textContent = `Status: ${handState.closed ? "CLOSED" : "OPEN"} • pinch=${handState.pinching?"ON":"OFF"} • v=${handState.wristVel.toFixed(2)} peak=${handState.peakVel.toFixed(2)}`;
+
+        // While idle and QB gesture, update aim from the hand cursor (supports offsets)
+        if (control.throwCtrl==="gesture" && userRole==="qb" && ball.mode==="idle" && game.style==="pass"){
+          updateAimFromHandCursor();
+        }
+
+        handleGestureToss();
+        handleGestureThrow();
+        handleGestureAction();
+
+        // reduce peak when holding closed
+        if (handState.closed) handState.peakVel *= 0.995;
+      });
+
+      video.autoplay = true;
+      video.playsInline = true;
+      video.muted = true;
+
+      cam = new Camera(video, {
+        onFrame: async()=>{ await hands.send({ image: video }); },
+        width: 640,
+        height: 480
+      });
+
+      try{
+        await cam.start();
+        cameraRunning = true;
+        statusLine.textContent = "Status: camera ON (show your hand)";
+        showCallout("CAM ON", 600);
+      } catch (err){
+        statusLine.textContent = "Status: camera ERROR (permission / http / device)";
+        console.error(err);
+      }
+    }
+
+    startCamBtn.addEventListener('click', startCamera);
+    startCamBtnQ.addEventListener('click', startCamera);
+
+    // =========================================================
+    // Main loop
+    // =========================================================
+    function clampFloatingTilesToViewport(){
+      for (const [id, t] of Tile.map.entries()){
+        if (!t || t.state !== "float") continue;
+        const r = t.el.getBoundingClientRect();
+        const newL = clamp(r.left, 8, window.innerWidth - Math.max(260, r.width));
+        const newT = clamp(r.top,  8, window.innerHeight - Math.max(140, r.height));
+        const newW = clamp(r.width, 260, window.innerWidth - 16);
+        const newH = clamp(r.height,140, window.innerHeight - 16);
+        t.el.style.left = newL + "px";
+        t.el.style.top  = newT + "px";
+        t.el.style.width  = newW + "px";
+        t.el.style.height = newH + "px";
+        t.last = { x:newL, y:newT, w:newW, h:newH };
+      }
+    }
+
+    addEventListener('resize', ()=>{
+      renderer.setSize(innerWidth, innerHeight);
+      camera.aspect = innerWidth/innerHeight;
+      camera.updateProjectionMatrix();
+      resizeFieldMap();
+      clampFloatingTilesToViewport();
+    });
+
+    // Ensure controls state is consistent
+    function normalizeAndRefresh(){
+      normalizeControls();
+      applyStyleMode();
+      updateHUD();
+    }
+
+    // Per-frame camera updates for preset modes
+    function updatePresetCameras(){
+      if (camMode === CAM_MODES.QB){
+        lookAt.set(0, 1.7, LOS_Z + 22);
+        updateOrbitCamera();
+      }
+      if (camMode === CAM_MODES.ENDZONE){
+        lookAt.set(0, 1.8, LOS_Z - 10);
+        updateOrbitCamera();
+      }
+      if (camMode === CAM_MODES.SIDELINE){
+        lookAt.set(0, 1.6, LOS_Z + 10);
+        updateOrbitCamera();
+      }
+      if (camMode === CAM_MODES.OVERHEAD){
+        lookAt.set(0, 0.0, 0.0);
+        updateOrbitCamera();
+      }
+      if (camMode === CAM_MODES.RECEIVER){
+        lookAt.copy(wr.position).add(new THREE.Vector3(0,1.5, 14));
+        updateOrbitCamera();
+      }
+      // FOLLOW handled separately
+      if (camMode === CAM_MODES.FREE){
+        // orbit params already applied by dragging/wheel
+      }
+    }
+
+    let lastFrameT = performance.now();
+
+    function tick(tMs){
+      const rawDt = (tMs - lastFrameT) / 1000;
+      lastFrameT = tMs;
+      const dt = clamp(rawDt, 0, 0.040);
+
+      // update controls state occasionally
+      // (cheap check)
+      // normalizeControls();
+
+      // update wind continuously
+      windVec.set(Number(windEl.value), 0, 0);
+
+
+      // update hand cursor + catch cursor (every frame)
+      updateHandCursor(dt);
+      updateCatchCursor();
+
+      // if QB is using gesture throw, keep aim synced to the cursor for "point-and-throw"
+      if (game.active && control.throwCtrl==="gesture" && userRole==="qb" && ball.mode==="idle" && game.style==="pass"){
+        updateAimFromHandCursor();
+      }
+
+      // keep ball attached when idle
+      if (ball.mode === "idle"){
+        const hand = qb.position.clone().add(new THREE.Vector3(0.25, 1.65, 0.85));
+        ball.pos.copy(hand);
+        ballMesh.position.copy(ball.pos);
+      }
+
+      // update actors AI / user movement
+      updateActors(dt);
+
+      // ball physics
+      if (ball.mode === "pass"){
+        stepBallPhysics(dt);
+        resolvePassStep();
+      } else if (ball.mode === "carrier"){
+        resolveCarrierStep(dt);
+      }
+
+      // camera updates
+      if (camMode === CAM_MODES.FOLLOW){
+        updateFollowCamera(dt);
+      } else {
+        updatePresetCameras();
+      }
+
+      // update HUD + minimap frequently but not too heavy
+      updateHUD();
+      drawFieldMap();
+
+      renderer.render(scene, camera);
+      requestAnimationFrame(tick);
+    }
+
+    // init
+    resizeFieldMap();
+    normalizeAndRefresh();
+    setAim(0, LOS_Z + 25);
+    setCameraMode(CAM_MODES.QB);
+    showCallout("READY", 700);
+    requestAnimationFrame(tick);
+  </script>
+</body>
+</html>
