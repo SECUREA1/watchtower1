@@ -1,0 +1,2208 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>AirPick Guitar AR — Full Scan-to-Fit + Always-Strum Audio + Tunable String Engine (Fixed)</title>
+  <style>
+    :root{
+      --bg:#050814; --panel: rgba(0,0,0,.38); --stroke: rgba(255,255,255,.16);
+      --txt: rgba(255,255,255,.92); --muted: rgba(255,255,255,.72);
+      --cyan:#20ffe6; --violet:#b04cff; --amber:#ffcf55; --red:#ff4646; --green:#46ff87;
+      --shadow: 0 14px 42px rgba(0,0,0,.40);
+    }
+    *{ box-sizing:border-box; }
+    html,body{ height:100%; margin:0; background:var(--bg); color:var(--txt); font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; overflow:hidden;}
+    #video{ display:none; }
+    #view{ position:fixed; inset:0; width:100vw; height:100vh; display:block; background: radial-gradient(900px 500px at 50% 10%, rgba(32,255,230,.12), transparent 60%); }
+    #cursor{
+      position: fixed; width: 18px; height: 18px; border-radius: 999px;
+      border: 2px solid rgba(32,255,230,.95);
+      box-shadow: 0 0 18px rgba(32,255,230,.25), 0 0 26px rgba(176,76,255,.18);
+      transform: translate(-50%,-50%);
+      pointer-events:none; z-index: 9999; display:none;
+      background: radial-gradient(circle at 30% 30%, rgba(255,255,255,.35), rgba(32,255,230,.08));
+      transition: border-color .09s ease, box-shadow .09s ease, transform .09s ease, opacity .09s ease;
+      opacity: .95;
+    }
+    #cursor.close{ border-color: rgba(32,255,230,.95); box-shadow: 0 0 18px rgba(32,255,230,.25), 0 0 26px rgba(176,76,255,.18); }
+    #cursor.med{ border-color: rgba(255,170,55,.95); box-shadow: 0 0 18px rgba(255,170,55,.22), 0 0 34px rgba(255,170,55,.18); }
+    #cursor.far{ border-color: rgba(70,255,135,.95); box-shadow: 0 0 18px rgba(70,255,135,.18), 0 0 34px rgba(70,255,135,.14); }
+    #cursor.pinch{
+      border-color: rgba(255,207,85,.98);
+      box-shadow: 0 0 20px rgba(255,207,85,.28), 0 0 36px rgba(176,76,255,.18);
+      transform: translate(-50%,-50%) scale(0.92);
+    }
+    #hud{
+      position:fixed; left:12px; top:12px; z-index:10;
+      display:flex; gap:10px; align-items:flex-start; flex-wrap:wrap;
+      pointer-events:none;
+    }
+    .card{
+      pointer-events:none;
+      background: var(--panel);
+      border: 1px solid var(--stroke);
+      backdrop-filter: blur(8px);
+      border-radius: 14px;
+      padding: 10px 12px;
+      box-shadow: var(--shadow);
+      min-width: 250px;
+    }
+    .title{
+      font-weight: 950; letter-spacing:.4px; text-transform: uppercase; font-size: 12px;
+      display:flex; align-items:center; justify-content:space-between; gap:8px;
+      margin-bottom:6px;
+    }
+    .pill{
+      display:inline-flex; align-items:center; gap:6px;
+      border: 1px solid rgba(255,255,255,.18);
+      background: rgba(0,0,0,.22);
+      padding: 4px 9px;
+      border-radius: 999px;
+      font-size: 12px;
+      color: var(--muted);
+      white-space:nowrap;
+    }
+    .pill b{ color: var(--txt); }
+    .dot{ width:9px; height:9px; border-radius:50%; background: var(--red); box-shadow: 0 0 14px rgba(255,59,59,.35); }
+    .dot.ok{ background: var(--green); box-shadow: 0 0 14px rgba(55,255,116,.28); }
+    .dot.warn{ background: var(--amber); box-shadow: 0 0 14px rgba(255,207,85,.22); }
+    .row{ font-size:13px; line-height:1.35; color:var(--txt); }
+    .muted{ color:var(--muted); }
+
+    #panel{
+      position:fixed; right:12px; top:12px; z-index:10;
+      width: min(560px, calc(100vw - 24px));
+      background: rgba(0,0,0,.35);
+      border: 1px solid rgba(255,255,255,.16);
+      backdrop-filter: blur(10px);
+      border-radius: 16px;
+      padding: 10px;
+      box-shadow: var(--shadow);
+      user-select:none;
+      max-height: calc(100vh - 24px);
+      overflow:auto;
+    }
+    .head{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
+    .brand{ font-weight:1000; letter-spacing:.6px; text-transform:uppercase; font-size:12px; display:flex; align-items:center; gap:8px; }
+    .brand .spark{ width:10px;height:10px;border-radius:50%; background: radial-gradient(circle at 30% 30%, #fff, var(--cyan)); box-shadow: 0 0 16px rgba(32,255,230,.26); }
+    .btn{
+      border:1px solid rgba(255,255,255,.16);
+      background:
+        radial-gradient(circle at 30% 20%, rgba(32,255,230,.18), transparent 55%),
+        linear-gradient(180deg, rgba(176,76,255,.28), rgba(0,0,0,.25));
+      color: rgba(255,255,255,.95);
+      padding: 9px 12px;
+      border-radius: 12px;
+      cursor:pointer;
+      font-weight: 950;
+      transition: transform .08s ease, filter .12s ease;
+      white-space:nowrap;
+    }
+    .btn:hover{ filter: brightness(1.06) drop-shadow(0 0 12px rgba(32,255,230,.18)); }
+    .btn:active{ transform: translateY(1px); }
+    .btn.secondary{ background: rgba(0,0,0,.28); }
+    .btn.danger{ background: linear-gradient(180deg, rgba(255,70,70,.30), rgba(0,0,0,.25)); }
+
+    .group{
+      margin-top: 10px;
+      padding: 10px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(0,0,0,.20);
+    }
+    .gtitle{ font-weight:1000; font-size:12px; letter-spacing:.4px; text-transform:uppercase; margin-bottom:8px; color:rgba(255,255,255,.92); }
+    .help{ font-size:11px; color:rgba(255,255,255,.72); line-height:1.25; }
+    .setting{ margin-bottom: 10px; }
+    .setting label{
+      display:flex; justify-content:space-between; gap:10px; align-items:center;
+      font-size:12px; font-weight:950; color:rgba(255,255,255,.92);
+      margin-bottom: 6px;
+    }
+    .setting .val{ color: var(--cyan); }
+    input[type="range"]{ width:100%; }
+    input[type="checkbox"]{ transform: scale(1.15); }
+    .toggleRow{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    select, input[type="text"]{
+      width:100%;
+      border-radius: 12px;
+      border:1px solid rgba(255,255,255,.16);
+      background: rgba(0,0,0,.25);
+      color: rgba(255,255,255,.90);
+      padding: 9px 10px;
+      outline:none;
+    }
+
+    #overlay{
+      position:fixed; inset:0; z-index:50;
+      display:flex; align-items:center; justify-content:center;
+      padding:16px;
+      background: rgba(0,0,0,.55);
+      backdrop-filter: blur(10px);
+    }
+    #overlay.hidden{ display:none; }
+    #overlayCard{
+      width:min(1000px, 98vw);
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,.18);
+      background:
+        radial-gradient(900px 500px at 20% 0%, rgba(32,255,230,.12), transparent 60%),
+        radial-gradient(900px 600px at 90% 10%, rgba(176,76,255,.12), transparent 60%),
+        rgba(8,12,34,.70);
+      box-shadow: 0 18px 64px rgba(0,0,0,.55);
+      overflow:hidden;
+      padding: 14px;
+    }
+    #overlayCard h1{ margin:0 0 8px; font-size:18px; font-weight:1000; letter-spacing:.4px; text-transform:uppercase; }
+    #overlayCard p{ margin:0 0 10px; color:rgba(255,255,255,.85); line-height:1.35; }
+    .grid{ display:grid; grid-template-columns: 1.2fr .8fr; gap: 12px; align-items:start; }
+    @media (max-width: 860px){ .grid{ grid-template-columns: 1fr; } }
+    .warnBox{
+      background: rgba(0,0,0,.28);
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 14px;
+      padding: 10px;
+      color: rgba(255,255,255,.88);
+    }
+    .warnBox b{ color: var(--amber); }
+    .progress{
+      height:10px; width:100%;
+      background: rgba(255,255,255,.12);
+      border: 1px solid rgba(255,255,255,.14);
+      border-radius: 999px;
+      overflow:hidden;
+    }
+    .bar{
+      height:100%;
+      width:0%;
+      background: linear-gradient(90deg, rgba(32,255,230,.95), rgba(176,76,255,.95));
+      transition: width .08s linear;
+    }
+    .statusLine{
+      margin-top:8px; padding:10px;
+      background: rgba(0,0,0,.22);
+      border: 1px solid rgba(255,255,255,.14);
+      border-radius: 14px;
+      font-size: 13px; line-height: 1.35;
+    }
+    code.k{
+      background: rgba(0,0,0,.24);
+      border: 1px solid rgba(255,255,255,.14);
+      padding: 2px 6px;
+      border-radius: 8px;
+      color: rgba(255,255,255,.9);
+    }
+  </style>
+</head>
+
+<body>
+  <canvas id="view"></canvas>
+  <video id="video" autoplay playsinline muted></video>
+  <div id="cursor"></div>
+
+  <div id="hud">
+    <div class="card">
+      <div class="title">
+        <span>AirPick Guitar AR</span>
+        <span class="pill">Score <b id="score">0</b></span>
+      </div>
+      <div class="row"><b>Pick:</b> pinch + strum over strings (right zone).</div>
+      <div class="row"><b>Fret:</b> place fingers on neck (left zone).</div>
+      <div class="row muted" id="lastNote">Last: —</div>
+    </div>
+
+    <div class="card" style="min-width:380px">
+      <div class="title">
+        <span>Status</span>
+        <span class="pill"><span class="dot warn" id="dotCam"></span> <b id="camStat">camera</b></span>
+      </div>
+      <div class="row"><span class="pill"><span class="dot warn" id="dotMP"></span> <b id="mpStat">mediapipe</b></span></div>
+      <div class="row"><span class="pill"><span class="dot warn" id="dotAU"></span> <b id="auStat">audio</b></span></div>
+      <div class="row muted" id="hintLine">Press Start to request permissions.</div>
+      <div class="row" style="margin-top:6px">
+        <span class="pill">Profile <b id="profileStat">none</b></span>
+        <span class="pill">AutoFit <b id="fitStat">off</b></span>
+        <span class="pill">Sound <b id="soundStat">Physical</b></span>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <span class="pill">Scan <b id="scanMini">idle</b></span>
+      </div>
+    </div>
+  </div>
+
+  <div id="panel">
+    <div class="head">
+      <div class="brand"><span class="spark"></span> Guitar Controls</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn secondary" id="openOverlay">Start / Scan-to-Fit</button>
+        <button class="btn secondary" id="testSound">Test Sound</button>
+        <button class="btn secondary" id="toggleDebug">Debug: ON</button>
+        <button class="btn secondary" id="resetScore">Reset</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gtitle">HandScan AutoFit</div>
+      <div class="row muted">Creates a playing profile and auto-fits string spacing + neck + band.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap; margin-top:10px;">
+        <button class="btn" id="createProfile">Create / Overwrite Profile (Scan)</button>
+        <button class="btn secondary" id="loginProfile">Login + Apply AutoFit (Scan)</button>
+        <button class="btn danger" id="deleteProfile">Delete Profile</button>
+      </div>
+      <div class="help" style="margin-top:8px">
+        Best results: hold your hand(s) steady at your natural playing distance for ~1.6 seconds.
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gtitle">AutoFit Result</div>
+      <div class="row">Hand scale: <span class="pill"><b id="handScale">—</b></span></div>
+      <div class="row">String spacing: <span class="pill"><b id="fitSpread">—</b></span></div>
+      <div class="row">Neck width: <span class="pill"><b id="fitNeck">—</b></span></div>
+      <div class="row">Fret band: <span class="pill"><b id="fitBand">—</b></span></div>
+    </div>
+
+    <div class="group">
+      <div class="gtitle">Guitar Geometry</div>
+      <div class="setting">
+        <label><span>String spacing (0.03 ultra-tight)</span><span class="val" id="vSpread">0.55</span></label>
+        <input id="spread" type="range" min="0.03" max="0.90" step="0.005" value="0.55" />
+      </div>
+      <div class="setting">
+        <label><span>String vertical position</span><span class="val" id="vCY">0.55</span></label>
+        <input id="centerY" type="range" min="0.20" max="0.80" step="0.005" value="0.55" />
+      </div>
+      <div class="setting">
+        <label><span>Neck width (left zone)</span><span class="val" id="vNeck">0.10–0.45</span></label>
+        <input id="neckW" type="range" min="0.30" max="0.62" step="0.005" value="0.45" />
+      </div>
+      <div class="setting" style="margin-bottom:0;">
+        <label><span>Fret finger band (px)</span><span class="val" id="vFretBand">24</span></label>
+        <input id="fretBand" type="range" min="10" max="80" step="1" value="24" />
+        <div class="help">Larger = more forgiving fret detection.</div>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gtitle">Pick + Strum Detection</div>
+      <div class="setting">
+        <label><span>Pinch ON threshold</span><span class="val" id="vPinchOn">0.055</span></label>
+        <input id="pinchOn" type="range" min="0.020" max="0.090" step="0.001" value="0.055" />
+      </div>
+      <div class="setting">
+        <label><span>Pinch hysteresis</span><span class="val" id="vPinchHy">1.25</span></label>
+        <input id="pinchHy" type="range" min="1.05" max="1.80" step="0.01" value="1.25" />
+      </div>
+      <div class="setting">
+        <label><span>Cursor smoothing</span><span class="val" id="vSmooth">0.22</span></label>
+        <input id="smooth" type="range" min="0.05" max="0.60" step="0.01" value="0.22" />
+      </div>
+      <div class="setting">
+        <label><span>Min strum speed (px/frame)</span><span class="val" id="vMinSpeed">6</span></label>
+        <input id="minSpeed" type="range" min="2" max="40" step="1" value="6" />
+      </div>
+      <div class="setting" style="margin-bottom:0;">
+        <label><span>Retrigger cooldown (ms)</span><span class="val" id="vCD">55</span></label>
+        <input id="cooldown" type="range" min="0" max="180" step="5" value="55" />
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gtitle">Frets</div>
+      <div class="toggleRow" style="margin-bottom:8px;">
+        <span class="row">Quantize to semitones</span>
+        <input type="checkbox" id="quantize" checked/>
+      </div>
+      <div class="setting">
+        <label><span>Slide smoothing</span><span class="val" id="vSlide">0.30</span></label>
+        <input id="slide" type="range" min="0.05" max="0.70" step="0.01" value="0.30" />
+      </div>
+      <div class="setting" style="margin-bottom:0;">
+        <label><span>Max frets</span><span class="val" id="vMaxF">12</span></label>
+        <input id="maxFrets" type="range" min="5" max="18" step="1" value="12" />
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gtitle">Sound Tuner (Per Gameplay)</div>
+      <div class="help">
+        Choose a sound type (electric/bass/synth). This swaps the <b>string sound engine</b> and saves it.
+      </div>
+
+      <div class="setting" style="margin-top:10px;">
+        <label><span>Sound type</span><span class="val" id="vInstr">Physical</span></label>
+        <select id="instrument">
+          <option value="physical">Physical Guitar (Plucked)</option>
+          <option value="electric">Clean Electric Guitar</option>
+          <option value="bass">Electric Bass</option>
+          <option value="synth">Synth Lead</option>
+        </select>
+      </div>
+
+      <div class="setting">
+        <label><span>String brightness</span><span class="val" id="vBright">0.55</span></label>
+        <input id="bright" type="range" min="0" max="1" step="0.01" value="0.55"/>
+      </div>
+
+      <div class="setting">
+        <label><span>String decay (sustain)</span><span class="val" id="vDecay">0.82</span></label>
+        <input id="sDecay" type="range" min="0.60" max="0.94" step="0.005" value="0.82"/>
+      </div>
+
+      <div class="setting">
+        <label><span>Pick attack/noise</span><span class="val" id="vNoise">0.70</span></label>
+        <input id="pNoise" type="range" min="0" max="1" step="0.01" value="0.70"/>
+      </div>
+
+      <div class="setting">
+        <label><span>Chorus width</span><span class="val" id="vChorus">0.12</span></label>
+        <input id="chorus" type="range" min="0" max="1" step="0.01" value="0.12"/>
+      </div>
+
+      <div class="setting">
+        <label><span>Envelope attack (ms)</span><span class="val" id="vAtk">4</span></label>
+        <input id="envA" type="range" min="0" max="40" step="1" value="4"/>
+      </div>
+
+      <div class="setting" style="margin-bottom:0;">
+        <label><span>Envelope release (ms)</span><span class="val" id="vRel">260</span></label>
+        <input id="envR" type="range" min="40" max="1600" step="10" value="260"/>
+      </div>
+
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
+        <input id="presetName" type="text" placeholder="Preset name (e.g., 'My Bass')" />
+        <button class="btn secondary" id="savePreset">Save</button>
+      </div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+        <select id="presetList"></select>
+        <button class="btn secondary" id="loadPreset">Load</button>
+        <button class="btn danger" id="delPreset">Delete</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gtitle">Amp + Backing Track</div>
+
+      <div class="setting">
+        <label><span>Instrument volume</span><span class="val" id="vVol">0.70</span></label>
+        <input id="vol" type="range" min="0.00" max="1.00" step="0.01" value="0.70" />
+      </div>
+
+      <div class="setting">
+        <label><span>Preamp gain (dB)</span><span class="val" id="vPre">12</span></label>
+        <input id="pre" type="range" min="0" max="24" step="1" value="12" />
+      </div>
+
+      <div class="setting">
+        <label><span>Drive</span><span class="val" id="vDrive">0.35</span></label>
+        <input id="drive" type="range" min="0" max="1" step="0.01" value="0.35" />
+      </div>
+
+      <div class="setting">
+        <label><span>Cab tone (brightness)</span><span class="val" id="vTone">0.55</span></label>
+        <input id="tone" type="range" min="0" max="1" step="0.01" value="0.55" />
+      </div>
+
+      <div class="setting" style="margin-bottom:0;">
+        <label><span>Backing track volume</span><span class="val" id="vTrack">0.55</span></label>
+        <input id="trackVol" type="range" min="0" max="1" step="0.01" value="0.55" />
+        <div class="help">Load a song and play along.</div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+          <input id="trackFile" type="file" accept="audio/*" style="max-width:260px; color:rgba(255,255,255,.85)"/>
+          <button class="btn secondary" id="trackPlay">Play/Pause Track</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gtitle">Record Events</div>
+      <div class="toggleRow" style="margin-bottom:8px;">
+        <span class="row">Record note events</span>
+        <input type="checkbox" id="recOn"/>
+      </div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn secondary" id="dlJson">Download JSON</button>
+        <button class="btn secondary" id="clearRec">Clear</button>
+      </div>
+      <div class="help" style="margin-top:8px">
+        Saves timing + freq + velocity + instrument.
+      </div>
+    </div>
+  </div>
+
+  <div id="overlay">
+    <div id="overlayCard">
+      <h1>Start + Scan-to-Fit (Hands)</h1>
+      <div class="grid">
+        <div>
+          <p>
+            1) Press <b>Start</b> to enable camera + hands + audio.<br/>
+            2) Use <b>Create Profile</b> to scan your hand(s).<br/>
+            3) Use <b>Login</b> to re-apply AutoFit anytime.
+          </p>
+          <div class="warnBox" id="secureBox"><b>Important:</b> Camera requires HTTPS or localhost.</div>
+
+          <div style="margin-top:10px">
+            <div class="row"><b>Scan progress</b></div>
+            <div class="progress"><div class="bar" id="scanBar"></div></div>
+            <div class="statusLine" id="overlayStatus">Ready.</div>
+          </div>
+
+          <div class="help" style="margin-top:8px">
+            If sound is silent: click/tap the page once, then press <code class="k">Test Sound</code>.
+          </div>
+        </div>
+
+        <div>
+          <button class="btn" id="startBtn" style="width:100%; font-size:14px;">Start Camera + Hands + Audio</button>
+          <div style="height:10px"></div>
+          <button class="btn secondary" id="closeOverlay" style="width:100%;">Close Overlay</button>
+
+          <div style="height:14px"></div>
+
+          <button class="btn" id="overlayCreate" style="width:100%;">Create / Overwrite Profile (Scan)</button>
+          <div style="height:10px"></div>
+          <button class="btn secondary" id="overlayLogin" style="width:100%;">Login + Apply AutoFit (Scan)</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.min.js"></script>
+
+  <script>
+  /********************************************************************
+   * AirPick Guitar AR — Fixed Build
+   *
+   * FIXES APPLIED (hardline):
+   * 1) PhysicalVoice injection gain was 0 (hard mute) -> now audible.
+   * 2) OscVoice transient noise path was muted -> now audible.
+   * 3) Start flow unlocks AudioContext FIRST (inside click gesture).
+   *
+   * Gameplay focus:
+   * - Always-strum tries to resume audio on strum frames
+   * - Sound engine + presets persist
+   * - FlexFit (Scan-to-Fit) preserved and applied to geometry
+   ********************************************************************/
+
+  // ---------- safe DOM helpers ----------
+  const $ = (id)=>document.getElementById(id);
+  const on = (id, evt, fn)=>{ const n = $(id); if(n) n.addEventListener(evt, fn); };
+  const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
+  const lerp=(a,b,t)=>a+(b-a)*t;
+
+  // ---------- canvas ----------
+  const canvas = $("view");
+  const ctx = canvas.getContext("2d");
+  let W=0,H=0,DPR=1;
+  function resize(){
+    DPR = Math.max(1, window.devicePixelRatio || 1);
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = Math.floor(W*DPR);
+    canvas.height = Math.floor(H*DPR);
+    canvas.style.width = W+"px";
+    canvas.style.height = H+"px";
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  // ---------- status dots ----------
+  function setDot(dotId, state){
+    const d = $(dotId);
+    if(!d) return;
+    d.classList.remove("ok","warn");
+    if(state==="ok") d.classList.add("ok");
+    else if(state==="warn") d.classList.add("warn");
+  }
+
+  // ---------- config ----------
+  const cfg = {
+    spread: 0.55,
+    centerY: 0.55,
+    neckX0: 0.10,
+    neckX1: 0.45,
+    fretBandPx: 24,
+    maxFrets: 12,
+
+    pinchOn: 0.055,
+    pinchHy: 1.25,
+    smooth: 0.22,
+    minSpeed: 6,
+    cooldownMs: 55,
+
+    quantize: true,
+    slideSmooth: 0.30,
+
+    strumX0: 0.42,
+    strumX1: 0.95,
+
+    debug: true,
+
+    volume: 0.70,
+    preDb: 12,
+    drive: 0.35,
+    cabTone: 0.55,
+    trackVol: 0.55,
+
+    instrument: "physical",
+    stringBright: 0.55,
+    stringDecay: 0.82,
+    pickNoise: 0.70,
+    chorus: 0.12,
+    envA_ms: 4,
+    envR_ms: 260
+  };
+
+  // ---------- HUD ----------
+  let score=0;
+  function setScore(n){ score=n|0; const s=$("score"); if(s) s.textContent=String(score); }
+  function setLastNote(s){ const n=$("lastNote"); if(n) n.textContent="Last: "+s; }
+
+  // ---------- UI label refresh ----------
+  function refreshLabels(){
+    const setT=(id,v)=>{ const n=$(id); if(n) n.textContent=v; };
+    setT("vSpread", cfg.spread.toFixed(3));
+    setT("vCY", cfg.centerY.toFixed(2));
+    setT("vNeck", cfg.neckX0.toFixed(2)+"–"+cfg.neckX1.toFixed(2));
+    setT("vFretBand", String(cfg.fretBandPx|0));
+    setT("vPinchOn", cfg.pinchOn.toFixed(3));
+    setT("vPinchHy", cfg.pinchHy.toFixed(2));
+    setT("vSmooth", cfg.smooth.toFixed(2));
+    setT("vMinSpeed", String(cfg.minSpeed|0));
+    setT("vCD", String(cfg.cooldownMs|0));
+    setT("vSlide", cfg.slideSmooth.toFixed(2));
+    setT("vMaxF", String(cfg.maxFrets|0));
+
+    setT("vVol", cfg.volume.toFixed(2));
+    setT("vPre", String(cfg.preDb|0));
+    setT("vDrive", cfg.drive.toFixed(2));
+    setT("vTone", cfg.cabTone.toFixed(2));
+    setT("vTrack", cfg.trackVol.toFixed(2));
+
+    const instrName = ({physical:"Physical", electric:"Electric", bass:"Bass", synth:"Synth"})[cfg.instrument] || "Physical";
+    setT("vInstr", instrName);
+    const ss=$("soundStat"); if(ss) ss.textContent=instrName;
+
+    setT("vBright", cfg.stringBright.toFixed(2));
+    setT("vDecay", cfg.stringDecay.toFixed(2));
+    setT("vNoise", cfg.pickNoise.toFixed(2));
+    setT("vChorus", cfg.chorus.toFixed(2));
+    setT("vAtk", String(cfg.envA_ms|0));
+    setT("vRel", String(cfg.envR_ms|0));
+
+    const dbg=$("toggleDebug"); if(dbg) dbg.textContent="Debug: "+(cfg.debug?"ON":"OFF");
+  }
+
+  // ---------- wire UI ----------
+  function bindRange(id, key, parseFn, after){
+    on(id, "input", (e)=>{
+      cfg[key]=parseFn(e.target.value);
+      refreshLabels();
+      if(after) after();
+    });
+  }
+  function bindCheck(id, key, after){
+    on(id, "change", (e)=>{
+      cfg[key]=!!e.target.checked;
+      if(after) after();
+    });
+  }
+
+  // geometry
+  bindRange("spread","spread",parseFloat);
+  bindRange("centerY","centerY",parseFloat);
+  bindRange("neckW","neckX1",parseFloat);
+  bindRange("fretBand","fretBandPx",(v)=>parseInt(v,10));
+  // detection
+  bindRange("pinchOn","pinchOn",parseFloat);
+  bindRange("pinchHy","pinchHy",parseFloat);
+  bindRange("smooth","smooth",parseFloat);
+  bindRange("minSpeed","minSpeed",(v)=>parseInt(v,10));
+  bindRange("cooldown","cooldownMs",(v)=>parseInt(v,10));
+  // frets
+  bindCheck("quantize","quantize");
+  bindRange("slide","slideSmooth",parseFloat);
+  bindRange("maxFrets","maxFrets",(v)=>parseInt(v,10));
+
+  // amp
+  bindRange("vol","volume",parseFloat, ()=>Synth.retune());
+  bindRange("pre","preDb",(v)=>parseInt(v,10), ()=>Synth.retune());
+  bindRange("drive","drive",parseFloat, ()=>Synth.retune());
+  bindRange("tone","cabTone",parseFloat, ()=>Synth.retune());
+  bindRange("trackVol","trackVol",parseFloat, ()=>Synth.setTrackVol(cfg.trackVol));
+
+  // sound engine
+  bindRange("bright","stringBright",parseFloat, ()=>{ Synth.setSoundParamsFromCfg(); saveCurrentSoundState(); });
+  bindRange("sDecay","stringDecay",parseFloat, ()=>{ Synth.setSoundParamsFromCfg(); saveCurrentSoundState(); });
+  bindRange("pNoise","pickNoise",parseFloat, ()=>{ Synth.setSoundParamsFromCfg(); saveCurrentSoundState(); });
+  bindRange("chorus","chorus",parseFloat, ()=>{ Synth.setChorus(cfg.chorus); saveCurrentSoundState(); });
+  bindRange("envA","envA_ms",(v)=>parseInt(v,10), ()=>{ Synth.setSoundParamsFromCfg(); saveCurrentSoundState(); });
+  bindRange("envR","envR_ms",(v)=>parseInt(v,10), ()=>{ Synth.setSoundParamsFromCfg(); saveCurrentSoundState(); });
+
+  on("toggleDebug","click", ()=>{ cfg.debug=!cfg.debug; refreshLabels(); });
+  on("resetScore","click", ()=> setScore(0));
+
+  // ---------- notes/strings ----------
+  const STRINGS = [
+    { name:"E2", freq: 82.41 },
+    { name:"A2", freq:110.00 },
+    { name:"D3", freq:146.83 },
+    { name:"G3", freq:196.00 },
+    { name:"B3", freq:246.94 },
+    { name:"E4", freq:329.63 }
+  ];
+  const stringState = STRINGS.map(()=>({ hitAt:0, vib:0, armed:true, lastTrig: -1e9, fretSemi: 0, fretHeld: false, fretNum: 0 }));
+
+  const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+  function freqToNote(freq){
+    const A4=440;
+    const n = Math.round(12*Math.log2(freq/A4)) + 69;
+    const name = NOTE_NAMES[(n%12+12)%12];
+    const oct = Math.floor(n/12)-1;
+    return name+oct;
+  }
+
+  // ---------- camera ----------
+  const video = $("video");
+  let stream=null, videoReady=false;
+
+  async function startCameraOldStable(){
+    if(!navigator.mediaDevices?.getUserMedia) throw new Error("getUserMedia not available.");
+    $("camStat").textContent="starting"; setDot("dotCam","warn");
+
+    let constraints = { video: { facingMode:"user", width:{ideal:1280}, height:{ideal:720} }, audio:false };
+    try{
+      stream = await navigator.mediaDevices.getUserMedia(constraints);
+    }catch(_){
+      stream = await navigator.mediaDevices.getUserMedia({ video:true, audio:false });
+    }
+    video.srcObject = stream;
+
+    await new Promise((res, rej)=>{
+      let done=false;
+      const t = setTimeout(()=>{ if(!done){ done=true; rej(new Error("Video metadata timeout")); } }, 7000);
+      video.onloadedmetadata = async ()=>{
+        if(done) return;
+        try{ await video.play(); }catch(_){}
+        clearTimeout(t);
+        done=true;
+        res();
+      };
+    });
+
+    videoReady=true;
+    $("camStat").textContent="ready"; setDot("dotCam","ok");
+  }
+
+  // ---------- MediaPipe Hands ----------
+  let mpHands=null, handsRunning=false, mpBusy=false;
+  let lastHands=[];
+
+  function dist(a,b){ const dx=a.x-b.x, dy=a.y-b.y; return Math.sqrt(dx*dx + dy*dy); }
+  function pinchDistance(lm){ return dist(lm[8], lm[4]); }
+
+  const handTrack = new Map();
+  function handKey(label, idx){ return (label && label!=="Unknown") ? label : ("H"+idx); }
+  function handMid(lm){
+    const idx=lm[8], th=lm[4];
+    return { x: (1-((idx.x+th.x)*0.5))*W, y: (((idx.y+th.y)*0.5))*H };
+  }
+  function updateHandMotion(h, idx){
+    const k = handKey(h.label, idx);
+    const m = handMid(h.lm);
+    const now = performance.now();
+    const prev = handTrack.get(k);
+    let v=0;
+    if(prev){
+      const dt = Math.max(1, now - prev.ts);
+      v = Math.hypot(m.x - prev.mx, m.y - prev.my) / dt; // px per ms
+    }
+    handTrack.set(k, { mx:m.x, my:m.y, ts:now, v });
+    h.motion = { v, mx:m.x, my:m.y };
+    return h;
+  }
+
+  async function initMediaPipe(){
+    if(typeof Hands === "undefined") throw new Error("MediaPipe Hands failed to load.");
+    $("mpStat").textContent="starting"; setDot("dotMP","warn");
+
+    mpHands = new Hands({ locateFile: (f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${f}` });
+    mpHands.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.60,
+      minTrackingConfidence: 0.60
+    });
+    mpHands.onResults((results)=>{
+      const hands=[];
+      const lms = results.multiHandLandmarks || [];
+      const mhd = results.multiHandedness || [];
+      for(let i=0;i<lms.length;i++){
+        const label = (mhd[i]?.classification?.[0]?.label) || "Unknown";
+        hands.push(updateHandMotion({
+          lm: lms[i],
+          label,
+          pinchD: pinchDistance(lms[i])
+        }, i));
+      }
+      lastHands = hands;
+    });
+
+    handsRunning = true;
+    $("mpStat").textContent="ready"; setDot("dotMP","ok");
+  }
+
+  async function mpLoop(){
+    if(!handsRunning || !videoReady) { requestAnimationFrame(mpLoop); return; }
+    if(mpBusy){ requestAnimationFrame(mpLoop); return; }
+    mpBusy = true;
+    try{ await mpHands.send({ image: video }); }
+    catch(e){
+      console.error(e);
+      $("mpStat").textContent="error";
+      setDot("dotMP","warn");
+    }finally{
+      mpBusy=false;
+      requestAnimationFrame(mpLoop);
+    }
+  }
+
+  // ---------- geometry ----------
+  function computeStringYs(){
+    const spreadPx = Math.max(10, H * cfg.spread);
+    const center = H * cfg.centerY;
+    let top = center - spreadPx/2;
+    top = clamp(top, 20, H - spreadPx - 20);
+    const step = spreadPx / (STRINGS.length - 1);
+    const ys=[];
+    for(let i=0;i<STRINGS.length;i++) ys.push(top + step*i);
+    return { ys, step, top, spreadPx };
+  }
+  function fretPositions(x0, x1, maxFrets){
+    const L = Math.max(1, x1-x0);
+    const out=[x0];
+    for(let n=1; n<=maxFrets; n++){
+      const d = L*(1 - Math.pow(2, -n/12));
+      out.push(x0 + d);
+    }
+    return out;
+  }
+
+  // ---------- pick/fret assignment ----------
+  function assignPickFret(hands){
+    if(!hands.length) return { pick:null, fret:null };
+    if(hands.length===1) return { pick:hands[0], fret:null };
+
+    const pinchOnThr = cfg.pinchOn;
+    const pinching = hands.map((h,i)=> (h.pinchD < pinchOnThr) ? i : -1).filter(i=>i>=0);
+    if(pinching.length === 1){
+      const p = pinching[0];
+      return { pick:hands[p], fret:hands[1-p] };
+    }
+    const v0 = hands[0].motion?.v || 0;
+    const v1 = hands[1].motion?.v || 0;
+    const pickIdx = (v0 >= v1) ? 0 : 1;
+    return { pick:hands[pickIdx], fret:hands[1-pickIdx] };
+  }
+
+  // ---------- pick state ----------
+  const cursorEl = $("cursor");
+  let cursorX=W*0.5, cursorY=H*0.5;
+  let pickX=W*0.6, pickY=H*0.55;
+  let lastPickX=pickX, lastPickY=pickY;
+  let pickPinched=false, prevPickPinched=false;
+  let pickPinchD=1;
+
+  function updatePickFromLandmarks(lm){
+    const idx=lm[8], th=lm[4];
+    const ix=(1-idx.x)*W;
+    const iy=idx.y*H;
+
+    cursorX = cursorX*(1-cfg.smooth) + ix*cfg.smooth;
+    cursorY = cursorY*(1-cfg.smooth) + iy*cfg.smooth;
+
+    cursorEl.style.display="block";
+    cursorEl.style.left = cursorX+"px";
+    cursorEl.style.top  = cursorY+"px";
+
+    pickPinchD = dist(idx, th);
+    const pinchOn = cfg.pinchOn;
+    const pinchOff = cfg.pinchOn * cfg.pinchHy;
+
+    prevPickPinched = pickPinched;
+    if(!pickPinched && pickPinchD < pinchOn) pickPinched = true;
+    if(pickPinched && pickPinchD > pinchOff) pickPinched = false;
+
+    cursorEl.classList.remove("close","med","far","pinch");
+    const medT = pinchOn * 1.8;
+    if(pickPinched) cursorEl.classList.add("pinch");
+    if(pickPinchD < pinchOn) cursorEl.classList.add("close");
+    else if(pickPinchD < medT) cursorEl.classList.add("med");
+    else cursorEl.classList.add("far");
+
+    const tx=(1-th.x)*W;
+    const ty=th.y*H;
+    const mx=(ix+tx)*0.5;
+    const my=(iy+ty)*0.5;
+
+    lastPickX=pickX; lastPickY=pickY;
+    pickX = lerp(pickX, mx, 0.35);
+    pickY = lerp(pickY, my, 0.35);
+
+    if(pickPinched && !prevPickPinched){
+      Synth.ensure();
+      Synth.tryResume();
+      Synth.updateStatus();
+    }
+  }
+
+  // ---------- fret detection ----------
+  let fretFingers=[];
+  let activeFretLines=new Set();
+
+  function updateFretsFromLandmarks(lm, stringYs, fretXs, neckRect){
+    fretFingers=[];
+    activeFretLines.clear();
+
+    const wrist = lm[0];
+    const mMcp  = lm[9];
+    const palmX = (1-((wrist.x+mMcp.x)*0.5))*W;
+    const palmY = (((wrist.y+mMcp.y)*0.5))*H;
+    const holdingNeck =
+      palmX >= (neckRect.x0 - 50) && palmX <= (neckRect.x1 + 50) &&
+      palmY >= (neckRect.y0 - 80) && palmY <= (neckRect.y1 + 80);
+
+    if(!holdingNeck){
+      for(const st of stringState){
+        st.fretHeld=false;
+        st.fretSemi*=0.86;
+        st.fretNum=0;
+      }
+      return;
+    }
+
+    const perStringTarget = new Array(STRINGS.length).fill(null);
+    const tips = [{id:8,name:"I"},{id:12,name:"M"},{id:16,name:"R"},{id:20,name:"P"}];
+
+    for(const t of tips){
+      const p=lm[t.id];
+      const x=(1-p.x)*W;
+      const y=p.y*H;
+
+      if(x < neckRect.x0 || x > neckRect.x1) continue;
+      if(y < neckRect.y0 || y > neckRect.y1) continue;
+
+      let bestS=-1, bestD=1e9;
+      for(let i=0;i<stringYs.length;i++){
+        const dd=Math.abs(y-stringYs[i]);
+        if(dd<bestD){ bestD=dd; bestS=i; }
+      }
+      if(bestS<0 || bestD>cfg.fretBandPx) continue;
+
+      let fret = 0;
+      for(let i=1;i<fretXs.length;i++){
+        if(x >= fretXs[i]) fret = i;
+        else break;
+      }
+      fret = clamp(fret, 0, cfg.maxFrets);
+
+      let semi = cfg.quantize ? fret : clamp(((x-neckRect.x0)/Math.max(1,(neckRect.x1-neckRect.x0)))*cfg.maxFrets, 0, cfg.maxFrets);
+
+      if(perStringTarget[bestS] == null || semi > perStringTarget[bestS].semi){
+        perStringTarget[bestS] = { semi, fret, x, y, finger:t.name };
+      }
+      fretFingers.push({x,y,stringIndex:bestS, semi, fret, finger:t.name});
+    }
+
+    for(let i=0;i<STRINGS.length;i++){
+      const st=stringState[i];
+      const tgt = perStringTarget[i];
+      if(tgt){
+        st.fretHeld = true;
+        st.fretNum = tgt.fret;
+        st.fretSemi = lerp(st.fretSemi, tgt.semi, cfg.slideSmooth);
+        activeFretLines.add(tgt.fret);
+      }else{
+        st.fretHeld = false;
+        st.fretNum = 0;
+        st.fretSemi *= 0.86;
+      }
+      st.fretSemi = clamp(st.fretSemi, 0, cfg.maxFrets);
+    }
+  }
+
+  // ---------- SOUND ENGINE ----------
+  const dbToGain = (db)=>Math.pow(10, db/20);
+
+  function makeDriveCurve(amount){
+    const n=2048, c=new Float32Array(n);
+    const k=1+amount*24;
+    for(let i=0;i<n;i++){
+      const x=(i/(n-1))*2-1;
+      c[i]=Math.tanh(k*x);
+    }
+    return c;
+  }
+  function createNoiseBuffer(A, ms){
+    const len = Math.max(1, Math.floor(A.sampleRate*(ms/1000)));
+    const buf = A.createBuffer(1, len, A.sampleRate);
+    const d = buf.getChannelData(0);
+    for(let i=0;i<len;i++){
+      const a = 1 - i/len;
+      d[i] = (Math.random()*2-1) * a;
+    }
+    return buf;
+  }
+
+  // FIX #1: PhysicalVoice injection was hard-muted (gain=0). Now audible.
+  class PhysicalVoice {
+    constructor(A, bus){
+      this.A=A;
+      this.bus=bus;
+
+      this.inj = A.createGain();
+      this.inj.gain.value = 1.0; // was 0 (silent)
+
+      this.delay = A.createDelay(1.0);
+      this.delay.delayTime.value = 1/110;
+
+      this.lp = A.createBiquadFilter();
+      this.lp.type="lowpass";
+      this.lp.Q.value=0.7;
+      this.lp.frequency.value=2800;
+
+      this.fb = A.createGain();
+      this.fb.gain.value=0.82;
+
+      this.outLP = A.createBiquadFilter();
+      this.outLP.type="lowpass";
+      this.outLP.Q.value=0.7;
+      this.outLP.frequency.value=5200;
+
+      // Optional output gain so the "fun guitar" is clearly audible
+      this.outGain = A.createGain();
+      this.outGain.gain.value = 1.15;
+
+      // feedback loop
+      this.inj.connect(this.delay);
+      this.delay.connect(this.lp);
+      this.lp.connect(this.fb);
+      this.fb.connect(this.delay);
+
+      // tap output
+      this.delay.connect(this.outLP);
+      this.outLP.connect(this.outGain);
+      this.outGain.connect(this.bus);
+
+      this.noiseBuf = createNoiseBuffer(A, 18);
+      this.pickGain = 0.8;
+    }
+    setParams(p){
+      const bright = clamp(p.stringBright, 0, 1);
+      const decay = clamp(p.stringDecay, 0.60, 0.94);
+      const pickN = clamp(p.pickNoise, 0, 1);
+
+      this.fb.gain.value = decay;
+      this.lp.frequency.value = lerp(1400, 4200, bright);
+      this.outLP.frequency.value = lerp(2200, 7200, bright);
+      this.pickGain = lerp(0.25, 1.15, pickN);
+    }
+    pluck(freq, vel){
+      const A=this.A;
+      const t0=A.currentTime;
+
+      this.delay.delayTime.setTargetAtTime(1/Math.max(20,freq), t0, 0.004);
+
+      const src=A.createBufferSource();
+      src.buffer=this.noiseBuf;
+
+      const g=A.createGain();
+      const v=clamp(vel,0.05,1.2)*this.pickGain;
+
+      g.gain.setValueAtTime(0.0001,t0);
+      g.gain.linearRampToValueAtTime(0.95*v, t0+0.004);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0+0.038);
+
+      src.connect(g); g.connect(this.inj);
+      try{ src.start(t0); src.stop(t0+0.045); }catch(_){}
+      setTimeout(()=>{ try{ src.disconnect(); g.disconnect(); }catch(_){ } }, 120);
+    }
+  }
+
+  class OscVoice {
+    constructor(A, bus, mode){
+      this.A=A;
+      this.bus=bus;
+      this.mode=mode;
+
+      this.mix = A.createGain();
+      this.filter = A.createBiquadFilter();
+      this.filter.type="lowpass";
+      this.filter.Q.value=0.9;
+
+      this.shape = A.createWaveShaper();
+      this.shape.curve = makeDriveCurve(0.12);
+      this.shape.oversample="4x";
+
+      this.env = A.createGain();
+      this.env.gain.value=0.0001;
+
+      this.mix.connect(this.filter);
+      this.filter.connect(this.shape);
+      this.shape.connect(this.env);
+      this.env.connect(this.bus);
+
+      this.o1=A.createOscillator();
+      this.o2=A.createOscillator();
+      this.oSub=A.createOscillator();
+      this.g1=A.createGain();
+      this.g2=A.createGain();
+      this.gSub=A.createGain();
+
+      if(mode==="bass"){
+        this.o1.type="sawtooth"; this.o2.type="square"; this.oSub.type="sine";
+        this.g1.gain.value=0.55; this.g2.gain.value=0.15; this.gSub.gain.value=0.55;
+      }else if(mode==="electric"){
+        this.o1.type="triangle"; this.o2.type="sawtooth"; this.oSub.type="sine";
+        this.g1.gain.value=0.62; this.g2.gain.value=0.22; this.gSub.gain.value=0.08;
+      }else{
+        this.o1.type="sawtooth"; this.o2.type="square"; this.oSub.type="sine";
+        this.g1.gain.value=0.55; this.g2.gain.value=0.35; this.gSub.gain.value=0.15;
+      }
+
+      this.o1.connect(this.g1); this.g1.connect(this.mix);
+      this.o2.connect(this.g2); this.g2.connect(this.mix);
+      this.oSub.connect(this.gSub); this.gSub.connect(this.mix);
+
+      this.noiseBuf = createNoiseBuffer(A, 14);
+
+      const t0=A.currentTime;
+      this.o1.start(t0); this.o2.start(t0); this.oSub.start(t0);
+
+      // transient noise
+      this.nGain=A.createGain();
+      this.nGain.gain.value=1.0; // FIX #2: was 0 (silent transient)
+      this.nHP=A.createBiquadFilter(); this.nHP.type="highpass"; this.nHP.frequency.value=900;
+      this.nGain.connect(this.nHP);
+      this.nHP.connect(this.mix);
+    }
+    setParams(p){
+      const bright = clamp(p.stringBright,0,1);
+      const decay = clamp(p.stringDecay,0.60,0.94);
+      const pickN = clamp(p.pickNoise,0,1);
+
+      let fMin,fMax;
+      if(this.mode==="bass"){ fMin=180; fMax=1400; }
+      else if(this.mode==="electric"){ fMin=650; fMax=5200; }
+      else { fMin=800; fMax=7200; }
+
+      this.filter.frequency.value = lerp(fMin,fMax,bright);
+      this.filter.Q.value = lerp(0.7,1.2,bright);
+
+      this.shape.curve = makeDriveCurve(lerp(0.05,0.22,pickN));
+
+      this.atk = (clamp(p.envA_ms ?? 4,0,40)/1000);
+      this.rel = (clamp(p.envR_ms ?? 260,40,1600)/1000);
+      this.hold = lerp(0.08,0.22,(decay-0.60)/(0.94-0.60));
+      this.pickTransient = lerp(0.06,0.26,pickN);
+    }
+    pluck(freq, vel){
+      const A=this.A;
+      const t0=A.currentTime;
+      const v=clamp(vel,0.05,1.2);
+
+      this.o1.frequency.setTargetAtTime(freq, t0, 0.004);
+      this.o2.frequency.setTargetAtTime(freq*2, t0, 0.006);
+      this.oSub.frequency.setTargetAtTime(freq*0.5, t0, 0.006);
+
+      const atk=this.atk ?? 0.004;
+      const rel=this.rel ?? 0.26;
+      const hold=this.hold ?? 0.12;
+
+      try{
+        this.env.gain.cancelScheduledValues(t0);
+        this.env.gain.setValueAtTime(Math.max(0.0001,this.env.gain.value), t0);
+        this.env.gain.linearRampToValueAtTime(0.55*v, t0+atk);
+        this.env.gain.exponentialRampToValueAtTime(0.30*v+0.0001, t0+atk+hold);
+        this.env.gain.exponentialRampToValueAtTime(0.0001, t0+atk+hold+rel);
+      }catch(_){}
+
+      // transient noise
+      const src=A.createBufferSource(); src.buffer=this.noiseBuf;
+      const g=A.createGain();
+      const tr=(this.pickTransient ?? 0.12)*v;
+      g.gain.setValueAtTime(0.0001,t0);
+      g.gain.linearRampToValueAtTime(tr, t0+0.002);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0+0.018);
+      src.connect(g); g.connect(this.nGain);
+      try{ src.start(t0); src.stop(t0+0.020); }catch(_){}
+      setTimeout(()=>{ try{ src.disconnect(); g.disconnect(); }catch(_){ } }, 60);
+    }
+  }
+
+  class StringEngine{
+    constructor(A, bus){ this.A=A; this.bus=bus; this.type=null; this.voices=[]; }
+    setInstrument(type){
+      if(type===this.type && this.voices.length===STRINGS.length) return;
+      this.type=type;
+      this.voices=[];
+      for(let i=0;i<STRINGS.length;i++){
+        let v;
+        if(type==="physical") v=new PhysicalVoice(this.A,this.bus);
+        else if(type==="bass") v=new OscVoice(this.A,this.bus,"bass");
+        else if(type==="electric") v=new OscVoice(this.A,this.bus,"electric");
+        else v=new OscVoice(this.A,this.bus,"synth");
+        this.voices.push(v);
+      }
+      this.setParamsFromCfg(cfg);
+    }
+    setParamsFromCfg(p){ for(const v of this.voices) v.setParams(p); }
+    pluckString(i,freq,vel){ const v=this.voices[i]; if(v) v.pluck(freq,vel); }
+  }
+
+  const Synth = (()=> {
+    let A=null;
+    let instBus=null, pre=null, shaper=null, cabLP=null, master=null, comp=null;
+    let chorusDelay=null, chorusWet=null, lfo=null, lfoGain=null;
+    let trackGain=null, trackSrc=null, trackEl=null;
+    let engine=null;
+    let lastResumeTry=0;
+
+    function ensure(){
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if(!AC) return false;
+      if(A) return true;
+
+      A = new AC();
+
+      instBus = A.createGain();
+
+      // chorus (parallel)
+      chorusDelay = A.createDelay(0.06);
+      chorusDelay.delayTime.value = 0.018;
+      chorusWet = A.createGain();
+      chorusWet.gain.value = 0.0;
+
+      lfo = A.createOscillator();
+      lfo.frequency.value = 0.28;
+      lfoGain = A.createGain();
+      lfoGain.gain.value = 0.006;
+      lfo.connect(lfoGain);
+      lfoGain.connect(chorusDelay.delayTime);
+      lfo.start();
+
+      // amp chain
+      pre = A.createGain();
+      shaper = A.createWaveShaper();
+      shaper.oversample="4x";
+      cabLP = A.createBiquadFilter(); cabLP.type="lowpass"; cabLP.Q.value=0.7;
+      master = A.createGain();
+      comp = A.createDynamicsCompressor();
+      comp.threshold.value = -22;
+      comp.knee.value = 18;
+      comp.ratio.value = 10;
+      comp.attack.value = 0.003;
+      comp.release.value = 0.20;
+
+      // route: instBus -> pre, and instBus -> chorusDelay -> wet -> pre
+      instBus.connect(pre);
+      instBus.connect(chorusDelay);
+      chorusDelay.connect(chorusWet);
+      chorusWet.connect(pre);
+
+      pre.connect(shaper);
+      shaper.connect(cabLP);
+      cabLP.connect(master);
+      master.connect(comp);
+      comp.connect(A.destination);
+
+      // backing track
+      trackGain = A.createGain();
+      trackGain.gain.value = cfg.trackVol;
+      trackGain.connect(master);
+
+      // string engine
+      engine = new StringEngine(A, instBus);
+      engine.setInstrument(cfg.instrument);
+
+      retune();
+      setChorus(cfg.chorus);
+      setSoundParamsFromCfg();
+
+      updateStatus();
+      return true;
+    }
+
+    function tryResume(){
+      if(!A) return;
+      if(A.state==="running") return;
+      const now=performance.now();
+      if(now-lastResumeTry < 250) return;
+      lastResumeTry=now;
+      try{ A.resume().then(()=>updateStatus()).catch(()=>{}); }catch(_){}
+    }
+
+    async function unlockHard(){
+      ensure();
+      if(!A) return;
+      try{ await A.resume(); }catch(_){}
+      updateStatus();
+    }
+
+    function updateStatus(){
+      const au=$("auStat");
+      if(!au) return;
+      if(!A){ au.textContent="locked"; setDot("dotAU","warn"); return; }
+      if(A.state==="running"){ au.textContent="ready"; setDot("dotAU","ok"); }
+      else { au.textContent="locked"; setDot("dotAU","warn"); }
+    }
+
+    function retune(){
+      if(!A) return;
+      pre.gain.value = dbToGain(cfg.preDb);
+      shaper.curve = makeDriveCurve(cfg.drive);
+      cabLP.frequency.value = lerp(1600, 4200, cfg.cabTone);
+      master.gain.value = cfg.volume;
+      if(trackGain) trackGain.gain.value = cfg.trackVol;
+    }
+
+    function setTrackVol(v){ if(trackGain) trackGain.gain.value = v; }
+
+    function attachTrack(audioEl){
+      ensure();
+      if(!A || !trackGain) return;
+      // MediaElementSource can only be created once per element; guard.
+      if(trackEl === audioEl && trackSrc) return;
+      if(trackSrc){
+        try{ trackSrc.disconnect(); }catch(_){}
+        trackSrc=null;
+      }
+      trackEl = audioEl;
+      try{
+        trackSrc = A.createMediaElementSource(trackEl);
+        trackSrc.connect(trackGain);
+      }catch(e){
+        // if a source was already created elsewhere, we still keep track playing via element itself
+        console.warn("Track attach failed:", e);
+      }
+    }
+
+    function setInstrument(type){
+      ensure();
+      cfg.instrument = type;
+      if(engine) engine.setInstrument(type);
+      setSoundParamsFromCfg();
+      updateStatus();
+    }
+
+    function setSoundParamsFromCfg(){ if(engine) engine.setParamsFromCfg(cfg); }
+
+    function setChorus(amount){
+      if(!A) return;
+      const a = clamp(amount,0,1);
+      chorusWet.gain.value = 0.22 * a;
+      lfoGain.gain.value = 0.003 + 0.010 * a;
+      lfo.frequency.value = 0.22 + 0.55 * a;
+    }
+
+    function pluckString(i, freq, vel){
+      ensure();
+      tryResume();
+      if(engine) engine.pluckString(i, freq, vel);
+    }
+
+    async function test(){
+      await unlockHard();
+      const freqs = [110,146.83,196,246.94,329.63,392];
+      freqs.forEach((f,i)=> setTimeout(()=>pluckString(i%6,f,0.70), i*55));
+      updateStatus();
+    }
+
+    return { ensure, tryResume, unlockHard, updateStatus, retune, setTrackVol, attachTrack,
+             setInstrument, setSoundParamsFromCfg, setChorus, pluckString, test };
+  })();
+
+  // Always attempt to unlock on user gestures
+  function gestureAudioKick(){
+    Synth.ensure();
+    Synth.tryResume();
+    Synth.updateStatus();
+  }
+  window.addEventListener("pointerdown", gestureAudioKick, {passive:true});
+  window.addEventListener("touchstart", gestureAudioKick, {passive:true});
+  window.addEventListener("keydown", gestureAudioKick);
+
+  on("testSound","click", async ()=>{
+    await Synth.test();
+    const h=$("hintLine"); if(h) h.textContent="Audio test played. If silent: click/tap the page once, then Test Sound again.";
+  });
+
+  // backing track
+  const track = new Audio();
+  track.crossOrigin="anonymous";
+  track.loop=true;
+
+  on("trackFile","change",(e)=>{
+    const f = e.target.files?.[0];
+    if(!f) return;
+    const url = URL.createObjectURL(f);
+    track.src = url;
+    track.load();
+    Synth.attachTrack(track);
+    const h=$("hintLine"); if(h) h.textContent="Track loaded. Press Play/Pause Track.";
+  });
+
+  on("trackPlay","click", async ()=>{
+    await Synth.unlockHard();
+    if(!track.src){ const h=$("hintLine"); if(h) h.textContent="Load a track file first."; return; }
+    if(track.paused) track.play().catch(()=>{});
+    else track.pause();
+  });
+
+  // ---------- sound presets ----------
+  const SOUND_CUR_KEY = "airpick_sound_current_v2";
+  const SOUND_PRESETS_KEY = "airpick_sound_presets_v2";
+  const BUILT_INS = {
+    physical: { instrument:"physical", stringBright:0.55, stringDecay:0.82, pickNoise:0.72, chorus:0.08, envA_ms:3, envR_ms:260 },
+    electric: { instrument:"electric", stringBright:0.70, stringDecay:0.78, pickNoise:0.55, chorus:0.18, envA_ms:4, envR_ms:340 },
+    bass:     { instrument:"bass",     stringBright:0.38, stringDecay:0.88, pickNoise:0.40, chorus:0.10, envA_ms:5, envR_ms:520 },
+    synth:    { instrument:"synth",    stringBright:0.80, stringDecay:0.74, pickNoise:0.25, chorus:0.35, envA_ms:6, envR_ms:420 },
+  };
+
+  function safeJSONParse(s, fallback){ try{ return JSON.parse(s); }catch(_){ return fallback; } }
+  function loadSavedPresets(){ return safeJSONParse(localStorage.getItem(SOUND_PRESETS_KEY)||"{}", {}) || {}; }
+  function saveSavedPresets(obj){ localStorage.setItem(SOUND_PRESETS_KEY, JSON.stringify(obj)); }
+  function saveCurrentSoundState(){
+    localStorage.setItem(SOUND_CUR_KEY, JSON.stringify({
+      instrument: cfg.instrument,
+      stringBright: cfg.stringBright,
+      stringDecay: cfg.stringDecay,
+      pickNoise: cfg.pickNoise,
+      chorus: cfg.chorus,
+      envA_ms: cfg.envA_ms,
+      envR_ms: cfg.envR_ms
+    }));
+  }
+  function loadCurrentSoundState(){ return safeJSONParse(localStorage.getItem(SOUND_CUR_KEY)||"null", null); }
+  function rebuildPresetList(){
+    const list = $("presetList");
+    if(!list) return;
+    const saved = loadSavedPresets();
+    list.innerHTML = "";
+
+    const addOpt=(val,text)=>{
+      const o=document.createElement("option");
+      o.value=val; o.textContent=text;
+      list.appendChild(o);
+    };
+
+    addOpt("__builtin_physical","Built-in: Physical Guitar");
+    addOpt("__builtin_electric","Built-in: Clean Electric");
+    addOpt("__builtin_bass","Built-in: Electric Bass");
+    addOpt("__builtin_synth","Built-in: Synth Lead");
+
+    for(const name of Object.keys(saved).sort((a,b)=>a.localeCompare(b))){
+      addOpt(name,"Saved: "+name);
+    }
+  }
+
+  function applyPresetObject(p){
+    if(!p) return;
+    cfg.instrument = p.instrument ?? cfg.instrument;
+    cfg.stringBright = clamp(p.stringBright ?? cfg.stringBright, 0, 1);
+    cfg.stringDecay  = clamp(p.stringDecay ?? cfg.stringDecay, 0.60, 0.94);
+    cfg.pickNoise    = clamp(p.pickNoise ?? cfg.pickNoise, 0, 1);
+    cfg.chorus       = clamp(p.chorus ?? cfg.chorus, 0, 1);
+    cfg.envA_ms      = clamp(p.envA_ms ?? cfg.envA_ms, 0, 40);
+    cfg.envR_ms      = clamp(p.envR_ms ?? cfg.envR_ms, 40, 1600);
+
+    const setV=(id,val)=>{ const n=$(id); if(n) n.value=val; };
+    setV("instrument", cfg.instrument);
+    setV("bright", cfg.stringBright);
+    setV("sDecay", cfg.stringDecay);
+    setV("pNoise", cfg.pickNoise);
+    setV("chorus", cfg.chorus);
+    setV("envA", cfg.envA_ms);
+    setV("envR", cfg.envR_ms);
+
+    refreshLabels();
+
+    Synth.setInstrument(cfg.instrument);
+    Synth.setSoundParamsFromCfg();
+    Synth.setChorus(cfg.chorus);
+    saveCurrentSoundState();
+  }
+
+  function applyBuiltInPreset(name, user=false){
+    applyPresetObject(BUILT_INS[name] || BUILT_INS.physical);
+    if(user){
+      const h=$("hintLine"); if(h) h.textContent="Sound set: "+($("instrument")?.selectedOptions?.[0]?.textContent||name);
+    }
+  }
+
+  on("instrument","change",(e)=> applyBuiltInPreset(e.target.value, true));
+  on("savePreset","click", ()=>{
+    const name = ($("presetName")?.value || "").trim();
+    if(!name){ const h=$("hintLine"); if(h) h.textContent="Preset name required."; return; }
+    const saved = loadSavedPresets();
+    saved[name] = {
+      instrument: cfg.instrument,
+      stringBright: cfg.stringBright,
+      stringDecay: cfg.stringDecay,
+      pickNoise: cfg.pickNoise,
+      chorus: cfg.chorus,
+      envA_ms: cfg.envA_ms,
+      envR_ms: cfg.envR_ms
+    };
+    saveSavedPresets(saved);
+    rebuildPresetList();
+    const h=$("hintLine"); if(h) h.textContent="Saved preset: "+name;
+  });
+  on("loadPreset","click", ()=>{
+    const key = $("presetList")?.value;
+    if(!key) return;
+    if(key.startsWith("__builtin_")){
+      applyBuiltInPreset(key.replace("__builtin_",""), true);
+      return;
+    }
+    const saved = loadSavedPresets();
+    if(saved[key]){
+      applyPresetObject(saved[key]);
+      const h=$("hintLine"); if(h) h.textContent="Loaded preset: "+key;
+    }
+  });
+  on("delPreset","click", ()=>{
+    const key = $("presetList")?.value;
+    if(!key || key.startsWith("__builtin_")){
+      const h=$("hintLine"); if(h) h.textContent="Can't delete built-in preset.";
+      return;
+    }
+    const saved = loadSavedPresets();
+    if(saved[key]){
+      delete saved[key];
+      saveSavedPresets(saved);
+      rebuildPresetList();
+      const h=$("hintLine"); if(h) h.textContent="Deleted preset: "+key;
+    }
+  });
+
+  // ---------- record events ----------
+  const recording = { on:false, t0: performance.now(), events: [] };
+  on("recOn","change",(e)=>{
+    recording.on=!!e.target.checked;
+    if(recording.on){ recording.t0=performance.now(); recording.events=[]; const h=$("hintLine"); if(h) h.textContent="Recording ON."; }
+    else { const h=$("hintLine"); if(h) h.textContent="Recording OFF."; }
+  });
+  on("clearRec","click", ()=>{
+    recording.events=[]; recording.t0=performance.now();
+    const h=$("hintLine"); if(h) h.textContent="Recording cleared.";
+  });
+  on("dlJson","click", ()=>{
+    const payload = {
+      createdAt: new Date().toISOString(),
+      sound: {
+        instrument: cfg.instrument,
+        stringBright: cfg.stringBright,
+        stringDecay: cfg.stringDecay,
+        pickNoise: cfg.pickNoise,
+        chorus: cfg.chorus,
+        envA_ms: cfg.envA_ms,
+        envR_ms: cfg.envR_ms
+      },
+      settings: { tuning: STRINGS.map(s=>s.name), maxFrets: cfg.maxFrets, quantize: cfg.quantize },
+      events: recording.events
+    };
+    const blob = new Blob([JSON.stringify(payload,null,2)], {type:"application/json"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href=url; a.download="airpick_guitar_events.json";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 1500);
+  });
+
+  // ---------- Profile + Scan-to-fit (FlexFit) ----------
+  const LS_KEY = "airpick_hand_profile_v3";
+  function loadProfile(){ return safeJSONParse(localStorage.getItem(LS_KEY)||"null", null); }
+  function saveProfile(p){ localStorage.setItem(LS_KEY, JSON.stringify(p)); updateProfileUI(); }
+  function deleteProfile(){ localStorage.removeItem(LS_KEY); updateProfileUI(); }
+  function updateProfileUI(){
+    const p=loadProfile();
+    const ps=$("profileStat"); if(ps) ps.textContent = p ? "saved" : "none";
+  }
+  updateProfileUI();
+
+  function calcHandMetrics(lm){
+    const wrist = lm[0];
+    const iMCP  = lm[5];
+    const mMCP  = lm[9];
+    const pMCP  = lm[17];
+
+    const palmW = dist(iMCP, pMCP);
+    const palmL = dist(wrist, mMCP);
+    const span  = dist(lm[4], lm[20]);
+
+    const iLen = dist(lm[5], lm[8]);
+    const mLen = dist(lm[9], lm[12]);
+    const rLen = dist(lm[13], lm[16]);
+    const pLen = dist(lm[17], lm[20]);
+
+    const wOverL = palmW / Math.max(1e-6, palmL);
+    const spanOverL = span / Math.max(1e-6, palmL);
+    const fingers = [
+      iLen / Math.max(1e-6, palmL),
+      mLen / Math.max(1e-6, palmL),
+      rLen / Math.max(1e-6, palmL),
+      pLen / Math.max(1e-6, palmL)
+    ];
+
+    const screenScale = palmW; // normalized (mediapipe units)
+    const mid = handMid(lm);
+    const centerYNorm = clamp(mid.y / Math.max(1,H), 0.20, 0.80);
+
+    return { signature:[wOverL, spanOverL, ...fingers], screenScale, centerYNorm };
+  }
+
+  function vecMean(vs){
+    const n=vs.length; if(!n) return null;
+    const m=new Array(vs[0].length).fill(0);
+    for(const v of vs) for(let i=0;i<m.length;i++) m[i]+=v[i];
+    for(let i=0;i<m.length;i++) m[i]/=n;
+    return m;
+  }
+  function vecVar(vs, mean){
+    const n=vs.length; if(!n) return null;
+    const v=new Array(mean.length).fill(0);
+    for(const x of vs) for(let i=0;i<v.length;i++){ const d=x[i]-mean[i]; v[i]+=d*d; }
+    for(let i=0;i<v.length;i++) v[i]/=n;
+    return v;
+  }
+  function vecDist(a,b){
+    let s=0;
+    for(let i=0;i<a.length;i++){ const d=a[i]-b[i]; s+=d*d; }
+    return Math.sqrt(s);
+  }
+
+  function applyAutoFit(screenScale, centerYNorm){
+    const s = clamp((screenScale - 0.12) / (0.30 - 0.12), 0, 1);
+    const newSpread  = lerp(0.26, 0.66, s);
+    const newNeckX1  = lerp(0.40, 0.58, s);
+    const newFretBand= Math.round(lerp(18, 36, s));
+    const newCenterY = clamp(centerYNorm ?? cfg.centerY, 0.20, 0.80);
+
+    cfg.spread = clamp(newSpread, 0.03, 0.90);
+    cfg.neckX1 = clamp(newNeckX1, 0.30, 0.62);
+    cfg.fretBandPx = clamp(newFretBand, 10, 80);
+    cfg.centerY = newCenterY;
+
+    const setV=(id,val)=>{ const n=$(id); if(n) n.value=val; };
+    setV("spread", cfg.spread);
+    setV("neckW", cfg.neckX1);
+    setV("fretBand", cfg.fretBandPx);
+    setV("centerY", cfg.centerY);
+
+    refreshLabels();
+
+    const hs=$("handScale"); if(hs) hs.textContent=screenScale.toFixed(3);
+    const fs=$("fitSpread"); if(fs) fs.textContent=cfg.spread.toFixed(3);
+    const fn=$("fitNeck"); if(fn) fn.textContent=cfg.neckX0.toFixed(2)+"–"+cfg.neckX1.toFixed(2);
+    const fb=$("fitBand"); if(fb) fb.textContent=String(cfg.fretBandPx|0);
+
+    const ft=$("fitStat"); if(ft) ft.textContent="on";
+  }
+
+  let scanMode="idle";
+  let scanStart=0;
+  const scanDurMs=1600;
+
+  const sigFramesByLabel = { Left:[], Right:[], Unknown:[] };
+  const scaleFrames=[], cyFrames=[];
+
+  function resetScanBuffers(){
+    sigFramesByLabel.Left.length=0;
+    sigFramesByLabel.Right.length=0;
+    sigFramesByLabel.Unknown.length=0;
+    scaleFrames.length=0;
+    cyFrames.length=0;
+  }
+
+  function setScanMini(text){ const n=$("scanMini"); if(n) n.textContent=text; }
+
+  function startScan(mode){
+    scanMode=mode;
+    scanStart=performance.now();
+    resetScanBuffers();
+    const bar=$("scanBar"); if(bar) bar.style.width="0%";
+    const st=$("overlayStatus");
+    const msg = (mode==="create")
+      ? "Creating profile: hold 1–2 hands steady in the center…"
+      : "Logging in: hold the same hand(s) steady in the center…";
+    if(st) st.textContent = msg;
+    setScanMini(mode);
+  }
+  function stopScan(){
+    scanMode="idle";
+    const bar=$("scanBar"); if(bar) bar.style.width="0%";
+    setScanMini("idle");
+  }
+
+  function scanTick(){
+    if(scanMode==="idle") return;
+    const now=performance.now();
+    const t=clamp((now-scanStart)/scanDurMs,0,1);
+    const bar=$("scanBar"); if(bar) bar.style.width=(t*100).toFixed(1)+"%";
+    if(!lastHands || !lastHands.length) return;
+
+    let anySteady=false;
+    for(const h of lastHands){
+      const v = h.motion?.v || 0;
+      if(v > 0.55) continue;
+      const m = calcHandMetrics(h.lm);
+      const label = (h.label==="Left"||h.label==="Right") ? h.label : "Unknown";
+      sigFramesByLabel[label].push(m.signature);
+      scaleFrames.push(m.screenScale);
+      cyFrames.push(m.centerYNorm);
+      anySteady=true;
+    }
+    if(!anySteady) return;
+    if(t<1) return;
+
+    const allSigs = [].concat(sigFramesByLabel.Left, sigFramesByLabel.Right, sigFramesByLabel.Unknown);
+    if(allSigs.length < 8){
+      const st=$("overlayStatus");
+      if(st) st.textContent="Not enough steady frames. Hold steadier; scanning again…";
+      scanStart=performance.now();
+      resetScanBuffers();
+      if(bar) bar.style.width="0%";
+      return;
+    }
+
+    const meanSigAll=vecMean(allSigs);
+    const varSigAll=vecVar(allSigs, meanSigAll);
+    const instability = Math.sqrt(varSigAll.reduce((a,b)=>a+b,0)/varSigAll.length);
+
+    if(instability>0.022){
+      const st=$("overlayStatus");
+      if(st) st.textContent="Too much movement/noise. Hold steadier; scanning again…";
+      scanStart=performance.now();
+      resetScanBuffers();
+      if(bar) bar.style.width="0%";
+      return;
+    }
+
+    const meanScale = scaleFrames.reduce((a,b)=>a+b,0)/Math.max(1,scaleFrames.length);
+    const meanCY = cyFrames.reduce((a,b)=>a+b,0)/Math.max(1,cyFrames.length);
+
+    const sigMeans = {};
+    for(const label of ["Left","Right","Unknown"]){
+      if(sigFramesByLabel[label].length >= 6){
+        sigMeans[label] = vecMean(sigFramesByLabel[label]);
+      }
+    }
+
+    if(scanMode==="create"){
+      saveProfile({ createdAt: Date.now(), sigMeans });
+      applyAutoFit(meanScale, meanCY);
+      const st=$("overlayStatus"); if(st) st.textContent="✅ Profile saved. AutoFit applied.";
+      $("overlay").classList.add("hidden");
+      stopScan();
+      const h=$("hintLine"); if(h) h.textContent="Profile created + AutoFit applied.";
+      return;
+    }
+
+    if(scanMode==="login"){
+      const p=loadProfile();
+      if(!p?.sigMeans){
+        const st=$("overlayStatus"); if(st) st.textContent="No profile saved. Create one first.";
+        stopScan(); return;
+      }
+
+      let bestDist=1e9;
+      for(const label of Object.keys(sigMeans)){
+        const a = sigMeans[label];
+        if(p.sigMeans[label]){
+          bestDist = Math.min(bestDist, vecDist(a, p.sigMeans[label]));
+        }else{
+          for(const storedLabel of Object.keys(p.sigMeans)){
+            bestDist = Math.min(bestDist, vecDist(a, p.sigMeans[storedLabel]));
+          }
+        }
+      }
+
+      const ok = bestDist <= 0.090;
+      const st=$("overlayStatus");
+      if(ok){
+        applyAutoFit(meanScale, meanCY);
+        if(st) st.textContent="✅ Login matched. AutoFit applied.";
+        $("overlay").classList.add("hidden");
+        stopScan();
+        const h=$("hintLine"); if(h) h.textContent="Logged in + AutoFit applied.";
+      }else{
+        if(st) st.textContent=`❌ Login failed (distance=${bestDist.toFixed(3)}). Try again or recreate profile.`;
+        stopScan();
+      }
+    }
+  }
+
+  // ---------- draw helpers ----------
+  function roundedRectPath(x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);
+    ctx.arcTo(x,y,x+w,y,r);
+    ctx.closePath();
+  }
+
+  function drawString(y, amp, thickness, active, held){
+    const x0=W*0.10, x1=W*0.90;
+    const segs=48;
+    const dx=(x1-x0)/segs;
+
+    ctx.lineWidth = thickness;
+    ctx.strokeStyle = active ? "rgba(255,207,85,0.92)"
+      : (held ? "rgba(176,76,255,0.62)" : "rgba(255,255,255,0.35)");
+    ctx.beginPath();
+    for(let s=0;s<=segs;s++){
+      const x=x0+dx*s;
+      const m=1-Math.abs((s/segs)-0.5)*2;
+      const wave=Math.sin((s/segs)*Math.PI*10)*amp*m;
+      const yy=y+wave;
+      if(s===0) ctx.moveTo(x,yy); else ctx.lineTo(x,yy);
+    }
+    ctx.stroke();
+  }
+
+  function drawFretboard(neck, fretXs, stringYs){
+    ctx.save();
+    ctx.globalAlpha = 0.20;
+    ctx.fillStyle="rgba(0,0,0,0.9)";
+    roundedRectPath(neck.x0, neck.y0, neck.x1-neck.x0, neck.y1-neck.y0, 22);
+    ctx.fill();
+    ctx.globalAlpha = 0.34;
+    ctx.strokeStyle="rgba(32,255,230,0.65)";
+    ctx.lineWidth=2;
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.save();
+    for(let i=0;i<fretXs.length;i++){
+      const x=fretXs[i];
+      const isNut=(i===0);
+      const active=activeFretLines.has(i);
+      ctx.beginPath(); ctx.moveTo(x,neck.y0); ctx.lineTo(x,neck.y1);
+      if(isNut){ ctx.strokeStyle="rgba(255,255,255,0.55)"; ctx.lineWidth=4; }
+      else if(active){ ctx.strokeStyle="rgba(255,207,85,0.90)"; ctx.lineWidth=3; }
+      else { ctx.strokeStyle="rgba(255,255,255,0.18)"; ctx.lineWidth=2; }
+      ctx.stroke();
+    }
+
+    const markers=[3,5,7,9,12,15,17].filter(f=>f<=cfg.maxFrets);
+    for(const f of markers){
+      const x=(fretXs[f-1]+fretXs[f])*0.5;
+      const y=(neck.y0+neck.y1)*0.5;
+      ctx.fillStyle=activeFretLines.has(f) ? "rgba(255,207,85,0.90)" : "rgba(255,255,255,0.12)";
+      ctx.beginPath(); ctx.arc(x,y,(f===12?7:5),0,Math.PI*2); ctx.fill();
+      if(f===12){
+        ctx.beginPath(); ctx.arc(x,y-28,6,0,Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(x,y+28,6,0,Math.PI*2); ctx.fill();
+      }
+    }
+
+    for(let s=0;s<STRINGS.length;s++){
+      const st=stringState[s];
+      if(!st.fretHeld || st.fretNum<=0) continue;
+      const f=st.fretNum;
+      const x=(fretXs[Math.max(0,f-1)] + fretXs[f]) * 0.5;
+      const y=stringYs[s];
+      ctx.fillStyle="rgba(176,76,255,0.92)";
+      ctx.strokeStyle="rgba(0,0,0,0.30)";
+      ctx.lineWidth=2;
+      ctx.beginPath(); ctx.arc(x,y,8,0,Math.PI*2); ctx.fill(); ctx.stroke();
+    }
+
+    if(fretFingers.length){
+      for(const f of fretFingers){
+        ctx.globalAlpha=0.98;
+        ctx.fillStyle="rgba(176,76,255,0.92)";
+        ctx.strokeStyle="rgba(0,0,0,0.35)";
+        ctx.lineWidth=2;
+        ctx.beginPath(); ctx.arc(f.x,f.y,9,0,Math.PI*2); ctx.fill(); ctx.stroke();
+        ctx.fillStyle="rgba(255,255,255,0.92)";
+        ctx.font="900 12px system-ui, sans-serif";
+        ctx.fillText(f.finger, f.x-4, f.y+4);
+      }
+    }
+    ctx.restore();
+  }
+
+  function drawPick(){
+    if(cursorEl.style.display==="none") return;
+    ctx.save();
+    ctx.translate(pickX,pickY);
+    ctx.rotate(0.25);
+    ctx.globalAlpha = pickPinched ? 0.95 : 0.65;
+    ctx.fillStyle = pickPinched ? "rgba(255,207,85,.95)" : "rgba(32,255,230,.90)";
+    ctx.strokeStyle="rgba(0,0,0,.35)";
+    ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.moveTo(0,-14);
+    ctx.lineTo(12,10);
+    ctx.lineTo(-12,10);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawDebugHands(){
+    if(!cfg.debug || !lastHands?.length) return;
+    ctx.save();
+    ctx.globalAlpha=0.75;
+    for(const h of lastHands){
+      const lm=h.lm;
+      const pts=[0,4,8,12,16,20,9,5,17];
+      for(const id of pts){
+        const p=lm[id];
+        const x=(1-p.x)*W;
+        const y=p.y*H;
+        ctx.fillStyle = (id===4||id===8) ? "rgba(255,207,85,.95)" : "rgba(32,255,230,.90)";
+        ctx.beginPath(); ctx.arc(x,y,4,0,Math.PI*2); ctx.fill();
+      }
+      const m=handMid(lm);
+      ctx.fillStyle="rgba(255,255,255,0.85)";
+      ctx.font="900 12px system-ui, sans-serif";
+      ctx.fillText(h.label, m.x+8, m.y-8);
+    }
+    ctx.restore();
+  }
+
+  // ---------- STRUM (always tries to play) ----------
+  function strum(stringYs, step){
+    if(!pickPinched) return;
+    const sx0=W*cfg.strumX0, sx1=W*cfg.strumX1;
+    if(pickX<sx0 || pickX>sx1) return;
+
+    Synth.ensure();
+    Synth.tryResume();
+    Synth.updateStatus();
+
+    const dy = pickY - lastPickY;
+    const speed = Math.abs(dy);
+    const min = Math.max(2, cfg.minSpeed * 0.35);
+    if(speed < min) return;
+
+    const now = performance.now();
+    const baseBand = Math.max(10, (step || 24) * 0.22);
+    const rearmDist = baseBand * 2.0;
+
+    const y0=lastPickY, y1=pickY;
+    const lo=Math.min(y0,y1), hi=Math.max(y0,y1);
+
+    const crossed=[];
+    for(let i=0;i<stringYs.length;i++){
+      const y=stringYs[i];
+      const st=stringState[i];
+
+      const distNow=Math.abs(y1-y);
+      if(!st.armed && distNow>rearmDist) st.armed=true;
+      if(now - st.lastTrig < cfg.cooldownMs) continue;
+
+      const segCovers = (y >= (lo - baseBand) && y <= (hi + baseBand));
+      const nearNow = (distNow <= baseBand);
+
+      if(st.armed && (segCovers || nearNow)){
+        crossed.push(i);
+        st.armed=false;
+        st.lastTrig=now;
+      }
+    }
+
+    if(!crossed.length){
+      let bestI=-1, bestD=Infinity;
+      for(let i=0;i<stringYs.length;i++){
+        const d=Math.abs(pickY-stringYs[i]);
+        if(d<bestD){ bestD=d; bestI=i; }
+      }
+      if(bestI>=0 && bestD<=baseBand*1.35){
+        const st=stringState[bestI];
+        if(now-st.lastTrig>=cfg.cooldownMs){
+          crossed.push(bestI);
+          st.armed=false;
+          st.lastTrig=now;
+        }
+      }else return;
+    }
+
+    const isDown = dy>0;
+    crossed.sort((i,j)=> isDown ? (stringYs[i]-stringYs[j]) : (stringYs[j]-stringYs[i]));
+
+    const vel = clamp(Math.pow(clamp(speed/70,0,2), 0.70), 0.18, 1.0);
+
+    for(let k=0;k<crossed.length;k++){
+      const i=crossed[k];
+      const st=stringState[i];
+      st.hitAt=now;
+      st.vib=1.0;
+
+      const semi = st.fretSemi || 0;
+      const freq = STRINGS[i].freq * Math.pow(2, semi/12);
+
+      Synth.pluckString(i, freq, clamp(vel*(1-k*0.06),0.18,1.0));
+
+      setScore(score+1);
+      setLastNote(`${freqToNote(freq)} (${STRINGS[i].name}${semi>0.2 ? " +"+semi.toFixed(cfg.quantize?0:1) : ""})`);
+
+      if(recording.on){
+        recording.events.push({
+          t:(performance.now()-recording.t0),
+          string:STRINGS[i].name,
+          baseHz:STRINGS[i].freq,
+          semi:+semi.toFixed(3),
+          hz:+freq.toFixed(3),
+          vel:+vel.toFixed(3),
+          dir:isDown?"down":"up",
+          instrument:cfg.instrument
+        });
+      }
+    }
+  }
+
+  // ---------- main draw loop ----------
+  function drawFrame(){
+    ctx.fillStyle="#050814";
+    ctx.fillRect(0,0,W,H);
+
+    if(videoReady && video.videoWidth){
+      ctx.save();
+      ctx.translate(W,0);
+      ctx.scale(-1,1);
+      const vw=video.videoWidth, vh=video.videoHeight;
+      const s=Math.max(W/vw, H/vh);
+      const dw=vw*s, dh=vh*s;
+      const dx=(W-dw)/2, dy=(H-dh)/2;
+      ctx.drawImage(video, dx, dy, dw, dh);
+      ctx.restore();
+
+      const g = ctx.createRadialGradient(W*0.5,H*0.45,Math.min(W,H)*0.10, W*0.5,H*0.5, Math.min(W,H)*0.70);
+      g.addColorStop(0, "rgba(0,0,0,0.00)");
+      g.addColorStop(1, "rgba(0,0,0,0.55)");
+      ctx.fillStyle=g;
+      ctx.fillRect(0,0,W,H);
+    }else{
+      ctx.fillStyle="rgba(255,255,255,0.10)";
+      ctx.font="700 16px system-ui, sans-serif";
+      ctx.fillText("Camera not started yet.", 20, H-28);
+    }
+
+    const { ys, step, top, spreadPx } = computeStringYs();
+    const neck = { x0:W*cfg.neckX0, x1:W*cfg.neckX1, y0:top-70, y1:top+spreadPx+70 };
+    const fretXs = fretPositions(neck.x0, neck.x1, cfg.maxFrets);
+
+    if(lastHands && lastHands.length){
+      const { pick, fret } = assignPickFret(lastHands);
+
+      if(pick?.lm) updatePickFromLandmarks(pick.lm);
+      else { cursorEl.style.display="none"; pickPinched=false; }
+
+      if(fret?.lm) updateFretsFromLandmarks(fret.lm, ys, fretXs, neck);
+      else {
+        fretFingers=[]; activeFretLines.clear();
+        for(const st of stringState){ st.fretHeld=false; st.fretSemi*=0.86; st.fretNum=0; }
+      }
+
+      strum(ys, step);
+    }else{
+      cursorEl.style.display="none";
+      pickPinched=false;
+      fretFingers=[]; activeFretLines.clear();
+      for(const st of stringState){ st.fretHeld=false; st.fretSemi*=0.86; st.fretNum=0; }
+    }
+
+    drawFretboard(neck, fretXs, ys);
+
+    // zones overlay
+    ctx.save();
+    ctx.globalAlpha=0.16;
+    ctx.strokeStyle="rgba(32,255,230,0.65)";
+    ctx.lineWidth=2;
+    roundedRectPath(W*0.12, ys[0]-60, W*0.76, (ys[5]-ys[0])+120, 36);
+    ctx.stroke();
+
+    ctx.globalAlpha=0.12;
+    ctx.fillStyle="rgba(176,76,255,1)";
+    roundedRectPath(neck.x0, neck.y0, neck.x1-neck.x0, neck.y1-neck.y0, 22);
+    ctx.fill();
+
+    ctx.globalAlpha=0.10;
+    ctx.fillStyle="rgba(255,207,85,1)";
+    const sx0=W*cfg.strumX0, sx1=W*cfg.strumX1;
+    roundedRectPath(sx0, ys[0]-80, sx1-sx0, (ys[5]-ys[0])+160, 26);
+    ctx.fill();
+    ctx.restore();
+
+    // strings
+    const now=performance.now();
+    for(let i=0;i<ys.length;i++){
+      const st=stringState[i];
+      st.vib = Math.max(0, st.vib - 0.030);
+      const active=(now-st.hitAt)<150;
+      const thickness=active ? 4.2 : (st.fretHeld ? 2.9 : 2.0);
+      const amp = st.vib * (active ? 8.5 : 6.0);
+
+      ctx.save();
+      ctx.lineCap="round";
+      drawString(ys[i], amp, thickness, active, st.fretHeld);
+
+      ctx.fillStyle = active ? "rgba(255,207,85,.95)" : (st.fretHeld ? "rgba(176,76,255,.92)" : "rgba(255,255,255,.75)");
+      ctx.font="900 13px system-ui, sans-serif";
+      ctx.fillText(STRINGS[i].name, W*0.10 - 40, ys[i] + 5);
+
+      if(st.fretSemi > 0.10){
+        ctx.fillStyle="rgba(176,76,255,.92)";
+        ctx.font="900 12px system-ui, sans-serif";
+        ctx.fillText("+"+st.fretSemi.toFixed(cfg.quantize?0:1), W*0.10 + 10, ys[i] + 5);
+      }
+      ctx.restore();
+    }
+
+    drawPick();
+    drawDebugHands();
+    scanTick();
+
+    requestAnimationFrame(drawFrame);
+  }
+
+  // ---------- overlay + start flow ----------
+  const secure = window.isSecureContext || location.hostname==="localhost" || location.hostname==="127.0.0.1";
+  $("secureBox").innerHTML = secure
+    ? "<b>Good:</b> secure context detected. Camera should work if permissions are granted."
+    : "<b>Important:</b> Camera requires HTTPS or localhost (secure context).";
+
+  // initial status
+  $("camStat").textContent="idle"; setDot("dotCam","warn");
+  $("mpStat").textContent="idle"; setDot("dotMP","warn");
+  $("auStat").textContent="locked"; setDot("dotAU","warn");
+
+  // restore sound preset + UI values
+  rebuildPresetList();
+  const curSound = loadCurrentSoundState();
+  if(curSound) applyPresetObject(curSound);
+  else applyBuiltInPreset("physical");
+
+  // sync UI sliders to cfg
+  const setV=(id,val)=>{ const n=$(id); if(n) n.value=val; };
+  setV("spread", cfg.spread);
+  setV("centerY", cfg.centerY);
+  setV("neckW", cfg.neckX1);
+  setV("fretBand", cfg.fretBandPx);
+  setV("pinchOn", cfg.pinchOn);
+  setV("pinchHy", cfg.pinchHy);
+  setV("smooth", cfg.smooth);
+  setV("minSpeed", cfg.minSpeed);
+  setV("cooldown", cfg.cooldownMs);
+  setV("slide", cfg.slideSmooth);
+  setV("maxFrets", cfg.maxFrets);
+  setV("vol", cfg.volume);
+  setV("pre", cfg.preDb);
+  setV("drive", cfg.drive);
+  setV("tone", cfg.cabTone);
+  setV("trackVol", cfg.trackVol);
+  setV("instrument", cfg.instrument);
+  setV("bright", cfg.stringBright);
+  setV("sDecay", cfg.stringDecay);
+  setV("pNoise", cfg.pickNoise);
+  setV("chorus", cfg.chorus);
+  setV("envA", cfg.envA_ms);
+  setV("envR", cfg.envR_ms);
+  refreshLabels();
+
+  let started=false;
+
+  // FIX #3: unlock audio FIRST, while still inside the click gesture.
+  async function startAll(){
+    const st=$("overlayStatus");
+    try{
+      if(st) st.textContent="Unlocking audio…";
+      Synth.ensure();
+      await Synth.unlockHard();
+      Synth.updateStatus();
+
+      if(st) st.textContent="Requesting camera permission…";
+      await startCameraOldStable();
+
+      if(st) st.textContent="Loading MediaPipe Hands…";
+      await initMediaPipe();
+
+      started=true;
+      if(st) st.textContent="Running ✓";
+      const hint=$("hintLine");
+      if(hint) hint.textContent="Running. Pinch to strum; fret on the left neck zone.";
+      $("overlay").classList.add("hidden");
+
+      requestAnimationFrame(drawFrame);
+      requestAnimationFrame(mpLoop);
+    }catch(e){
+      console.error(e);
+      if(st) st.textContent="❌ Start failed: " + (e?.message || String(e));
+      $("camStat").textContent="error"; setDot("dotCam","warn");
+      $("mpStat").textContent="error"; setDot("dotMP","warn");
+    }
+  }
+
+  on("startBtn","click", startAll);
+
+  on("closeOverlay","click", ()=> $("overlay").classList.add("hidden"));
+  on("openOverlay","click", ()=>{
+    $("overlay").classList.remove("hidden");
+    const st=$("overlayStatus");
+    if(st) st.textContent = started ? "Ready. Choose Create/Login scan." : "Ready. Press Start.";
+    stopScan();
+  });
+
+  // overlay scan buttons
+  on("overlayCreate","click", ()=>{
+    const st=$("overlayStatus");
+    if(!started){ if(st) st.textContent="Start first."; return; }
+    startScan("create");
+  });
+  on("overlayLogin","click", ()=>{
+    const st=$("overlayStatus");
+    if(!started){ if(st) st.textContent="Start first."; return; }
+    if(!loadProfile()){ if(st) st.textContent="No profile saved. Create one first."; return; }
+    startScan("login");
+  });
+
+  // panel scan buttons
+  on("createProfile","click", ()=>{
+    $("overlay").classList.remove("hidden");
+    const st=$("overlayStatus");
+    if(!started){ if(st) st.textContent="Start first."; return; }
+    startScan("create");
+  });
+  on("loginProfile","click", ()=>{
+    $("overlay").classList.remove("hidden");
+    const st=$("overlayStatus");
+    if(!started){ if(st) st.textContent="Start first."; return; }
+    if(!loadProfile()){ if(st) st.textContent="No profile saved. Create one first."; return; }
+    startScan("login");
+  });
+  on("deleteProfile","click", ()=>{
+    deleteProfile();
+    const ps=$("profileStat"); if(ps) ps.textContent="none";
+    const ft=$("fitStat"); if(ft) ft.textContent="off";
+    const st=$("overlayStatus"); if(st) st.textContent="Profile deleted.";
+    const h=$("hintLine"); if(h) h.textContent="Profile deleted.";
+  });
+
+  // global error visibility
+  window.addEventListener("error",(e)=>{
+    const st=$("overlayStatus");
+    if(st && !$("overlay").classList.contains("hidden")){
+      st.textContent = "❌ Script error: " + (e?.message || "unknown");
+    }
+  });
+
+  </script>
+</body>
+</html>

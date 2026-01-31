@@ -1,0 +1,883 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>PickStorm AR — Air Pick Guitar</title>
+  <style>
+    :root{
+      --cyan:#20ffe6;
+      --violet:#b04cff;
+      --amber:#ffcf55;
+      --bg:#050814;
+      --panel: rgba(0,0,0,.35);
+      --stroke: rgba(255,255,255,.16);
+      --text: rgba(255,255,255,.92);
+      --muted: rgba(255,255,255,.72);
+    }
+    *{ box-sizing:border-box; }
+    html,body{ height:100%; margin:0; background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; overflow:hidden;}
+    #view{ position:fixed; inset:0; width:100vw; height:100vh; display:block; background: radial-gradient(900px 500px at 50% 10%, rgba(32,255,230,.12), transparent 60%); }
+    #video{ display:none; }
+
+    #hud{
+      position:fixed; left:12px; top:12px; z-index:10;
+      display:flex; gap:10px; align-items:flex-start; flex-wrap:wrap;
+      pointer-events:none;
+    }
+    .card{
+      pointer-events:none;
+      background: var(--panel);
+      border: 1px solid var(--stroke);
+      backdrop-filter: blur(8px);
+      border-radius: 14px;
+      padding: 10px 12px;
+      box-shadow: 0 14px 42px rgba(0,0,0,.35);
+      min-width: 220px;
+    }
+    .title{
+      font-weight: 900; letter-spacing:.4px; text-transform: uppercase; font-size: 12px;
+      display:flex; align-items:center; justify-content:space-between; gap:8px;
+      margin-bottom:6px;
+    }
+    .row{ font-size:13px; line-height:1.35; color:var(--text); }
+    .muted{ color:var(--muted); }
+    .pill{
+      display:inline-flex; align-items:center; gap:6px;
+      border: 1px solid rgba(255,255,255,.18);
+      background: rgba(0,0,0,.22);
+      padding: 4px 9px;
+      border-radius: 999px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .pill b{ color: var(--text); }
+    .dot{
+      width:9px; height:9px; border-radius:50%;
+      background: #ff3b3b; box-shadow: 0 0 14px rgba(255,59,59,.35);
+    }
+    .dot.ok{ background:#37ff74; box-shadow: 0 0 14px rgba(55,255,116,.28); }
+    .dot.warn{ background:#ffcf55; box-shadow: 0 0 14px rgba(255,207,85,.22); }
+
+    /* Controls panel (mouse/touch or pinch-click later if you want) */
+    #controls{
+      position:fixed; right:12px; top:12px; z-index:10;
+      width: min(360px, calc(100vw - 24px));
+      background: rgba(0,0,0,.35);
+      border: 1px solid rgba(255,255,255,.16);
+      backdrop-filter: blur(10px);
+      border-radius: 16px;
+      padding: 10px;
+      box-shadow: 0 14px 42px rgba(0,0,0,.35);
+      user-select:none;
+    }
+    #controls .head{
+      display:flex; align-items:center; justify-content:space-between; gap:10px;
+      margin-bottom:10px;
+    }
+    #controls .brand{
+      font-weight:1000; letter-spacing:.6px; text-transform:uppercase; font-size:12px;
+      display:flex; align-items:center; gap:8px;
+    }
+    #controls .brand .spark{
+      width:10px;height:10px;border-radius:50%;
+      background: radial-gradient(circle at 30% 30%, #fff, var(--cyan));
+      box-shadow: 0 0 16px rgba(32,255,230,.26);
+    }
+    .btn{
+      border:1px solid rgba(255,255,255,.16);
+      background:
+        radial-gradient(circle at 30% 20%, rgba(32,255,230,.18), transparent 55%),
+        linear-gradient(180deg, rgba(176,76,255,.28), rgba(0,0,0,.25));
+      color: rgba(255,255,255,.95);
+      padding: 9px 12px;
+      border-radius: 12px;
+      cursor:pointer;
+      font-weight: 900;
+      transition: transform .08s ease, filter .12s ease;
+    }
+    .btn:hover{ filter: brightness(1.06) drop-shadow(0 0 12px rgba(32,255,230,.18)); }
+    .btn:active{ transform: translateY(1px); }
+    .btn.secondary{
+      background: rgba(0,0,0,.28);
+    }
+    .group{
+      margin-top: 10px;
+      padding: 10px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(0,0,0,.20);
+    }
+    .gtitle{ font-weight:1000; font-size:12px; letter-spacing:.4px; text-transform:uppercase; margin-bottom:8px; color:rgba(255,255,255,.92); }
+    .setting{ margin-bottom: 10px; }
+    .setting label{
+      display:flex; justify-content:space-between; gap:10px; align-items:center;
+      font-size:12px; font-weight:900; color:rgba(255,255,255,.92);
+      margin-bottom: 6px;
+    }
+    .setting .val{ color: var(--cyan); }
+    input[type="range"]{ width:100%; }
+    .help{ font-size:11px; color:rgba(255,255,255,.72); line-height:1.25; }
+
+    /* Start overlay */
+    #startOverlay{
+      position:fixed; inset:0; z-index:20;
+      display:flex; align-items:center; justify-content:center;
+      padding: 16px;
+      background: rgba(0,0,0,.55);
+      backdrop-filter: blur(10px);
+    }
+    #startCard{
+      width: min(820px, 98vw);
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,.18);
+      background:
+        radial-gradient(900px 500px at 20% 0%, rgba(32,255,230,.12), transparent 60%),
+        radial-gradient(900px 600px at 90% 10%, rgba(176,76,255,.12), transparent 60%),
+        rgba(8,12,34,.70);
+      box-shadow: 0 18px 64px rgba(0,0,0,.55);
+      overflow:hidden;
+      padding: 14px;
+    }
+    #startCard h1{
+      margin:0 0 8px;
+      font-size: 18px;
+      font-weight: 1000;
+      letter-spacing:.4px;
+      text-transform: uppercase;
+    }
+    #startCard p{ margin: 0 0 10px; color: rgba(255,255,255,.85); line-height:1.35; }
+    #startCard .grid{
+      display:grid;
+      grid-template-columns: 1.2fr .8fr;
+      gap: 12px;
+      align-items:start;
+    }
+    @media (max-width: 860px){ #startCard .grid{ grid-template-columns: 1fr; } }
+    .warnBox{
+      background: rgba(0,0,0,.28);
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 14px;
+      padding: 10px;
+      color: rgba(255,255,255,.88);
+    }
+    .warnBox b{ color: var(--amber); }
+    .statusLine{
+      margin-top: 8px;
+      padding: 10px;
+      background: rgba(0,0,0,.22);
+      border: 1px solid rgba(255,255,255,.14);
+      border-radius: 14px;
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    /* Pick cursor */
+    #gCursor{
+      position: fixed;
+      width: 18px; height: 18px;
+      border-radius: 999px;
+      border: 2px solid rgba(32,255,230,.95);
+      box-shadow: 0 0 18px rgba(32,255,230,.25), 0 0 26px rgba(176,76,255,.18);
+      transform: translate(-50%,-50%);
+      pointer-events:none;
+      z-index: 9999;
+      display:none;
+      background: radial-gradient(circle at 30% 30%, rgba(255,255,255,.35), rgba(32,255,230,.08));
+    }
+    #gCursor.pinch{
+      border-color: rgba(255,207,85,.95);
+      box-shadow: 0 0 20px rgba(255,207,85,.22), 0 0 34px rgba(176,76,255,.18);
+    }
+  </style>
+</head>
+
+<body>
+  <canvas id="view"></canvas>
+  <video id="video" autoplay playsinline muted></video>
+  <div id="gCursor"></div>
+
+  <div id="hud">
+    <div class="card">
+      <div class="title">
+        <span>PickStorm AR</span>
+        <span class="pill">Score <b id="score">0</b></span>
+      </div>
+      <div class="row">Pinch to hold the pick. Strum through strings.</div>
+      <div class="row muted">Tip: move your hand up/down across the lines.</div>
+    </div>
+    <div class="card" style="min-width:260px">
+      <div class="title">
+        <span>Status</span>
+        <span class="pill"><span class="dot" id="dotCam"></span> <b id="camStat">camera</b></span>
+      </div>
+      <div class="row"><span class="pill"><span class="dot" id="dotMP"></span> <b id="mpStat">mediapipe</b></span></div>
+      <div class="row"><span class="pill"><span class="dot" id="dotAU"></span> <b id="auStat">audio</b></span></div>
+      <div class="row muted" id="hintLine">Press Start to request permissions.</div>
+    </div>
+  </div>
+
+  <div id="controls">
+    <div class="head">
+      <div class="brand"><span class="spark"></span> Air Pick Guitar</div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn secondary" id="toggleDebug">Debug: ON</button>
+        <button class="btn secondary" id="resetScore">Reset</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gtitle">Gesture</div>
+
+      <div class="setting">
+        <label><span>Pinch threshold</span><span class="val" id="vPinch">0.045</span></label>
+        <input id="pinchThr" type="range" min="0.020" max="0.090" step="0.001" value="0.045" />
+        <div class="help">Lower = tighter pinch needed.</div>
+      </div>
+
+      <div class="setting" style="margin-bottom:0;">
+        <label><span>Cursor smoothing</span><span class="val" id="vSmooth">0.22</span></label>
+        <input id="smooth" type="range" min="0.05" max="0.60" step="0.01" value="0.22" />
+        <div class="help">Higher = smoother, slower.</div>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gtitle">Guitar</div>
+
+      <div class="setting">
+        <label><span>String spread</span><span class="val" id="vSpread">0.55</span></label>
+        <input id="spread" type="range" min="0.35" max="0.80" step="0.01" value="0.55" />
+        <div class="help">How tall the string stack is on screen.</div>
+      </div>
+
+      <div class="setting">
+        <label><span>Hit band (px)</span><span class="val" id="vBand">14</span></label>
+        <input id="band" type="range" min="6" max="30" step="1" value="14" />
+        <div class="help">Wider = easier to hit.</div>
+      </div>
+
+      <div class="setting" style="margin-bottom:0;">
+        <label><span>Volume</span><span class="val" id="vVol">0.70</span></label>
+        <input id="vol" type="range" min="0.00" max="1.00" step="0.01" value="0.70" />
+        <div class="help">Audio is unlocked on Start / first click.</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="startOverlay">
+    <div id="startCard">
+      <h1>Start Air Pick Guitar</h1>
+      <div class="grid">
+        <div>
+          <p>
+            This runs fully in the browser: camera → hand tracking → pinch/strum → guitar notes.
+          </p>
+          <div class="warnBox" id="secureBox">
+            <b>Important:</b> Camera access requires a <b>secure context</b> (HTTPS or localhost). :contentReference[oaicite:2]{index=2}
+          </div>
+          <div class="statusLine" id="startStatus">Ready.</div>
+        </div>
+        <div>
+          <button class="btn" id="startBtn" style="width:100%; font-size:14px;">Start Camera + Audio</button>
+          <div style="height:10px"></div>
+          <button class="btn secondary" id="startNoCam" style="width:100%;">No camera (mouse test)</button>
+          <div style="margin-top:10px" class="help">
+            If camera fails on deployment: ensure it’s HTTPS, allow permissions, and don’t run inside a blocked iframe.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MediaPipe (pinned versions) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1675466124/drawing_utils.js"></script>
+
+  <script>
+    // ========= Helpers =========
+    const el = (id)=>document.getElementById(id);
+    const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
+
+    // ========= Config =========
+    const cfg = {
+      pinchThr: 0.045,
+      smooth: 0.22,
+      spread: 0.55,
+      hitBandPx: 14,
+      volume: 0.70,
+      showDebug: true,
+      minStrumSpeedPx: 10,
+      stringCooldownMs: 85
+    };
+
+    // Standard guitar open strings (low->high): E2 A2 D3 G3 B3 E4
+    const STRINGS = [
+      { name:"E2", freq: 82.41 },
+      { name:"A2", freq:110.00 },
+      { name:"D3", freq:146.83 },
+      { name:"G3", freq:196.00 },
+      { name:"B3", freq:246.94 },
+      { name:"E4", freq:329.63 }
+    ];
+
+    // ========= Canvas =========
+    const canvas = el("view");
+    const ctx = canvas.getContext("2d", { alpha:false });
+    let W=0, H=0, DPR=1;
+
+    function resize(){
+      DPR = Math.max(1, window.devicePixelRatio || 1);
+      W = window.innerWidth;
+      H = window.innerHeight;
+      canvas.width  = Math.floor(W * DPR);
+      canvas.height = Math.floor(H * DPR);
+      canvas.style.width = W + "px";
+      canvas.style.height = H + "px";
+      ctx.setTransform(DPR,0,0,DPR,0,0); // draw in CSS pixels
+    }
+    window.addEventListener("resize", resize);
+    resize();
+
+    // ========= Status dots =========
+    function setDot(id, state){ // "ok" | "warn" | "bad"
+      const d = el(id);
+      d.classList.remove("ok","warn");
+      if(state==="ok") d.classList.add("ok");
+      else if(state==="warn") d.classList.add("warn");
+    }
+    function setStatus(){
+      el("vPinch").textContent = cfg.pinchThr.toFixed(3);
+      el("vSmooth").textContent = cfg.smooth.toFixed(2);
+      el("vSpread").textContent = cfg.spread.toFixed(2);
+      el("vBand").textContent = String(cfg.hitBandPx|0);
+      el("vVol").textContent = cfg.volume.toFixed(2);
+      el("toggleDebug").textContent = "Debug: " + (cfg.showDebug ? "ON" : "OFF");
+    }
+    setStatus();
+
+    // ========= Audio (plucked string-ish) =========
+    const Synth = (() => {
+      let ctxA=null, master=null;
+
+      function ensure(){
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if(!AC) return false;
+        if(!ctxA){
+          ctxA = new AC();
+          master = ctxA.createGain();
+          master.gain.value = cfg.volume;
+          master.connect(ctxA.destination);
+        }
+        master.gain.value = cfg.volume;
+        if(ctxA.state === "suspended") ctxA.resume().catch(()=>{});
+        return true;
+      }
+
+      function pluck(freq, vel=1){
+        if(!ensure()) return;
+        const t = ctxA.currentTime;
+
+        // short noise burst
+        const noiseLen = Math.floor(ctxA.sampleRate * 0.03);
+        const buf = ctxA.createBuffer(1, noiseLen, ctxA.sampleRate);
+        const data = buf.getChannelData(0);
+        for(let i=0;i<noiseLen;i++){
+          // slightly decaying noise
+          const a = 1 - i/noiseLen;
+          data[i] = (Math.random()*2-1) * a;
+        }
+        const noise = ctxA.createBufferSource();
+        noise.buffer = buf;
+
+        const excite = ctxA.createGain();
+        excite.gain.value = 0.9 * vel;
+
+        const delay = ctxA.createDelay(1.0);
+        delay.delayTime.value = 1 / freq;
+
+        const lp = ctxA.createBiquadFilter();
+        lp.type = "lowpass";
+        lp.frequency.setValueAtTime(3200, t);
+
+        const fb = ctxA.createGain();
+        fb.gain.setValueAtTime(0.86, t);
+
+        // output envelope
+        const out = ctxA.createGain();
+        out.gain.setValueAtTime(0.0001, t);
+        out.gain.linearRampToValueAtTime(0.30 * vel, t + 0.01);
+        out.gain.exponentialRampToValueAtTime(0.0001, t + 1.6);
+
+        // route: noise -> excite -> delay
+        // feedback loop: delay -> lp -> fb -> delay
+        // output: delay -> out -> master
+        noise.connect(excite);
+        excite.connect(delay);
+
+        delay.connect(lp);
+        lp.connect(fb);
+        fb.connect(delay);
+
+        delay.connect(out);
+        out.connect(master);
+
+        noise.start(t);
+        noise.stop(t + 0.031);
+      }
+
+      return { ensure, pluck };
+    })();
+
+    // ========= Camera =========
+    const video = el("video");
+    let stream=null, videoReady=false;
+
+    async function startCamera(){
+      if(!navigator.mediaDevices?.getUserMedia){
+        throw new Error("getUserMedia not available in this browser/context.");
+      }
+
+      // First try "nice" constraints; fallback to plain if overconstrained.
+      const tryConstraints = async (c) => await navigator.mediaDevices.getUserMedia(c);
+
+      try{
+        stream = await tryConstraints({ video: { facingMode: "user", width:{ideal:1280}, height:{ideal:720} }, audio:false });
+      }catch(err){
+        if(err && (err.name === "OverconstrainedError" || err.name === "NotReadableError")){
+          stream = await tryConstraints({ video:true, audio:false });
+        }else{
+          throw err;
+        }
+      }
+
+      video.srcObject = stream;
+      video.muted = true;
+
+      // Ensure playback starts
+      const playPromise = video.play();
+      if(playPromise && typeof playPromise.then === "function"){
+        await playPromise;
+      }
+
+      videoReady = true;
+      el("camStat").textContent = "ready";
+      setDot("dotCam","ok");
+      el("hintLine").textContent = "Pinch to hold pick. Strum across strings.";
+    }
+
+    // ========= MediaPipe Hands =========
+    let mpHands=null, handsRunning=false, lastLandmarks=null;
+
+    function dist2(a,b){
+      const dx=a.x-b.x, dy=a.y-b.y;
+      return Math.sqrt(dx*dx + dy*dy);
+    }
+
+    async function initMediaPipe(){
+      if(typeof Hands === "undefined"){
+        throw new Error("MediaPipe Hands script failed to load (Hands is undefined).");
+      }
+
+      mpHands = new Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${file}`
+      });
+
+      mpHands.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.60,
+        minTrackingConfidence: 0.60
+      });
+
+      mpHands.onResults((results)=>{
+        if(results.multiHandLandmarks && results.multiHandLandmarks.length){
+          lastLandmarks = results.multiHandLandmarks[0];
+        }else{
+          lastLandmarks = null;
+        }
+      });
+
+      handsRunning = true;
+      el("mpStat").textContent = "ready";
+      setDot("dotMP","ok");
+    }
+
+    // ========= Pick cursor + strum detection =========
+    const cursorEl = el("gCursor");
+    let score=0;
+
+    // screen-space (CSS px)
+    let cursorX = W*0.5, cursorY=H*0.5;
+    let pinchDown=false;
+
+    let pickX=W*0.5, pickY=H*0.5;
+    let lastPickX=pickX, lastPickY=pickY;
+
+    const stringState = STRINGS.map(()=>({ hitAt:0, flash:0 }));
+
+    function setScore(n){
+      score=n|0;
+      el("score").textContent = String(score);
+    }
+
+    function computeStringYs(){
+      const spreadPx = H * cfg.spread;
+      const top = (H - spreadPx) * 0.5;
+      const step = spreadPx / (STRINGS.length - 1);
+      const ys = [];
+      for(let i=0;i<STRINGS.length;i++) ys.push(top + step*i);
+      return ys;
+    }
+
+    function updateCursorFromLandmarks(lm){
+      // We draw video mirrored, so mirror x as (1 - lm.x)
+      const idx = lm[8];
+      const thumb = lm[4];
+
+      const ix = (1 - idx.x) * W;
+      const iy = idx.y * H;
+
+      // smoothed cursor (for UI feel)
+      cursorX = cursorX*(1-cfg.smooth) + ix*cfg.smooth;
+      cursorY = cursorY*(1-cfg.smooth) + iy*cfg.smooth;
+
+      // pinch
+      const pinchD = dist2(idx, thumb); // in normalized coords
+      const nowPinch = pinchD < cfg.pinchThr;
+
+      cursorEl.style.display = "block";
+      cursorEl.style.left = cursorX + "px";
+      cursorEl.style.top  = cursorY + "px";
+      cursorEl.classList.toggle("pinch", nowPinch);
+
+      // pick point is midpoint thumb-index while pinching (more “pick-like”)
+      const tx = (1 - thumb.x) * W;
+      const ty = thumb.y * H;
+      const midX = (ix + tx) * 0.5;
+      const midY = (iy + ty) * 0.5;
+
+      // smooth pick position a bit so it doesn’t jitter
+      lastPickX = pickX; lastPickY = pickY;
+      pickX = pickX*(1-0.35) + midX*0.35;
+      pickY = pickY*(1-0.35) + midY*0.35;
+
+      // update pinch state transitions
+      pinchDown = nowPinch;
+    }
+
+    function maybeStrum(stringsY){
+      if(!pinchDown) return;
+
+      const dy = pickY - lastPickY;
+      const speed = Math.abs(dy);
+      if(speed < cfg.minStrumSpeedPx) return;
+
+      const now = performance.now();
+      const band = cfg.hitBandPx;
+
+      for(let i=0;i<stringsY.length;i++){
+        const y = stringsY[i];
+
+        // crossing test (last -> current crosses the string line)
+        const crossed = (lastPickY < y && pickY >= y) || (lastPickY > y && pickY <= y);
+        if(!crossed) continue;
+
+        // must be near the line when crossing (band)
+        if(Math.abs(pickY - y) > band && Math.abs(lastPickY - y) > band) continue;
+
+        // cooldown per string to avoid machine-gun triggers
+        if(now - stringState[i].hitAt < cfg.stringCooldownMs) continue;
+
+        stringState[i].hitAt = now;
+        stringState[i].flash = 1.0;
+
+        setScore(score + 1);
+
+        // velocity scales with speed, capped
+        const vel = clamp(speed / 70, 0.25, 1.0);
+        Synth.pluck(STRINGS[i].freq, vel);
+      }
+    }
+
+    // ========= Rendering =========
+    function drawRoundedRect(x,y,w,h,r){
+      ctx.beginPath();
+      ctx.moveTo(x+r,y);
+      ctx.arcTo(x+w,y,x+w,y+h,r);
+      ctx.arcTo(x+w,y+h,x,y+h,r);
+      ctx.arcTo(x,y+h,x,y,r);
+      ctx.arcTo(x,y,x+w,y,r);
+      ctx.closePath();
+    }
+
+    function drawFrame(){
+      // background
+      ctx.fillStyle = "#050814";
+      ctx.fillRect(0,0,W,H);
+
+      // draw camera frame mirrored
+      if(videoReady && video.videoWidth){
+        ctx.save();
+        ctx.translate(W, 0);
+        ctx.scale(-1, 1);
+        // cover-fit
+        const vw = video.videoWidth, vh = video.videoHeight;
+        const s = Math.max(W/vw, H/vh);
+        const dw = vw*s, dh = vh*s;
+        const dx = (W - dw)/2;
+        const dy = (H - dh)/2;
+        ctx.drawImage(video, dx, dy, dw, dh);
+        ctx.restore();
+
+        // subtle vignette
+        const g = ctx.createRadialGradient(W*0.5,H*0.45,Math.min(W,H)*0.10, W*0.5,H*0.5, Math.min(W,H)*0.70);
+        g.addColorStop(0, "rgba(0,0,0,0.00)");
+        g.addColorStop(1, "rgba(0,0,0,0.55)");
+        ctx.fillStyle = g;
+        ctx.fillRect(0,0,W,H);
+      }else{
+        // no video yet
+        ctx.fillStyle = "rgba(255,255,255,0.08)";
+        ctx.font = "700 16px system-ui, sans-serif";
+        ctx.fillText("Camera not started yet.", 20, H-28);
+      }
+
+      // strings
+      const ys = computeStringYs();
+      const now = performance.now();
+
+      // guitar body hint area
+      ctx.save();
+      ctx.globalAlpha = 0.16;
+      ctx.strokeStyle = "rgba(32,255,230,0.65)";
+      ctx.lineWidth = 2;
+      drawRoundedRect(W*0.12, ys[0]-60, W*0.76, (ys[5]-ys[0])+120, 36);
+      ctx.stroke();
+      ctx.restore();
+
+      for(let i=0;i<ys.length;i++){
+        // flash decay
+        const st = stringState[i];
+        if(st.flash > 0){
+          st.flash = Math.max(0, st.flash - 0.06);
+        }
+
+        const active = (now - st.hitAt) < 140;
+        const a = active ? 1.0 : 0.65;
+
+        ctx.save();
+        ctx.lineCap = "round";
+
+        // base string
+        ctx.strokeStyle = active ? `rgba(255,207,85,${0.95*a})` : `rgba(255,255,255,${0.35*a})`;
+        ctx.lineWidth = active ? 5 : 2;
+        ctx.beginPath();
+        ctx.moveTo(W*0.10, ys[i]);
+        ctx.lineTo(W*0.90, ys[i]);
+        ctx.stroke();
+
+        // label
+        ctx.fillStyle = active ? "rgba(255,207,85,.95)" : "rgba(255,255,255,.75)";
+        ctx.font = "900 13px system-ui, sans-serif";
+        ctx.fillText(STRINGS[i].name, W*0.10 - 40, ys[i] + 5);
+        ctx.restore();
+      }
+
+      // hand overlay (debug) + pick
+      if(lastLandmarks){
+        updateCursorFromLandmarks(lastLandmarks);
+
+        // strum detection
+        maybeStrum(ys);
+
+        // draw pick marker
+        ctx.save();
+        ctx.translate(pickX, pickY);
+        ctx.rotate(0.25);
+        ctx.globalAlpha = pinchDown ? 0.95 : 0.65;
+        ctx.fillStyle = pinchDown ? "rgba(255,207,85,.95)" : "rgba(32,255,230,.90)";
+        ctx.strokeStyle = "rgba(0,0,0,.35)";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, -14);
+        ctx.lineTo(12, 10);
+        ctx.lineTo(-12, 10);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        ctx.restore();
+
+        // optional debug landmarks
+        if(cfg.showDebug && typeof drawConnectors === "function" && typeof HAND_CONNECTIONS !== "undefined"){
+          ctx.save();
+          ctx.globalAlpha = 0.75;
+          // drawConnectors/drawLandmarks expect canvas space aligned with image coords.
+          // Since we are drawing the video mirrored manually, we can still draw debug in screen coords by mapping:
+          // We'll just plot a few key points instead (simple + reliable).
+          const pts = [0,4,8,12,16,20,9];
+          for(const id of pts){
+            const p = lastLandmarks[id];
+            const x = (1 - p.x) * W;
+            const y = p.y * H;
+            ctx.fillStyle = (id===4 || id===8) ? "rgba(255,207,85,.95)" : "rgba(32,255,230,.9)";
+            ctx.beginPath(); ctx.arc(x,y,4,0,Math.PI*2); ctx.fill();
+          }
+          ctx.restore();
+        }
+      }else{
+        cursorEl.style.display = "none";
+        pinchDown = false;
+        // instruction
+        ctx.fillStyle = "rgba(255,255,255,.82)";
+        ctx.font = "900 16px system-ui, sans-serif";
+        ctx.fillText("Show your hand to the camera…", 20, H - 28);
+      }
+
+      requestAnimationFrame(drawFrame);
+    }
+
+    // ========= MediaPipe processing loop =========
+    let mpBusy=false;
+    async function mpLoop(){
+      if(!handsRunning || !videoReady) return;
+      if(mpBusy){ requestAnimationFrame(mpLoop); return; }
+      mpBusy = true;
+      try{
+        await mpHands.send({ image: video });
+      }catch(e){
+        // If something transient happens, show warning but keep trying.
+        el("mpStat").textContent = "error";
+        setDot("dotMP","warn");
+        console.error(e);
+      }finally{
+        mpBusy = false;
+        requestAnimationFrame(mpLoop);
+      }
+    }
+
+    // ========= Start / Stop =========
+    function stopAll(){
+      try{ if(stream){ stream.getTracks().forEach(t=>t.stop()); } }catch(_){}
+      stream=null; videoReady=false;
+      handsRunning=false;
+      lastLandmarks=null;
+      el("camStat").textContent = "stopped";
+      setDot("dotCam","warn");
+      el("mpStat").textContent = "stopped";
+      setDot("dotMP","warn");
+    }
+
+    async function startAll(withCamera=true){
+      const st = el("startStatus");
+
+      // secure context hint
+      const secure = window.isSecureContext || location.hostname === "localhost" || location.hostname === "127.0.0.1";
+      if(!secure){
+        // Camera in insecure contexts can fail / be blocked. :contentReference[oaicite:3]{index=3}
+        st.innerHTML = "⚠️ Not a secure context. Use HTTPS or localhost for camera.";
+      }
+
+      // audio
+      const auOk = Synth.ensure();
+      el("auStat").textContent = auOk ? "ready" : "unavailable";
+      setDot("dotAU", auOk ? "ok" : "warn");
+
+      try{
+        if(withCamera){
+          st.textContent = "Requesting camera permission…";
+          el("camStat").textContent = "starting";
+          setDot("dotCam","warn");
+          await startCamera();
+        }else{
+          // mouse test mode
+          videoReady = false;
+          el("camStat").textContent = "disabled";
+          setDot("dotCam","warn");
+        }
+
+        st.textContent = "Loading MediaPipe Hands…";
+        el("mpStat").textContent = "starting";
+        setDot("dotMP","warn");
+        await initMediaPipe();
+
+        st.textContent = "Running ✓ Pinch + strum.";
+        el("startOverlay").style.display = "none";
+
+        // start loops
+        requestAnimationFrame(drawFrame);
+        if(withCamera) requestAnimationFrame(mpLoop);
+
+        // mouse test (no camera)
+        if(!withCamera){
+          canvas.addEventListener("pointermove",(e)=>{
+            lastPickX = pickX; lastPickY = pickY;
+            pickX = e.clientX; pickY = e.clientY;
+            cursorX = pickX; cursorY = pickY;
+            cursorEl.style.display = "block";
+            cursorEl.style.left = cursorX + "px";
+            cursorEl.style.top  = cursorY + "px";
+          });
+          canvas.addEventListener("pointerdown",()=>{
+            pinchDown = true; cursorEl.classList.add("pinch");
+          });
+          window.addEventListener("pointerup",()=>{
+            pinchDown = false; cursorEl.classList.remove("pinch");
+          });
+        }
+
+      }catch(err){
+        console.error(err);
+        st.textContent = "❌ Start failed: " + (err?.name ? `${err.name}: ` : "") + (err?.message || String(err));
+        el("hintLine").textContent = "If deployed: ensure HTTPS + allow permissions. If local: use localhost (not file://).";
+        el("camStat").textContent = "error";
+        setDot("dotCam","warn");
+        el("mpStat").textContent = "error";
+        setDot("dotMP","warn");
+      }
+    }
+
+    // ========= UI bindings =========
+    el("pinchThr").addEventListener("input",(e)=>{ cfg.pinchThr = parseFloat(e.target.value); setStatus(); });
+    el("smooth").addEventListener("input",(e)=>{ cfg.smooth = parseFloat(e.target.value); setStatus(); });
+    el("spread").addEventListener("input",(e)=>{ cfg.spread = parseFloat(e.target.value); setStatus(); });
+    el("band").addEventListener("input",(e)=>{ cfg.hitBandPx = parseInt(e.target.value,10); setStatus(); });
+    el("vol").addEventListener("input",(e)=>{ cfg.volume = parseFloat(e.target.value); setStatus(); Synth.ensure(); });
+
+    el("toggleDebug").addEventListener("click",()=>{ cfg.showDebug = !cfg.showDebug; setStatus(); });
+    el("resetScore").addEventListener("click",()=> setScore(0));
+
+    el("startBtn").addEventListener("click", async ()=>{
+      // unlock audio on user gesture
+      Synth.ensure();
+      await startAll(true);
+    });
+    el("startNoCam").addEventListener("click", async ()=>{
+      Synth.ensure();
+      await startAll(false);
+    });
+
+    // initial status
+    el("camStat").textContent = "idle";
+    el("mpStat").textContent = "idle";
+    el("auStat").textContent = "idle";
+    setDot("dotCam","warn");
+    setDot("dotMP","warn");
+    setDot("dotAU","warn");
+
+    // show secure context note
+    const secure = window.isSecureContext || location.hostname === "localhost" || location.hostname === "127.0.0.1";
+    el("secureBox").innerHTML = secure
+      ? "<b>Good:</b> secure context detected. Camera should be allowed if permissions are granted."
+      : "<b>Important:</b> Camera requires HTTPS or localhost (secure context).";
+
+    // Safety: stop camera on tab hide
+    document.addEventListener("visibilitychange", ()=>{
+      if(document.hidden){
+        // keep it simple: stop tracks so the camera isn’t left running
+        // comment this out if you prefer to keep it alive.
+        // stopAll();
+      }
+    });
+  </script>
+</body>
+</html>

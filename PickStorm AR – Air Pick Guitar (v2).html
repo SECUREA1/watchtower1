@@ -1,0 +1,726 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>PickStorm AR – Air Pick Guitar (v2)</title>
+
+  <!-- MediaPipe Tasks Vision via CDN (officially documented) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js" crossorigin="anonymous"></script>
+
+  <style>
+    :root { color-scheme: dark; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:#070708; color:#eaeaea; overflow:hidden; }
+    .wrap { display:grid; grid-template-columns: 360px 1fr; height:100vh; }
+    .panel { padding:16px; border-right:1px solid #1f1f24; background:#0d0d10; overflow:auto; }
+    .panel h1 { margin:0 0 10px; font-size:18px; }
+    .row { margin:12px 0; }
+    label { display:block; font-size:12px; color:#bdbdc7; margin-bottom:6px; }
+    input[type="range"] { width:100%; }
+    select, button { width:100%; padding:10px 12px; border-radius:12px; background:#1a1a1f; border:1px solid #2b2b33; color:#eee; }
+    button:hover { background:#22222a; cursor:pointer; }
+    button:disabled { opacity:.55; cursor:not-allowed; }
+    .hint { font-size:12px; color:#a7a7b3; line-height:1.35; }
+    .stage { position:relative; width:100%; height:100%; background:#000; }
+    canvas { display:block; width:100%; height:100%; }
+    video { display:none; }
+    .badge { display:inline-block; padding:2px 8px; border:1px solid #2b2b33; border-radius:999px; font-size:12px; color:#bdbdc7; }
+    .stat { font-size:13px; margin-top:10px; color:#cfcfe6; }
+    .stat b { color:#fff; }
+  </style>
+</head>
+
+<body>
+<div class="wrap">
+  <div class="panel">
+    <h1>PickStorm AR – Air Pick Guitar <span class="badge">v2</span></h1>
+
+    <div class="row">
+      <button id="startBtn">Start Camera + Audio</button>
+    </div>
+    <div class="row">
+      <button id="stopBtn" disabled>Stop</button>
+    </div>
+
+    <div class="row">
+      <label>Tuning</label>
+      <select id="tuning">
+        <option value="standard" selected>Standard (E2 A2 D3 G3 B3 E4)</option>
+        <option value="dropd">Drop D (D2 A2 D3 G3 B3 E4)</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <label>Strum speed threshold</label>
+      <input id="speedThresh" type="range" min="150" max="2500" value="700"/>
+      <div class="hint">If it won’t trigger, lower this. If it triggers too much, raise it.</div>
+    </div>
+
+    <div class="row">
+      <label>Hit window (pixels)</label>
+      <input id="hitWindow" type="range" min="4" max="50" value="18"/>
+    </div>
+
+    <div class="row">
+      <label>String cooldown (ms)</label>
+      <input id="cooldown" type="range" min="20" max="240" value="90"/>
+      <div class="hint">Prevents rapid retriggers as you cross a string.</div>
+    </div>
+
+    <div class="row">
+      <label>Damping (sustain)</label>
+      <input id="damping" type="range" min="0.80" max="0.995" step="0.001" value="0.985"/>
+    </div>
+
+    <div class="row">
+      <label>Volume</label>
+      <input id="volume" type="range" min="0" max="1" step="0.01" value="0.55"/>
+    </div>
+
+    <div class="row">
+      <label>Reverb</label>
+      <input id="reverb" type="range" min="0" max="1" step="0.01" value="0.18"/>
+    </div>
+
+    <div class="row">
+      <label><input id="mirror" type="checkbox" checked/> Mirror selfie</label>
+    </div>
+
+    <div class="row">
+      <label><input id="showVideo" type="checkbox" checked/> Show camera background</label>
+    </div>
+
+    <div class="row">
+      <label><input id="mouseMode" type="checkbox"/> Mouse mode (no camera)</label>
+      <div class="hint">If MediaPipe/camera fails, enable this and strum with your mouse.</div>
+    </div>
+
+    <div class="row">
+      <label><input id="debug" type="checkbox" checked/> Debug overlay</label>
+    </div>
+
+    <div class="stat">Status: <b id="status">Idle</b></div>
+    <div class="stat">Score: <b id="score">0</b> | Combo: <b id="combo">0</b></div>
+    <div class="stat">Last: <b id="lastNote">—</b></div>
+
+    <div class="row hint" style="margin-top:14px;">
+      <b>Important:</b> run from a local server (not file://). Example:
+      <div style="margin-top:6px;"><code>python -m http.server 8000</code></div>
+      <div><code>http://localhost:8000</code></div>
+    </div>
+  </div>
+
+  <div class="stage">
+    <video id="video" playsinline></video>
+    <canvas id="canvas"></canvas>
+  </div>
+</div>
+
+<script>
+(() => {
+  // ===== UI =====
+  const video = document.getElementById("video");
+  const canvas = document.getElementById("canvas");
+  const ctx = canvas.getContext("2d");
+
+  const startBtn = document.getElementById("startBtn");
+  const stopBtn  = document.getElementById("stopBtn");
+  const statusEl = document.getElementById("status");
+  const scoreEl  = document.getElementById("score");
+  const comboEl  = document.getElementById("combo");
+  const lastNoteEl = document.getElementById("lastNote");
+
+  const tuningEl = document.getElementById("tuning");
+  const speedThreshEl = document.getElementById("speedThresh");
+  const hitWindowEl = document.getElementById("hitWindow");
+  const cooldownEl = document.getElementById("cooldown");
+  const dampingEl = document.getElementById("damping");
+  const volumeEl = document.getElementById("volume");
+  const reverbEl = document.getElementById("reverb");
+  const mirrorEl = document.getElementById("mirror");
+  const showVideoEl = document.getElementById("showVideo");
+  const mouseModeEl = document.getElementById("mouseMode");
+  const debugEl = document.getElementById("debug");
+
+  // ===== MediaPipe (Tasks Vision) =====
+  // wasm root per official guide
+  const WASM_ROOT = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm";
+  const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+
+  let running = false;
+  let handLandmarker = null;
+  let lastVideoTime = -1;
+  let mpError = "";
+
+  // ===== Game / Guitar Layout =====
+  const NUM_STRINGS = 6;
+  let stringY = new Array(NUM_STRINGS).fill(0);
+  let flashUntil = new Array(NUM_STRINGS).fill(0);
+  let lastHitAt = new Array(NUM_STRINGS).fill(0);
+
+  let score = 0;
+  let combo = 0;
+
+  function layoutStrings(w, h) {
+    const top = h * 0.18;
+    const bottom = h * 0.82;
+    for (let i = 0; i < NUM_STRINGS; i++) {
+      const t = i / (NUM_STRINGS - 1);
+      stringY[i] = top + t * (bottom - top);
+    }
+  }
+
+  function fitCanvasToStage() {
+    const r = canvas.getBoundingClientRect();
+    const w = Math.max(2, Math.floor(r.width));
+    const h = Math.max(2, Math.floor(r.height));
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+      layoutStrings(w, h);
+    }
+  }
+  window.addEventListener("resize", fitCanvasToStage);
+
+  // ===== Cursor / pick tracking =====
+  let tip = { x: 0, y: 0, t: 0, ok: false };
+  let prevTip = { x: 0, y: 0, t: 0, ok: false };
+
+  // EMA smoothing
+  const SMOOTH = 0.35;
+  const lerp = (a,b,t) => a + (b-a)*t;
+
+  function updateTip(x, y, tMs, ok) {
+    prevTip = { ...tip };
+    if (!tip.ok) {
+      tip = { x, y, t: tMs, ok };
+    } else {
+      tip = {
+        x: lerp(tip.x, x, 1 - SMOOTH),
+        y: lerp(tip.y, y, 1 - SMOOTH),
+        t: tMs,
+        ok
+      };
+    }
+  }
+
+  // Mouse fallback
+  canvas.addEventListener("mousemove", (e) => {
+    if (!mouseModeEl.checked) return;
+    const r = canvas.getBoundingClientRect();
+    const x = (e.clientX - r.left) * (canvas.width / r.width);
+    const y = (e.clientY - r.top) * (canvas.height / r.height);
+    updateTip(x, y, performance.now(), true);
+  });
+
+  // ===== Audio (pluck synth) =====
+  let audioCtx = null, masterGain = null, dryGain = null, wetGain = null, convolver = null;
+  let strings = [];
+
+  const NOTESETS = {
+    standard: [
+      { name: "E2", f: 82.4069 },
+      { name: "A2", f: 110.0 },
+      { name: "D3", f: 146.832 },
+      { name: "G3", f: 196.0 },
+      { name: "B3", f: 246.942 },
+      { name: "E4", f: 329.628 }
+    ],
+    dropd: [
+      { name: "D2", f: 73.4162 },
+      { name: "A2", f: 110.0 },
+      { name: "D3", f: 146.832 },
+      { name: "G3", f: 196.0 },
+      { name: "B3", f: 246.942 },
+      { name: "E4", f: 329.628 }
+    ]
+  };
+
+  function makeImpulseResponse(ctx, seconds=1.4, decay=3.2) {
+    const rate = ctx.sampleRate;
+    const length = Math.floor(rate * seconds);
+    const buf = ctx.createBuffer(2, length, rate);
+    for (let ch = 0; ch < 2; ch++) {
+      const data = buf.getChannelData(ch);
+      for (let i = 0; i < length; i++) {
+        const t = i / length;
+        data[i] = (Math.random()*2 - 1) * Math.pow(1 - t, decay);
+      }
+    }
+    return buf;
+  }
+
+  function setMix() {
+    if (!audioCtx) return;
+    masterGain.gain.value = parseFloat(volumeEl.value);
+    const wet = parseFloat(reverbEl.value);
+    wetGain.gain.value = wet;
+    dryGain.gain.value = 1 - wet;
+  }
+
+  function createString(ctx, freq, name) {
+    const delay = ctx.createDelay(1.0);
+    delay.delayTime.value = 1 / freq;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = 3200;
+
+    const feedback = ctx.createGain();
+    feedback.gain.value = parseFloat(dampingEl.value);
+
+    const out = ctx.createGain();
+    out.gain.value = 0.22;
+
+    delay.connect(filter);
+    filter.connect(feedback);
+    feedback.connect(delay);
+
+    filter.connect(out);
+    out.connect(dryGain);
+    out.connect(wetGain);
+
+    function pluck(strength01) {
+      const now = ctx.currentTime;
+
+      // dynamic brightness & gain
+      const amp = 0.10 + strength01 * 0.40;
+      out.gain.setTargetAtTime(0.18 + strength01 * 0.25, now, 0.01);
+      filter.frequency.setTargetAtTime(2000 + strength01 * 2800, now, 0.01);
+      feedback.gain.setTargetAtTime(parseFloat(dampingEl.value), now, 0.02);
+
+      const burstSec = Math.max(0.015, (1 / freq) * 1.2);
+      const len = Math.floor(ctx.sampleRate * burstSec);
+      const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+
+      for (let i = 0; i < len; i++) {
+        const env = 1 - i / len;
+        data[i] = (Math.random()*2 - 1) * env;
+      }
+
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+
+      const g = ctx.createGain();
+      g.gain.value = amp;
+
+      src.connect(g);
+      g.connect(delay);
+
+      src.start(now);
+      src.stop(now + burstSec);
+    }
+
+    return { name, freq, pluck };
+  }
+
+  function rebuildStrings() {
+    if (!audioCtx) return;
+    strings = [];
+    const set = NOTESETS[tuningEl.value] || NOTESETS.standard;
+    for (let i = 0; i < NUM_STRINGS; i++) {
+      strings.push(createString(audioCtx, set[i].f, set[i].name));
+    }
+  }
+
+  // ===== Strum detection (crossing string lines) =====
+  function detectStrum() {
+    if (!tip.ok || !prevTip.ok) return;
+
+    const dt = (tip.t - prevTip.t) / 1000;
+    if (dt <= 0) return;
+
+    const dy = tip.y - prevTip.y;
+    const speed = Math.abs(dy) / dt; // px/s
+    const speedThresh = parseFloat(speedThreshEl.value);
+    const hitWindow = parseFloat(hitWindowEl.value);
+    const cooldown = parseFloat(cooldownEl.value);
+
+    if (speed < speedThresh) return;
+
+    const yA = prevTip.y, yB = tip.y;
+    const minY = Math.min(yA, yB);
+    const maxY = Math.max(yA, yB);
+
+    let crossed = [];
+    for (let i = 0; i < NUM_STRINGS; i++) {
+      const yS = stringY[i];
+      if (yS >= minY - hitWindow && yS <= maxY + hitWindow) crossed.push(i);
+    }
+
+    // order by strum direction
+    crossed.sort((a,b) => (dy >= 0) ? (a - b) : (b - a));
+
+    const now = performance.now();
+    const strength01 = Math.min(1, (speed - speedThresh) / (speedThresh * 1.25));
+
+    let any = false;
+    for (const i of crossed) {
+      if (now - lastHitAt[i] < cooldown) continue;
+
+      // ensure we're close enough to the actual line at some point (simple check)
+      const distNow = Math.abs(tip.y - stringY[i]);
+      const distPrev = Math.abs(prevTip.y - stringY[i]);
+      if (Math.min(distNow, distPrev) > hitWindow) continue;
+
+      lastHitAt[i] = now;
+      flashUntil[i] = now + 110;
+
+      if (strings[i]) {
+        strings[i].pluck(strength01);
+        lastNoteEl.textContent = strings[i].name + (dy >= 0 ? " ↓" : " ↑");
+      }
+
+      score += 1;
+      combo += 1;
+      any = true;
+    }
+
+    if (any) {
+      scoreEl.textContent = String(score);
+      comboEl.textContent = String(combo);
+    } else {
+      // if you moved fast but didn't actually cross a string, break combo softly
+      combo = Math.max(0, combo - 1);
+      comboEl.textContent = String(combo);
+    }
+  }
+
+  // ===== Draw =====
+  function drawPick() {
+    if (!tip.ok) return;
+
+    // angle based on movement
+    let angle = 0;
+    if (prevTip.ok) {
+      const dx = tip.x - prevTip.x;
+      const dy = tip.y - prevTip.y;
+      angle = Math.atan2(dy, dx);
+    }
+
+    ctx.save();
+    ctx.translate(tip.x, tip.y);
+    ctx.rotate(angle);
+
+    // pick body (triangle)
+    ctx.fillStyle = "rgba(255, 80, 80, 0.95)";
+    ctx.beginPath();
+    ctx.moveTo(16, 0);
+    ctx.lineTo(-10, -10);
+    ctx.lineTo(-10, 10);
+    ctx.closePath();
+    ctx.fill();
+
+    // outline
+    ctx.strokeStyle = "rgba(0,0,0,0.6)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // tip dot
+    ctx.fillStyle = "rgba(255,255,255,0.9)";
+    ctx.beginPath();
+    ctx.arc(14, 0, 2.4, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawGuitarOverlay() {
+    // fretboard shadow
+    ctx.fillStyle = "rgba(0,0,0,0.35)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // neck vertical guides (frets)
+    ctx.strokeStyle = "rgba(255,255,255,0.08)";
+    ctx.lineWidth = 2;
+    const fretCount = 7;
+    for (let i = 1; i <= fretCount; i++) {
+      const x = (canvas.width / (fretCount + 1)) * i;
+      ctx.beginPath();
+      ctx.moveTo(x, canvas.height*0.15);
+      ctx.lineTo(x, canvas.height*0.85);
+      ctx.stroke();
+    }
+
+    // strings
+    const now = performance.now();
+    for (let i = 0; i < NUM_STRINGS; i++) {
+      const active = flashUntil[i] > now;
+      ctx.strokeStyle = active ? "rgba(0, 255, 140, 0.95)" : "rgba(240, 240, 255, 0.75)";
+      ctx.lineWidth = active ? 6 : (2 + i*0.35); // thicker lower strings
+      ctx.beginPath();
+      ctx.moveTo(0, stringY[i]);
+      ctx.lineTo(canvas.width, stringY[i]);
+      ctx.stroke();
+
+      // label
+      ctx.fillStyle = "rgba(255,255,255,0.85)";
+      ctx.font = "14px system-ui";
+      ctx.fillText(strings[i]?.name || "", 10, stringY[i] - 8);
+    }
+
+    drawPick();
+  }
+
+  function drawDebug(textLines) {
+    if (!debugEl.checked) return;
+    const pad = 10;
+    const w = 360;
+    const h = 18 * (textLines.length + 1) + 10;
+
+    ctx.save();
+    ctx.globalAlpha = 0.92;
+    ctx.fillStyle = "rgba(10,10,14,0.75)";
+    ctx.fillRect(pad, pad, w, h);
+    ctx.globalAlpha = 1;
+
+    ctx.fillStyle = "#fff";
+    ctx.font = "13px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+    ctx.fillText("DEBUG", pad+10, pad+20);
+
+    ctx.fillStyle = "#cfcfe6";
+    for (let i = 0; i < textLines.length; i++) {
+      ctx.fillText(textLines[i], pad+10, pad+40 + i*18);
+    }
+    ctx.restore();
+  }
+
+  function drawErrorOverlay(msg) {
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,0.75)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = "#fff";
+    ctx.font = "22px system-ui";
+    ctx.fillText("Hand tracking failed — strings still work.", 30, 60);
+
+    ctx.fillStyle = "#cfcfe6";
+    ctx.font = "14px ui-monospace, monospace";
+    const lines = (msg || "Unknown error").split("\n").slice(0, 10);
+    let y = 95;
+    for (const line of lines) {
+      ctx.fillText(line, 30, y);
+      y += 18;
+    }
+
+    ctx.fillStyle = "#a7a7b3";
+    ctx.font = "14px system-ui";
+    ctx.fillText("Tip: enable Mouse mode in the left panel to test strumming.", 30, y + 16);
+    ctx.restore();
+  }
+
+  function renderLoop() {
+    if (!running) return;
+
+    fitCanvasToStage();
+
+    // background
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    if (showVideoEl.checked && !mouseModeEl.checked && video.readyState >= 2) {
+      const mirror = mirrorEl.checked;
+      ctx.save();
+      if (mirror) {
+        ctx.translate(canvas.width, 0);
+        ctx.scale(-1, 1);
+      }
+      // draw video fitted to canvas
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      ctx.restore();
+    } else {
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+    }
+
+    // Always draw guitar overlay (strings + pick) no matter what
+    drawGuitarOverlay();
+
+    // debug
+    const dt = (tip.ok && prevTip.ok) ? ((tip.t - prevTip.t)/1000) : 0;
+    const dx = (tip.ok && prevTip.ok) ? (tip.x - prevTip.x) : 0;
+    const dy = (tip.ok && prevTip.ok) ? (tip.y - prevTip.y) : 0;
+    const speed = dt > 0 ? (Math.abs(dy)/dt) : 0;
+
+    drawDebug([
+      `mode=${mouseModeEl.checked ? "mouse" : "hand"}`,
+      `videoReady=${video.readyState}`,
+      `tip.ok=${tip.ok}`,
+      `tip=(${tip.x.toFixed(1)}, ${tip.y.toFixed(1)})`,
+      `dy=${dy.toFixed(1)} px | speed=${speed.toFixed(0)} px/s`,
+      `mp=${handLandmarker ? "OK" : "null"}`,
+      `err=${mpError ? "YES" : "no"}`
+    ]);
+
+    if (mpError && !mouseModeEl.checked) {
+      drawErrorOverlay(mpError);
+    }
+
+    requestAnimationFrame(renderLoop);
+  }
+
+  // ===== Prediction loop =====
+  function predictLoop() {
+    if (!running) return;
+
+    if (!mouseModeEl.checked && handLandmarker && video.currentTime !== lastVideoTime) {
+      lastVideoTime = video.currentTime;
+
+      try {
+        // detectForVideo(video, timestampMs) is the intended usage
+        const res = handLandmarker.detectForVideo(video, performance.now());
+        const mirror = mirrorEl.checked;
+
+        if (res && res.landmarks && res.landmarks.length > 0) {
+          const lm = res.landmarks[0][8]; // index fingertip
+          let x = lm.x * canvas.width;
+          const y = lm.y * canvas.height;
+          if (mirror) x = (1 - lm.x) * canvas.width;
+          updateTip(x, y, performance.now(), true);
+        } else {
+          updateTip(tip.x, tip.y, performance.now(), false);
+        }
+      } catch (err) {
+        mpError = String(err && err.stack ? err.stack : err);
+        handLandmarker = null;
+        statusEl.textContent = "Running (hand tracking error)";
+      }
+    }
+
+    detectStrum();
+    requestAnimationFrame(predictLoop);
+  }
+
+  // ===== Start / Stop =====
+  async function initAudio() {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    masterGain = audioCtx.createGain();
+    dryGain = audioCtx.createGain();
+    wetGain = audioCtx.createGain();
+
+    convolver = audioCtx.createConvolver();
+    convolver.buffer = makeImpulseResponse(audioCtx);
+
+    dryGain.connect(masterGain);
+    wetGain.connect(convolver);
+    convolver.connect(masterGain);
+    masterGain.connect(audioCtx.destination);
+
+    setMix();
+    rebuildStrings();
+  }
+
+  async function initMediaPipe() {
+    // Use modelAssetBuffer (more robust than remote modelAssetPath)
+    const vision = await FilesetResolver.forVisionTasks(WASM_ROOT);
+
+    const buf = await fetch(MODEL_URL).then(r => {
+      if (!r.ok) throw new Error(`Model fetch failed: ${r.status} ${r.statusText}`);
+      return r.arrayBuffer();
+    });
+
+    const modelAssetBuffer = new Uint8Array(buf);
+
+    handLandmarker = await HandLandmarker.createFromOptions(vision, {
+      baseOptions: { modelAssetBuffer },
+      runningMode: "VIDEO",
+      numHands: 1,
+      minHandDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.6,
+      minHandPresenceConfidence: 0.6
+    });
+  }
+
+  async function initCamera() {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false
+    });
+    video.srcObject = stream;
+    await video.play();
+  }
+
+  async function start() {
+    if (running) return;
+    running = true;
+
+    mpError = "";
+    statusEl.textContent = "Starting…";
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+
+    // reset state so strings/pick will show instantly
+    score = 0; combo = 0;
+    scoreEl.textContent = "0";
+    comboEl.textContent = "0";
+    lastNoteEl.textContent = "—";
+    flashUntil.fill(0);
+    lastHitAt.fill(0);
+
+    fitCanvasToStage();
+    updateTip(canvas.width*0.5, canvas.height*0.5, performance.now(), mouseModeEl.checked);
+
+    try {
+      await initAudio();
+    } catch (e) {
+      mpError = "Audio init failed:\n" + String(e && e.stack ? e.stack : e);
+      statusEl.textContent = "Running (no audio)";
+    }
+
+    if (!mouseModeEl.checked) {
+      try {
+        await initCamera();
+      } catch (e) {
+        mpError = "Camera init failed (try local server + permission):\n" + String(e && e.stack ? e.stack : e);
+        statusEl.textContent = "Running (camera error)";
+      }
+
+      try {
+        await initMediaPipe();
+      } catch (e) {
+        mpError = "MediaPipe init failed:\n" + String(e && e.stack ? e.stack : e);
+        handLandmarker = null;
+        statusEl.textContent = "Running (hand tracking error)";
+      }
+    }
+
+    if (!mpError) statusEl.textContent = mouseModeEl.checked ? "Running (mouse mode)" : "Running (hand tracking)";
+    requestAnimationFrame(renderLoop);
+    requestAnimationFrame(predictLoop);
+  }
+
+  async function stop() {
+    running = false;
+    statusEl.textContent = "Idle";
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+
+    if (video.srcObject) {
+      const tracks = video.srcObject.getTracks();
+      tracks.forEach(t => t.stop());
+      video.srcObject = null;
+    }
+    handLandmarker = null;
+    lastVideoTime = -1;
+
+    if (audioCtx) {
+      try { await audioCtx.close(); } catch {}
+      audioCtx = null;
+    }
+  }
+
+  // ===== Events =====
+  startBtn.addEventListener("click", start);
+  stopBtn.addEventListener("click", stop);
+
+  [volumeEl, reverbEl].forEach(el => el.addEventListener("input", setMix));
+  dampingEl.addEventListener("input", () => {});
+  tuningEl.addEventListener("change", rebuildStrings);
+
+  mouseModeEl.addEventListener("change", () => {
+    if (running) stop().then(start);
+  });
+})();
+</script>
+</body>
+</html>

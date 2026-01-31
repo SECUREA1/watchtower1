@@ -1,0 +1,570 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>PickStorm AR – Air Pick Guitar</title>
+
+  <!-- MediaPipe Tasks Vision (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js" crossorigin="anonymous"></script>
+  <!-- Per MediaPipe web setup guide, this CDN approach is supported. -->
+  <!-- See also the Hand Landmarker Web guide for wasm path usage. -->
+  <!-- :contentReference[oaicite:1]{index=1} -->
+
+  <style>
+    :root { color-scheme: dark; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:#0b0b0b; color:#eee; }
+    .wrap { display:grid; grid-template-columns: 340px 1fr; height:100vh; }
+    .panel { padding:16px; border-right: 1px solid #222; background:#0f0f10; overflow:auto; }
+    .panel h1 { font-size:18px; margin:0 0 12px; }
+    .row { margin:10px 0; }
+    label { display:block; font-size:12px; color:#bbb; margin-bottom:6px; }
+    input[type="range"] { width:100%; }
+    select, button, input[type="checkbox"] { font-size:14px; }
+    button { width:100%; padding:10px 12px; background:#1c1c1e; border:1px solid #333; color:#eee; border-radius:10px; cursor:pointer; }
+    button:hover { background:#242427; }
+    .hint { font-size:12px; color:#aaa; line-height:1.35; }
+    .stage { position:relative; display:flex; align-items:center; justify-content:center; background:#000; }
+    canvas { width:100%; height:100%; }
+    video { display:none; }
+    .badge { display:inline-block; padding:2px 8px; border:1px solid #333; border-radius:999px; font-size:12px; color:#bbb; }
+    .stat { font-size:14px; margin-top:10px; }
+    .stat b { color:#fff; }
+  </style>
+</head>
+
+<body>
+<div class="wrap">
+  <div class="panel">
+    <h1>PickStorm AR – Air Pick Guitar <span class="badge">Web</span></h1>
+
+    <div class="row">
+      <button id="startBtn">Start Camera + Audio</button>
+    </div>
+
+    <div class="row">
+      <button id="stopBtn" disabled>Stop</button>
+    </div>
+
+    <div class="row">
+      <label for="tuning">Tuning</label>
+      <select id="tuning">
+        <option value="standard" selected>Standard (E2 A2 D3 G3 B3 E4)</option>
+        <option value="dropd">Drop D (D2 A2 D3 G3 B3 E4)</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <label for="speedThresh">Strum speed threshold</label>
+      <input id="speedThresh" type="range" min="200" max="2500" value="850" />
+      <div class="hint">Higher = you must move faster to trigger a string.</div>
+    </div>
+
+    <div class="row">
+      <label for="hitWindow">Hit window (pixels)</label>
+      <input id="hitWindow" type="range" min="4" max="40" value="14" />
+      <div class="hint">How close your fingertip must be when crossing a string.</div>
+    </div>
+
+    <div class="row">
+      <label for="damping">String damping (decay)</label>
+      <input id="damping" type="range" min="0.80" max="0.995" step="0.001" value="0.985" />
+      <div class="hint">Lower = shorter “mute”, higher = longer sustain.</div>
+    </div>
+
+    <div class="row">
+      <label for="volume">Master volume</label>
+      <input id="volume" type="range" min="0" max="1" step="0.01" value="0.55" />
+    </div>
+
+    <div class="row">
+      <label for="reverb">Reverb mix</label>
+      <input id="reverb" type="range" min="0" max="1" step="0.01" value="0.18" />
+    </div>
+
+    <div class="row">
+      <label><input id="mirror" type="checkbox" checked /> Mirror video (selfie mode)</label>
+      <div class="hint">Keep this ON for natural “mirror” control.</div>
+    </div>
+
+    <div class="row">
+      <label><input id="mouseMode" type="checkbox" /> Mouse mode (no camera)</label>
+      <div class="hint">Debug without a webcam: move mouse to strum.</div>
+    </div>
+
+    <div class="stat">Status: <b id="status">Idle</b></div>
+    <div class="stat">Last note: <b id="lastNote">—</b></div>
+
+    <div class="row hint" style="margin-top:14px;">
+      <b>Run it locally:</b><br/>
+      1) Save as <code>index.html</code><br/>
+      2) In that folder: <code>python -m http.server 8000</code><br/>
+      3) Open: <code>http://localhost:8000</code><br/><br/>
+      Tip: Keep your fingertip “cursor” moving across the strings (up or down) to strum.
+    </div>
+  </div>
+
+  <div class="stage">
+    <video id="video" playsinline></video>
+    <canvas id="canvas"></canvas>
+  </div>
+</div>
+
+<script>
+(() => {
+  // ====== MediaPipe Hand Landmarker setup ======
+  // The official guide shows using FilesetResolver.forVisionTasks(wasmRoot) and HandLandmarker.createFromOptions(...)
+  // :contentReference[oaicite:2]{index=2}
+  const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+  // Model bundle URL used in MediaPipe samples (same path appears in official sample notebooks). :contentReference[oaicite:3]{index=3}
+
+  const video = document.getElementById("video");
+  const canvas = document.getElementById("canvas");
+  const ctx2d = canvas.getContext("2d");
+
+  const startBtn = document.getElementById("startBtn");
+  const stopBtn  = document.getElementById("stopBtn");
+  const statusEl = document.getElementById("status");
+  const lastNoteEl = document.getElementById("lastNote");
+
+  const speedThreshEl = document.getElementById("speedThresh");
+  const hitWindowEl   = document.getElementById("hitWindow");
+  const dampingEl     = document.getElementById("damping");
+  const volumeEl      = document.getElementById("volume");
+  const reverbEl      = document.getElementById("reverb");
+  const mirrorEl      = document.getElementById("mirror");
+  const mouseModeEl   = document.getElementById("mouseMode");
+  const tuningEl      = document.getElementById("tuning");
+
+  let running = false;
+  let handLandmarker = null;
+  let lastVideoTime = -1;
+
+  // ====== Guitar layout ======
+  const NUM_STRINGS = 6;
+  let stringY = new Array(NUM_STRINGS).fill(0);
+  let flashUntil = new Array(NUM_STRINGS).fill(0);
+
+  function layoutStrings(w, h) {
+    // Even spacing with padding
+    const top = h * 0.15;
+    const bottom = h * 0.85;
+    for (let i = 0; i < NUM_STRINGS; i++) {
+      const t = i / (NUM_STRINGS - 1);
+      stringY[i] = top + t * (bottom - top);
+    }
+  }
+
+  // ====== “Cursor” tracking ======
+  let tip = { x: 0, y: 0, t: 0, ok: false };
+  let prevTip = { x: 0, y: 0, t: 0, ok: false };
+
+  // Simple smoothing (EMA)
+  const SMOOTHING = 0.35; // 0..1 ; higher = smoother
+  function smoothTo(curr, next) {
+    return curr + (next - curr) * (1 - SMOOTHING);
+  }
+
+  // Mouse mode helper
+  canvas.addEventListener("mousemove", (e) => {
+    if (!mouseModeEl.checked) return;
+    const r = canvas.getBoundingClientRect();
+    const x = (e.clientX - r.left) * (canvas.width / r.width);
+    const y = (e.clientY - r.top) * (canvas.height / r.height);
+    updateTip(x, y, performance.now(), true);
+  });
+
+  function updateTip(x, y, tMs, ok) {
+    prevTip = { ...tip };
+    if (!tip.ok) {
+      tip = { x, y, t: tMs, ok };
+    } else {
+      tip = {
+        x: smoothTo(tip.x, x),
+        y: smoothTo(tip.y, y),
+        t: tMs,
+        ok
+      };
+    }
+  }
+
+  // ====== Audio (plucked-string “Karplus-ish” using delay+feedback+filter) ======
+  // Karplus-Strong style plucked-string synthesis is a classic approach for guitar-like timbre. :contentReference[oaicite:4]{index=4}
+  let audioCtx = null;
+  let masterGain = null;
+  let dryGain = null;
+  let wetGain = null;
+  let convolver = null;
+  let strings = [];
+
+  const NOTESETS = {
+    standard: [
+      { name: "E2", f: 82.4069 },
+      { name: "A2", f: 110.0 },
+      { name: "D3", f: 146.832 },
+      { name: "G3", f: 196.0 },
+      { name: "B3", f: 246.942 },
+      { name: "E4", f: 329.628 }
+    ],
+    dropd: [
+      { name: "D2", f: 73.4162 },
+      { name: "A2", f: 110.0 },
+      { name: "D3", f: 146.832 },
+      { name: "G3", f: 196.0 },
+      { name: "B3", f: 246.942 },
+      { name: "E4", f: 329.628 }
+    ]
+  };
+
+  function makeImpulseResponse(ctx, seconds = 1.6, decay = 3.5) {
+    const rate = ctx.sampleRate;
+    const length = Math.floor(rate * seconds);
+    const impulse = ctx.createBuffer(2, length, rate);
+    for (let ch = 0; ch < 2; ch++) {
+      const data = impulse.getChannelData(ch);
+      for (let i = 0; i < length; i++) {
+        const t = i / length;
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, decay);
+      }
+    }
+    return impulse;
+  }
+
+  function createString(ctx, freq, baseName) {
+    const delay = ctx.createDelay(1.0);
+    delay.delayTime.value = 1 / freq;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = 3200;
+
+    const feedback = ctx.createGain();
+    feedback.gain.value = parseFloat(dampingEl.value);
+
+    const out = ctx.createGain();
+    out.gain.value = 0.22;
+
+    // Feedback loop: delay -> filter -> feedback -> delay
+    delay.connect(filter);
+    filter.connect(feedback);
+    feedback.connect(delay);
+
+    // Tap to output
+    filter.connect(out);
+    out.connect(dryGain);
+
+    function pluck(strength01) {
+      // Noise burst into the delay line
+      const now = ctx.currentTime;
+
+      // Strength shapes amplitude + slight brightness
+      const amp = 0.10 + strength01 * 0.35;
+      out.gain.setTargetAtTime(0.18 + strength01 * 0.25, now, 0.01);
+      filter.frequency.setTargetAtTime(2200 + strength01 * 2500, now, 0.01);
+
+      // Apply current damping
+      feedback.gain.setTargetAtTime(parseFloat(dampingEl.value), now, 0.02);
+
+      // Create a short noise burst
+      const burstSec = Math.max(0.015, (1 / freq) * 1.2);
+      const len = Math.floor(ctx.sampleRate * burstSec);
+      const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+
+      // Slightly “pick-like” shaped noise
+      for (let i = 0; i < len; i++) {
+        const env = 1 - i / len;
+        data[i] = (Math.random() * 2 - 1) * env;
+      }
+
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+
+      const g = ctx.createGain();
+      g.gain.value = amp;
+
+      src.connect(g);
+      g.connect(delay);
+      src.start(now);
+      src.stop(now + burstSec);
+    }
+
+    return { freq, name: baseName, pluck, delay };
+  }
+
+  function rebuildStrings() {
+    if (!audioCtx) return;
+    // Disconnect old
+    strings.forEach(s => {
+      try { s.delay.disconnect(); } catch {}
+    });
+    strings = [];
+
+    const set = NOTESETS[tuningEl.value] || NOTESETS.standard;
+    for (let i = 0; i < NUM_STRINGS; i++) {
+      strings.push(createString(audioCtx, set[i].f, set[i].name));
+    }
+  }
+
+  function setAudioMix() {
+    if (!audioCtx) return;
+    masterGain.gain.value = parseFloat(volumeEl.value);
+    wetGain.gain.value = parseFloat(reverbEl.value);
+    dryGain.gain.value = 1.0 - wetGain.gain.value;
+  }
+
+  // ====== Strum detection (crossing strings with speed) ======
+  function detectStrumAndPlay() {
+    if (!tip.ok || !prevTip.ok) return;
+
+    const dt = (tip.t - prevTip.t) / 1000;
+    if (dt <= 0) return;
+
+    const dy = tip.y - prevTip.y;
+    const speed = Math.abs(dy) / dt; // px/s
+    const speedThresh = parseFloat(speedThreshEl.value);
+    const hitWindow = parseFloat(hitWindowEl.value);
+
+    if (speed < speedThresh) return;
+
+    // Determine which strings are crossed between prevTip and tip.
+    const yA = prevTip.y, yB = tip.y;
+    const minY = Math.min(yA, yB);
+    const maxY = Math.max(yA, yB);
+
+    let crossed = [];
+    for (let i = 0; i < NUM_STRINGS; i++) {
+      const yS = stringY[i];
+      if (yS >= minY && yS <= maxY) {
+        // Ensure the moment of crossing is “near” the string (window)
+        // (also helps if fingertip teleports)
+        if (Math.abs(tip.y - yS) <= Math.abs(dy) + hitWindow) crossed.push(i);
+      }
+    }
+
+    // Order matters: down-strum hits top->bottom; up-strum bottom->top
+    crossed.sort((a,b) => (dy >= 0) ? (a - b) : (b - a));
+
+    const now = performance.now();
+    const strength01 = Math.min(1, (speed - speedThresh) / (speedThresh * 1.2));
+
+    for (const i of crossed) {
+      // Cooldown per string so it doesn't retrigger multiple times in one crossing
+      if (flashUntil[i] > now) continue;
+
+      flashUntil[i] = now + 90;
+      strings[i]?.pluck(strength01);
+
+      lastNoteEl.textContent = strings[i]?.name || "—";
+    }
+  }
+
+  // ====== Rendering ======
+  function resizeToVideo() {
+    const w = video.videoWidth || 1280;
+    const h = video.videoHeight || 720;
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+      layoutStrings(w, h);
+    }
+  }
+
+  function draw() {
+    if (!running) return;
+
+    ctx2d.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Background video (unless mouse mode)
+    if (!mouseModeEl.checked && video.readyState >= 2) {
+      const mirror = mirrorEl.checked;
+      ctx2d.save();
+      if (mirror) {
+        ctx2d.translate(canvas.width, 0);
+        ctx2d.scale(-1, 1);
+      }
+      ctx2d.drawImage(video, 0, 0, canvas.width, canvas.height);
+      ctx2d.restore();
+    } else {
+      ctx2d.fillStyle = "#000";
+      ctx2d.fillRect(0, 0, canvas.width, canvas.height);
+    }
+
+    // Strings
+    const now = performance.now();
+    for (let i = 0; i < NUM_STRINGS; i++) {
+      const active = flashUntil[i] > now;
+      ctx2d.strokeStyle = active ? "rgba(0,255,120,0.95)" : "rgba(220,220,220,0.75)";
+      ctx2d.lineWidth = active ? 6 : 2;
+      ctx2d.beginPath();
+      ctx2d.moveTo(0, stringY[i]);
+      ctx2d.lineTo(canvas.width, stringY[i]);
+      ctx2d.stroke();
+
+      // String labels
+      ctx2d.fillStyle = "rgba(255,255,255,0.8)";
+      ctx2d.font = "14px system-ui";
+      ctx2d.fillText(strings[i]?.name || "", 10, stringY[i] - 8);
+    }
+
+    // Fingertip cursor
+    if (tip.ok) {
+      ctx2d.fillStyle = "rgba(255,60,60,0.95)";
+      ctx2d.beginPath();
+      ctx2d.arc(tip.x, tip.y, 10, 0, Math.PI * 2);
+      ctx2d.fill();
+      ctx2d.strokeStyle = "rgba(0,0,0,0.6)";
+      ctx2d.lineWidth = 2;
+      ctx2d.stroke();
+    }
+
+    requestAnimationFrame(draw);
+  }
+
+  // ====== Hand tracking loop ======
+  async function predict() {
+    if (!running) return;
+
+    resizeToVideo();
+
+    if (!mouseModeEl.checked && handLandmarker && video.currentTime !== lastVideoTime) {
+      lastVideoTime = video.currentTime;
+
+      const mirror = mirrorEl.checked;
+      const res = handLandmarker.detectForVideo(video, performance.now());
+
+      if (res && res.landmarks && res.landmarks.length > 0) {
+        // Use first hand, index fingertip (#8)
+        const lm = res.landmarks[0][8];
+        let x = lm.x * canvas.width;
+        const y = lm.y * canvas.height;
+
+        // If mirrored video is ON, invert x so cursor matches the mirrored image
+        if (mirror) x = (1 - lm.x) * canvas.width;
+
+        updateTip(x, y, performance.now(), true);
+      } else {
+        updateTip(tip.x, tip.y, performance.now(), false);
+      }
+    }
+
+    detectStrumAndPlay();
+    requestAnimationFrame(predict);
+  }
+
+  // ====== Start/Stop ======
+  async function start() {
+    if (running) return;
+
+    statusEl.textContent = "Starting…";
+    running = true;
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+
+    // Audio init (must be user-gesture)
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    masterGain = audioCtx.createGain();
+    masterGain.gain.value = parseFloat(volumeEl.value);
+
+    dryGain = audioCtx.createGain();
+    wetGain = audioCtx.createGain();
+
+    convolver = audioCtx.createConvolver();
+    convolver.buffer = makeImpulseResponse(audioCtx);
+
+    // Routing: dry + wet
+    dryGain.connect(masterGain);
+    wetGain.connect(convolver);
+    convolver.connect(masterGain);
+    masterGain.connect(audioCtx.destination);
+
+    setAudioMix();
+    rebuildStrings();
+
+    // If mouse mode, skip camera/mediapipe
+    if (!mouseModeEl.checked) {
+      // Webcam
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false
+      });
+      video.srcObject = stream;
+      await video.play();
+
+      // MediaPipe task init
+      // Official guide shows using @latest/wasm with FilesetResolver. :contentReference[oaicite:5]{index=5}
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+      );
+
+      handLandmarker = await HandLandmarker.createFromOptions(vision, {
+        baseOptions: { modelAssetPath: MODEL_URL },
+        runningMode: "VIDEO",
+        numHands: 1,
+        minHandDetectionConfidence: 0.6,
+        minTrackingConfidence: 0.6,
+        minHandPresenceConfidence: 0.6
+      });
+    }
+
+    // Reset tip state
+    tip = { x: canvas.width * 0.5, y: canvas.height * 0.5, t: performance.now(), ok: false };
+    prevTip = { ...tip };
+    flashUntil.fill(0);
+
+    statusEl.textContent = mouseModeEl.checked ? "Running (mouse mode)" : "Running (hand tracking)";
+    requestAnimationFrame(draw);
+    requestAnimationFrame(predict);
+  }
+
+  async function stop() {
+    running = false;
+    statusEl.textContent = "Stopping…";
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+
+    // Stop camera stream
+    if (video.srcObject) {
+      const tracks = video.srcObject.getTracks();
+      tracks.forEach(t => t.stop());
+      video.srcObject = null;
+    }
+
+    // Close task
+    handLandmarker = null;
+    lastVideoTime = -1;
+
+    // Close audio
+    if (audioCtx) {
+      try { await audioCtx.close(); } catch {}
+      audioCtx = null;
+    }
+
+    statusEl.textContent = "Idle";
+  }
+
+  // UI listeners
+  startBtn.addEventListener("click", start);
+  stopBtn.addEventListener("click", stop);
+
+  [speedThreshEl, hitWindowEl, dampingEl, volumeEl, reverbEl].forEach(el => {
+    el.addEventListener("input", () => {
+      if (el === volumeEl || el === reverbEl) setAudioMix();
+      if (el === dampingEl) {
+        // applied on next pluck; ok
+      }
+    });
+  });
+
+  tuningEl.addEventListener("change", () => rebuildStrings());
+
+  mouseModeEl.addEventListener("change", () => {
+    // If switching while running, easiest is: stop then start.
+    if (running) {
+      stop().then(() => start());
+    }
+  });
+})();
+</script>
+</body>
+</html>

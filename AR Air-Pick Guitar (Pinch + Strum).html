@@ -1,0 +1,771 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>AR Air-Pick Guitar (Pinch + Strum)</title>
+  <style>
+    :root{
+      --panel: rgba(10,12,16,0.72);
+      --text: rgba(255,255,255,0.92);
+      --muted: rgba(255,255,255,0.68);
+      --accent: rgba(120,200,255,0.95);
+      --ok: rgba(120,255,170,0.95);
+      --bad: rgba(255,120,140,0.95);
+      --shadow: 0 18px 50px rgba(0,0,0,.35);
+    }
+    html,body{height:100%; margin:0; background:#000; overflow:hidden; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;}
+    canvas{position:fixed; inset:0; width:100vw; height:100vh; display:block;}
+    #cursor{
+      position:fixed; width:18px; height:18px; border-radius:50%;
+      border:2px solid rgba(255,255,255,0.9);
+      box-shadow: 0 0 0 3px rgba(120,200,255,0.25), 0 10px 20px rgba(0,0,0,0.35);
+      transform: translate(-50%,-50%);
+      pointer-events:none; z-index: 20;
+      background: rgba(120,200,255,0.18);
+    }
+    #cursor.pinch{
+      border-color: rgba(120,255,170,0.95);
+      background: rgba(120,255,170,0.18);
+      box-shadow: 0 0 0 4px rgba(120,255,170,0.20), 0 10px 22px rgba(0,0,0,0.4);
+    }
+
+    #ui{
+      position:fixed; top:14px; left:14px; z-index:30;
+      width:min(420px, calc(100vw - 28px));
+      background: var(--panel);
+      color: var(--text);
+      border:1px solid rgba(255,255,255,0.12);
+      border-radius:18px;
+      box-shadow: var(--shadow);
+      overflow:hidden;
+      backdrop-filter: blur(10px);
+    }
+    #ui header{
+      display:flex; align-items:center; justify-content:space-between;
+      padding:12px 12px 10px 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.10);
+    }
+    #title{
+      display:flex; flex-direction:column; gap:2px;
+      line-height:1.1;
+    }
+    #title strong{font-size:14px; letter-spacing:0.2px;}
+    #title span{font-size:12px; color: var(--muted);}
+    .btn{
+      appearance:none; border:1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.08);
+      color: var(--text);
+      padding:8px 10px; border-radius:12px;
+      cursor:pointer; font-weight:600; font-size:12px;
+      transition: transform .05s ease, background .15s ease, border-color .15s ease;
+      user-select:none;
+    }
+    .btn:hover{ background: rgba(255,255,255,0.12); }
+    .btn:active{ transform: translateY(1px) scale(0.99); }
+    .btn.primary{ border-color: rgba(120,200,255,0.35); background: rgba(120,200,255,0.16); }
+    .btn.good{ border-color: rgba(120,255,170,0.35); background: rgba(120,255,170,0.14); }
+    .btn.warn{ border-color: rgba(255,140,120,0.35); background: rgba(255,140,120,0.14); }
+
+    #body{
+      padding: 12px;
+      display:grid;
+      gap:10px;
+    }
+    .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .pill{
+      font-size:12px; padding:6px 10px; border-radius:999px;
+      border:1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.06);
+      color: var(--muted);
+    }
+    .pill.ok{ border-color: rgba(120,255,170,0.35); color: rgba(200,255,220,0.95); }
+    .pill.bad{ border-color: rgba(255,120,140,0.35); color: rgba(255,200,210,0.95); }
+
+    details{
+      border:1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.04);
+      border-radius:14px;
+      padding:10px;
+    }
+    summary{ cursor:pointer; font-weight:800; font-size:12px; color: var(--text); }
+    .grid{
+      display:grid; grid-template-columns: 1fr auto; gap:8px 12px;
+      margin-top:10px;
+      font-size:12px;
+      color: var(--muted);
+      align-items:center;
+    }
+    input[type="range"]{ width: 220px; max-width: 52vw; }
+    select, input[type="number"]{
+      background: rgba(0,0,0,0.35);
+      border:1px solid rgba(255,255,255,0.14);
+      color: var(--text);
+      border-radius:10px;
+      padding:6px 8px;
+      outline:none;
+    }
+
+    #toast{
+      position:fixed; left:50%; bottom:16px; transform:translateX(-50%);
+      background: rgba(10,12,16,0.70);
+      border:1px solid rgba(255,255,255,0.12);
+      color: var(--text);
+      padding:10px 12px;
+      border-radius:14px;
+      box-shadow: var(--shadow);
+      z-index:40;
+      max-width: min(820px, calc(100vw - 24px));
+      font-size:13px;
+      line-height:1.35;
+      backdrop-filter: blur(10px);
+    }
+    #toast strong{ color: rgba(255,255,255,0.98); }
+    #toast .small{ color: var(--muted); font-size:12px; margin-top:4px; }
+
+    #video{ display:none; }
+  </style>
+</head>
+<body>
+  <video id="video" playsinline></video>
+  <canvas id="c"></canvas>
+  <div id="cursor"></div>
+
+  <div id="ui" data-ui="1">
+    <header>
+      <div id="title">
+        <strong>AR Air-Pick Guitar</strong>
+        <span>Pinch to “hold pick”, strum through strings to play</span>
+      </div>
+      <div class="row">
+        <button class="btn primary" id="btnStart" data-ui="1">Start Camera</button>
+        <button class="btn" id="btnMirror" data-ui="1">Mirror: ON</button>
+      </div>
+    </header>
+
+    <div id="body">
+      <div class="row">
+        <span class="pill" id="pillModel">Model: not loaded</span>
+        <span class="pill" id="pillCam">Camera: off</span>
+        <span class="pill" id="pillHand">Hand: none</span>
+        <span class="pill" id="pillPick">Pick: open</span>
+      </div>
+
+      <details>
+        <summary>Settings</summary>
+        <div class="grid">
+          <div>Pinch threshold (smaller = tighter pinch)</div>
+          <input id="pinchTh" type="range" min="0.015" max="0.10" step="0.001" value="0.045" data-ui="1"/>
+
+          <div>Smoothing (higher = steadier cursor)</div>
+          <input id="smooth" type="range" min="0.00" max="0.85" step="0.01" value="0.35" data-ui="1"/>
+
+          <div>Min strum speed (px/frame)</div>
+          <input id="strumSpeed" type="range" min="2" max="28" step="1" value="8" data-ui="1"/>
+
+          <div>Pluck cooldown (ms)</div>
+          <input id="cooldown" type="range" min="30" max="220" step="5" value="90" data-ui="1"/>
+
+          <div>Volume</div>
+          <input id="vol" type="range" min="0" max="1" step="0.01" value="0.85" data-ui="1"/>
+
+          <div>Capo (semitones)</div>
+          <select id="capo" data-ui="1">
+            <option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option>
+            <option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option>
+            <option value="8">8</option><option value="9">9</option><option value="10">10</option><option value="11">11</option>
+            <option value="12">12</option>
+          </select>
+        </div>
+      </details>
+
+      <div class="row">
+        <span class="pill">Tip: keep your hand ~30–70cm from camera</span>
+        <button class="btn good" id="btnAudio" data-ui="1">Enable Audio</button>
+        <button class="btn" id="btnDebug" data-ui="1">Debug: OFF</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast">
+    <strong>How to play:</strong> Pinch thumb + index to “hold the pick”, then move up/down through the 6 strings to strum.
+    <div class="small">
+      If camera won’t start: you must run on <strong>HTTPS</strong> (Render is fine). :contentReference[oaicite:2]{index=2}
+    </div>
+  </div>
+
+  <script type="module">
+    // ===== Updated solution: MediaPipe Tasks (HandLandmarker) =====
+    // Uses the modern "tasks-vision" pipeline (recommended path for web hand tracking). :contentReference[oaicite:3]{index=3}
+
+    import { FilesetResolver, HandLandmarker } from
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/vision_bundle.mjs";
+
+    const $ = (id) => document.getElementById(id);
+
+    const canvas = $("c");
+    const ctx = canvas.getContext("2d", { alpha: false });
+    const video = $("video");
+    const cursorEl = $("cursor");
+
+    const pillModel = $("pillModel");
+    const pillCam = $("pillCam");
+    const pillHand = $("pillHand");
+    const pillPick = $("pillPick");
+
+    const btnStart = $("btnStart");
+    const btnMirror = $("btnMirror");
+    const btnAudio = $("btnAudio");
+    const btnDebug = $("btnDebug");
+
+    const pinchTh = $("pinchTh");
+    const smooth = $("smooth");
+    const strumSpeed = $("strumSpeed");
+    const cooldown = $("cooldown");
+    const vol = $("vol");
+    const capoSel = $("capo");
+
+    // --- State ---
+    const state = {
+      dpr: Math.max(1, Math.min(2, window.devicePixelRatio || 1)),
+      mirror: true,
+      debug: false,
+
+      pinchThreshold: parseFloat(pinchTh.value), // normalized distance in video space
+      smoothing: parseFloat(smooth.value),       // 0..0.85
+      minStrumSpeedPx: parseFloat(strumSpeed.value),
+      cooldownMs: parseInt(cooldown.value, 10),
+
+      capo: 0,
+      volume: parseFloat(vol.value),
+
+      running: false,
+      cameraOn: false,
+      audioReady: false,
+      handOk: false,
+      pinched: false
+    };
+
+    // --- Audio (simple Karplus-Strong-ish pluck) ---
+    let audioCtx = null;
+    let masterGain = null;
+
+    function ensureAudio() {
+      if (audioCtx && audioCtx.state !== "closed") return true;
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      masterGain = audioCtx.createGain();
+      masterGain.gain.value = state.volume;
+      masterGain.connect(audioCtx.destination);
+      state.audioReady = true;
+      btnAudio.textContent = "Audio: ON";
+      btnAudio.classList.add("good");
+      return true;
+    }
+
+    async function resumeAudioIfNeeded() {
+      if (!audioCtx) return;
+      if (audioCtx.state !== "running") {
+        try { await audioCtx.resume(); } catch {}
+      }
+    }
+
+    function pluck(freqHz, intensity01 = 0.7) {
+      if (!state.audioReady) return;
+
+      const t0 = audioCtx.currentTime;
+      const burstDur = 0.02;
+      const totalDur = 1.6;
+
+      // noise burst
+      const n = Math.floor(audioCtx.sampleRate * burstDur);
+      const noiseBuf = audioCtx.createBuffer(1, n, audioCtx.sampleRate);
+      const data = noiseBuf.getChannelData(0);
+      for (let i = 0; i < n; i++) data[i] = (Math.random() * 2 - 1) * 0.9;
+
+      const src = audioCtx.createBufferSource();
+      src.buffer = noiseBuf;
+
+      // excitation shaping
+      const hp = audioCtx.createBiquadFilter();
+      hp.type = "highpass";
+      hp.frequency.value = 650;
+
+      // delay loop (string)
+      const delay = audioCtx.createDelay(1.0);
+      delay.delayTime.value = 1 / Math.max(40, freqHz);
+
+      const lp = audioCtx.createBiquadFilter();
+      lp.type = "lowpass";
+      lp.frequency.value = 3200;
+
+      const fb = audioCtx.createGain();
+      fb.gain.value = 0.972; // sustain
+
+      const amp = audioCtx.createGain();
+      amp.gain.setValueAtTime(0.0001, t0);
+      amp.gain.exponentialRampToValueAtTime(Math.max(0.08, intensity01), t0 + 0.004);
+      amp.gain.exponentialRampToValueAtTime(0.0001, t0 + totalDur);
+
+      src.connect(hp).connect(delay);
+      delay.connect(lp).connect(fb).connect(delay);
+      delay.connect(amp).connect(masterGain);
+
+      src.start(t0);
+      src.stop(t0 + burstDur);
+
+      // cleanup
+      setTimeout(() => {
+        try { src.disconnect(); hp.disconnect(); delay.disconnect(); lp.disconnect(); fb.disconnect(); amp.disconnect(); } catch {}
+      }, (totalDur + 0.2) * 1000);
+    }
+
+    // --- Guitar strings (standard tuning) ---
+    const STRINGS = [
+      { name: "E2", baseHz: 82.4069, flash: 0, lastPluck: 0 },
+      { name: "A2", baseHz: 110.0000, flash: 0, lastPluck: 0 },
+      { name: "D3", baseHz: 146.8324, flash: 0, lastPluck: 0 },
+      { name: "G3", baseHz: 195.9977, flash: 0, lastPluck: 0 },
+      { name: "B3", baseHz: 246.9417, flash: 0, lastPluck: 0 },
+      { name: "E4", baseHz: 329.6276, flash: 0, lastPluck: 0 },
+    ];
+
+    function hzWithCapo(baseHz) {
+      const semis = state.capo;
+      return baseHz * Math.pow(2, semis / 12);
+    }
+
+    // --- Hand tracking (Tasks) ---
+    let handLandmarker = null;
+
+    async function initHandLandmarker() {
+      pillModel.textContent = "Model: loading…";
+      pillModel.className = "pill";
+
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
+      );
+
+      handLandmarker = await HandLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+          delegate: "GPU"
+        },
+        runningMode: "VIDEO",
+        numHands: 1
+      });
+
+      pillModel.textContent = "Model: ready";
+      pillModel.className = "pill ok";
+    }
+
+    // --- Camera ---
+    async function startCamera() {
+      if (!window.isSecureContext && location.hostname !== "localhost") {
+        // getUserMedia is restricted to secure contexts (HTTPS). :contentReference[oaicite:4]{index=4}
+        alert("Camera requires HTTPS (or localhost). Deploy to Render / use HTTPS locally.");
+        return;
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
+        audio: false
+      });
+
+      video.srcObject = stream;
+      await video.play();
+
+      state.cameraOn = true;
+      pillCam.textContent = "Camera: ON";
+      pillCam.className = "pill ok";
+      btnStart.textContent = "Camera: ON";
+      btnStart.classList.add("good");
+    }
+
+    // --- Canvas sizing ---
+    function resize() {
+      state.dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+      canvas.width = Math.floor(window.innerWidth * state.dpr);
+      canvas.height = Math.floor(window.innerHeight * state.dpr);
+    }
+    window.addEventListener("resize", resize);
+    resize();
+
+    // --- Helpers ---
+    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+    const lerp = (a, b, t) => a + (b - a) * t;
+
+    // Cover draw parameters (video -> canvas)
+    function coverParams(videoW, videoH, canvasW, canvasH) {
+      const s = Math.max(canvasW / videoW, canvasH / videoH);
+      const dw = videoW * s;
+      const dh = videoH * s;
+      const dx = (canvasW - dw) / 2;
+      const dy = (canvasH - dh) / 2;
+      return { s, dx, dy, dw, dh };
+    }
+
+    // --- Cursor / pick smoothing ---
+    let hasPick = false;
+    let pickX = 0, pickY = 0;         // in canvas pixels (DPR space)
+    let pickXSm = 0, pickYSm = 0;
+    let pickPrevX = 0, pickPrevY = 0;
+
+    // pinch click (UI only)
+    let pinchWasDown = false;
+    let pinchDownAt = 0;
+    let pinchClicked = false;
+
+    function dispatchClickAtCss(xCss, yCss) {
+      const el = document.elementFromPoint(xCss, yCss);
+      if (!el) return;
+      // Only click UI elements
+      const ui = el.closest("[data-ui='1']");
+      if (!ui) return;
+
+      ui.dispatchEvent(new MouseEvent("pointerdown", { bubbles:true, clientX:xCss, clientY:yCss }));
+      ui.dispatchEvent(new MouseEvent("pointerup", { bubbles:true, clientX:xCss, clientY:yCss }));
+      ui.dispatchEvent(new MouseEvent("click", { bubbles:true, clientX:xCss, clientY:yCss }));
+    }
+
+    // --- Draw guitar overlay ---
+    function drawGuitarOverlay() {
+      const W = canvas.width, H = canvas.height;
+
+      // strings region
+      const top = H * 0.26;
+      const bottom = H * 0.78;
+      const left = W * 0.10;
+      const right = W * 0.95;
+      const spacing = (bottom - top) / (STRINGS.length - 1);
+
+      // fretboard tint
+      ctx.fillStyle = "rgba(0,0,0,0.18)";
+      ctx.fillRect(left, top - spacing*0.55, right - left, (bottom - top) + spacing*1.1);
+
+      // strings
+      for (let i = 0; i < STRINGS.length; i++) {
+        const y = top + i * spacing;
+
+        // flash decay
+        STRINGS[i].flash = Math.max(0, STRINGS[i].flash - 0.06);
+
+        const baseAlpha = 0.42 + i * 0.03;
+        const flashAlpha = STRINGS[i].flash;
+
+        ctx.lineWidth = (i === 0 || i === 5) ? 3.3 : 2.4;
+        ctx.strokeStyle = `rgba(255,255,255,${baseAlpha + flashAlpha * 0.35})`;
+
+        ctx.beginPath();
+        ctx.moveTo(left, y);
+        ctx.lineTo(right, y);
+        ctx.stroke();
+
+        // label
+        ctx.font = `${Math.floor(12 * state.dpr)}px ui-sans-serif, system-ui`;
+        ctx.fillStyle = `rgba(255,255,255,${0.75 + flashAlpha * 0.25})`;
+        ctx.fillText(STRINGS[i].name, left + 10 * state.dpr, y - 8 * state.dpr);
+      }
+
+      // pick indicator
+      if (hasPick) {
+        ctx.save();
+        ctx.translate(pickXSm, pickYSm);
+        ctx.beginPath();
+        ctx.arc(0, 0, 10 * state.dpr, 0, Math.PI * 2);
+        ctx.fillStyle = state.pinched ? "rgba(120,255,170,0.28)" : "rgba(120,200,255,0.22)";
+        ctx.fill();
+        ctx.lineWidth = 2 * state.dpr;
+        ctx.strokeStyle = state.pinched ? "rgba(120,255,170,0.95)" : "rgba(120,200,255,0.95)";
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    function maybeStrum() {
+      if (!hasPick) return;
+      if (!state.pinched) return; // pinch = holding a pick
+
+      const W = canvas.width, H = canvas.height;
+      const top = H * 0.26;
+      const bottom = H * 0.78;
+      const left = W * 0.10;
+      const right = W * 0.95;
+      const spacing = (bottom - top) / (STRINGS.length - 1);
+
+      // only strum in the board area (so UI clicks don't trigger notes)
+      if (pickXSm < left || pickXSm > right) return;
+
+      const dy = pickYSm - pickPrevY;
+      if (Math.abs(dy) < state.minStrumSpeedPx * state.dpr) return;
+
+      const now = performance.now();
+
+      for (let i = 0; i < STRINGS.length; i++) {
+        const yS = top + i * spacing;
+
+        // crossing test (prev -> current segment crosses the string line)
+        const a = pickPrevY - yS;
+        const b = pickYSm - yS;
+        const crossed = (a === 0) || (b === 0) || (a < 0 && b > 0) || (a > 0 && b < 0);
+
+        if (!crossed) continue;
+
+        // cooldown per string
+        if (now - STRINGS[i].lastPluck < state.cooldownMs) continue;
+
+        // pluck intensity from speed
+        const intensity = clamp(Math.abs(dy) / (70 * state.dpr), 0.18, 1.0);
+
+        STRINGS[i].lastPluck = now;
+        STRINGS[i].flash = 1.0;
+
+        const hz = hzWithCapo(STRINGS[i].baseHz);
+        pluck(hz, intensity);
+      }
+    }
+
+    // --- Render loop ---
+    let lastVideoTime = -1;
+
+    function updateCursorCss() {
+      const xCss = pickXSm / state.dpr;
+      const yCss = pickYSm / state.dpr;
+      cursorEl.style.left = `${xCss}px`;
+      cursorEl.style.top = `${yCss}px`;
+      cursorEl.classList.toggle("pinch", state.pinched);
+    }
+
+    function drawFrameBase() {
+      const W = canvas.width, H = canvas.height;
+      ctx.clearRect(0,0,W,H);
+
+      if (!state.cameraOn || video.readyState < 2) {
+        // idle background
+        ctx.fillStyle = "rgb(8,10,14)";
+        ctx.fillRect(0,0,W,H);
+        ctx.fillStyle = "rgba(255,255,255,0.08)";
+        ctx.font = `${Math.floor(18 * state.dpr)}px ui-sans-serif, system-ui`;
+        ctx.fillText("Click “Start Camera” to begin.", 24 * state.dpr, 54 * state.dpr);
+        return;
+      }
+
+      const vW = video.videoWidth || 1280;
+      const vH = video.videoHeight || 720;
+      const p = coverParams(vW, vH, W, H);
+
+      ctx.save();
+      if (state.mirror) {
+        // draw mirrored video (and we’ll mirror landmark X when mapping)
+        ctx.translate(W, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, p.dx, p.dy, p.dw, p.dh);
+      } else {
+        ctx.drawImage(video, p.dx, p.dy, p.dw, p.dh);
+      }
+      ctx.restore();
+
+      // subtle vignette
+      const g = ctx.createRadialGradient(W*0.5, H*0.55, Math.min(W,H)*0.10, W*0.5, H*0.55, Math.min(W,H)*0.75);
+      g.addColorStop(0, "rgba(0,0,0,0.00)");
+      g.addColorStop(1, "rgba(0,0,0,0.38)");
+      ctx.fillStyle = g;
+      ctx.fillRect(0,0,W,H);
+    }
+
+    function mapLandmarkToCanvas(lm, vW, vH) {
+      const W = canvas.width, H = canvas.height;
+      const p = coverParams(vW, vH, W, H);
+
+      // mirror X in normalized space if mirrored
+      const nx = state.mirror ? (1 - lm.x) : lm.x;
+      const ny = lm.y;
+
+      const xV = nx * vW;
+      const yV = ny * vH;
+
+      return {
+        x: p.dx + xV * p.s,
+        y: p.dy + yV * p.s
+      };
+    }
+
+    function drawDebugLandmarks(landmarks, vW, vH) {
+      if (!state.debug) return;
+      ctx.save();
+      ctx.fillStyle = "rgba(120,200,255,0.9)";
+      for (const lm of landmarks) {
+        const p = mapLandmarkToCanvas(lm, vW, vH);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 3.2 * state.dpr, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    function updatePills() {
+      pillHand.textContent = state.handOk ? "Hand: FOUND" : "Hand: none";
+      pillHand.className = state.handOk ? "pill ok" : "pill";
+      pillPick.textContent = state.pinched ? "Pick: PINCHED" : "Pick: open";
+      pillPick.className = state.pinched ? "pill ok" : "pill";
+    }
+
+    function tick() {
+      drawFrameBase();
+
+      // default: decay, draw overlay even if no hand
+      drawGuitarOverlay();
+
+      if (!state.cameraOn || !handLandmarker || video.readyState < 2) {
+        updatePills();
+        requestAnimationFrame(tick);
+        return;
+      }
+
+      const vW = video.videoWidth || 1280;
+      const vH = video.videoHeight || 720;
+
+      if (video.currentTime !== lastVideoTime) {
+        lastVideoTime = video.currentTime;
+
+        const nowMs = performance.now();
+        const res = handLandmarker.detectForVideo(video, nowMs);
+
+        const hands = res?.landmarks || [];
+        if (hands.length > 0) {
+          const lm = hands[0]; // 21 landmarks
+          state.handOk = true;
+
+          // index tip = 8, thumb tip = 4
+          const idx = lm[8];
+          const th = lm[4];
+
+          // pinch distance in normalized video space
+          const dx = (idx.x - th.x);
+          const dy = (idx.y - th.y);
+          const dist = Math.sqrt(dx*dx + dy*dy);
+
+          state.pinched = dist < state.pinchThreshold;
+
+          // pick point (use index tip)
+          const pt = mapLandmarkToCanvas(idx, vW, vH);
+          hasPick = true;
+          pickX = pt.x;
+          pickY = pt.y;
+
+          // smoothing
+          const alpha = 1 - state.smoothing; // 0.15..1
+          pickPrevX = pickXSm;
+          pickPrevY = pickYSm;
+
+          pickXSm = (pickXSm === 0) ? pickX : lerp(pickXSm, pickX, alpha);
+          pickYSm = (pickYSm === 0) ? pickY : lerp(pickYSm, pickY, alpha);
+
+          // UI pinch click (only for UI panel)
+          const xCss = pickXSm / state.dpr;
+          const yCss = pickYSm / state.dpr;
+
+          if (state.pinched && !pinchWasDown) {
+            pinchWasDown = true;
+            pinchDownAt = performance.now();
+            pinchClicked = false;
+          }
+          if (!state.pinched && pinchWasDown) {
+            pinchWasDown = false;
+            pinchClicked = false;
+          }
+          if (pinchWasDown && !pinchClicked) {
+            const held = performance.now() - pinchDownAt;
+            // short hold to confirm click, and only if hovering UI
+            const el = document.elementFromPoint(xCss, yCss);
+            const ui = el && el.closest("[data-ui='1']");
+            if (ui && held > 110) {
+              dispatchClickAtCss(xCss, yCss);
+              pinchClicked = true;
+            }
+          }
+
+          // strum detection
+          maybeStrum();
+
+          // debug
+          drawDebugLandmarks(lm, vW, vH);
+
+        } else {
+          state.handOk = false;
+          state.pinched = false;
+          hasPick = false;
+        }
+      }
+
+      // overlay again (so it sits above debug dots nicely)
+      drawGuitarOverlay();
+
+      updateCursorCss();
+      updatePills();
+      requestAnimationFrame(tick);
+    }
+
+    // --- UI bindings ---
+    pinchTh.addEventListener("input", () => state.pinchThreshold = parseFloat(pinchTh.value));
+    smooth.addEventListener("input", () => state.smoothing = parseFloat(smooth.value));
+    strumSpeed.addEventListener("input", () => state.minStrumSpeedPx = parseFloat(strumSpeed.value));
+    cooldown.addEventListener("input", () => state.cooldownMs = parseInt(cooldown.value, 10));
+    vol.addEventListener("input", () => {
+      state.volume = parseFloat(vol.value);
+      if (masterGain) masterGain.gain.value = state.volume;
+    });
+    capoSel.addEventListener("change", () => state.capo = parseInt(capoSel.value, 10));
+
+    btnMirror.addEventListener("click", async () => {
+      state.mirror = !state.mirror;
+      btnMirror.textContent = `Mirror: ${state.mirror ? "ON" : "OFF"}`;
+      await resumeAudioIfNeeded();
+    });
+
+    btnDebug.addEventListener("click", async () => {
+      state.debug = !state.debug;
+      btnDebug.textContent = `Debug: ${state.debug ? "ON" : "OFF"}`;
+      await resumeAudioIfNeeded();
+    });
+
+    btnAudio.addEventListener("click", async () => {
+      ensureAudio();
+      await resumeAudioIfNeeded();
+    });
+
+    btnStart.addEventListener("click", async () => {
+      try {
+        ensureAudio();
+        await resumeAudioIfNeeded();
+
+        if (!handLandmarker) await initHandLandmarker();
+        await startCamera();
+
+        if (!state.running) {
+          state.running = true;
+          requestAnimationFrame(tick);
+        }
+      } catch (e) {
+        console.error(e);
+        alert("Start failed. Open console for details.\n\nCommon causes:\n• Not HTTPS\n• Camera blocked\n• Unsupported browser");
+      }
+    });
+
+    // Start loading the model immediately (still requires camera click later)
+    (async () => {
+      try {
+        await initHandLandmarker();
+      } catch (e) {
+        console.error(e);
+        pillModel.textContent = "Model: failed";
+        pillModel.className = "pill bad";
+      }
+    })();
+
+    // Keep cursor visible even before camera
+    cursorEl.style.left = "50vw";
+    cursorEl.style.top = "60vh";
+  </script>
+</body>
+</html>

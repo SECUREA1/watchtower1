@@ -1,0 +1,823 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>PickStorm AR – Air Pick Guitar (v3 Pinch Strum)</title>
+
+  <!-- MediaPipe Tasks Vision -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js" crossorigin="anonymous"></script>
+
+  <style>
+    :root { color-scheme: dark; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:#070708; color:#eaeaea; overflow:hidden; }
+    .wrap { display:grid; grid-template-columns: 380px 1fr; height:100vh; }
+    .panel { padding:16px; border-right:1px solid #1f1f24; background:#0d0d10; overflow:auto; }
+    .panel h1 { margin:0 0 10px; font-size:18px; }
+    .row { margin:12px 0; }
+    label { display:block; font-size:12px; color:#bdbdc7; margin-bottom:6px; }
+    input[type="range"] { width:100%; }
+    select, button { width:100%; padding:10px 12px; border-radius:12px; background:#1a1a1f; border:1px solid #2b2b33; color:#eee; }
+    button:hover { background:#22222a; cursor:pointer; }
+    button:disabled { opacity:.55; cursor:not-allowed; }
+    .hint { font-size:12px; color:#a7a7b3; line-height:1.35; }
+    .stage { position:relative; width:100%; height:100%; background:#000; }
+    canvas { display:block; width:100%; height:100%; }
+    video { display:none; }
+    .stat { font-size:13px; margin-top:10px; color:#cfcfe6; }
+    .stat b { color:#fff; }
+    .badge { display:inline-block; padding:2px 8px; border:1px solid #2b2b33; border-radius:999px; font-size:12px; color:#bdbdc7; }
+  </style>
+</head>
+
+<body>
+<div class="wrap">
+  <div class="panel">
+    <h1>PickStorm AR – Air Pick Guitar <span class="badge">v3</span></h1>
+
+    <div class="row">
+      <button id="startBtn">Start (Camera + Hand + Audio)</button>
+    </div>
+    <div class="row">
+      <button id="stopBtn" disabled>Stop</button>
+    </div>
+
+    <div class="row">
+      <label>Camera device</label>
+      <select id="cameraSelect">
+        <option value="">Default</option>
+      </select>
+      <div class="hint">If camera fails, click Stop → pick a different device → Start.</div>
+    </div>
+
+    <div class="row">
+      <label>Tuning</label>
+      <select id="tuning">
+        <option value="standard" selected>Standard (E2 A2 D3 G3 B3 E4)</option>
+        <option value="dropd">Drop D (D2 A2 D3 G3 B3 E4)</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <label>Pinch threshold (smaller = tighter pinch)</label>
+      <input id="pinchThresh" type="range" min="0.015" max="0.10" step="0.001" value="0.045"/>
+      <div class="hint">If pinch never triggers, raise it. If always “pinched”, lower it.</div>
+    </div>
+
+    <div class="row">
+      <label>Strum speed threshold (px/s)</label>
+      <input id="speedThresh" type="range" min="150" max="3000" value="700"/>
+      <div class="hint">Lower if it won’t strum. Raise if it triggers too easily.</div>
+    </div>
+
+    <div class="row">
+      <label>Hit window (pixels)</label>
+      <input id="hitWindow" type="range" min="6" max="70" value="20"/>
+    </div>
+
+    <div class="row">
+      <label>String cooldown (ms)</label>
+      <input id="cooldown" type="range" min="20" max="260" value="90"/>
+    </div>
+
+    <div class="row">
+      <label>Damping (sustain)</label>
+      <input id="damping" type="range" min="0.80" max="0.995" step="0.001" value="0.985"/>
+    </div>
+
+    <div class="row">
+      <label>Volume</label>
+      <input id="volume" type="range" min="0" max="1" step="0.01" value="0.55"/>
+    </div>
+
+    <div class="row">
+      <label>Reverb</label>
+      <input id="reverb" type="range" min="0" max="1" step="0.01" value="0.18"/>
+    </div>
+
+    <div class="row">
+      <label><input id="mirror" type="checkbox" checked/> Mirror selfie</label>
+    </div>
+
+    <div class="row">
+      <label><input id="showVideo" type="checkbox" checked/> Show camera background</label>
+    </div>
+
+    <div class="row">
+      <label><input id="debug" type="checkbox" checked/> Debug overlay</label>
+    </div>
+
+    <div class="stat">Status: <b id="status">Idle</b></div>
+    <div class="stat">Score: <b id="score">0</b> | Combo: <b id="combo">0</b></div>
+    <div class="stat">Pinch: <b id="pinchState">—</b></div>
+    <div class="stat">Last: <b id="lastNote">—</b></div>
+
+    <div class="row hint" style="margin-top:14px;">
+      <b>If camera fails:</b><br/>
+      • Make sure you’re on HTTPS (Render URL) or localhost.<br/>
+      • Allow permissions.<br/>
+      • Try another camera in the dropdown.
+    </div>
+  </div>
+
+  <div class="stage">
+    <video id="video" playsinline muted></video>
+    <canvas id="canvas"></canvas>
+  </div>
+</div>
+
+<script>
+(() => {
+  // ===== UI =====
+  const video = document.getElementById("video");
+  const canvas = document.getElementById("canvas");
+  const ctx = canvas.getContext("2d");
+
+  const startBtn = document.getElementById("startBtn");
+  const stopBtn  = document.getElementById("stopBtn");
+
+  const statusEl = document.getElementById("status");
+  const scoreEl  = document.getElementById("score");
+  const comboEl  = document.getElementById("combo");
+  const lastNoteEl = document.getElementById("lastNote");
+  const pinchStateEl = document.getElementById("pinchState");
+
+  const cameraSelectEl = document.getElementById("cameraSelect");
+  const tuningEl = document.getElementById("tuning");
+  const pinchThreshEl = document.getElementById("pinchThresh");
+  const speedThreshEl = document.getElementById("speedThresh");
+  const hitWindowEl = document.getElementById("hitWindow");
+  const cooldownEl = document.getElementById("cooldown");
+  const dampingEl = document.getElementById("damping");
+  const volumeEl = document.getElementById("volume");
+  const reverbEl = document.getElementById("reverb");
+  const mirrorEl = document.getElementById("mirror");
+  const showVideoEl = document.getElementById("showVideo");
+  const debugEl = document.getElementById("debug");
+
+  // ===== Secure context guard =====
+  function isSecureEnough() {
+    return window.isSecureContext || location.hostname === "localhost";
+  }
+
+  // ===== MediaPipe setup =====
+  const WASM_ROOT = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm";
+  const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+
+  let running = false;
+  let handLandmarker = null;
+  let lastVideoTime = -1;
+  let mpError = "";
+
+  // ===== Guitar layout =====
+  const NUM_STRINGS = 6;
+  let stringY = new Array(NUM_STRINGS).fill(0);
+  let flashUntil = new Array(NUM_STRINGS).fill(0);
+  let lastHitAt = new Array(NUM_STRINGS).fill(0);
+
+  let score = 0;
+  let combo = 0;
+
+  function layoutStrings(w, h) {
+    const top = h * 0.18;
+    const bottom = h * 0.82;
+    for (let i = 0; i < NUM_STRINGS; i++) {
+      const t = i / (NUM_STRINGS - 1);
+      stringY[i] = top + t * (bottom - top);
+    }
+  }
+
+  function fitCanvas() {
+    const r = canvas.getBoundingClientRect();
+    const w = Math.max(2, Math.floor(r.width));
+    const h = Math.max(2, Math.floor(r.height));
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+      layoutStrings(w, h);
+    }
+  }
+  window.addEventListener("resize", fitCanvas);
+
+  // ===== Cursor/pick tracking =====
+  let pick = { x: 0, y: 0, t: 0, ok: false };
+  let prevPick = { x: 0, y: 0, t: 0, ok: false };
+
+  // Landmarks debug points
+  let idxTip = null;
+  let thbTip = null;
+
+  // Pinch state
+  let pinch = { active: false, justStartedAt: 0, dist: 999 };
+
+  // smoothing
+  const SMOOTH = 0.35;
+  const lerp = (a,b,t) => a + (b-a)*t;
+
+  function updatePick(x, y, tMs, ok) {
+    prevPick = { ...pick };
+    if (!pick.ok) {
+      pick = { x, y, t: tMs, ok };
+    } else {
+      pick = {
+        x: lerp(pick.x, x, 1 - SMOOTH),
+        y: lerp(pick.y, y, 1 - SMOOTH),
+        t: tMs,
+        ok
+      };
+    }
+  }
+
+  // ===== Audio =====
+  let audioCtx = null, masterGain = null, dryGain = null, wetGain = null, convolver = null;
+  let strings = [];
+
+  const NOTESETS = {
+    standard: [
+      { name: "E2", f: 82.4069 },
+      { name: "A2", f: 110.0 },
+      { name: "D3", f: 146.832 },
+      { name: "G3", f: 196.0 },
+      { name: "B3", f: 246.942 },
+      { name: "E4", f: 329.628 }
+    ],
+    dropd: [
+      { name: "D2", f: 73.4162 },
+      { name: "A2", f: 110.0 },
+      { name: "D3", f: 146.832 },
+      { name: "G3", f: 196.0 },
+      { name: "B3", f: 246.942 },
+      { name: "E4", f: 329.628 }
+    ]
+  };
+
+  function makeImpulseResponse(ctx, seconds=1.4, decay=3.2) {
+    const rate = ctx.sampleRate;
+    const length = Math.floor(rate * seconds);
+    const buf = ctx.createBuffer(2, length, rate);
+    for (let ch = 0; ch < 2; ch++) {
+      const data = buf.getChannelData(ch);
+      for (let i = 0; i < length; i++) {
+        const t = i / length;
+        data[i] = (Math.random()*2 - 1) * Math.pow(1 - t, decay);
+      }
+    }
+    return buf;
+  }
+
+  function setMix() {
+    if (!audioCtx) return;
+    masterGain.gain.value = parseFloat(volumeEl.value);
+    const wet = parseFloat(reverbEl.value);
+    wetGain.gain.value = wet;
+    dryGain.gain.value = 1 - wet;
+  }
+
+  function createString(ctx, freq, name) {
+    const delay = ctx.createDelay(1.0);
+    delay.delayTime.value = 1 / freq;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = 3200;
+
+    const feedback = ctx.createGain();
+    feedback.gain.value = parseFloat(dampingEl.value);
+
+    const out = ctx.createGain();
+    out.gain.value = 0.22;
+
+    delay.connect(filter);
+    filter.connect(feedback);
+    feedback.connect(delay);
+
+    filter.connect(out);
+    out.connect(dryGain);
+    out.connect(wetGain);
+
+    function pluck(strength01) {
+      const now = ctx.currentTime;
+
+      const amp = 0.10 + strength01 * 0.40;
+      out.gain.setTargetAtTime(0.18 + strength01 * 0.25, now, 0.01);
+      filter.frequency.setTargetAtTime(2000 + strength01 * 2800, now, 0.01);
+      feedback.gain.setTargetAtTime(parseFloat(dampingEl.value), now, 0.02);
+
+      const burstSec = Math.max(0.015, (1 / freq) * 1.2);
+      const len = Math.floor(ctx.sampleRate * burstSec);
+      const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+
+      for (let i = 0; i < len; i++) {
+        const env = 1 - i / len;
+        data[i] = (Math.random()*2 - 1) * env;
+      }
+
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      const g = ctx.createGain();
+      g.gain.value = amp;
+
+      src.connect(g);
+      g.connect(delay);
+
+      src.start(now);
+      src.stop(now + burstSec);
+    }
+
+    return { name, freq, pluck };
+  }
+
+  function rebuildStrings() {
+    if (!audioCtx) return;
+    strings = [];
+    const set = NOTESETS[tuningEl.value] || NOTESETS.standard;
+    for (let i = 0; i < NUM_STRINGS; i++) {
+      strings.push(createString(audioCtx, set[i].f, set[i].name));
+    }
+  }
+
+  // ===== Pinch + strum logic =====
+  function tryHitString(i, strength01, dir) {
+    const now = performance.now();
+    const cooldown = parseFloat(cooldownEl.value);
+    if (now - lastHitAt[i] < cooldown) return false;
+
+    lastHitAt[i] = now;
+    flashUntil[i] = now + 120;
+
+    if (strings[i]) {
+      strings[i].pluck(strength01);
+      lastNoteEl.textContent = strings[i].name + (dir >= 0 ? " ↓" : " ↑");
+    }
+
+    score += 1;
+    combo += 1;
+    scoreEl.textContent = String(score);
+    comboEl.textContent = String(combo);
+    return true;
+  }
+
+  function detectPinchStrum() {
+    if (!pick.ok || !prevPick.ok) return;
+
+    // must be pinching to play
+    if (!pinch.active) return;
+
+    const dt = (pick.t - prevPick.t) / 1000;
+    if (dt <= 0) return;
+
+    const dy = pick.y - prevPick.y;
+    const speed = Math.abs(dy) / dt; // px/s
+    const speedThresh = parseFloat(speedThreshEl.value);
+    const hitWindow = parseFloat(hitWindowEl.value);
+
+    // "pluck" when pinch starts near a string (no need for speed)
+    const now = performance.now();
+    if (pinch.justStartedAt && (now - pinch.justStartedAt) < 180) {
+      // find nearest string
+      let bestI = -1, bestD = Infinity;
+      for (let i = 0; i < NUM_STRINGS; i++) {
+        const d = Math.abs(pick.y - stringY[i]);
+        if (d < bestD) { bestD = d; bestI = i; }
+      }
+      if (bestI >= 0 && bestD <= hitWindow) {
+        const strength01 = Math.min(1, (hitWindow - bestD) / hitWindow + 0.2);
+        tryHitString(bestI, strength01, dy);
+        pinch.justStartedAt = 0; // consume
+        return;
+      }
+    }
+
+    // Strum: require speed
+    if (speed < speedThresh) return;
+
+    const yA = prevPick.y, yB = pick.y;
+    const minY = Math.min(yA, yB);
+    const maxY = Math.max(yA, yB);
+
+    let crossed = [];
+    for (let i = 0; i < NUM_STRINGS; i++) {
+      const yS = stringY[i];
+      if (yS >= minY - hitWindow && yS <= maxY + hitWindow) crossed.push(i);
+    }
+
+    // order by direction
+    crossed.sort((a,b) => (dy >= 0) ? (a - b) : (b - a));
+
+    const strength01 = Math.min(1, (speed - speedThresh) / (speedThresh * 1.25));
+
+    let any = false;
+    for (const i of crossed) {
+      // close enough to line at some point
+      const distNow = Math.abs(pick.y - stringY[i]);
+      const distPrev = Math.abs(prevPick.y - stringY[i]);
+      if (Math.min(distNow, distPrev) > hitWindow) continue;
+      any = tryHitString(i, strength01, dy) || any;
+    }
+
+    if (!any) {
+      combo = Math.max(0, combo - 1);
+      comboEl.textContent = String(combo);
+    }
+  }
+
+  // ===== Draw =====
+  function drawPick() {
+    // pick is midpoint of thumb/index when tracking works
+    if (!pick.ok) return;
+
+    // angle from motion
+    let angle = 0;
+    if (prevPick.ok) {
+      const dx = pick.x - prevPick.x;
+      const dy = pick.y - prevPick.y;
+      angle = Math.atan2(dy, dx);
+    }
+
+    // pick color changes with pinch
+    const fill = pinch.active ? "rgba(255, 80, 80, 0.95)" : "rgba(160, 160, 180, 0.85)";
+
+    ctx.save();
+    ctx.translate(pick.x, pick.y);
+    ctx.rotate(angle);
+
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.moveTo(18, 0);
+    ctx.lineTo(-10, -12);
+    ctx.lineTo(-10, 12);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.strokeStyle = "rgba(0,0,0,0.65)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawOverlay() {
+    // fret guides
+    ctx.strokeStyle = "rgba(255,255,255,0.08)";
+    ctx.lineWidth = 2;
+    const fretCount = 7;
+    for (let i = 1; i <= fretCount; i++) {
+      const x = (canvas.width / (fretCount + 1)) * i;
+      ctx.beginPath();
+      ctx.moveTo(x, canvas.height*0.15);
+      ctx.lineTo(x, canvas.height*0.85);
+      ctx.stroke();
+    }
+
+    // strings
+    const now = performance.now();
+    for (let i = 0; i < NUM_STRINGS; i++) {
+      const active = flashUntil[i] > now;
+      ctx.strokeStyle = active ? "rgba(0, 255, 140, 0.95)" : "rgba(240, 240, 255, 0.75)";
+      ctx.lineWidth = active ? 6 : (2 + i*0.35);
+      ctx.beginPath();
+      ctx.moveTo(0, stringY[i]);
+      ctx.lineTo(canvas.width, stringY[i]);
+      ctx.stroke();
+
+      ctx.fillStyle = "rgba(255,255,255,0.85)";
+      ctx.font = "14px system-ui";
+      ctx.fillText(strings[i]?.name || "", 10, stringY[i] - 8);
+    }
+
+    // draw thumb/index points + pinch line (if available)
+    if (idxTip && thbTip) {
+      ctx.strokeStyle = pinch.active ? "rgba(255,80,80,0.9)" : "rgba(200,200,220,0.75)";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(idxTip.x, idxTip.y);
+      ctx.lineTo(thbTip.x, thbTip.y);
+      ctx.stroke();
+
+      ctx.fillStyle = "rgba(255,255,255,0.9)";
+      ctx.beginPath(); ctx.arc(idxTip.x, idxTip.y, 6, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(thbTip.x, thbTip.y, 6, 0, Math.PI*2); ctx.fill();
+    }
+
+    drawPick();
+  }
+
+  function drawDebug(lines) {
+    if (!debugEl.checked) return;
+    const pad = 10;
+    const w = 420;
+    const h = 18 * (lines.length + 1) + 10;
+    ctx.save();
+    ctx.globalAlpha = 0.92;
+    ctx.fillStyle = "rgba(10,10,14,0.75)";
+    ctx.fillRect(pad, pad, w, h);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "#fff";
+    ctx.font = "13px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+    ctx.fillText("DEBUG", pad+10, pad+20);
+    ctx.fillStyle = "#cfcfe6";
+    for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], pad+10, pad+40 + i*18);
+    ctx.restore();
+  }
+
+  function drawLoop() {
+    if (!running) return;
+
+    fitCanvas();
+
+    // background
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    if (showVideoEl.checked && video.readyState >= 2) {
+      const mirror = mirrorEl.checked;
+      ctx.save();
+      if (mirror) { ctx.translate(canvas.width, 0); ctx.scale(-1, 1); }
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      ctx.restore();
+    } else {
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+    }
+
+    // darken slightly for contrast
+    ctx.fillStyle = "rgba(0,0,0,0.25)";
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+
+    drawOverlay();
+
+    // speed debug
+    let speed = 0;
+    if (pick.ok && prevPick.ok) {
+      const dt = (pick.t - prevPick.t) / 1000;
+      if (dt > 0) speed = Math.abs(pick.y - prevPick.y) / dt;
+    }
+
+    drawDebug([
+      `secureContext=${isSecureEnough()}`,
+      `videoReady=${video.readyState}`,
+      `mp=${handLandmarker ? "OK" : "null"}`,
+      `pinch=${pinch.active} dist=${pinch.dist.toFixed(4)} (thr=${parseFloat(pinchThreshEl.value).toFixed(4)})`,
+      `pick.ok=${pick.ok} x=${pick.x.toFixed(1)} y=${pick.y.toFixed(1)}`,
+      `speed=${speed.toFixed(0)} px/s (thr=${speedThreshEl.value})`,
+      `error=${mpError ? "YES" : "no"}`
+    ]);
+
+    if (mpError) {
+      ctx.save();
+      ctx.fillStyle = "rgba(0,0,0,0.70)";
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.fillStyle = "#fff";
+      ctx.font = "20px system-ui";
+      ctx.fillText("Camera/Hand tracking error", 24, 52);
+      ctx.fillStyle = "#cfcfe6";
+      ctx.font = "13px ui-monospace, monospace";
+      const lines = mpError.split("\n").slice(0, 12);
+      let y = 80;
+      for (const line of lines) { ctx.fillText(line, 24, y); y += 18; }
+      ctx.fillStyle = "#a7a7b3";
+      ctx.font = "14px system-ui";
+      ctx.fillText("Make sure you are on HTTPS (Render) or localhost, and allow camera permission.", 24, y + 14);
+      ctx.restore();
+    }
+
+    requestAnimationFrame(drawLoop);
+  }
+
+  // ===== Prediction loop =====
+  function predictLoop() {
+    if (!running) return;
+
+    if (handLandmarker && video.currentTime !== lastVideoTime) {
+      lastVideoTime = video.currentTime;
+      try {
+        const res = handLandmarker.detectForVideo(video, performance.now());
+        const mirror = mirrorEl.checked;
+
+        idxTip = null; thbTip = null;
+
+        if (res?.landmarks?.length) {
+          const lms = res.landmarks[0];
+          const idx = lms[8]; // index tip
+          const thb = lms[4]; // thumb tip
+
+          // screen coords
+          let ix = idx.x * canvas.width;
+          let tx = thb.x * canvas.width;
+          const iy = idx.y * canvas.height;
+          const ty = thb.y * canvas.height;
+
+          if (mirror) { ix = (1 - idx.x) * canvas.width; tx = (1 - thb.x) * canvas.width; }
+
+          idxTip = { x: ix, y: iy };
+          thbTip = { x: tx, y: ty };
+
+          // pinch distance in normalized (use original normalized to avoid px scaling differences)
+          const dNorm = Math.hypot(idx.x - thb.x, idx.y - thb.y);
+          pinch.dist = dNorm;
+
+          const thr = parseFloat(pinchThreshEl.value);
+          const was = pinch.active;
+          pinch.active = dNorm < thr;
+
+          if (!was && pinch.active) pinch.justStartedAt = performance.now();
+
+          pinchStateEl.textContent = pinch.active ? "ON" : "OFF";
+
+          // pick point is midpoint of thumb+index (feels like holding a pick)
+          const px = (ix + tx) * 0.5;
+          const py = (iy + ty) * 0.5;
+          updatePick(px, py, performance.now(), true);
+
+        } else {
+          pinch.active = false;
+          pinchStateEl.textContent = "OFF";
+          updatePick(pick.x, pick.y, performance.now(), false);
+        }
+
+      } catch (err) {
+        mpError = String(err?.stack || err);
+        handLandmarker = null;
+        statusEl.textContent = "Running (tracking error)";
+      }
+    }
+
+    // play logic
+    detectPinchStrum();
+
+    requestAnimationFrame(predictLoop);
+  }
+
+  // ===== Robust camera init =====
+  async function getStream(deviceId) {
+    // Try stricter constraints first, then relax
+    const base = {
+      audio: false,
+      video: deviceId
+        ? { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
+        : { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }
+    };
+
+    try {
+      return await navigator.mediaDevices.getUserMedia(base);
+    } catch (e1) {
+      // Relax constraints
+      try {
+        const relaxed = { audio: false, video: deviceId ? { deviceId: { exact: deviceId } } : true };
+        return await navigator.mediaDevices.getUserMedia(relaxed);
+      } catch (e2) {
+        throw new Error("getUserMedia failed:\n" + (e2?.message || e2) + "\n\nFirst attempt:\n" + (e1?.message || e1));
+      }
+    }
+  }
+
+  async function refreshCameraList() {
+    // Can only reliably enumerate labels after permission is granted at least once
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cams = devices.filter(d => d.kind === "videoinput");
+      const current = cameraSelectEl.value;
+
+      cameraSelectEl.innerHTML = `<option value="">Default</option>`;
+      cams.forEach((c, i) => {
+        const opt = document.createElement("option");
+        opt.value = c.deviceId;
+        opt.textContent = c.label || `Camera ${i+1}`;
+        cameraSelectEl.appendChild(opt);
+      });
+
+      // restore selection if possible
+      if (current) cameraSelectEl.value = current;
+    } catch {}
+  }
+
+  // ===== MediaPipe init (buffer model for reliability) =====
+  async function initMediaPipe() {
+    const vision = await FilesetResolver.forVisionTasks(WASM_ROOT);
+    const buf = await fetch(MODEL_URL).then(r => {
+      if (!r.ok) throw new Error(`Model fetch failed: ${r.status} ${r.statusText}`);
+      return r.arrayBuffer();
+    });
+    const modelAssetBuffer = new Uint8Array(buf);
+
+    handLandmarker = await HandLandmarker.createFromOptions(vision, {
+      baseOptions: { modelAssetBuffer },
+      runningMode: "VIDEO",
+      numHands: 1,
+      minHandDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.6,
+      minHandPresenceConfidence: 0.6
+    });
+  }
+
+  // ===== Audio init =====
+  async function initAudio() {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    masterGain = audioCtx.createGain();
+    dryGain = audioCtx.createGain();
+    wetGain = audioCtx.createGain();
+    convolver = audioCtx.createConvolver();
+    convolver.buffer = makeImpulseResponse(audioCtx);
+
+    dryGain.connect(masterGain);
+    wetGain.connect(convolver);
+    convolver.connect(masterGain);
+    masterGain.connect(audioCtx.destination);
+
+    setMix();
+    rebuildStrings();
+  }
+
+  // ===== Start/Stop =====
+  async function start() {
+    if (running) return;
+    running = true;
+    mpError = "";
+
+    score = 0; combo = 0;
+    scoreEl.textContent = "0";
+    comboEl.textContent = "0";
+    lastNoteEl.textContent = "—";
+    pinchStateEl.textContent = "—";
+    flashUntil.fill(0);
+    lastHitAt.fill(0);
+
+    fitCanvas();
+    updatePick(canvas.width*0.5, canvas.height*0.5, performance.now(), false);
+
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+
+    if (!isSecureEnough()) {
+      mpError = "This page is not in a secure context.\n\nUse HTTPS (Render) or http://localhost.";
+      statusEl.textContent = "Blocked (insecure context)";
+      requestAnimationFrame(drawLoop);
+      return;
+    }
+
+    statusEl.textContent = "Starting…";
+
+    try {
+      await initAudio();
+    } catch (e) {
+      mpError = "Audio init failed:\n" + String(e?.stack || e);
+    }
+
+    try {
+      const deviceId = cameraSelectEl.value || null;
+      const stream = await getStream(deviceId);
+      video.srcObject = stream;
+      await video.play();
+      await refreshCameraList();
+    } catch (e) {
+      mpError = "Camera init failed:\n" + String(e?.stack || e);
+      statusEl.textContent = "Running (no camera)";
+      requestAnimationFrame(drawLoop);
+      return;
+    }
+
+    try {
+      await initMediaPipe();
+    } catch (e) {
+      mpError = "MediaPipe init failed:\n" + String(e?.stack || e);
+      handLandmarker = null;
+    }
+
+    statusEl.textContent = mpError ? "Running (with error)" : "Running (pinch + strum)";
+    requestAnimationFrame(drawLoop);
+    requestAnimationFrame(predictLoop);
+  }
+
+  async function stop() {
+    running = false;
+    statusEl.textContent = "Idle";
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+
+    if (video.srcObject) {
+      video.srcObject.getTracks().forEach(t => t.stop());
+      video.srcObject = null;
+    }
+    handLandmarker = null;
+    lastVideoTime = -1;
+    idxTip = null; thbTip = null;
+
+    if (audioCtx) {
+      try { await audioCtx.close(); } catch {}
+      audioCtx = null;
+    }
+  }
+
+  // ===== Events =====
+  startBtn.addEventListener("click", start);
+  stopBtn.addEventListener("click", stop);
+
+  tuningEl.addEventListener("change", rebuildStrings);
+  volumeEl.addEventListener("input", setMix);
+  reverbEl.addEventListener("input", setMix);
+
+  // refresh list early (labels may be blank until permission)
+  refreshCameraList();
+})();
+</script>
+</body>
+</html>
