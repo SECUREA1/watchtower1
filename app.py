@@ -309,6 +309,35 @@ def is_ui_authenticated(request: Request) -> bool:
     return False
 
 
+def _is_public_ui_path(path: str) -> bool:
+    """Paths that must remain reachable before the UI session is unlocked."""
+    return path in {
+        "/",
+        "/index.html",
+        "/start",
+        "/start.html",
+        "/api/session/status",
+        "/api/session/unlock",
+        "/api/session/logout",
+        "/healthz",
+        "/health",
+        "/favicon.ico",
+    }
+
+
+def _path_requires_ui_auth(path: str) -> bool:
+    """Require login for all UI pages, including any direct *.html route."""
+    if _is_public_ui_path(path):
+        return False
+    if path.startswith("/api"):
+        return False
+    if path.startswith("/static/"):
+        return False
+    if path.endswith(".svg") or path.endswith(".js") or path.endswith(".css"):
+        return False
+    return True
+
+
 def _hash_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
@@ -947,6 +976,7 @@ async def session_unlock(payload: UnlockPayload):
         httponly=True,
         samesite="lax",
         secure=False,
+        path="/",
     )
     return response
 
@@ -984,7 +1014,7 @@ async def serve_frontend(full_path: str, request: Request):
     if request.method not in {"GET", "HEAD"}:
         raise HTTPException(status_code=404, detail="Not found")
 
-    if url_path not in {"/", "/index.html", "/start", "/start.html"} and not is_ui_authenticated(request):
+    if _path_requires_ui_auth(url_path) and not is_ui_authenticated(request):
         return RedirectResponse(url="/start.html", status_code=302)
 
     # Prefer a modern landing page
@@ -1058,7 +1088,7 @@ async def spa_fallback_handler(request: Request, exc: HTTPException):
     if path.startswith("/api") or path in {"/healthz", "/health"}:
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
-    if not is_ui_authenticated(request):
+    if _path_requires_ui_auth(path) and not is_ui_authenticated(request):
         return RedirectResponse(url="/start.html", status_code=302)
 
     fallback = _fallback_ui()
