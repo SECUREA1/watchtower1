@@ -1,5 +1,6 @@
 # app.py - GitHub-only RedNode API (complete) — updated UI serving logic
 import base64
+import hashlib
 import json
 import logging
 import os
@@ -69,6 +70,22 @@ GITHUB_PR_FLOW = os.getenv("GITHUB_PR_FLOW", "0").lower() in {"1", "true", "yes"
 INDEX_LOCK = threading.Lock()
 
 AUTH_COOKIE_NAME = "watchtower_access"
+UI_ACCESS_PASSWORD = os.getenv("WATCHTOWER_ACCESS_PASSWORD", "boots")
+UI_ACCESS_CODE = os.getenv("WATCHTOWER_ACCESS_CODE", "")
+UI_ALLOWED_CONTRACTS = {
+    "ethereum": {
+        "0x9fC58b9F6f2dE0d35Ebd0A51Dca9d61B3f79a7C1".lower(),
+        "0x6A7D512Ea381Ba2F8b01f0b473f8BDF26d5D3A7D".lower(),
+    },
+    "solana": {
+        "9xQeWvG816bUx9EPfQ8N6e7h22JfX5nM2X8fE6GxwQJQ".lower(),
+        "4Nd1m8qQhN9Qw5oNFDXL9uBeb5GsyhQ2E31x4n4t4WR4".lower(),
+    },
+    "cardano": {
+        "addr1qxpz7k8r3n2m0u6g6f4w0v3j5t8l8y8w7a9shm0k9n7m9h3l4kz4k8".lower(),
+        "addr1qx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5n4z9t3gn7j4s2hr6jhn2".lower(),
+    },
+}
 
 # -------------------------------------------------------------------------
 # Logging & FastAPI app
@@ -184,6 +201,14 @@ class LogsPayload(BaseModel):
     source_device_id: Optional[str] = None
     captured_at: Optional[str] = None
 
+
+class UnlockPayload(BaseModel):
+    chain: Optional[str] = None
+    contract: Optional[str] = None
+    wallet: Optional[str] = None
+    passphrase: Optional[str] = None
+    access_code: Optional[str] = None
+
 # -------------------------------------------------------------------------
 # Filesystem helpers
 # -------------------------------------------------------------------------
@@ -279,9 +304,42 @@ def validate_upload(content_type: str, data: bytes) -> None:
 
 def is_ui_authenticated(request: Request) -> bool:
     token_cookie = request.cookies.get(AUTH_COOKIE_NAME, "")
-    if token_cookie:
+    if token_cookie == "ok":
         return True
     return False
+
+
+def _hash_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _is_valid_ui_secret(payload: UnlockPayload) -> bool:
+    passphrase = (payload.passphrase or "").strip()
+    access_code = (payload.access_code or "").strip()
+    if UI_ACCESS_PASSWORD:
+        if passphrase == UI_ACCESS_PASSWORD:
+            return True
+        if passphrase and _hash_text(passphrase) == UI_ACCESS_PASSWORD:
+            return True
+    if UI_ACCESS_CODE:
+        if access_code == UI_ACCESS_CODE:
+            return True
+        if access_code and _hash_text(access_code) == UI_ACCESS_CODE:
+            return True
+    return False
+
+
+def _validate_unlock_payload(payload: UnlockPayload) -> bool:
+    chain = (payload.chain or "").strip().lower()
+    contract = (payload.contract or "").strip().lower()
+    wallet = (payload.wallet or "").strip()
+    if not chain or chain not in UI_ALLOWED_CONTRACTS:
+        return False
+    if not contract or contract not in UI_ALLOWED_CONTRACTS[chain]:
+        return False
+    if len(wallet) < 10:
+        return False
+    return _is_valid_ui_secret(payload)
 
 
 # -------------------------------------------------------------------------
@@ -871,6 +929,33 @@ async def healthz():
 @app.get("/health")
 async def health():
     return {"ok": True}
+
+
+@app.get("/api/session/status")
+async def session_status(request: Request):
+    return {"ok": True, "authenticated": is_ui_authenticated(request)}
+
+
+@app.post("/api/session/unlock")
+async def session_unlock(payload: UnlockPayload):
+    if not _validate_unlock_payload(payload):
+        raise HTTPException(status_code=401, detail="Invalid unlock credentials.")
+    response = JSONResponse({"ok": True, "authenticated": True})
+    response.set_cookie(
+        AUTH_COOKIE_NAME,
+        "ok",
+        httponly=True,
+        samesite="lax",
+        secure=False,
+    )
+    return response
+
+
+@app.post("/api/session/logout")
+async def session_logout():
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(AUTH_COOKIE_NAME)
+    return response
 
 # -------------------------------------------------------------------------
 # Optional static mount for site/static (improves performance for common assets)
