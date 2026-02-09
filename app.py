@@ -971,7 +971,7 @@ if STATIC_DIR.exists():
 
 def _fallback_ui() -> Optional[FileResponse]:
     """Return a usable UI when the requested path is missing."""
-    for candidate in ("rednode.html", "start.html", "index.html"):
+    for candidate in ("start.html", "index.html", "rednode.html"):
         response = serve_file(candidate)
         if response:
             return response
@@ -1057,6 +1057,10 @@ async def spa_fallback_handler(request: Request, exc: HTTPException):
     path = request.url.path
     if path.startswith("/api") or path in {"/healthz", "/health"}:
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+    if not is_ui_authenticated(request):
+        return RedirectResponse(url="/start.html", status_code=302)
+
     fallback = _fallback_ui()
     if fallback:
         return fallback
