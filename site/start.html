@@ -1331,7 +1331,7 @@
         <img src="static/watchtown-wood-logo.svg" alt="Watchtower secure access icon" />
         <h3 id="startAccessTitle">Watchtower Main Start Secure Login</h3>
       </div>
-      <p class="start-access-copy">Secure access is required before entering the Watchtower start page. Use Ethereum, Solana, or Cardano token-gated credentials.</p>
+      <p class="start-access-copy">Secure access is required before entering the Watchtower start page. Use Ethereum, Solana, or Cardano token-gated credentials plus the access password (default: boots) or your access code.</p>
 
       <div class="start-chain-row" id="startChainRow" role="radiogroup" aria-label="Choose network">
         <button class="start-chain-btn active" data-chain="ethereum" role="radio" aria-checked="true"><img src="static/watchtown-wood-logo.svg" alt=""/>Ethereum</button>
@@ -1349,8 +1349,8 @@
           <input id="startWalletInput" placeholder="0x..., base58..., addr1..." autocomplete="off" />
         </div>
         <div class="full">
-          <label for="startPassphrase">Secure Access Phrase</label>
-          <input id="startPassphrase" type="password" placeholder="Enter secure phrase" autocomplete="off" />
+          <label for="startPassphrase">Secure Access Password or Code</label>
+          <input id="startPassphrase" type="password" placeholder="Enter password/code (boots by default)" autocomplete="off" />
         </div>
       </div>
 
@@ -1970,7 +1970,6 @@
 
       const storageKey = 'watchtower_start_access_v2';
       const sessionKey = 'session_user';
-      const passHash = 'f5571758e1437085808ba64c8f168c90e16d807e000131f4989dc41919fc22c2';
       const contracts = {
         ethereum: [
           { label: 'WT ETH Main Gate A', value: '0x9fC58b9F6f2dE0d35Ebd0A51Dca9d61B3f79a7C1' },
@@ -2004,11 +2003,6 @@
         overlay.classList.toggle('active', locked);
       };
 
-      const toHex = (buf) => Array.from(new Uint8Array(buf)).map(v => v.toString(16).padStart(2, '0')).join('');
-      const digest = async (text) => {
-        const enc = new TextEncoder().encode(text);
-        return toHex(await crypto.subtle.digest('SHA-256', enc));
-      };
 
       const renderContracts = () => {
         const list = contracts[chain] || [];
@@ -2035,7 +2029,25 @@
         return null;
       };
 
-      const unlock = (meta = {}) => {
+      const unlock = async (meta = {}, credentials = {}) => {
+        const payload = {
+          chain,
+          contract: credentials.contract || '',
+          wallet: credentials.wallet || '',
+          passphrase: credentials.passphrase || '',
+          access_code: credentials.accessCode || credentials.passphrase || ''
+        };
+
+        const res = await fetch('/api/session/unlock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+          throw new Error('unlock_failed');
+        }
+
         const exp = Date.now() + (12 * 60 * 60 * 1000);
         localStorage.setItem(storageKey, JSON.stringify({ exp, ...meta }));
         setLocked(false);
@@ -2047,17 +2059,34 @@
         setChain(btn.dataset.chain || 'ethereum');
       });
 
-      document.getElementById('startUseSessionBtn')?.addEventListener('click', () => {
+      document.getElementById('startUseSessionBtn')?.addEventListener('click', async () => {
         msg.textContent = '';
-        try {
-          const session = JSON.parse(localStorage.getItem(sessionKey) || '{}');
-          if (session?.accessToken || session?.username) {
-            unlock({ method: 'session', account: session.username || 'watchtower-user' });
-            return;
+        const session = (() => {
+          try {
+            return JSON.parse(localStorage.getItem(sessionKey) || '{}');
+          } catch {
+            return {};
           }
-          msg.textContent = 'No saved session found. Use wallet + access phrase.';
+        })();
+
+        const contract = preset.value.trim();
+        const wallet = walletInput.value.trim() || session?.username || '';
+        const phrase = passInput.value || session?.accessToken || '';
+
+        if (!contract || !wallet || !phrase) {
+          msg.textContent = 'Add contract, wallet, and access phrase/password to restore access.';
+          return;
+        }
+
+        try {
+          await unlock({ method: 'session', account: session?.username || 'watchtower-user' }, {
+            contract,
+            wallet,
+            passphrase: phrase,
+            accessCode: phrase,
+          });
         } catch (err) {
-          msg.textContent = 'Saved session is invalid. Use wallet + access phrase.';
+          msg.textContent = 'Saved session failed server validation. Re-enter credentials.';
         }
       });
 
@@ -2089,22 +2118,27 @@
         }
 
         try {
-          const hash = await digest(phrase);
-          if (hash !== passHash) {
-            msg.textContent = 'Secure phrase rejected.';
-            return;
-          }
+          await unlock({ method: 'wallet', chain, contract, account: `${wallet.slice(0,6)}...${wallet.slice(-4)}` }, {
+            contract,
+            wallet,
+            passphrase: phrase,
+            accessCode: phrase,
+          });
         } catch (err) {
-          msg.textContent = 'Secure hash validation failed on this browser.';
-          return;
+          msg.textContent = 'Secure phrase/password rejected by server gate.';
         }
-
-        unlock({ method: 'wallet', chain, contract, account: `${wallet.slice(0,6)}...${wallet.slice(-4)}` });
       });
 
       setChain(chain);
       const saved = getSaved();
-      setLocked(!saved);
+      if (saved) {
+        fetch('/api/session/status')
+          .then((r) => r.ok ? r.json() : null)
+          .then((status) => setLocked(!(status && status.authenticated)))
+          .catch(() => setLocked(true));
+      } else {
+        setLocked(true);
+      }
     })();
 
 
