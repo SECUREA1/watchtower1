@@ -7,6 +7,9 @@ import { WebSocketServer } from "ws";
 import Database from "better-sqlite3";
 
 const PORT = process.env.PORT || 10000; // Render provides PORT
+const SESSION_COOKIE = "wt_session";
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const ACCESS_CODE = process.env.WATCHTOWER_ACCESS_CODE || "boots";
 
 // Locate repo root to serve the client HTML
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -122,6 +125,68 @@ const htmlAliases = new Map([
   ["/rednode-dashboard-demo", "RedNode Dashboard — Full Demo.html"],
 ]);
 
+const PUBLIC_EXACT_PATHS = new Set([
+  "/start",
+  "/start/",
+  "/start.html",
+  "/api/session/unlock",
+  "/api/session/status",
+  "/health",
+  "/healthz",
+]);
+
+function parseCookies(header = "") {
+  return header
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .reduce((acc, part) => {
+      const idx = part.indexOf("=");
+      if (idx <= 0) return acc;
+      const key = part.slice(0, idx);
+      const value = part.slice(idx + 1);
+      acc[key] = decodeURIComponent(value);
+      return acc;
+    }, {});
+}
+
+function readSession(req) {
+  const cookies = parseCookies(req.headers.cookie || "");
+  const raw = cookies[SESSION_COOKIE];
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed?.exp || Number(parsed.exp) <= Date.now()) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function isPublicRequest(urlPath) {
+  if (PUBLIC_EXACT_PATHS.has(urlPath)) return true;
+  if (urlPath.startsWith("/api/session/")) return true;
+  return false;
+}
+
+function isHtmlLikePath(urlPath) {
+  const clean = urlPath.endsWith("/") && urlPath !== "/" ? urlPath.slice(0, -1) : urlPath;
+  if (clean === "/" || clean === "/index.html") return true;
+  if (path.extname(clean).toLowerCase() === ".html" || path.extname(clean).toLowerCase() === ".htm") return true;
+  if (htmlAliases.has(clean)) return true;
+  return path.extname(clean) === "";
+}
+
+function requiresAuth(req, urlPath) {
+  if (req.method !== "GET" && req.method !== "HEAD") return false;
+  if (isPublicRequest(urlPath)) return false;
+  if (urlPath.startsWith("/static/")) {
+    const ext = path.extname(urlPath).toLowerCase();
+    return ext === ".html" || ext === ".htm";
+  }
+  return isHtmlLikePath(urlPath);
+}
+
 async function tryServeFile(res, relativePath, method) {
   for (const base of SERVE_ROOTS) {
     const normalized = path.normalize(path.join(base, relativePath));
@@ -164,13 +229,59 @@ async function tryServeFile(res, relativePath, method) {
 }
 
 const server = http.createServer(async (req, res) => {
+  const urlPath = decodeURIComponent(req.url.split('?')[0]);
+
+  if (req.method === "POST" && urlPath === "/api/session/unlock") {
+    let body = "";
+    req.on("data", (chunk) => body += chunk);
+    req.on("end", () => {
+      let payload = {};
+      try { payload = JSON.parse(body || "{}"); } catch {}
+
+      const phrase = `${payload?.access_code || payload?.passphrase || ""}`.trim();
+      const ok = phrase === ACCESS_CODE;
+      if (!ok) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "invalid_credentials" }));
+        return;
+      }
+
+      const exp = Date.now() + SESSION_TTL_MS;
+      const token = encodeURIComponent(JSON.stringify({ exp, auth: true }));
+      const secureFlag = req.headers["x-forwarded-proto"] === "https" ? "; Secure" : "";
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Set-Cookie": `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}${secureFlag}`,
+      });
+      res.end(JSON.stringify({ ok: true, authenticated: true, exp }));
+    });
+    return;
+  }
+
+  if (req.method === "GET" && urlPath === "/api/session/status") {
+    const session = readSession(req);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ authenticated: Boolean(session), exp: session?.exp || null }));
+    return;
+  }
+
   if (req.url === "/healthz") {
     res.writeHead(200);
     res.end("ok");
     return;
   }
 
-  const urlPath = decodeURIComponent(req.url.split('?')[0]);
+  if (req.url === "/health") {
+    res.writeHead(200);
+    res.end("ok");
+    return;
+  }
+
+  if (requiresAuth(req, urlPath) && !readSession(req)) {
+    res.writeHead(302, { Location: "/start.html" });
+    res.end();
+    return;
+  }
 
   if (req.method === "POST" && urlPath === "/api/excavator") {
     let body = "";
