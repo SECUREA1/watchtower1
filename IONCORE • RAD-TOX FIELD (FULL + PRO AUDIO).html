@@ -194,6 +194,79 @@
     }
     #controlsBody::-webkit-scrollbar-track{ background: rgba(0,0,0,0.15); }
 
+    #mobileGameplayHeader{
+      display:none;
+      position:fixed;
+      top:8px;
+      left:8px;
+      right:8px;
+      z-index:120;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      padding:8px 10px;
+      border-radius:12px;
+      border:1px solid rgba(170,255,210,0.24);
+      background: rgba(6,10,8,0.68);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 10px 28px rgba(0,0,0,0.38);
+    }
+    #mobileGameplayHeader .miniActions{ display:flex; gap:7px; align-items:center; }
+    #mobileGameplayHeader .miniLabel{
+      font-size:11px;
+      font-weight:900;
+      letter-spacing:0.7px;
+      color: rgba(230,255,240,0.9);
+      white-space:nowrap;
+    }
+    #mobileGameplayHeader button{
+      padding:7px 9px;
+      border-radius:10px;
+      font-size:11px;
+      min-width:unset;
+    }
+
+    body.mobile-play{
+      overflow:hidden;
+      background:#020404;
+    }
+    body.mobile-play #app{
+      padding:0;
+      gap:0;
+      height:100dvh;
+      min-height:100dvh;
+      grid-template-columns:1fr;
+    }
+    body.mobile-play #app > .card:first-child{
+      border-radius:0;
+      border:none;
+      box-shadow:none;
+      background:#020404;
+    }
+    body.mobile-play #app > .card:first-child .header{
+      display:none;
+    }
+    body.mobile-play #stage{
+      min-height:100dvh;
+      height:100dvh;
+      border-radius:0;
+    }
+    body.mobile-play #app > .card:nth-child(2){
+      display:none;
+      position:fixed;
+      top:56px;
+      left:8px;
+      right:8px;
+      bottom:8px;
+      z-index:115;
+      border-radius:14px;
+      min-height:unset;
+    }
+    body.mobile-play.controls-open #app > .card:nth-child(2){ display:flex; }
+    body.mobile-play #mobileGameplayHeader{ display:flex; }
+    body.mobile-play #overlayMsg{ padding-top:62px; }
+    body.mobile-play.mobile-authed #overlayMsg{ display:none; }
+
     @media (max-width: 900px){
       body{ overflow:auto; }
       #app{
@@ -495,6 +568,15 @@
 </head>
 
 <body>
+  <div id="mobileGameplayHeader" aria-live="polite">
+    <span class="miniLabel">GAMEPLAY</span>
+    <div class="miniActions">
+      <button id="btnMobilePanel" type="button">Open Functions</button>
+      <button id="btnMobileMute" type="button">Sound: ON</button>
+      <button id="btnMobileRestart" type="button">Restart</button>
+    </div>
+  </div>
+
   <!-- AUTH OVERLAY -->
   <div id="authOverlay" class="show" aria-modal="true" role="dialog">
     <div class="authShell">
@@ -1279,6 +1361,14 @@
     const authMini      = document.getElementById("authMini");
     const authStrict    = document.getElementById("authStrict");
     const authStrictVal = document.getElementById("authStrictVal");
+
+    const mobileGameplayHeader = document.getElementById("mobileGameplayHeader");
+    const btnMobilePanel = document.getElementById("btnMobilePanel");
+    const btnMobileMute = document.getElementById("btnMobileMute");
+    const btnMobileRestart = document.getElementById("btnMobileRestart");
+
+    const isMobileMode = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+      || window.matchMedia("(max-width: 900px)").matches;
 
     // Tuners
     const enemyModeSel  = document.getElementById("enemyMode");
@@ -2260,6 +2350,7 @@
       const unlocked = !!(audio?.ctx && audio.ctx.state === "running" && audio.unlocked);
 
       btnMute.textContent = s.enabled ? "Sound: ON" : "Sound: OFF";
+      if(btnMobileMute) btnMobileMute.textContent = btnMute.textContent;
 
       audioPill.classList.remove("ok","bad");
       if(!s.enabled){
@@ -2825,6 +2916,8 @@
       btnRestart.disabled = !authed;
       btnLockTop.disabled = !authed;
       btnMute.disabled    = !authed;
+      if(btnMobileMute) btnMobileMute.disabled = !authed;
+      if(btnMobileRestart) btnMobileRestart.disabled = !authed;
 
       if(!authed){
         authOverlay.classList.add("show");
@@ -2836,6 +2929,8 @@
         statusPill.textContent = visionReady ? "READY — ENABLE CAMERA" : "VISION FAILED";
       }
 
+      document.body.classList.toggle("mobile-authed", !!authed);
+
       setAuthMini(
         visionReady
           ? (hasTemplate
@@ -2843,6 +2938,38 @@
               : `Template: <b>NONE</b> • Click <b>Enroll</b>.`)
           : `Vision: <b>NOT READY</b> • Refresh and ensure CDN access.`
       );
+    }
+
+    function setMobilePanelOpen(open){
+      if(!isMobileMode) return;
+      const next = !!open;
+      document.body.classList.toggle("controls-open", next);
+      btnMobilePanel.textContent = next ? "Hide Functions" : "Open Functions";
+    }
+
+    async function startGameSession(){
+      const ok = await startStream();
+      if(!ok) return false;
+      resetRun(false);
+      overlayMsg.classList.add("hidden");
+      statusPill.textContent = "LINK ACTIVE";
+      btnStart.disabled = true;
+      btnStop.disabled = false;
+      btnRestart.disabled = false;
+      btnMute.disabled = false;
+      gameLoop();
+      return true;
+    }
+
+    async function maybeAutoStartMobile(){
+      if(!isMobileMode || !authed || streamActive) return;
+      try{
+        await startGameSession();
+      } catch(e){
+        setAuthMini(`Mobile auto-start blocked: <b>${e?.message || "UNKNOWN"}</b>. Tap Enable Camera.`);
+      } finally {
+        updateAuthUI();
+      }
     }
 
     function hardStopAll(){
@@ -2884,6 +3011,9 @@
         setAuthPill(hasTemplate ? "LOCKED • TEMPLATE READY" : "LOCKED • ENROLL REQUIRED", false);
         setAuthMini("Camera live. Put your hand in view and hold steady.");
         authLoop();
+        if(isMobileMode && authed){
+          await maybeAutoStartMobile();
+        }
       } catch(e){
         setAuthPill("CAMERA ERROR", false);
         setAuthMini(`Camera error: <b>${e?.message || "UNKNOWN"}</b>`);
@@ -2948,6 +3078,10 @@
           authHint.innerHTML = `✅ Unlocked.<br/>You can start the game now.`;
           authOverlay.classList.remove("show");
           audio.pickup();
+          if(isMobileMode){
+            setMobilePanelOpen(false);
+            await maybeAutoStartMobile();
+          }
         } else {
           setAuthPill("DENIED", false);
           setAuthMini(`Mismatch • similarity: <b>${sim.toFixed(3)}</b> (need ≥ ${required.toFixed(2)})`);
@@ -4089,16 +4223,7 @@
         return;
       }
       try{
-        const ok = await startStream();
-        if(!ok) return;
-        resetRun(false);
-        overlayMsg.classList.add("hidden");
-        statusPill.textContent = "LINK ACTIVE";
-        btnStart.disabled = true;
-        btnStop.disabled = false;
-        btnRestart.disabled = false;
-        btnMute.disabled = false;
-        gameLoop();
+        await startGameSession();
       } catch(e){
         showFatal("CAMERA ERROR", `Could not access camera.<br/><br/><b>${e?.message || "UNKNOWN"}</b>`);
       } finally {
@@ -4310,11 +4435,27 @@
       gameRAF = requestAnimationFrame(tick);
     }
 
+    btnMobilePanel?.addEventListener("click", () => {
+      setMobilePanelOpen(!document.body.classList.contains("controls-open"));
+    });
+    btnMobileMute?.addEventListener("click", () => btnMute.click());
+    btnMobileRestart?.addEventListener("click", () => btnRestart.click());
+
     // ---------- INIT ----------
     (async function init(){
       await createHandLandmarker();
+
+      if(isMobileMode){
+        document.body.classList.add("mobile-play");
+        authed = true;
+        sessionStorage.setItem(SESSION_KEY, "1");
+        setAuthMini("Mobile quick play enabled. Camera will auto-start after permission.");
+        setMobilePanelOpen(false);
+      }
+
       updateAuthUI();
       authLoop();
+      await maybeAutoStartMobile();
 
       if(!CanvasRenderingContext2D.prototype.roundRect){
         CanvasRenderingContext2D.prototype.roundRect = function(x,y,w,h,r){
