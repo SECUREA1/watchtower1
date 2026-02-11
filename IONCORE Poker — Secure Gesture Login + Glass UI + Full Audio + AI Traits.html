@@ -41,6 +41,10 @@
     *{ box-sizing:border-box; }
     html,body{ height:100%; }
 
+    :root{
+      --vh: 1vh;
+    }
+
     body{
       margin:0;
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
@@ -60,7 +64,13 @@
         radial-gradient(700px 700px at 80% 40%, rgba(0,216,255,.09), transparent 55%),
         linear-gradient(180deg, var(--bg0), var(--bg1));
       overflow-x:hidden;
+      touch-action: manipulation;
     }
+
+    body.mobileNoLogin #loginBtn,
+    body.mobileNoLogin #logoutBtn{ display:none !important; }
+
+    body.mobileNoLogin #accessPill{ color: rgba(32,255,230,.92); }
     body:before{
       content:"";
       position:fixed;
@@ -222,14 +232,15 @@
     #tableWrap{
       width: min(660px, 96vw);
       position:relative;
-      height: 450px;
+      height: clamp(340px, calc(var(--vh) * 56), 460px);
       display:flex;
       align-items:center;
       justify-content:center;
     }
     #table{
-      width: 520px;
-      height: 410px;
+      width: min(520px, 100%);
+      aspect-ratio: 520 / 410;
+      height: auto;
       border-radius: 999px;
       position:relative;
       overflow:hidden;
@@ -325,8 +336,8 @@
 
     .seat{
       position:absolute;
-      width: 138px;
-      height: 94px;
+      width: clamp(94px, 20vw, 138px);
+      height: clamp(72px, 14vw, 94px);
       display:flex;
       flex-direction:column;
       align-items:center;
@@ -410,7 +421,7 @@
     }
 
     .card{
-      width: 40px; height: 58px;
+      width: clamp(30px, 7vw, 40px); height: clamp(46px, 10vw, 58px);
       border-radius: 12px;
       background:
         radial-gradient(circle at 30% 20%, rgba(255,255,255,.9), #ffffff 55%),
@@ -821,11 +832,24 @@
       #layout{ grid-template-columns: 1fr; }
       #tunerPanel{ position:relative; top:auto; max-height:none; }
     }
-    @media (max-width: 560px){
-      #table{ width: 480px; height: 400px; }
+    @media (max-width: 700px){
+      #tableWrap{
+        width: 100%;
+        height: clamp(300px, calc(var(--vh) * 52), 420px);
+      }
       #seat4{ display:none; }
       .brandTitle .sub{ display:none; }
       #tunerPanel{ max-height:none; }
+      #actionsBar{ justify-content:center; }
+      .leftActions, .rightActions{ justify-content:center; }
+      #log{ height: 140px; }
+    }
+
+    @media (max-width: 430px){
+      .seatTitle{ font-size: 11px; }
+      .chipLine{ font-size: 11px; }
+      #potBadge{ padding: 7px 10px; font-size: 12px; }
+      #community{ gap: 6px; padding: 8px; }
     }
 
     /* ===== Gesture Cursor ===== */
@@ -2940,6 +2964,25 @@
     lastSim: null,
   };
 
+
+  const IS_MOBILE_LAYOUT = (() => {
+    const ua = (navigator.userAgent || "").toLowerCase();
+    const coarse = window.matchMedia("(pointer: coarse)").matches;
+    return coarse || /android|iphone|ipad|ipod|mobile/.test(ua) || window.innerWidth <= 900;
+  })();
+
+  function syncViewportUnit(){
+    const vh = window.innerHeight * 0.01;
+    document.documentElement.style.setProperty("--vh", `${vh}px`);
+  }
+
+  function applyMobileNoLoginMode(){
+    if(!IS_MOBILE_LAYOUT) return;
+    document.body.classList.add("mobileNoLogin");
+    if(el("loginOverlay")) el("loginOverlay").classList.remove("show");
+    if(el("loginCloseBtn")) el("loginCloseBtn").disabled = false;
+  }
+
   const TEMPLATE_KEY = "ioncore_glass_gesture_template_v2";
   const videoEl = el("cam");
   const canvasEl = el("camCanvas");
@@ -3072,11 +3115,12 @@
   function cosineSim(a,b){ return dot(a,b) / (norm(a)*norm(b) + 1e-9); }
 
   function setLoggedIn(on){
-    gesture.loggedIn = !!on;
+    const effective = IS_MOBILE_LAYOUT ? true : !!on;
+    gesture.loggedIn = effective;
 
     el("accessPill").textContent = gesture.loggedIn ? "Verified" : "Locked";
-    el("logoutBtn").style.display = gesture.loggedIn ? "inline-block" : "none";
-    el("loginBtn").textContent = gesture.loggedIn ? "HUD" : "Login";
+    el("logoutBtn").style.display = (gesture.loggedIn && !IS_MOBILE_LAYOUT) ? "inline-block" : "none";
+    el("loginBtn").textContent = IS_MOBILE_LAYOUT ? "HUD" : (gesture.loggedIn ? "HUD" : "Login");
 
     // ✅ close button only if verified
     el("loginCloseBtn").disabled = !gesture.loggedIn;
@@ -3100,6 +3144,12 @@
   }
 
   function openLoginOverlay(){
+    if(IS_MOBILE_LAYOUT){
+      gesture.overlayOpen = false;
+      el("loginOverlay").classList.remove("show");
+      setButtonsEnabled(state.currentActor===0 && state.handActive && gesture.loggedIn);
+      return;
+    }
     gesture.overlayOpen = true;
     el("loginOverlay").classList.add("show");
     setButtonsEnabled(false);
@@ -3129,6 +3179,10 @@
   }
 
   function logout(){
+    if(IS_MOBILE_LAYOUT){
+      showBanner("MOBILE MODE", "Login gate is disabled on mobile.");
+      return;
+    }
     IonAudio.loginFail();
     setLoggedIn(false);
     openLoginOverlay();
@@ -3368,15 +3422,15 @@
       await camera.start();
 
       gesture.camReady = true;
-      setHudMsg("Camera ready");
+      setHudMsg(IS_MOBILE_LAYOUT ? "Mobile gameplay mode ready" : "Camera ready");
       updateHudBasics();
-      openLoginOverlay();
+      if(!IS_MOBILE_LAYOUT) openLoginOverlay();
     }catch(err){
       console.error(err);
       gesture.camReady = false;
       setHudMsg("Camera failed (need https/localhost)");
       updateHudBasics();
-      openLoginOverlay();
+      if(!IS_MOBILE_LAYOUT) openLoginOverlay();
     }
   }
 
@@ -4037,6 +4091,7 @@
      Boot
   ======================= */
   window.addEventListener("resize", ()=>{
+    syncViewportUnit();
     gesture.cursorX = clamp(gesture.cursorX, 0, window.innerWidth);
     gesture.cursorY = clamp(gesture.cursorY, 0, window.innerHeight);
     updateHudBasics();
@@ -4053,12 +4108,18 @@
     }
   });
 
+  syncViewportUnit();
+  applyMobileNoLoginMode();
   bindTuners();
 
-  setLoggedIn(false);
+  setLoggedIn(IS_MOBILE_LAYOUT);
   updateUISeats();
   updateBestPanel();
-  showBanner("IONCORE LOCKED", "Verify gesture to unlock poker.");
+  if(IS_MOBILE_LAYOUT){
+    showBanner("MOBILE READY", "Login removed for mobile. Gesture gameplay is unlocked.");
+  }else{
+    showBanner("IONCORE LOCKED", "Verify gesture to unlock poker.");
+  }
 
   initHands();
   </script>
