@@ -9,6 +9,7 @@
       --cyan:#20ffe6;
       --violet:#b04cff;
       --amber:#ffcf55;
+      --electric:#4fb7ff;
       --bg:#050814;
       --panel: rgba(0,0,0,.35);
       --stroke: rgba(255,255,255,.16);
@@ -73,6 +74,7 @@
       padding: 10px;
       box-shadow: 0 14px 42px rgba(0,0,0,.35);
       user-select:none;
+      transition: transform .25s ease, opacity .2s ease;
     }
     #controls .head{
       display:flex; align-items:center; justify-content:space-between; gap:10px;
@@ -106,6 +108,34 @@
     .btn:hover{ filter: brightness(1.06) drop-shadow(0 0 12px rgba(32,255,230,.18)); }
     .btn:active{ transform: translateY(1px); }
     .btn.secondary{ background: rgba(0,0,0,.28); }
+
+    #mobileToggle{
+      position: fixed;
+      right: 12px;
+      bottom: 14px;
+      z-index: 30;
+      display: none;
+      pointer-events:auto;
+    }
+
+    body.menu-hidden #hud,
+    body.menu-hidden #controls{
+      opacity: 0;
+      transform: translateY(-10px);
+      pointer-events: none;
+    }
+
+    @media (max-width: 900px){
+      #hud{ left:8px; right:8px; top:8px; gap:6px; }
+      .card{ min-width:0; flex:1 1 220px; padding:8px 9px; }
+      #controls{
+        right:8px; left:8px; top:auto; bottom:8px; width:auto;
+        max-height:46vh; overflow:auto; border-radius:14px;
+      }
+      #controls .head{ margin-bottom:8px; }
+      .group{ margin-top:8px; padding:8px; }
+      #mobileToggle{ display:inline-flex; }
+    }
 
     /* === Proximity highlights (buttons) === */
     .btn.prox-distant{
@@ -309,6 +339,18 @@
       </div>
 
       <div class="setting">
+        <label><span>Electric drive</span><span class="val" id="vDrive">0.45</span></label>
+        <input id="drive" type="range" min="0.00" max="1.00" step="0.01" value="0.45" />
+        <div class="help">Adds electric crunch and bite.</div>
+      </div>
+
+      <div class="setting">
+        <label><span>Reverb</span><span class="val" id="vReverb">0.22</span></label>
+        <input id="reverb" type="range" min="0.00" max="0.65" step="0.01" value="0.22" />
+        <div class="help">Room ambience for electric guitar depth.</div>
+      </div>
+
+      <div class="setting">
         <label><span>Volume</span><span class="val" id="vVol">0.70</span></label>
         <input id="vol" type="range" min="0.00" max="1.00" step="0.01" value="0.70" />
         <div class="help">Master output. If silent, click “Test Sound”.</div>
@@ -321,6 +363,8 @@
       </div>
     </div>
   </div>
+
+  <button class="btn" id="mobileToggle">Hide Menus</button>
 
   <div id="startOverlay">
     <div id="startCard">
@@ -362,6 +406,8 @@
       tightness: 1.00,
       hitBandPx: 14,
       sustain: 0.80,
+      drive: 0.45,
+      reverb: 0.22,
       volume: 0.70,
       showDebug: true,
 
@@ -409,8 +455,17 @@
       canvas.style.height = H + "px";
       ctx.setTransform(DPR,0,0,DPR,0,0);
     }
-    window.addEventListener("resize", resize);
+    function updateResponsiveLayout(){
+      const mobile = window.matchMedia("(max-width: 900px)").matches;
+      cfg.neckX0 = mobile ? 0.04 : 0.10;
+      cfg.neckX1 = mobile ? 0.52 : 0.45;
+      if(mobile && cfg.spread < 0.60) cfg.spread = 0.60;
+      setStatus();
+    }
+
+    window.addEventListener("resize", ()=>{ resize(); updateResponsiveLayout(); });
     resize();
+    updateResponsiveLayout();
 
     // ========= Status dots =========
     function setDot(id, state){
@@ -427,6 +482,8 @@
       el("vTight").textContent  = cfg.tightness.toFixed(2);
       el("vBand").textContent = String(cfg.hitBandPx|0);
       el("vSustain").textContent = cfg.sustain.toFixed(2);
+      el("vDrive").textContent = cfg.drive.toFixed(2);
+      el("vReverb").textContent = cfg.reverb.toFixed(2);
       el("vVol").textContent = cfg.volume.toFixed(2);
       el("vFrets").textContent = String(cfg.maxFrets|0);
       el("toggleDebug").textContent = "Debug: " + (cfg.showDebug ? "ON" : "OFF");
@@ -435,9 +492,43 @@
 
     // ========= Audio (hard unlock + fallback) =========
     const Synth = (() => {
-      let ctxA=null, mix=null, comp=null, hp=null;
+      let ctxA=null, master=null, comp=null, hp=null, drive=null, tone=null, voiceBus=null;
+      let reverbSend=null, convolver=null, reverbReturn=null;
       const activeVoices = [];
       const perStringVoice = new Array(STRINGS.length).fill(null);
+
+      function buildImpulse(audioCtx, duration=1.5, decay=2.0){
+        const len = Math.floor(audioCtx.sampleRate * duration);
+        const impulse = audioCtx.createBuffer(2, len, audioCtx.sampleRate);
+        for(let ch=0; ch<2; ch++){
+          const data = impulse.getChannelData(ch);
+          for(let i=0;i<len;i++){
+            const t = i / len;
+            data[i] = (Math.random()*2-1) * Math.pow(1 - t, decay);
+          }
+        }
+        return impulse;
+      }
+
+      function makeCurve(amount){
+        const n = 2048;
+        const curve = new Float32Array(n);
+        const k = 2 + amount * 45;
+        for(let i=0;i<n;i++){
+          const x = (i / (n - 1)) * 2 - 1;
+          curve[i] = ((1 + k) * x) / (1 + k * Math.abs(x));
+        }
+        return curve;
+      }
+
+      function applyTone(){
+        if(!drive || !tone || !reverbSend || !reverbReturn) return;
+        drive.curve = makeCurve(cfg.drive);
+        drive.oversample = "4x";
+        tone.frequency.value = clamp(3400 - cfg.drive * 1500, 1400, 3800);
+        reverbSend.gain.value = cfg.reverb;
+        reverbReturn.gain.value = 0.45;
+      }
 
       function ensure(){
         const AC = window.AudioContext || window.webkitAudioContext;
@@ -446,8 +537,15 @@
         if(!ctxA){
           ctxA = new AC();
 
-          mix = ctxA.createGain();
-          mix.gain.value = cfg.volume;
+          voiceBus = ctxA.createGain();
+          voiceBus.gain.value = 1;
+
+          drive = ctxA.createWaveShaper();
+          tone = ctxA.createBiquadFilter();
+          tone.type = "lowpass";
+
+          master = ctxA.createGain();
+          master.gain.value = cfg.volume;
 
           hp = ctxA.createBiquadFilter();
           hp.type = "highpass";
@@ -460,12 +558,27 @@
           comp.attack.value = 0.003;
           comp.release.value = 0.18;
 
-          mix.connect(hp);
+          reverbSend = ctxA.createGain();
+          reverbReturn = ctxA.createGain();
+          convolver = ctxA.createConvolver();
+          convolver.buffer = buildImpulse(ctxA, 1.6, 2.4);
+
+          voiceBus.connect(drive);
+          drive.connect(tone);
+          tone.connect(hp);
+
+          voiceBus.connect(reverbSend);
+          reverbSend.connect(convolver);
+          convolver.connect(reverbReturn);
+          reverbReturn.connect(hp);
+
           hp.connect(comp);
-          comp.connect(ctxA.destination);
+          comp.connect(master);
+          master.connect(ctxA.destination);
         }
 
-        mix.gain.value = cfg.volume;
+        master.gain.value = cfg.volume;
+        applyTone();
         return true;
       }
 
@@ -487,7 +600,7 @@
           g.gain.exponentialRampToValueAtTime(0.0001, t + 0.03);
 
           osc.connect(g);
-          g.connect(mix);
+          g.connect(master);
 
           osc.start(t);
           osc.stop(t + 0.03);
@@ -567,7 +680,7 @@
         fb.connect(delay);
 
         delay.connect(out);
-        out.connect(mix);
+        out.connect(voiceBus);
 
         noise.start(t0);
         noise.stop(t0 + 0.020);
@@ -626,7 +739,7 @@
         g.gain.linearRampToValueAtTime(0.18, t0 + 0.01);
         g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
         osc.connect(g);
-        g.connect(mix);
+        g.connect(master);
         osc.start(t0);
         osc.stop(t0 + 0.25);
       }
@@ -968,7 +1081,8 @@
     }
 
     function drawVibratingString(y, amp, thickness, active){
-      const x0 = W*0.10, x1 = W*0.90;
+      const mobile = window.matchMedia("(max-width: 900px)").matches;
+      const x0 = W*(mobile ? 0.04 : 0.10), x1 = W*(mobile ? 0.96 : 0.90);
       const segs = 48;
       const dx = (x1 - x0) / segs;
 
@@ -993,12 +1107,16 @@
       const y1 = H * 0.88;
 
       ctx.save();
-      ctx.globalAlpha = 0.18;
-      ctx.fillStyle = "rgba(0,0,0,0.9)";
+      ctx.globalAlpha = 0.30;
+      const neckGlow = ctx.createLinearGradient(x0,y0,x1,y1);
+      neckGlow.addColorStop(0, "rgba(79,183,255,0.45)");
+      neckGlow.addColorStop(0.55, "rgba(176,76,255,0.36)");
+      neckGlow.addColorStop(1, "rgba(255,207,85,0.28)");
+      ctx.fillStyle = neckGlow;
       drawRoundedRect(x0, y0, (x1-x0), (y1-y0), 22);
       ctx.fill();
-      ctx.globalAlpha = 0.30;
-      ctx.strokeStyle = "rgba(32,255,230,0.65)";
+      ctx.globalAlpha = 0.65;
+      ctx.strokeStyle = "rgba(79,183,255,0.88)";
       ctx.lineWidth = 2;
       ctx.stroke();
       ctx.restore();
@@ -1085,7 +1203,7 @@
       ctx.globalAlpha = 0.16;
       ctx.strokeStyle = "rgba(32,255,230,0.65)";
       ctx.lineWidth = 2;
-      drawRoundedRect(W*0.12, ys[0]-60, W*0.76, (ys[5]-ys[0])+120, 36);
+      drawRoundedRect(W*0.08, ys[0]-60, W*0.84, (ys[5]-ys[0])+120, 36);
       ctx.stroke();
       ctx.restore();
 
@@ -1281,6 +1399,8 @@
     el("tightness").addEventListener("input",(e)=>{ cfg.tightness = parseFloat(e.target.value); setStatus(); });
     el("band").addEventListener("input",(e)=>{ cfg.hitBandPx = parseInt(e.target.value,10); setStatus(); });
     el("sustain").addEventListener("input",(e)=>{ cfg.sustain = parseFloat(e.target.value); setStatus(); });
+    el("drive").addEventListener("input",(e)=>{ cfg.drive = parseFloat(e.target.value); setStatus(); Synth.ensure(); });
+    el("reverb").addEventListener("input",(e)=>{ cfg.reverb = parseFloat(e.target.value); setStatus(); Synth.ensure(); });
     el("vol").addEventListener("input",(e)=>{ cfg.volume = parseFloat(e.target.value); setStatus(); Synth.ensure(); Synth.updateAudioStatus(); });
     el("maxFrets").addEventListener("input",(e)=>{ cfg.maxFrets = parseInt(e.target.value,10); setStatus(); });
 
@@ -1296,6 +1416,14 @@
 
     el("startBtn").addEventListener("click", async ()=>{ await startAll(true); });
     el("startNoCam").addEventListener("click", async ()=>{ await startAll(false); });
+
+    const mobileToggle = el("mobileToggle");
+    let menuHidden = false;
+    mobileToggle.addEventListener("click", ()=>{
+      menuHidden = !menuHidden;
+      document.body.classList.toggle("menu-hidden", menuHidden);
+      mobileToggle.textContent = menuHidden ? "Show Menus" : "Hide Menus";
+    });
 
     // initial status
     el("camStat").textContent = "idle";
