@@ -22,15 +22,23 @@
       margin: 0;
       padding: 0;
       height: 100%;
+      min-height: 100dvh;
       overflow: hidden;
       font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
       background: #0b0505;
       touch-action: none;
     }
+    body {
+      display: flex;
+      width: 100%;
+      min-height: 100dvh;
+    }
     canvas#gameCanvas {
       display: block;
-      width: 100vw;
-      height: 100vh;
+      flex: 1 1 auto;
+      width: 100%;
+      height: 100%;
+      min-height: 100dvh;
       background: radial-gradient(1200px 900px at 50% 25%, #6b0000 0%, #220000 35%, #070000 100%);
     }
 
@@ -264,7 +272,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 18px;
+      padding: clamp(8px, 2.2vw, 18px);
       transition: opacity 220ms ease, transform 220ms ease;
       opacity: 1;
       transform: scale(1);
@@ -277,6 +285,7 @@
 
     .authPanel {
       width: min(980px, calc(100vw - 26px));
+      max-height: calc(100dvh - 20px);
       border-radius: 18px;
       border: 1px solid rgba(255,255,255,0.16);
       background: rgba(0,0,0,0.55);
@@ -288,6 +297,7 @@
       gap: 14px;
       padding: 14px;
       color: rgba(255,255,255,0.92);
+      overflow: auto;
     }
     @media (max-width: 860px) {
       .authPanel { grid-template-columns: 1fr; }
@@ -394,6 +404,7 @@
       padding: 9px 10px;
       border-radius: 12px;
     }
+    .mobileOnly { display: none; }
     .statusBox {
       padding: 10px 12px;
       border-radius: 14px;
@@ -503,6 +514,12 @@
 
     @media (max-width: 520px) {
       .sensTuner { width: 210px; right: 10px; bottom: 86px; } /* avoid covering mobile buttons */
+      .authPanel { max-height: calc(100dvh - 12px); padding: 10px; gap: 10px; }
+      .mobileOnly { display: inline-flex; }
+    }
+
+    @media (pointer: coarse) {
+      .mobileOnly { display: inline-flex; }
     }
   </style>
 </head>
@@ -652,6 +669,7 @@
         <div class="authBox" style="padding: 12px;">
           <div class="row">
             <button class="cta" id="btnStartCam">Enable Camera</button>
+            <button class="cta mini mobileOnly" id="btnMobileScanStart" disabled>Hand Scan + Start</button>
             <button class="cta mini" id="btnEnroll" disabled>Enroll Pose</button>
             <button class="cta mini" id="btnLogin" disabled>Login</button>
             <button class="cta mini" id="btnReset" disabled>Reset Enrollment</button>
@@ -692,6 +710,7 @@
     const aCtx        = authCanvas.getContext("2d");
 
     const btnStartCam = document.getElementById("btnStartCam");
+    const btnMobileScanStart = document.getElementById("btnMobileScanStart");
     const btnEnroll   = document.getElementById("btnEnroll");
     const btnLogin    = document.getElementById("btnLogin");
     const btnReset    = document.getElementById("btnReset");
@@ -815,12 +834,13 @@
     let stableFrames = 0;
     let lastMoveMetric = 999;
 
-    let mode = "idle"; // idle | enroll | login
+    let mode = "idle"; // idle | enroll | login | quickstart
     let accum = null;
 
     let enrolled = null;
     let loggedIn = false;
     let handControlEnabled = true;
+    const isMobileLayout = window.matchMedia("(max-width: 860px), (pointer: coarse)").matches;
 
     let lastDebugPerf = 0;
 
@@ -1253,7 +1273,7 @@
       updateDebugHUD(nowPerf);
 
       const overlayVisible = !authOverlay.classList.contains("hidden");
-      const needsAuthWork = overlayVisible || !loggedIn || (mode === "enroll" || mode === "login");
+      const needsAuthWork = overlayVisible || !loggedIn || (mode === "enroll" || mode === "login" || mode === "quickstart");
 
       if (needsAuthWork) {
         drawHandsOverlay(handMap);
@@ -1293,7 +1313,7 @@
               mode = "idle";
               authResetProgress();
               setStatus("Status: ENROLLED. Now click “Login” and hold the same two-hand pose.");
-            } else {
+            } else if (mode === "login") {
               const stored = enrolled?.vec ? new Float32Array(enrolled.vec) : null;
               if (!stored) {
                 mode = "idle";
@@ -1330,6 +1350,20 @@ Tip: re-enroll with clearer lighting and keep hands centered.`
                   );
                 }
               }
+            } else if (mode === "quickstart") {
+              loggedIn = true;
+              mode = "idle";
+              authResetProgress();
+              handControlEnabled = !!chkHandControl.checked;
+
+              setStatus("Status: MOBILE HAND SCAN COMPLETE.
+Two hands found and stable.
+Starting game…");
+
+              setTimeout(() => {
+                authOverlay.classList.add("hidden");
+                startGameBoot();
+              }, 220);
             }
           } else {
             if (mode === "enroll") {
@@ -1342,6 +1376,13 @@ Move metric: ${isFinite(lastMoveMetric) ? lastMoveMetric.toFixed(4) : "—"}`
             if (mode === "login") {
               setStatus(
                 `Status: logging in… match your enrolled pose and hold still.
+Stable frames: ${stableFrames}/${STABLE_FRAMES_TARGET}
+Move metric: ${isFinite(lastMoveMetric) ? lastMoveMetric.toFixed(4) : "—"}`
+              );
+            }
+            if (mode === "quickstart") {
+              setStatus(
+                `Status: mobile hand scan… hold BOTH hands visible and steady.
 Stable frames: ${stableFrames}/${STABLE_FRAMES_TARGET}
 Move metric: ${isFinite(lastMoveMetric) ? lastMoveMetric.toFixed(4) : "—"}`
               );
@@ -1363,6 +1404,24 @@ Move metric: ${isFinite(lastMoveMetric) ? lastMoveMetric.toFixed(4) : "—"}`
       try {
         btnStartCam.disabled = true;
         await startCamera();
+        btnMobileScanStart.disabled = false;
+      } catch (e) {
+        btnStartCam.disabled = false;
+        setStatus(`Status: camera start failed.\n${String(e?.message || e)}`);
+      }
+    });
+
+    btnMobileScanStart.addEventListener("click", async () => {
+      try {
+        if (!webcamOn) {
+          btnStartCam.disabled = true;
+          await startCamera();
+        }
+        btnMobileScanStart.disabled = false;
+        mode = "quickstart";
+        authResetProgress();
+        accum = null;
+        setStatus("Status: MOBILE HAND SCAN started. Hold both hands steady to jump straight into the game.");
       } catch (e) {
         btnStartCam.disabled = false;
         setStatus(`Status: camera start failed.\n${String(e?.message || e)}`);
@@ -1408,10 +1467,12 @@ Move metric: ${isFinite(lastMoveMetric) ? lastMoveMetric.toFixed(4) : "—"}`
       dotModel.className = "dot bad";
       lblModel.textContent = "Model: unavailable";
       btnStartCam.disabled = true;
+      btnMobileScanStart.disabled = true;
       btnEnroll.disabled = true;
       btnLogin.disabled = true;
       btnReset.disabled = true;
     } else {
+      btnMobileScanStart.disabled = !isMobileLayout;
       enrolled = loadEnrollment();
       btnReset.disabled = !enrolled;
       initLandmarker().catch((e) => {
