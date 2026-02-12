@@ -153,6 +153,28 @@
       box-shadow:0 0 0 1px rgba(0,0,0,.20) inset;
     }
 
+    #mobileMenuBtn{
+      display:none;
+      position:fixed;right:14px;top:14px;z-index:95;
+      appearance:none;border:1px solid rgba(255,255,255,.18);
+      background:rgba(12,14,22,.72);
+      color:var(--text);padding:10px 14px;border-radius:14px;
+      font-weight:900;backdrop-filter:blur(10px);
+    }
+    #mobileMenuPopup{
+      display:none;
+      position:fixed;left:0;right:0;top:0;
+      z-index:96;
+      padding:14px;
+      background:rgba(5,6,10,.86);
+      border-bottom:1px solid rgba(255,255,255,.12);
+      backdrop-filter:blur(10px);
+      box-shadow:0 12px 34px rgba(0,0,0,.45);
+    }
+    #mobileMenuPopup.open{display:block}
+    .mobileMenuHead{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+    .mobileMenuGrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+
     /* ---------- MINI HUD (always visible) ---------- */
     #topHUD{
       position:fixed;left:50%;top:10px;transform:translateX(-50%);
@@ -497,6 +519,21 @@
       .controlButtons button{padding:12px 12px}
       .badgeBtn{padding:9px 12px}
     }
+
+    @media (max-width: 900px){
+      #mobileMenuBtn{display:block}
+      #rightDock{display:none}
+      #topHUD{top:66px;left:10px;right:10px;transform:none;max-width:none;justify-content:center}
+      #topHUD .hudCard{min-width:unset;flex:1 1 280px}
+      #footerDock{left:8px;right:8px;bottom:8px;height:38vh;min-height:200px;max-height:52vh}
+      #footerTopResizer{display:none}
+      #brandBadge{left:8px;top:8px;max-width:calc(100vw - 88px)}
+      .badgeInner{padding:8px 10px}
+      .badgeActions{display:none}
+      #tile-controls .tileHeader .tileBtns{display:none}
+      #tile-field .tileHeader .tileBtns{display:none}
+      .controlButtons button{flex:1 1 calc(50% - 8px)}
+    }
   </style>
 </head>
 
@@ -504,6 +541,22 @@
   <!-- UI layer -->
   <div class="uiRoot">
     <div id="callout" class="mono">—</div>
+
+    <button id="mobileMenuBtn" class="mono">☰ Menu</button>
+    <div id="mobileMenuPopup">
+      <div class="mobileMenuHead">
+        <div class="dockTitle mono">Panel Menu</div>
+        <button class="tbtn" id="mobileMenuCloseBtn">Close</button>
+      </div>
+      <div class="mobileMenuGrid">
+        <button class="dockBtn primary mobileMenuAction" data-open="controls"><span class="label">🎛️ Controls</span></button>
+        <button class="dockBtn mobileMenuAction" data-open="field"><span class="label">🗺️ Field</span></button>
+        <button class="dockBtn mobileMenuAction" data-open="cage"><span class="label">🎯 Cage</span></button>
+        <button class="dockBtn mobileMenuAction" data-open="cam"><span class="label">🧑✋ Camera</span></button>
+        <button class="dockBtn mobileMenuAction" data-open="settings"><span class="label">⚙️ Settings</span></button>
+        <button class="dockBtn mobileMenuAction" data-open="hideAll"><span class="label">🙈 Hide Tiles</span></button>
+      </div>
+    </div>
 
     <!-- Brand badge -->
     <div id="brandBadge">
@@ -2178,21 +2231,31 @@
     // Dock selectors (header buttons)
     // -----------------------------
     function wireDockSelectors(){
-      document.querySelectorAll('.dockBtn').forEach(b=>{
+      const runDockAction = (which)=>{
+        if (which === "hideAll"){
+          ['cage','field','cam','settings'].forEach(id=>setHidden(id,true));
+          return;
+        }
+        if (which === "controls"){
+          attachToFooter('controls');
+          footerDock.classList.remove('collapsed');
+          Tile.footerCollapsed = false;
+          scheduleSave();
+          return;
+        }
+        dockTileRight(which);
+      };
+
+      document.querySelectorAll('#dockHeader .dockBtn').forEach(b=>{
         b.addEventListener('click', ()=>{
-          const which = b.getAttribute('data-open');
-          if (which === "hideAll"){
-            ['cage','field','cam','settings'].forEach(id=>setHidden(id,true));
-            return;
-          }
-          if (which === "controls"){
-            attachToFooter('controls');
-            footerDock.classList.remove('collapsed');
-            Tile.footerCollapsed = false;
-            scheduleSave();
-            return;
-          }
-          dockTileRight(which);
+          runDockAction(b.getAttribute('data-open'));
+        });
+      });
+
+      document.querySelectorAll('.mobileMenuAction').forEach(b=>{
+        b.addEventListener('click', ()=>{
+          runDockAction(b.getAttribute('data-open'));
+          mobileMenuPopup.classList.remove('open');
         });
       });
 
@@ -2224,6 +2287,12 @@
     registerTile('cam',      el('tile-cam'));
     registerTile('settings', el('tile-settings'));
 
+    const mobileMenuBtn = el('mobileMenuBtn');
+    const mobileMenuPopup = el('mobileMenuPopup');
+    const mobileMenuCloseBtn = el('mobileMenuCloseBtn');
+    mobileMenuBtn.addEventListener('click', ()=>mobileMenuPopup.classList.toggle('open'));
+    mobileMenuCloseBtn.addEventListener('click', ()=>mobileMenuPopup.classList.remove('open'));
+
     ['controls','cage','field','cam','settings'].forEach(id=>{
       enableFloatingGestures(id);
       enableDockHeightResize(id);
@@ -2231,6 +2300,25 @@
 
     wireTileButtons();
     wireDockSelectors();
+
+    function isMobileLayout(){
+      return window.matchMedia('(max-width: 900px)').matches;
+    }
+
+    function applyMobileLayout(){
+      if (!isMobileLayout()) return;
+      attachToFooter('controls', {focus:false});
+      detachToFloating('field', {
+        focus:false,
+        x: 8,
+        y: Math.max(120, window.innerHeight * 0.22),
+        w: Math.min(window.innerWidth - 16, 420),
+        h: Math.min(window.innerHeight * 0.26, 250)
+      });
+      setMinimized('field', false);
+      Tile.dockCollapsed = true;
+      rightDock.classList.add('collapsed');
+    }
 
     // Default layout (can be overwritten by saved layout)
     attachToFooter('controls');
@@ -5494,6 +5582,7 @@
 
     // Load saved state if exists (commercial persistence)
     loadAllState();
+    applyMobileLayout();
 
     // -----------------------------
     // Clamp floating tiles on resize
@@ -5520,6 +5609,7 @@
       camera.updateProjectionMatrix();
       resizeFieldMap();
       clampFloatingTilesToViewport();
+      applyMobileLayout();
     });
 
     // -----------------------------
