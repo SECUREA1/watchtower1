@@ -2761,6 +2761,8 @@
     const gestureLiveHint = document.getElementById('gestureLiveHint');
 
     let isLoggedIn = false;
+    let isMobileQuickStart = false;
+    let mobileQuickStartPending = false;
     let controllerMode = null; // "gesture" | "cursor"
 
     const MODE_KEY = 'rn_chess_login_mode_v2';
@@ -2794,6 +2796,17 @@
     }
 
     function updateAuthProfilePill(){
+      if (isMobileQuickStart){
+        authProfilePill.textContent = 'Profile: Not required (mobile)';
+        authProfilePill.className = 'pill ok';
+
+        authProfileMini.textContent = 'Profile: Auto';
+        authProfileMini.className = 'pill ok';
+
+        loginBtn.disabled = true;
+        return;
+      }
+
       const exists = hasProfileForMode(controllerMode);
       authProfilePill.textContent = `Profile: ${exists ? 'Saved' : 'Not set'}`;
       authProfilePill.className = 'pill ' + (exists ? 'ok' : 'bad');
@@ -2861,27 +2874,43 @@
       return /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || coarse;
     }
 
+    function completeMobileQuickStart(msg){
+      if (!mobileQuickStartPending) return;
+      mobileQuickStartPending = false;
+      isLoggedIn = true;
+      overlay.style.display = 'none';
+      authStatusPill.textContent = 'Status: Mobile play ready';
+      authStatusPill.className = 'pill ok';
+      setControllerPill();
+      updateAuthProfilePill();
+      startGame(match.gameIndex, true);
+      if (msg) statusDiv.innerHTML = msg;
+    }
+
     async function launchMobileGestureQuickStart(){
+      isMobileQuickStart = true;
+      mobileQuickStartPending = true;
       body.classList.add('focus');
       selectMode('gesture');
       resizeBoardForViewport();
 
-      const cameraReady = await ensureGestureEngine();
+      enrollBtn.classList.add('disabled');
+      loginBtn.classList.add('disabled');
 
-      isLoggedIn = true;
+      const cameraReady = await ensureGestureEngine();
       overlay.style.display = 'none';
-      authStatusPill.textContent = 'Status: Mobile quick start';
+      authStatusPill.textContent = 'Status: Mobile quick start scan';
       authStatusPill.className = 'pill ok';
 
-      setControllerPill();
       if (cameraReady){
         armStartupSmoothing(2400);
         beginStartupScan();
+        statusDiv.innerHTML = 'Mobile quick start: scan in progress. You will enter instantly when scan completes.';
       }
-      startGame(match.gameIndex, true);
-      statusDiv.innerHTML = cameraReady
-        ? 'Mobile quick start enabled — camera is live and startup scan is running.'
-        : 'Mobile quick start enabled — login is bypassed and chess is unlocked. Allow camera anytime to run startup scan.';
+
+      if (!cameraReady){
+        completeMobileQuickStart('Mobile quick start enabled — camera blocked, but game unlocked for instant play.');
+      }
     }
 
     /* ===========================
@@ -3501,6 +3530,7 @@
     skipStartup.addEventListener('click', ()=>{
       startupActive = false;
       showStartup(false);
+      if (isMobileQuickStart) completeMobileQuickStart('Mobile quick start complete (scan skipped).');
     });
 
     startupScanAuth.addEventListener('click', async ()=>{
@@ -3578,7 +3608,11 @@
           startupCount.textContent = '✓';
           startupMsg.innerHTML = 'Neutral captured. Cursor stabilized.';
           phase = 'done';
-          setTimeout(()=>{ startupActive=false; showStartup(false); }, 650);
+          setTimeout(()=>{
+            startupActive=false;
+            showStartup(false);
+            if (isMobileQuickStart) completeMobileQuickStart('Mobile scan complete — instant play enabled.');
+          }, 650);
         }
       }
     }
