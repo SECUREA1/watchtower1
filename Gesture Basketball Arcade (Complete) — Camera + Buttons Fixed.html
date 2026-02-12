@@ -529,6 +529,11 @@
     el.textContent = text;
   }
 
+
+  function isTouchDevice(){
+    return ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
+  }
+
   // ----------------------------
   // Config (persisted)
   // ----------------------------
@@ -1207,6 +1212,184 @@
   }
 
   // ----------------------------
+  // Mobile touch controls
+  // ----------------------------
+  const mobile = {
+    enabled: isTouchDevice(),
+    moveTouchId: null,
+    moveStartX: 0,
+    moveStartY: 0,
+    moveVec: new THREE.Vector2(0,0),
+
+    shootTouchId: null,
+    shootX: 0,
+    shootY: 0,
+    shootPrevX: 0,
+    shootPrevY: 0,
+    shootActive: false,
+
+    pinchA: null,
+    pinchB: null,
+    pinchLastAngle: 0,
+
+    moveZoneWidthRatio: 0.68,
+    moveZoneHeightRatio: 0.86,
+    moveRangeScale: 0.48,
+    aimScale: 1.45,
+    pinchYawScale: 1.25,
+  };
+
+  function resetMobileTouches(){
+    mobile.moveTouchId = null;
+    mobile.shootTouchId = null;
+    mobile.shootActive = false;
+    mobile.pinchA = null;
+    mobile.pinchB = null;
+    mobile.moveVec.set(0,0);
+  }
+
+  function canUseMobileControls(){
+    return mobile.enabled && started && ui.overlay.style.display === "none";
+  }
+
+  function setMobileMoveFromTouch(t){
+    const zoneW = Math.max(120, window.innerWidth * mobile.moveZoneWidthRatio);
+    const zoneH = Math.max(120, window.innerHeight * mobile.moveZoneHeightRatio);
+    const maxR = Math.max(64, Math.min(zoneW, zoneH) * mobile.moveRangeScale);
+
+    const dx = t.clientX - mobile.moveStartX;
+    const dy = t.clientY - mobile.moveStartY;
+    const len = Math.hypot(dx, dy);
+    const clamp = (len > maxR) ? (maxR / Math.max(1e-6, len)) : 1;
+
+    const nx = (dx * clamp) / maxR;
+    const ny = (dy * clamp) / maxR;
+
+    mobile.moveVec.x = Math.max(-1, Math.min(1, nx));
+    mobile.moveVec.y = Math.max(-1, Math.min(1, ny));
+  }
+
+  function touchById(list, id){
+    for(const t of list){ if(t.identifier === id) return t; }
+    return null;
+  }
+
+  function updatePinchYawFromTouches(){
+    if(mobile.pinchA == null || mobile.pinchB == null) return;
+    const ta = touchById(eventTouchesCache, mobile.pinchA);
+    const tb = touchById(eventTouchesCache, mobile.pinchB);
+    if(!ta || !tb) return;
+
+    const dx = tb.clientX - ta.clientX;
+    const dy = tb.clientY - ta.clientY;
+    const ang = Math.atan2(dy, dx);
+
+    let dAng = ang - mobile.pinchLastAngle;
+    if(dAng > Math.PI) dAng -= Math.PI * 2;
+    if(dAng < -Math.PI) dAng += Math.PI * 2;
+
+    mobile.pinchLastAngle = ang;
+    cameraYaw += THREE.MathUtils.radToDeg(dAng) * mobile.pinchYawScale;
+  }
+
+  let eventTouchesCache = [];
+
+  function onTouchStart(e){
+    if(!canUseMobileControls()) return;
+
+    eventTouchesCache = Array.from(e.touches);
+    const moveZoneX = window.innerWidth * mobile.moveZoneWidthRatio;
+
+    for(const t of e.changedTouches){
+      if(mobile.moveTouchId == null && t.clientX <= moveZoneX){
+        mobile.moveTouchId = t.identifier;
+        mobile.moveStartX = t.clientX;
+        mobile.moveStartY = t.clientY;
+        mobile.moveVec.set(0,0);
+        continue;
+      }
+
+      if(mobile.shootTouchId == null){
+        mobile.shootTouchId = t.identifier;
+        mobile.shootX = t.clientX;
+        mobile.shootY = t.clientY;
+        mobile.shootPrevX = t.clientX;
+        mobile.shootPrevY = t.clientY;
+        mobile.shootActive = true;
+      }
+    }
+
+    const rightTouches = eventTouchesCache.filter(t => t.clientX > moveZoneX);
+    if(rightTouches.length >= 2){
+      mobile.pinchA = rightTouches[0].identifier;
+      mobile.pinchB = rightTouches[1].identifier;
+      mobile.pinchLastAngle = Math.atan2(rightTouches[1].clientY - rightTouches[0].clientY, rightTouches[1].clientX - rightTouches[0].clientX);
+    }
+
+    e.preventDefault();
+  }
+
+  function onTouchMove(e){
+    if(!canUseMobileControls()) return;
+
+    eventTouchesCache = Array.from(e.touches);
+
+    if(mobile.moveTouchId != null){
+      const mt = touchById(e.touches, mobile.moveTouchId);
+      if(mt) setMobileMoveFromTouch(mt);
+    }
+
+    if(mobile.shootTouchId != null){
+      const st = touchById(e.touches, mobile.shootTouchId);
+      if(st){
+        const dx = st.clientX - mobile.shootPrevX;
+        const dy = st.clientY - mobile.shootPrevY;
+        mobile.shootPrevX = st.clientX;
+        mobile.shootPrevY = st.clientY;
+        mobile.shootX = st.clientX;
+        mobile.shootY = st.clientY;
+
+        if(cfg.aimAssistEnabled && heldBall){
+          const sens = Math.max(0.05, Math.min(4.0, cfg.aimDragSensitivity));
+          const maxO = Math.max(0, Math.min(4000, cfg.aimDragMaxOffsetPx));
+          aim.targetX = Math.max(-maxO, Math.min(maxO, aim.targetX + dx * sens * mobile.aimScale));
+          aim.targetY = Math.max(-maxO, Math.min(maxO, aim.targetY + dy * sens * mobile.aimScale));
+        }
+      }
+    }
+
+    updatePinchYawFromTouches();
+    e.preventDefault();
+  }
+
+  function onTouchEnd(e){
+    if(!mobile.enabled) return;
+
+    const endedIds = new Set(Array.from(e.changedTouches).map(t => t.identifier));
+
+    if(mobile.moveTouchId != null && endedIds.has(mobile.moveTouchId)){
+      mobile.moveTouchId = null;
+      mobile.moveVec.set(0,0);
+    }
+
+    if(mobile.shootTouchId != null && endedIds.has(mobile.shootTouchId)){
+      mobile.shootTouchId = null;
+      mobile.shootActive = false;
+      if(heldBall){
+        releaseThrow(1/60);
+      }
+    }
+
+    if((mobile.pinchA != null && endedIds.has(mobile.pinchA)) || (mobile.pinchB != null && endedIds.has(mobile.pinchB))){
+      mobile.pinchA = null;
+      mobile.pinchB = null;
+    }
+
+    eventTouchesCache = Array.from(e.touches);
+    e.preventDefault();
+  }
+
+  // ----------------------------
   // Gesture input (MediaPipe Hands)
   // ----------------------------
   function pxPerInch(){
@@ -1768,10 +1951,11 @@
   function showOverlay(show){
     ui.overlay.style.display = show ? "flex" : "none";
     if(show){
+      resetMobileTouches();
       paused = true;
       ui.btnPause.textContent = "Resume";
       setChip(ui.chipStatus, cameraReady ? "ok" : "warn", cameraReady ? "Status: camera ready" : "Status: idle");
-      setBridge("Menu open — Enable Camera then Start / New Round");
+      setBridge(mobile.enabled ? "Menu open — Enable Camera then Start / New Round • Mobile: left side move, right side aim/shoot, 2-finger pinch rotates view" : "Menu open — Enable Camera then Start / New Round");
     }
   }
 
@@ -1814,20 +1998,19 @@
 
     // Rotate camera yaw when move-pinched EXCEPT when aiming (then move-pinch is aim drag)
     if(!holdingForAim && g.moveSeen && g.movePinch){
-      // look mode
-      // convert dx to yaw delta
-      // simplest stable: yaw changes with horizontal offset from neutral
       if(g.neutralMove){
         const dx = g.rawMoveX - g.neutralMove.x;
         cameraYaw += (dx / Math.max(1, ui.webgl.width)) * (cfg.lookSpeed * 360) * dt * 8.0;
       }
     }
 
-    // movement vector: only when not in look mode (or when aiming and not pinched)
+    // movement vector: mobile uses a larger left-screen touch zone, otherwise gesture analog
     let moveVec = new THREE.Vector2(0,0);
     if(!paused && arcade.running){
-      if(holdingForAim){
-        if(!g.movePinch) moveVec = computeAnalogFromMoveHand(); // freeze while dragging aim
+      if(canUseMobileControls() && mobile.moveTouchId != null){
+        moveVec.copy(mobile.moveVec);
+      } else if(holdingForAim){
+        if(!g.movePinch) moveVec = computeAnalogFromMoveHand();
       } else {
         if(!g.movePinch) moveVec = computeAnalogFromMoveHand();
       }
@@ -1837,9 +2020,12 @@
     // compute grab-hand world
     let grabWorld = null;
     let holdWorld = null;
-    if(g.grabSeen){
+    if(canUseMobileControls() && mobile.shootActive && mobile.shootTouchId != null){
+      grabWorld = screenToCourtWorld(mobile.shootX, mobile.shootY);
+    } else if(g.grabSeen){
       grabWorld = screenToCourtWorld(g.rawGrabX, g.rawGrabY);
-
+    }
+    if(grabWorld){
       const camDir = new THREE.Vector3();
       camera.getWorldDirection(camDir);
       camDir.y = 0;
@@ -1858,8 +2044,10 @@
       if(!g.neutralMove && g.moveSeen) g.neutralMove = { x:g.rawMoveX, y:g.rawMoveY, z:g.rawMoveZ };
       if(!g.neutralGrab && g.grabSeen) g.neutralGrab = { x:g.rawGrabX, y:g.rawGrabY, z:g.rawGrabZ };
 
+      const grabEngaged = !!g.grabPinch || (canUseMobileControls() && mobile.shootActive);
+
       // holding logic
-      if(g.grabPinch){
+      if(grabEngaged){
         if(grabWorld){
           if(!heldBall && grabCooldown <= 0){
             const b = findClosestBall(grabWorld);
@@ -1881,12 +2069,12 @@
       }
 
       // release edge -> throw
-      if(prevGrabPinch && !g.grabPinch){
+      if(prevGrabPinch && !grabEngaged){
         releaseThrow(dt);
         lastHoldWorld = null;
         handVel.multiplyScalar(0.0);
       }
-      prevGrabPinch = !!g.grabPinch;
+      prevGrabPinch = !!grabEngaged;
     }
 
     // timers + physics
@@ -1991,11 +2179,18 @@
   setChip(ui.chipStatus, "warn", "Status: idle");
   setChip(ui.chipCam, "warn", "Camera: not started");
   setChip(ui.chipHands, "warn", "Hands: waiting");
-  setBridge("Menu open — Enable Camera then Start / New Round");
+  setBridge(mobile.enabled ? "Menu open — Enable Camera then Start / New Round • Mobile: left side move, right side aim/shoot, 2-finger pinch rotates view" : "Menu open — Enable Camera then Start / New Round");
 
   // if insecure, show warning early
   if(isLikelyInsecure()){
     setBridge("Likely insecure origin — camera may fail. Use https:// or http://localhost");
+  }
+
+  if(mobile.enabled){
+    ui.hud.addEventListener("touchstart", onTouchStart, { passive:false });
+    ui.hud.addEventListener("touchmove", onTouchMove, { passive:false });
+    ui.hud.addEventListener("touchend", onTouchEnd, { passive:false });
+    ui.hud.addEventListener("touchcancel", onTouchEnd, { passive:false });
   }
 
   requestAnimationFrame(animate);
