@@ -35,6 +35,18 @@
     }
     .btn:active { transform: translateY(1px); }
 
+    #arcadeControls {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      z-index: 25;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      max-width: min(96vw, 420px);
+    }
+
     .small { font-size: 12px; opacity: 0.82; line-height: 1.25; }
     .divider { height: 1px; background: rgba(255,255,255,0.12); margin: 10px 0; }
 
@@ -138,10 +150,28 @@
     }
 
     @media (max-width: 900px), (pointer: coarse) {
+      #hud {
+        top: max(8px, env(safe-area-inset-top));
+        left: max(8px, env(safe-area-inset-left));
+        max-width: calc(100vw - 16px);
+      }
+      .panel {
+        min-width: 0;
+        width: min(100%, 470px);
+      }
+      #arcadeControls {
+        top: max(8px, env(safe-area-inset-top));
+        right: max(8px, env(safe-area-inset-right));
+      }
       #videoWrap {
         right: max(10px, env(safe-area-inset-right));
         bottom: max(10px, env(safe-area-inset-bottom));
       }
+    }
+
+    body.panels-hidden #hud .panel,
+    body.panels-hidden #videoWrap {
+      display: none !important;
     }
   </style>
 
@@ -154,6 +184,12 @@
 </head>
 <body>
   <canvas id="canvas3d"></canvas>
+
+  <div id="arcadeControls">
+    <button id="togglePanelsBtn" class="btn">Hide Panels</button>
+    <button id="toggleCameraBtn" class="btn">Camera: On</button>
+    <button id="toggleCameraViewBtn" class="btn">Camera View: On</button>
+  </div>
 
   <div id="hud">
     <div class="panel">
@@ -471,6 +507,9 @@
   const closeBtn = document.getElementById("closeBtn");
 
   const resetBtn = document.getElementById("resetBtn");
+  const togglePanelsBtn = document.getElementById("togglePanelsBtn");
+  const toggleCameraBtn = document.getElementById("toggleCameraBtn");
+  const toggleCameraViewBtn = document.getElementById("toggleCameraViewBtn");
   const toggleFaceBtn = document.getElementById("toggleFaceBtn");
   const calFaceBtn = document.getElementById("calFaceBtn");
   const swapGlovesBtn = document.getElementById("swapGlovesBtn");
@@ -1034,15 +1073,58 @@
   // ============================================================
   let previewEnabled = true;
   let handsOverlayEnabled = true;
+  let panelsHidden = false;
+  let mediaStream = null;
 
   function setPreview(on){
     previewEnabled = !!on;
     videoWrap.style.display = previewEnabled ? "block" : "none";
     togglePreviewBtn.textContent = `Preview: ${previewEnabled ? "On" : "Off"}`;
     mPreviewBtn.textContent = previewEnabled ? "On" : "Off";
+    toggleCameraViewBtn.textContent = `Camera View: ${previewEnabled ? "On" : "Off"}`;
   }
   togglePreviewBtn.addEventListener("click", () => setPreview(!previewEnabled));
   mPreviewBtn.addEventListener("click", () => setPreview(!previewEnabled));
+  toggleCameraViewBtn.addEventListener("click", () => setPreview(!previewEnabled));
+
+  function setPanelsHidden(nextHidden) {
+    panelsHidden = !!nextHidden;
+    document.body.classList.toggle("panels-hidden", panelsHidden);
+    togglePanelsBtn.textContent = panelsHidden ? "Show Panels" : "Hide Panels";
+  }
+  togglePanelsBtn.addEventListener("click", () => setPanelsHidden(!panelsHidden));
+
+  async function setCameraEnabled(on) {
+    if (on) {
+      if (mediaStream) return;
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+      mediaStream = stream;
+      video.srcObject = stream;
+      await video.play();
+      startVision();
+      setStatus("Tracking");
+      toggleCameraBtn.textContent = "Camera: On";
+      return;
+    }
+
+    if (mediaStream) {
+      mediaStream.getTracks().forEach((track) => track.stop());
+      mediaStream = null;
+      video.srcObject = null;
+    }
+    toggleCameraBtn.textContent = "Camera: Off";
+    setStatus("Camera paused");
+  }
+
+  toggleCameraBtn.addEventListener("click", async () => {
+    try {
+      await setCameraEnabled(!mediaStream);
+    } catch (e) {
+      console.error(e);
+      setStatus("Camera unavailable");
+      alert("Camera permission denied or unavailable.");
+    }
+  });
 
   function toggleHandsOverlay(){
     handsOverlayEnabled = !handsOverlayEnabled;
@@ -2316,10 +2398,7 @@
     modal.style.display = "none";
     setStatus("Starting…");
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
-      video.srcObject = stream;
-      await video.play();
-      startVision();
+      await setCameraEnabled(true);
       setPreview(true);
       setStatus("Fight!");
     } catch (e) {
