@@ -1448,6 +1448,8 @@
       holder:0,
       vel:new THREE.Vector3(),
       omega:new THREE.Vector3(),
+      gravityScale:1,
+      airDrag:0.018,
       lastThrownAt:0,
       lastKickAt:0
     };
@@ -1458,6 +1460,8 @@
       // attach at chest/hand forward
       ballMesh.position.set(p.pos.x, 1.55, p.pos.z - 0.55);
       ball.vel.set(0,0,0);
+      ball.gravityScale = 1;
+      ball.airDrag = 0.018;
     }
 
     // ---------- Play setup / formations ----------
@@ -1589,7 +1593,13 @@
       return dirV;
     }
 
-    function requestThrow(){
+    function computeGravityScale(gestureLift=0, pinchHoldSec=0){
+      const liftTerm = clamp(gestureLift * 0.42, -0.22, 0.18);
+      const holdTerm = clamp(pinchHoldSec * 0.18, 0, 0.22);
+      return clamp(1.0 - liftTerm - holdTerm, 0.72, 1.2);
+    }
+
+    function requestThrow(opts={}){
       if (game.playState!=="Live") return;
       if (ball.state!=="held") return;
       if (ball.holderTeam!=="offense" || ball.holder!==0) return;
@@ -1602,7 +1612,12 @@
       const qb = offense[0];
       const from = new THREE.Vector3(qb.pos.x, 1.6, qb.pos.z-0.4);
       const dirV = computeAimDir();
-      const spd = Number(throwPower.value);
+      const gestureBoost = clamp(Number(opts.gestureBoost)||0, -0.2, 0.45);
+      const spd = Number(throwPower.value) * (1 + gestureBoost);
+      const liftBoost = clamp(Number(opts.liftBoost)||0, -0.7, 1.8);
+      const spinBoost = clamp(Number(opts.spinBoost)||0, -5, 8);
+      const gravityScale = computeGravityScale(liftBoost, Number(opts.pinchHoldSec)||0);
+      const airDrag = clamp(0.018 - gestureBoost*0.005, 0.010, 0.024);
 
       // scatter from fatigue/pressure
       const scatter = (Math.random()-0.5) * 0.10;
@@ -1615,8 +1630,10 @@
       ball.holder=0;
       ballMesh.position.copy(from);
       ball.vel.copy(dirV.multiplyScalar(spd));
-      ball.vel.y += 1.2;
-      ball.omega.set(0, 14, 6);
+      ball.vel.y += 1.2 + liftBoost;
+      ball.omega.set(0, 14 + spinBoost, 6 + spinBoost*0.4);
+      ball.gravityScale = gravityScale;
+      ball.airDrag = airDrag;
       ball.lastThrownAt = nowS();
 
       game.last = `Throw → ${offense[selectedReceiver].name}`;
@@ -1626,7 +1643,7 @@
       // If player is QB and role is qb, keep control; if receiver role, you can still catch.
     }
 
-    function requestToss(){
+    function requestToss(opts={}){
       if (game.playState!=="Live") return;
       if (ball.state!=="held") return;
       if (ball.holderTeam!=="offense" || ball.holder!==0) return;
@@ -1639,13 +1656,18 @@
       const dirV = to.clone().sub(from);
       const dist = Math.max(3, dirV.length());
       dirV.normalize();
-      const spd = clamp(dist*4.0, 10, 22);
+      const pinchBoost = clamp(Number(opts.pinchBoost)||0, -0.1, 0.5);
+      const liftBoost = clamp(Number(opts.liftBoost)||0, -0.4, 2.2);
+      const pinchHoldSec = clamp(Number(opts.pinchHoldSec)||0, 0, 0.9);
+      const spd = clamp(dist*4.0*(1+pinchBoost), 10, 28);
 
       ball.state="thrown";
       ballMesh.position.copy(from);
       ball.vel.copy(dirV.multiplyScalar(spd));
-      ball.vel.y += 3.2; // toss arc
-      ball.omega.set(0, 10, 4);
+      ball.vel.y += 3.2 + liftBoost + pinchHoldSec*2.1; // toss arc
+      ball.omega.set(0, 10 + pinchBoost*9, 4 + liftBoost*0.5);
+      ball.gravityScale = computeGravityScale(liftBoost, pinchHoldSec);
+      ball.airDrag = clamp(0.016 - pinchBoost*0.004, 0.010, 0.020);
       ball.lastThrownAt = nowS();
 
       game.last = `Toss → ${tgt.name}`;
@@ -1665,6 +1687,8 @@
       const vy = 14 + Math.random()*3;
       ball.vel.set(vx, vy, vz);
       ball.omega.set(0, 18, 8);
+      ball.gravityScale = 1;
+      ball.airDrag = 0.018;
       ball.lastKickAt = nowS();
       game.playState="Live";
       game.playElapsed=0;
@@ -2056,11 +2080,11 @@
       }
 
       // apply gravity
-      ball.vel.y -= 9.81*dt;
+      ball.vel.y -= 9.81*ball.gravityScale*dt;
       ballMesh.position.addScaledVector(ball.vel, dt);
 
       // drag
-      const drag = 0.018;
+      const drag = ball.airDrag;
       ball.vel.multiplyScalar(Math.exp(-drag*dt));
 
       // simple ground bounce/roll
@@ -2308,9 +2332,11 @@
       active:false,
       wrist:{x:0.5,y:0.5},
       pinch:false,
+      pinchStrength:0,
       fist:false,
       open:false,
       speed:0,
+      vel:{x:0,y:0},
       prevWrist:{x:0.5,y:0.5},
       prevT:0
     };
@@ -2322,6 +2348,12 @@
       const dy = lm[4].y - lm[8].y;
       const d = Math.hypot(dx,dy);
       return d < 0.05;
+    }
+    function pinchStrength(lm){
+      const dx = lm[4].x - lm[8].x;
+      const dy = lm[4].y - lm[8].y;
+      const d = Math.hypot(dx,dy);
+      return clamp((0.085 - d) / 0.045, 0, 1);
     }
     function detectFist(lm){
       const palm = lm[0];
@@ -2363,6 +2395,8 @@
         const vy = (wy - handState.prevWrist.y) / Math.max(dt,1e-3);
         const sp = Math.hypot(vx,vy);
         handState.speed = sp;
+        handState.vel.x = vx;
+        handState.vel.y = vy;
 
         handState.prevWrist.x = wx;
         handState.prevWrist.y = wy;
@@ -2372,6 +2406,7 @@
         handState.wrist.y = wy;
 
         handState.pinch = detectPinch(lm);
+        handState.pinchStrength = pinchStrength(lm);
         handState.fist  = detectFist(lm);
         handState.open  = detectOpen(lm);
 
@@ -2478,6 +2513,8 @@
     let prevFist=false;
     let prevPinch=false;
     let pinchDownAt=0;
+    let pinchPeakStrength=0;
+    const pinchStartWrist = {x:0.5,y:0.5};
 
     function processGestures(){
       if (!cvEnabled || !handState.active) {
@@ -2491,12 +2528,18 @@
       const open = handState.open;
 
       // status
-      gestureMini.textContent = (pinch?"pinch ":"") + (fist?"fist ":"") + (open?"open ":"") + `v=${handState.speed.toFixed(2)}`;
+      gestureMini.textContent = (pinch?"pinch ":"") + (fist?"fist ":"") + (open?"open ":"") + `v=${handState.speed.toFixed(2)} p=${handState.pinchStrength.toFixed(2)}`;
 
       // Throw gesture: fist -> open with speed threshold
       if (skillCtrlSel.value==="gesture" && roleSel.value==="qb"){
         if (prevFist && !fist && open && handState.speed > 0.9){
-          requestThrow();
+          const boost = clamp((handState.speed - 0.9) * 0.17, 0, 0.42);
+          const upward = clamp(-handState.vel.y, 0, 2.2);
+          requestThrow({
+            gestureBoost: boost,
+            liftBoost: upward * 0.85,
+            spinBoost: clamp(Math.abs(handState.vel.x)*1.1, 0, 7)
+          });
         }
       }
 
@@ -2504,22 +2547,32 @@
       if (skillCtrlSel.value==="gesture"){
         if (!prevPinch && pinch){
           pinchDownAt = nowS();
+          pinchStartWrist.x = handState.wrist.x;
+          pinchStartWrist.y = handState.wrist.y;
+          pinchPeakStrength = handState.pinchStrength;
           // On kickoff as defender: pinch to kick
           if (game.playState==="Kickoff" && roleSel.value==="defender"){
             requestKick();
-          } else {
+          } else if (!(roleSel.value==="qb" && game.playState==="Live" && ball.state==="held" && ball.holderTeam==="offense" && ball.holder===0)) {
             // action: catch/tackle
             requestAction();
           }
         }
         if (prevPinch && !pinch){
           const dur = nowS() - pinchDownAt;
-          // quick pinch tap while QB has ball = toss
+          const dy = pinchStartWrist.y - handState.wrist.y;
+          const pinchMotion = clamp(dy*2.6, -0.15, 0.9);
+          const pinchStrengthNow = Math.max(pinchPeakStrength, handState.pinchStrength);
+          const pinchBoost = clamp(pinchStrengthNow*0.38 + Math.max(0,pinchMotion)*0.35, 0, 0.5);
+          // pinch release while QB has ball = gesture toss
           if (roleSel.value==="qb" && game.playState==="Live" && ball.state==="held" && ball.holderTeam==="offense" && ball.holder===0){
-            if (dur < 0.22){
-              requestToss();
-            }
+            requestToss({
+              pinchBoost,
+              liftBoost: Math.max(0,pinchMotion) * 2.6,
+              pinchHoldSec: dur
+            });
           }
+          pinchPeakStrength = 0;
         }
       }
 
