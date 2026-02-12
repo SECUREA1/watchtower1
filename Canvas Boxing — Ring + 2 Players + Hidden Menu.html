@@ -7,16 +7,83 @@
   <style>
     :root { color-scheme: dark; }
     body { margin:0; background:#0b0f16; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; overflow:hidden; }
-    #wrap{ position:fixed; inset:0; display:grid; place-items:center; }
+    #app{
+      position:fixed; inset:0;
+      display:flex; flex-direction:column;
+      min-height:100dvh;
+    }
+    #topbar{
+      height:58px;
+      padding:10px 12px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      background:rgba(4,8,14,0.92);
+      border-bottom:1px solid rgba(255,255,255,0.14);
+      backdrop-filter:blur(10px);
+      z-index:40;
+    }
+    #topbarLeft{ display:flex; align-items:center; gap:8px; }
+    #topbarTitle{ font-size:13px; font-weight:900; letter-spacing:.2px; color:rgba(255,255,255,0.92); }
+    #topbarTiles{ display:flex; align-items:center; gap:8px; }
+    .tileBtn{
+      pointer-events:auto; cursor:pointer;
+      border:1px solid rgba(255,255,255,0.2);
+      background:rgba(255,255,255,0.08);
+      color:rgba(255,255,255,0.94);
+      border-radius:10px;
+      font-size:12px;
+      font-weight:850;
+      padding:8px 10px;
+      min-height:36px;
+    }
+    .tileBtn.primary{ border-color:rgba(90,167,255,0.45); background:rgba(90,167,255,0.16); }
+    #wrap{
+      position:relative;
+      flex:1;
+      min-height:0;
+      display:grid;
+      place-items:center;
+      padding:10px;
+    }
     #game{
       background:#05070b;
       border:1px solid rgba(255,255,255,0.12);
       border-radius:14px;
       box-shadow:0 20px 70px rgba(0,0,0,0.55);
       display:block;
+      max-width:100%;
+      max-height:100%;
+    }
+    #cameraDock{
+      position:absolute;
+      right:16px;
+      bottom:16px;
+      width:min(260px, 34vw);
+      aspect-ratio: 16 / 10;
+      border:1px solid rgba(255,255,255,0.2);
+      border-radius:12px;
+      overflow:hidden;
+      background:rgba(2,6,12,0.95);
+      box-shadow:0 14px 28px rgba(0,0,0,0.4);
+      z-index:18;
+    }
+    #cameraFeed{ width:100%; height:100%; object-fit:cover; transform:scaleX(-1); display:block; }
+    #cameraLabel{
+      position:absolute;
+      left:8px;
+      top:8px;
+      font-size:11px;
+      font-weight:800;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,0.2);
+      background:rgba(0,0,0,0.46);
+      padding:3px 8px;
+      color:rgba(255,255,255,0.9);
     }
     #hud{
-      position:fixed; left:14px; top:14px; z-index:10;
+      position:fixed; left:14px; top:72px; z-index:10;
       user-select:none; pointer-events:none;
       display:grid; gap:8px;
     }
@@ -34,7 +101,7 @@
 
     /* Hidden menu popup */
     #overlay{
-      position:fixed; inset:0;
+      position:fixed; inset:58px 0 0 0;
       display:none;
       place-items:center;
       background:radial-gradient(900px 500px at 50% 40%, rgba(90,167,255,0.12), rgba(0,0,0,0.82));
@@ -77,7 +144,25 @@
 </head>
 
 <body>
-  <div id="wrap"><canvas id="game"></canvas></div>
+  <div id="app">
+    <header id="topbar">
+      <div id="topbarLeft">
+        <button class="tileBtn primary" id="btnToggleMenuTile" type="button">Hide Menu</button>
+        <div id="topbarTitle">Canvas Boxing • Flex Fit Layout</div>
+      </div>
+      <div id="topbarTiles">
+        <button class="tileBtn" id="btnToggleCameraTile" type="button">Hide Camera</button>
+      </div>
+    </header>
+
+    <div id="wrap">
+      <canvas id="game"></canvas>
+      <div id="cameraDock">
+        <video id="cameraFeed" autoplay playsinline muted></video>
+        <div id="cameraLabel">Camera Feed</div>
+      </div>
+    </div>
+  </div>
 
   <div id="hud">
     <div class="hudRow" id="hudTop">Boxing loaded. Press ESC for menu.</div>
@@ -139,17 +224,25 @@
   const btnToggleAssist = document.getElementById("btnToggleAssist");
   const btnToggleShake = document.getElementById("btnToggleShake");
   const btnToggleWebcam = document.getElementById("btnToggleWebcam");
+  const btnToggleMenuTile = document.getElementById("btnToggleMenuTile");
+  const btnToggleCameraTile = document.getElementById("btnToggleCameraTile");
+  const cameraDock = document.getElementById("cameraDock");
+  const cameraFeed = document.getElementById("cameraFeed");
 
   function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
   function lerp(a,b,t){ return a + (b-a)*t; }
   function now(){ return performance.now(); }
 
   function layoutCanvas(){
+    const topbar = document.getElementById("topbar");
+    const topbarH = topbar ? topbar.offsetHeight : 58;
+    const usableW = Math.max(320, window.innerWidth - 20);
+    const usableH = Math.max(220, window.innerHeight - topbarH - 20);
     canvas.width = Math.floor(GAME_W * DPR);
     canvas.height = Math.floor(GAME_H * DPR);
     ctx.setTransform(DPR,0,0,DPR,0,0);
 
-    const scale = Math.min(window.innerWidth / GAME_W, window.innerHeight / GAME_H);
+    const scale = Math.min(usableW / GAME_W, usableH / GAME_H);
     canvas.style.width = Math.floor(GAME_W * scale) + "px";
     canvas.style.height = Math.floor(GAME_H * scale) + "px";
   }
@@ -162,6 +255,8 @@
     autoFace: true,
     hitShake: true,
     webcamPlaceholder: false,
+    cameraVisible: true,
+    mediaStream: null,
 
     time: now(),
     last: now(),
@@ -227,8 +322,38 @@
   function setMenu(open){
     overlay.style.display = open ? "grid" : "none";
     state.paused = open;
+    btnToggleMenuTile.textContent = open ? "Hide Menu" : "Open Menu";
     menuStatus.textContent = open ? "Status: menu open (game paused)." : "Status: running.";
     hudTop.textContent = open ? "Menu open (paused). Press ESC to resume." : "Fight!";
+  }
+
+  function setCameraVisible(visible){
+    state.cameraVisible = !!visible;
+    cameraDock.style.display = state.cameraVisible ? "block" : "none";
+    btnToggleCameraTile.textContent = state.cameraVisible ? "Hide Camera" : "Show Camera";
+    btnToggleWebcam.textContent = "Webcam Feed: " + (state.cameraVisible ? "VISIBLE" : "HIDDEN");
+    menuStatus.textContent = state.cameraVisible ? "Status: camera feed visible." : "Status: camera feed hidden.";
+    layoutCanvas();
+  }
+
+  async function setupCamera(){
+    if (!navigator.mediaDevices?.getUserMedia){
+      hudTop.textContent = "Camera unavailable in this browser.";
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+      state.mediaStream = stream;
+      cameraFeed.srcObject = stream;
+      cameraFeed.play().catch(() => {});
+      hudTop.textContent = "Fight! Camera connected.";
+    } catch {
+      hudTop.textContent = "Fight! Camera permission blocked.";
+      cameraDock.style.display = "none";
+      state.cameraVisible = false;
+      btnToggleCameraTile.textContent = "Show Camera";
+      btnToggleWebcam.textContent = "Webcam Feed: UNAVAILABLE";
+    }
   }
 
   function restartRound(){
@@ -268,9 +393,10 @@
     btnToggleShake.textContent = "Hit Shake: " + (state.hitShake ? "ON" : "OFF");
   });
   btnToggleWebcam.addEventListener("click", () => {
-    state.webcamPlaceholder = !state.webcamPlaceholder;
-    btnToggleWebcam.textContent = "Webcam Controls: " + (state.webcamPlaceholder ? "ON (placeholder)" : "OFF (placeholder)");
+    setCameraVisible(!state.cameraVisible);
   });
+  btnToggleMenuTile.addEventListener("click", () => setMenu(!isMenuOpen()));
+  btnToggleCameraTile.addEventListener("click", () => setCameraVisible(!state.cameraVisible));
 
   window.addEventListener("keydown", (e) => {
     const k = e.key;
@@ -712,6 +838,8 @@
   // Start
   restartRound();
   hudTop.textContent = "Fight! (ESC opens menu)";
+  setCameraVisible(true);
+  setupCamera();
   requestAnimationFrame(tick);
 })();
 </script>
