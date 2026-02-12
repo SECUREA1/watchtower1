@@ -1,0 +1,1865 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>3D Boxing Match — Face+Hands Control (Rounds + Judges + Combos + Health/KO Tuners)</title>
+  <style>
+    html, body { margin:0; padding:0; overflow:hidden; background:#0b0d12; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    #canvas3d { position: fixed; inset:0; }
+
+    #hud {
+      position: fixed; top: 12px; left: 12px; z-index: 10;
+      display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap;
+      color: #fff; user-select: none;
+      max-width: calc(100vw - 24px);
+    }
+    .panel {
+      background: rgba(20, 24, 35, 0.72);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 12px;
+      padding: 10px 12px;
+      backdrop-filter: blur(8px);
+      min-width: 390px;
+      max-width: 430px;
+    }
+    .row { display:flex; justify-content: space-between; gap: 10px; align-items: center; margin: 6px 0; }
+    .bar { height: 10px; border-radius: 999px; background: rgba(255,255,255,0.15); overflow: hidden; flex: 1; margin-left: 10px; }
+    .fill { height:100%; width:100%; background: #fff; }
+
+    .btn {
+      cursor: pointer; border-radius: 10px; padding: 9px 10px;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.08);
+      color: #fff; font-weight: 600; white-space: nowrap;
+    }
+    .btn:active { transform: translateY(1px); }
+
+    .small { font-size: 12px; opacity: 0.82; line-height: 1.25; }
+    .divider { height: 1px; background: rgba(255,255,255,0.12); margin: 10px 0; }
+
+    .pill {
+      display:inline-flex; align-items:center; gap:8px;
+      padding: 6px 10px; border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.06);
+      font-size: 12px; opacity: 0.95;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 999px; background: rgba(255,255,255,0.35); }
+
+    .tunerRow { display:flex; align-items:center; justify-content:space-between; gap:10px; margin: 8px 0; }
+    .tunerRow label { font-size: 12px; opacity: 0.85; min-width: 155px; }
+    .tunerRow input[type="range"] { width: 180px; }
+    .val { font-variant-numeric: tabular-nums; font-size: 12px; opacity: 0.9; min-width: 70px; text-align:right; }
+
+    #videoWrap {
+      position: fixed; right: 12px; bottom: 12px; z-index: 10;
+      width: 280px;
+      background: rgba(20, 24, 35, 0.72);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 12px;
+      padding: 10px;
+      backdrop-filter: blur(8px);
+      display: none;
+    }
+    #videoBox { position: relative; width: 100%; }
+    #video {
+      width: 100%;
+      border-radius: 10px;
+      transform: scaleX(-1);
+      background: #000;
+      display: block;
+    }
+    #overlay {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      border-radius: 10px;
+    }
+    #tip { font-size: 12px; opacity: 0.85; margin-top: 8px; line-height: 1.25; }
+
+    #modal {
+      position: fixed; inset:0; z-index: 20;
+      display:flex; align-items:center; justify-content:center;
+      background: radial-gradient(ellipse at center, rgba(10,12,18,0.75), rgba(10,12,18,0.92));
+    }
+    #modalCard {
+      width: min(820px, calc(100% - 24px));
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(20, 24, 35, 0.75);
+      backdrop-filter: blur(10px);
+      color:#fff;
+      padding: 18px;
+    }
+    #modalCard h1 { margin: 0 0 8px; font-size: 18px; }
+    #modalCard p { margin: 0 0 12px; opacity: 0.9; line-height: 1.35; }
+    #kbd {
+      font-size: 12px; opacity: 0.85;
+      display:grid; grid-template-columns: 1fr 1fr; gap: 6px 16px;
+      margin-top: 10px;
+    }
+  </style>
+
+  <!-- Three.js -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+
+  <!-- MediaPipe Hands + FaceMesh -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+</head>
+<body>
+  <canvas id="canvas3d"></canvas>
+
+  <div id="hud">
+    <div class="panel">
+      <!-- HEALTH -->
+      <div class="row">
+        <div style="min-width:86px;">You HP</div>
+        <div class="bar"><div id="hpYou" class="fill"></div></div>
+        <div id="hpYouTxt" style="min-width:46px; text-align:right;">100</div>
+      </div>
+      <div class="row">
+        <div style="min-width:86px;">AI HP</div>
+        <div class="bar"><div id="hpAI" class="fill"></div></div>
+        <div id="hpAITxt" style="min-width:46px; text-align:right;">100</div>
+      </div>
+
+      <!-- STAMINA -->
+      <div class="row">
+        <div style="min-width:86px;">You STA</div>
+        <div class="bar"><div id="staYou" class="fill"></div></div>
+        <div id="staYouTxt" style="min-width:46px; text-align:right;">100</div>
+      </div>
+      <div class="row">
+        <div style="min-width:86px;">AI STA</div>
+        <div class="bar"><div id="staAI" class="fill"></div></div>
+        <div id="staAITxt" style="min-width:46px; text-align:right;">100</div>
+      </div>
+
+      <!-- Round / clock / scoring -->
+      <div class="row">
+        <div style="min-width:86px;">Round</div>
+        <div id="roundTxt" style="flex:1; text-align:left; opacity:0.92;">1 / 3</div>
+        <div id="clockTxt" style="min-width:72px; text-align:right;">01:30</div>
+      </div>
+      <div class="row">
+        <div style="min-width:86px;">Round Pts</div>
+        <div id="rPtsTxt" style="flex:1; text-align:left; opacity:0.92;">You 0 — AI 0</div>
+        <div id="kdTxt" style="min-width:72px; text-align:right; opacity:0.92;">KD 0–0</div>
+      </div>
+      <div class="row">
+        <div style="min-width:86px;">Judges</div>
+        <div id="judgeTxt" style="flex:1; text-align:left; opacity:0.92;">0–0 (10pt)</div>
+        <div id="matchTxt" style="min-width:72px; text-align:right; opacity:0.92;">M 0–0</div>
+      </div>
+
+      <!-- Combo point-group -->
+      <div class="row">
+        <div class="small" style="min-width:86px;">Point Group</div>
+        <div class="bar"><div id="grpFill" class="fill"></div></div>
+        <div id="grpTxt" style="min-width:72px; text-align:right;">+0</div>
+      </div>
+
+      <div class="row" style="gap:8px; flex-wrap:wrap; justify-content:flex-start;">
+        <button id="resetBtn" class="btn">Reset</button>
+        <button id="toggleFaceBtn" class="btn">Face: On</button>
+        <button id="calFaceBtn" class="btn">Cal Face</button>
+        <button id="swapGlovesBtn" class="btn">Swap Gloves: Off</button>
+      </div>
+
+      <div class="row" style="gap:8px; flex-wrap:wrap; justify-content:flex-start;">
+        <button id="flipXBtn" class="btn">Flip L/R</button>
+        <button id="flipYBtn" class="btn">Flip Up/Down</button>
+        <button id="toggleLookBtn" class="btn">Face Look: On</button>
+      </div>
+
+      <div class="row" style="justify-content:flex-start; gap:10px; flex-wrap:wrap;">
+        <div class="pill"><span id="faceDot" class="dot"></span>Face <span id="faceTxt" class="small">Waiting…</span></div>
+        <div class="pill"><span id="modeDot" class="dot"></span>Mode <span id="modeTxt" class="small">Fight</span></div>
+        <div class="small" id="status">Ready</div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="small" style="margin-bottom:6px;"><b>Face Tuner (Move + Look)</b></div>
+
+      <div class="tunerRow">
+        <label>Move Sensitivity</label>
+        <input id="sensMove" type="range" min="0.8" max="14" step="0.1" value="7.5" />
+        <div id="sensMoveVal" class="val">7.5</div>
+      </div>
+
+      <div class="tunerRow">
+        <label>L/R Move Ratio</label>
+        <input id="lrRatio" type="range" min="0.4" max="3.0" step="0.05" value="1.20" />
+        <div id="lrRatioVal" class="val">1.20</div>
+      </div>
+
+      <div class="tunerRow">
+        <label>Deadzone (Center)</label>
+        <input id="deadzone" type="range" min="0.00" max="0.32" step="0.005" value="0.055" />
+        <div id="deadzoneVal" class="val">0.055</div>
+      </div>
+
+      <div class="tunerRow">
+        <label>Face Smoothness</label>
+        <input id="faceSmooth" type="range" min="0.02" max="0.40" step="0.01" value="0.14" />
+        <div id="faceSmoothVal" class="val">0.14</div>
+      </div>
+
+      <div class="tunerRow">
+        <label>Look Yaw Amount</label>
+        <input id="lookYaw" type="range" min="0" max="35" step="1" value="18" />
+        <div id="lookYawVal" class="val">18°</div>
+      </div>
+
+      <div class="tunerRow">
+        <label>Look Pitch Amount</label>
+        <input id="lookPitch" type="range" min="0" max="28" step="1" value="14" />
+        <div id="lookPitchVal" class="val">14°</div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="small" style="margin-bottom:6px;"><b>Fight Tuner (Combos + KO + Damage)</b></div>
+
+      <div class="tunerRow">
+        <label>Hit Assist</label>
+        <input id="hitAssist" type="range" min="0.0" max="1.4" step="0.05" value="0.95" />
+        <div id="hitAssistVal" class="val">0.95</div>
+      </div>
+
+      <div class="tunerRow">
+        <label>Damage Scale</label>
+        <input id="dmgScale" type="range" min="0.35" max="1.75" step="0.05" value="0.95" />
+        <div id="dmgScaleVal" class="val">0.95</div>
+      </div>
+
+      <div class="tunerRow">
+        <label>Knockdown Combo (Pts)</label>
+        <input id="kdComboPts" type="range" min="5" max="22" step="1" value="10" />
+        <div id="kdComboPtsVal" class="val">10</div>
+      </div>
+
+      <div class="tunerRow">
+        <label>Knockout Combo (Pts)</label>
+        <input id="koComboPts" type="range" min="10" max="40" step="1" value="22" />
+        <div id="koComboPtsVal" class="val">22</div>
+      </div>
+
+      <div class="tunerRow">
+        <label>TKO Knockdowns</label>
+        <input id="tkoKDs" type="range" min="2" max="5" step="1" value="3" />
+        <div id="tkoKDsVal" class="val">3</div>
+      </div>
+
+      <div class="tunerRow">
+        <label>AI Calmness</label>
+        <input id="aiCalm" type="range" min="0.70" max="1.40" step="0.05" value="1.10" />
+        <div id="aiCalmVal" class="val">1.10</div>
+      </div>
+
+      <div class="tunerRow">
+        <label>AI Power</label>
+        <input id="aiPower" type="range" min="0.30" max="0.95" step="0.05" value="0.55" />
+        <div id="aiPowerVal" class="val">0.55</div>
+      </div>
+
+      <div class="small">
+        Face controls: <b>Up/Down</b> = forward/back + look pitch, <b>Left/Right</b> = strafe + look yaw.<br/>
+        Fighters always face each other; gloves are shoulder-aligned and punch forward.
+      </div>
+    </div>
+  </div>
+
+  <div id="videoWrap">
+    <div id="videoBox">
+      <video id="video" playsinline></video>
+      <canvas id="overlay"></canvas>
+    </div>
+    <div id="tip">Overlay: deadzone circle + direction dot (move+look). Keep face centered to stop.</div>
+  </div>
+
+  <div id="modal">
+    <div id="modalCard">
+      <h1>3D Boxing — Face Movement + Hand Punching + Combos + KO Tuners</h1>
+      <p>
+        Click <b>Enable Camera</b>. Face controls movement + looking. Hands control punching (Z-thrust).
+        You score via <b>point groups</b> (combo clusters). Knockdowns come from strong combos; KO comes from KO combos.
+      </p>
+      <button id="startBtn" class="btn">Enable Camera</button>
+      <div id="kbd">
+        <div><b>W/A/S/D</b> move (optional)</div><div><b>Shift</b> guard</div>
+        <div><b>R</b> reset</div><div><b>F</b> face calibrate</div>
+        <div><b>G</b> toggle face</div><div><b>L</b> toggle face look</div>
+        <div><b>T</b> swap glove mapping</div><div><b>X/Y</b> flip L/R or Up/Down</div>
+      </div>
+      <p class="small" style="margin-top:12px;">
+        Note: Camera requires HTTPS or localhost. Run with a local server.
+      </p>
+    </div>
+  </div>
+
+<script>
+(() => {
+  // ============================================================
+  // Utils
+  // ============================================================
+  const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+  const lerp = (a,b,t)=>a+(b-a)*t;
+
+  // time-based smoothing: alpha = 1 - exp(-dt/tau)
+  function smoothTo(cur, target, dt, tau) {
+    const a = 1 - Math.exp(-dt / Math.max(1e-5, tau));
+    return cur + (target - cur) * a;
+  }
+
+  function fmtClock(sec){
+    sec = Math.max(0, Math.floor(sec));
+    const m = String(Math.floor(sec/60)).padStart(2,"0");
+    const s = String(sec%60).padStart(2,"0");
+    return `${m}:${s}`;
+  }
+
+  function applyRadialDeadzone(x, y, dz) {
+    const r = Math.hypot(x, y);
+    if (r <= dz) return { x: 0, y: 0 };
+    const nr = (r - dz) / (1 - dz);
+    const s = nr / r;
+    return { x: x*s, y: y*s };
+  }
+
+  // ============================================================
+  // DOM
+  // ============================================================
+  const canvas = document.getElementById("canvas3d");
+  const modal = document.getElementById("modal");
+  const startBtn = document.getElementById("startBtn");
+
+  const resetBtn = document.getElementById("resetBtn");
+  const toggleFaceBtn = document.getElementById("toggleFaceBtn");
+  const calFaceBtn = document.getElementById("calFaceBtn");
+  const swapGlovesBtn = document.getElementById("swapGlovesBtn");
+  const flipXBtn = document.getElementById("flipXBtn");
+  const flipYBtn = document.getElementById("flipYBtn");
+  const toggleLookBtn = document.getElementById("toggleLookBtn");
+
+  const statusEl = document.getElementById("status");
+  const faceDot = document.getElementById("faceDot");
+  const faceTxt = document.getElementById("faceTxt");
+  const modeDot = document.getElementById("modeDot");
+  const modeTxt = document.getElementById("modeTxt");
+
+  const hpYouEl = document.getElementById("hpYou");
+  const hpAIEl = document.getElementById("hpAI");
+  const hpYouTxt = document.getElementById("hpYouTxt");
+  const hpAITxt = document.getElementById("hpAITxt");
+
+  const staYouEl = document.getElementById("staYou");
+  const staAIEl = document.getElementById("staAI");
+  const staYouTxt = document.getElementById("staYouTxt");
+  const staAITxt = document.getElementById("staAITxt");
+
+  const roundTxt = document.getElementById("roundTxt");
+  const clockTxt = document.getElementById("clockTxt");
+  const rPtsTxt = document.getElementById("rPtsTxt");
+  const kdTxt = document.getElementById("kdTxt");
+  const judgeTxt = document.getElementById("judgeTxt");
+  const matchTxt = document.getElementById("matchTxt");
+
+  const grpFill = document.getElementById("grpFill");
+  const grpTxt = document.getElementById("grpTxt");
+
+  const videoWrap = document.getElementById("videoWrap");
+  const video = document.getElementById("video");
+  const overlay = document.getElementById("overlay");
+  const octx = overlay.getContext("2d");
+
+  // tuners
+  const sensMoveEl = document.getElementById("sensMove");
+  const lrRatioEl = document.getElementById("lrRatio");
+  const deadzoneEl = document.getElementById("deadzone");
+  const faceSmoothEl = document.getElementById("faceSmooth");
+  const lookYawEl = document.getElementById("lookYaw");
+  const lookPitchEl = document.getElementById("lookPitch");
+
+  const hitAssistEl = document.getElementById("hitAssist");
+  const dmgScaleEl = document.getElementById("dmgScale");
+  const kdComboPtsEl = document.getElementById("kdComboPts");
+  const koComboPtsEl = document.getElementById("koComboPts");
+  const tkoKDsEl = document.getElementById("tkoKDs");
+  const aiCalmEl = document.getElementById("aiCalm");
+  const aiPowerEl = document.getElementById("aiPower");
+
+  const sensMoveVal = document.getElementById("sensMoveVal");
+  const lrRatioVal = document.getElementById("lrRatioVal");
+  const deadzoneVal = document.getElementById("deadzoneVal");
+  const faceSmoothVal = document.getElementById("faceSmoothVal");
+  const lookYawVal = document.getElementById("lookYawVal");
+  const lookPitchVal = document.getElementById("lookPitchVal");
+
+  const hitAssistVal = document.getElementById("hitAssistVal");
+  const dmgScaleVal = document.getElementById("dmgScaleVal");
+  const kdComboPtsVal = document.getElementById("kdComboPtsVal");
+  const koComboPtsVal = document.getElementById("koComboPtsVal");
+  const tkoKDsVal = document.getElementById("tkoKDsVal");
+  const aiCalmVal = document.getElementById("aiCalmVal");
+  const aiPowerVal = document.getElementById("aiPowerVal");
+
+  function setStatus(t){ statusEl.textContent = t; }
+  function setFaceUI(active, text){
+    faceDot.style.background = active ? "#39c26a" : "rgba(255,255,255,0.35)";
+    faceTxt.textContent = text;
+  }
+  function setModeUI(mode){
+    const c = (mode === "Rest") ? "#ffd24a" : (mode === "End") ? "#ff4b4b" : "#39c26a";
+    modeDot.style.background = c;
+    modeTxt.textContent = mode;
+  }
+
+  // ============================================================
+  // GAME CONSTANTS
+  // ============================================================
+  const MATCH = {
+    roundsTotal: 3,
+    roundSeconds: 90,
+    restSeconds: 20,
+
+    hpMax: 100,
+    staminaMax: 100,
+
+    staminaRegenPerSec: 1.5,
+    staminaDrainMove: 0.12,
+    staminaFloorSpeed: 0.72,
+
+    // point groups
+    comboWindowMs: 1150,
+    comboMultPerHit: 0.10,
+    comboMaxMult: 1.65,
+    groupCommitGraceMs: 120,
+
+    // points per punch type
+    ptsJab: 1,
+    ptsClean: 2,
+    ptsBig: 3,
+
+    // stamina cost base
+    staLossJab: 1.0,
+    staLossClean: 1.7,
+    staLossBig: 2.6,
+
+    // damage base (scaled by Damage Scale)
+    dmgJab: 0.7,
+    dmgClean: 1.5,
+    dmgBig: 3.0,
+    guardDamageMul: 0.35,
+    guardStaminaMul: 0.45,
+
+    // knockdown / KO behaviour
+    kdStaminaThreshold: 28,     // tired defender
+    kdCooldownMs: 2400,
+    kdDownMs: 2600,
+    kdBaseChance: 0.18,
+    kdMaxChance: 0.68,
+
+    // movement
+    maxSpeed: 11.0,
+    accel: 54.0,
+    friction: 30.0,
+    jumpVel: 9.5,
+    gravity: -22,
+
+    // hands punch
+    punchWindowMs: 340,
+    punchCooldownMs: 260,
+    punchVzThreshold: -0.80,
+
+    // glove mapping + alignment
+    shoulderY: 1.60,
+    shoulderWidth: 0.80,
+    gloveForwardBase: 0.55,
+    gloveForwardPunchMax: 1.75,
+    gloveUpJitter: 0.22,
+    gloveSideJitter: 0.35,
+
+    // collision
+    punchRangeBase: 2.10,
+
+    // camera orbit
+    camRadius: 14.0,
+    camHeight: 6.5,
+    camFollow: 0.07
+  };
+
+  // ============================================================
+  // THREE.JS SCENE
+  // ============================================================
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0x0b0d12, 10, 35);
+
+  const camera3d = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x223355, 0.9));
+  const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+  dir.position.set(8, 12, 6);
+  scene.add(dir);
+
+  // Ring
+  const ringSize = 10;
+  const half = ringSize / 2;
+
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(ringSize, ringSize),
+    new THREE.MeshStandardMaterial({ color: 0x1b2030, roughness: 0.95, metalness: 0.05 })
+  );
+  floor.rotation.x = -Math.PI / 2;
+  scene.add(floor);
+
+  const mark = new THREE.Mesh(
+    new THREE.RingGeometry(1.1, 1.25, 64),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6, side: THREE.DoubleSide })
+  );
+  mark.rotation.x = -Math.PI / 2;
+  mark.position.y = 0.01;
+  scene.add(mark);
+
+  // Posts + ropes
+  const postGeo = new THREE.CylinderGeometry(0.08, 0.08, 2.5, 16);
+  const postMat = new THREE.MeshStandardMaterial({ color: 0x888aa0, roughness: 0.4, metalness: 0.35 });
+  const ropeMat = new THREE.MeshStandardMaterial({ color: 0xaa3340, roughness: 0.8, metalness: 0.05 });
+
+  [[-half,1.25,-half],[half,1.25,-half],[-half,1.25,half],[half,1.25,half]].forEach(([x,y,z]) => {
+    const p = new THREE.Mesh(postGeo, postMat);
+    p.position.set(x,y,z);
+    scene.add(p);
+  });
+
+  function makeRope(y) {
+    const ropeGeo = new THREE.CylinderGeometry(0.035, 0.035, ringSize, 12);
+    const r1 = new THREE.Mesh(ropeGeo, ropeMat);
+    r1.rotation.z = Math.PI/2; r1.position.set(0,y,-half); scene.add(r1);
+    const r2 = r1.clone(); r2.position.set(0,y,half); scene.add(r2);
+    const r3 = r1.clone(); r3.rotation.z = 0; r3.rotation.x = Math.PI/2; r3.position.set(-half,y,0); scene.add(r3);
+    const r4 = r3.clone(); r4.position.set(half,y,0); scene.add(r4);
+  }
+  makeRope(0.75); makeRope(1.15); makeRope(1.55);
+
+  // Platforms
+  const platforms = [];
+  const platGeo = new THREE.BoxGeometry(1.8, 0.25, 1.2);
+  const platMat = new THREE.MeshStandardMaterial({ color: 0x2b3550, roughness: 0.9, metalness: 0.05 });
+  for (let i=0;i<3;i++){
+    const m = new THREE.Mesh(platGeo, platMat);
+    m.position.set(-2 + i*2, 0.55 + (i%2)*0.4, 1.5 - i*1.2);
+    scene.add(m); platforms.push(m);
+  }
+
+  // ============================================================
+  // Glove texture (SVG)
+  // ============================================================
+  const gloveSVG = `
+  <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+    <defs>
+      <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#ff4b4b"/>
+        <stop offset="1" stop-color="#b3132a"/>
+      </linearGradient>
+      <filter id="s" x="-20%" y="-20%" width="140%" height="140%">
+        <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#000" flood-opacity="0.35"/>
+      </filter>
+    </defs>
+    <g filter="url(#s)">
+      <path d="M70 110 C55 95,55 70,75 58 C92 48,110 60,115 70 L122 58
+               C130 44,152 44,160 60 L168 78 L176 66 C186 48,212 58,206 82
+               L198 112 C205 118,208 128,204 140 L192 178 C186 195,172 206,154 210
+               L108 220 C92 224,78 216,72 200 L56 154 C52 142,56 128,66 120 Z"
+            fill="url(#g)" stroke="#4a0613" stroke-width="6" stroke-linejoin="round"/>
+      <path d="M70 178 L190 150 L206 196 C210 208,204 220,192 224 L98 246
+               C84 250,70 242,66 228 L58 196 C54 186,60 180,70 178 Z"
+            fill="#222a3a" stroke="#0c101a" stroke-width="6" stroke-linejoin="round"/>
+      <path d="M92 106 C85 86,98 70,116 68 C136 66,144 82,138 100
+               C132 118,106 124,92 106 Z" fill="rgba(255,255,255,0.22)"/>
+    </g>
+  </svg>`.trim();
+
+  const gloveURL = "data:image/svg+xml;utf8," + encodeURIComponent(gloveSVG);
+  const gloveTexture = new THREE.TextureLoader().load(gloveURL);
+  gloveTexture.colorSpace = THREE.SRGBColorSpace;
+
+  function makeGlovePlane() {
+    const geo = new THREE.PlaneGeometry(1.12, 1.12);
+    const mat = new THREE.MeshBasicMaterial({ map: gloveTexture, transparent: true, side: THREE.DoubleSide });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.visible = false;
+    scene.add(mesh);
+    return mesh;
+  }
+
+  const glovePlaneL = makeGlovePlane();
+  const glovePlaneR = makeGlovePlane();
+
+  const gloveSmoothing = {
+    L: { pos: new THREE.Vector3(), ready: false },
+    R: { pos: new THREE.Vector3(), ready: false }
+  };
+
+  // ============================================================
+  // Fighters
+  // ============================================================
+  function makeFighter(colorBody) {
+    const group = new THREE.Group();
+
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(0.9, 1.4, 0.5),
+      new THREE.MeshStandardMaterial({ color: colorBody, roughness: 0.8, metalness: 0.05 })
+    );
+    body.position.y = 1.2;
+    group.add(body);
+
+    const head = new THREE.Mesh(
+      new THREE.SphereGeometry(0.35, 18, 18),
+      new THREE.MeshStandardMaterial({ color: 0xe6d6c7, roughness: 0.95, metalness: 0.02 })
+    );
+    head.position.y = 2.05;
+    group.add(head);
+
+    const gloveGeo = new THREE.SphereGeometry(0.22, 14, 14);
+    const gloveMat = new THREE.MeshStandardMaterial({ color: 0xaa3340, roughness: 0.6, metalness: 0.1 });
+    const gL = new THREE.Mesh(gloveGeo, gloveMat);
+    const gR = gL.clone();
+    gL.position.set(-0.55, 1.62, 0.55);
+    gR.position.set( 0.55, 1.62, 0.55);
+    group.add(gL, gR);
+
+    group.userData = { body, head, gL, gR };
+    scene.add(group);
+    return group;
+  }
+
+  const player = makeFighter(0x39c26a);
+  player.position.set(0, 0, 2.6);
+
+  const ai = makeFighter(0xff4b4b);
+  ai.position.set(0, 0, -2.8);
+  ai.scale.set(1.10, 1.10, 1.10); // easier to hit
+
+  // ============================================================
+  // World helpers
+  // ============================================================
+  function groundHeightAt(x, z) {
+    let h = 0;
+    for (const p of platforms) {
+      const halfX = 0.9, halfZ = 0.6;
+      const onTop = Math.abs(x - p.position.x) <= halfX && Math.abs(z - p.position.z) <= halfZ;
+      if (onTop) {
+        const top = p.position.y + 0.125;
+        if (top > h) h = top;
+      }
+    }
+    return h;
+  }
+  function keepInRing(obj) {
+    const pad = 0.55;
+    obj.position.x = clamp(obj.position.x, -half + pad, half - pad);
+    obj.position.z = clamp(obj.position.z, -half + pad, half - pad);
+  }
+
+  // ============================================================
+  // State
+  // ============================================================
+  const match = {
+    mode: "Fight",     // Fight | Rest | End
+    round: 1,
+    roundLeft: MATCH.roundSeconds,
+    restLeft: MATCH.restSeconds,
+
+    youRoundPts: 0,
+    aiRoundPts: 0,
+
+    youGroup: { hits: 0, pts: 0, impact: 0, until: 0 },
+    aiGroup:  { hits: 0, pts: 0, impact: 0, until: 0 },
+
+    youJudgeTotal: 0,
+    aiJudgeTotal: 0,
+    youMatchPts: 0,
+    aiMatchPts: 0,
+
+    youKD: 0,
+    aiKD: 0,
+    youKDMatch: 0,
+    aiKDMatch: 0,
+
+    youDownUntil: 0,
+    aiDownUntil: 0,
+    lastKDAt: 0
+  };
+
+  const fighter = {
+    you: { hp: MATCH.hpMax, stamina: MATCH.staminaMax, guarding: false },
+    ai:  { hp: MATCH.hpMax, stamina: MATCH.staminaMax, guarding: false }
+  };
+
+  function isYouDown(now){ return now < match.youDownUntil; }
+  function isAIDown(now){ return now < match.aiDownUntil; }
+
+  function setMode(mode){
+    match.mode = mode;
+    setModeUI(mode);
+  }
+
+  // ============================================================
+  // Input
+  // ============================================================
+  const keys = new Set();
+  window.addEventListener("keydown", (e) => {
+    keys.add(e.code);
+    if (e.code === "KeyR") resetMatch();
+    if (e.code === "KeyF") calibrateFace();
+    if (e.code === "KeyG") toggleFaceMove();
+    if (e.code === "KeyL") toggleFaceLook();
+    if (e.code === "KeyT") toggleSwapGloves();
+    if (e.code === "KeyX") flipFaceX();
+    if (e.code === "KeyY") flipFaceY();
+  });
+  window.addEventListener("keyup", (e) => keys.delete(e.code));
+
+  // ============================================================
+  // Face control
+  // ============================================================
+  const faceControl = {
+    enabledMove: true,
+    enabledLook: true,
+    invertX: true,
+    invertY: false,
+
+    moveGainBase: 7.5,
+    moveGainX: 9.0,
+    moveGainY: 7.5,
+    deadzone: 0.055,
+    smooth: 0.14,
+
+    neutral: null,
+    lastSeen: 0,
+
+    raw: { x: 0, y: 0 },
+    axes: { x: 0, y: 0 },
+
+    // look offsets (smoothed)
+    lookYaw: 0,
+    lookPitch: 0,
+    lookYawTarget: 0,
+    lookPitchTarget: 0
+  };
+
+  function calibrateFace(){
+    faceControl.neutral = null;
+    setStatus("Face calibrated");
+  }
+
+  function toggleFaceMove(){
+    faceControl.enabledMove = !faceControl.enabledMove;
+    toggleFaceBtn.textContent = `Face: ${faceControl.enabledMove ? "On" : "Off"}`;
+    setStatus(faceControl.enabledMove ? "Face movement enabled" : "Face movement disabled");
+  }
+
+  function toggleFaceLook(){
+    faceControl.enabledLook = !faceControl.enabledLook;
+    toggleLookBtn.textContent = `Face Look: ${faceControl.enabledLook ? "On" : "Off"}`;
+    setStatus(faceControl.enabledLook ? "Face look enabled" : "Face look disabled");
+  }
+
+  function flipFaceX(){
+    faceControl.invertX = !faceControl.invertX;
+    setStatus(faceControl.invertX ? "Face L/R flipped" : "Face L/R normal");
+  }
+
+  function flipFaceY(){
+    faceControl.invertY = !faceControl.invertY;
+    setStatus(faceControl.invertY ? "Face up/down flipped" : "Face up/down normal");
+  }
+
+  toggleFaceBtn.addEventListener("click", toggleFaceMove);
+  toggleLookBtn.addEventListener("click", toggleFaceLook);
+  calFaceBtn.addEventListener("click", calibrateFace);
+  flipXBtn.addEventListener("click", flipFaceX);
+  flipYBtn.addEventListener("click", flipFaceY);
+
+  // ============================================================
+  // Swap glove mapping
+  // ============================================================
+  let swapGloves = false;
+  function toggleSwapGloves(){
+    swapGloves = !swapGloves;
+    swapGlovesBtn.textContent = `Swap Gloves: ${swapGloves ? "On" : "Off"}`;
+    setStatus(swapGloves ? "Glove mapping swapped" : "Glove mapping normal");
+  }
+  swapGlovesBtn.addEventListener("click", toggleSwapGloves);
+
+  // ============================================================
+  // Vision (Hands + FaceMesh)
+  // ============================================================
+  let mpHands = null;
+  let mpFace = null;
+  let visionActive = false;
+
+  function startVision() {
+    if (visionActive) return;
+
+    mpHands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+    mpHands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+    mpHands.onResults(onHandResults);
+
+    mpFace = new FaceMesh({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}` });
+    mpFace.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+    mpFace.onResults(onFaceResults);
+
+    visionActive = true;
+    videoWrap.style.display = "block";
+    setStatus("Tracking");
+    setFaceUI(false, "Waiting…");
+
+    const resizeOverlay = () => {
+      const w = Math.max(1, video.clientWidth);
+      const h = Math.max(1, video.clientHeight);
+      if (overlay.width !== Math.floor(w) || overlay.height !== Math.floor(h)) {
+        overlay.width = Math.floor(w);
+        overlay.height = Math.floor(h);
+      }
+    };
+
+    let lastVisionT = performance.now();
+    const pump = async () => {
+      if (!visionActive) return;
+      resizeOverlay();
+
+      const now = performance.now();
+      // throttle: stable + performant
+      if (video.readyState >= 2 && (now - lastVisionT) > 28) {
+        lastVisionT = now;
+        try {
+          await mpHands.send({ image: video });
+          await mpFace.send({ image: video });
+        } catch {}
+      }
+
+      drawFaceOverlay();
+      requestAnimationFrame(pump);
+    };
+    requestAnimationFrame(pump);
+  }
+
+  function onFaceResults(results) {
+    const now = performance.now();
+    const faces = results.multiFaceLandmarks;
+
+    if (!faces || faces.length === 0) {
+      faceControl.axes.x *= 0.92;
+      faceControl.axes.y *= 0.92;
+      setFaceUI(false, "Not found");
+      return;
+    }
+
+    const lm = faces[0];
+    // stable points: nose tip + both eyes
+    const nose = lm[1];
+    const le = lm[33];
+    const re = lm[263];
+
+    const eyeMidX = (le.x + re.x) * 0.5;
+    const eyeMidY = (le.y + re.y) * 0.5;
+    const eyeDist = Math.max(1e-6, Math.hypot(le.x - re.x, le.y - re.y));
+
+    // normalized yaw/pitch
+    let yaw = (nose.x - eyeMidX) / eyeDist;
+    let pitch = (nose.y - eyeMidY) / eyeDist;
+
+    if (!faceControl.neutral) faceControl.neutral = { yaw, pitch };
+    yaw -= faceControl.neutral.yaw;
+    pitch -= faceControl.neutral.pitch;
+
+    // gains updated by sliders
+    let ax = yaw * faceControl.moveGainX;
+    let ay = (-pitch) * faceControl.moveGainY; // face up => forward
+
+    if (faceControl.invertX) ax = -ax;
+    if (faceControl.invertY) ay = -ay;
+
+    ax = clamp(ax, -1, 1);
+    ay = clamp(ay, -1, 1);
+
+    faceControl.raw.x = ax;
+    faceControl.raw.y = ay;
+
+    const dzOut = applyRadialDeadzone(ax, ay, faceControl.deadzone);
+    const tx = clamp(dzOut.x, -1, 1);
+    const ty = clamp(dzOut.y, -1, 1);
+
+    // smoothing tau from slider (bigger => smoother)
+    const tau = lerp(0.03, 0.28, clamp((faceControl.smooth - 0.02) / 0.38, 0, 1));
+    const dt = 0.033; // approximate vision dt
+
+    faceControl.axes.x = smoothTo(faceControl.axes.x, tx, dt, tau);
+    faceControl.axes.y = smoothTo(faceControl.axes.y, ty, dt, tau);
+
+    faceControl.lastSeen = now;
+    setFaceUI(true, "Tracking");
+  }
+
+  // ============================================================
+  // Hands -> punch detection + glove positioning helpers
+  // ============================================================
+  const handMotion = {
+    Left:  { lastZ: null, lastT: null, punchUntil: 0, cooldownUntil: 0, punchPower: 0, punchStart: 0 },
+    Right: { lastZ: null, lastT: null, punchUntil: 0, cooldownUntil: 0, punchPower: 0, punchStart: 0 }
+  };
+
+  let lastHandPoints = { Left: null, Right: null };
+
+  function onHandResults(results) {
+    const now = performance.now();
+
+    lastHandPoints.Left = null;
+    lastHandPoints.Right = null;
+
+    if (!results.multiHandLandmarks || !results.multiHandedness) return;
+
+    for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+      const lm = results.multiHandLandmarks[i];
+      const handedness = results.multiHandedness[i];
+      const label = handedness.label === "Left" ? "Left" : "Right";
+      lastHandPoints[label] = readHandPunch(label, lm, now);
+    }
+  }
+
+  function readHandPunch(label, lm, now) {
+    const x = (lm[0].x + lm[5].x + lm[17].x) / 3;
+    const y = (lm[0].y + lm[5].y + lm[17].y) / 3;
+    const z = (lm[0].z + lm[5].z + lm[17].z) / 3;
+
+    const m = handMotion[label] || handMotion.Right;
+
+    if (m.lastZ != null && m.lastT != null) {
+      const dt = Math.max(0.001, (now - m.lastT) / 1000);
+      const vz = (z - m.lastZ) / dt; // negative => toward camera
+
+      if (vz < MATCH.punchVzThreshold && now > m.cooldownUntil && match.mode === "Fight") {
+        m.punchStart = now;
+        m.punchUntil = now + MATCH.punchWindowMs;
+        m.cooldownUntil = now + MATCH.punchCooldownMs;
+
+        // punch power (normalized)
+        const raw = (-vz - (-MATCH.punchVzThreshold)) / 2.2;
+        m.punchPower = clamp(raw, 0, 1);
+      }
+    }
+
+    m.lastZ = z;
+    m.lastT = now;
+
+    return { nx: x, ny: y, nz: z, punching: now < m.punchUntil, power: m.punchPower, start: m.punchStart, until: m.punchUntil };
+  }
+
+  // ============================================================
+  // Combat: point groups + KD + KO
+  // ============================================================
+  function classifyPunch(power, defenderGuarding) {
+    // defending yields low/no points, reduced damage
+    if (defenderGuarding) return { pts: 0, staLoss: 0, dmg: 0.20, impact: 0.25, kind: "block" };
+    if (power < 0.35) return { pts: MATCH.ptsJab,   staLoss: MATCH.staLossJab,   dmg: MATCH.dmgJab,   impact: 1.0, kind: "jab" };
+    if (power < 0.70) return { pts: MATCH.ptsClean, staLoss: MATCH.staLossClean, dmg: MATCH.dmgClean, impact: 1.7, kind: "clean" };
+    return { pts: MATCH.ptsBig, staLoss: MATCH.staLossBig, dmg: MATCH.dmgBig, impact: 2.6, kind: "big" };
+  }
+
+  function addToGroup(side, pts, impact, now) {
+    const g = (side === "you") ? match.youGroup : match.aiGroup;
+
+    const inWindow = (g.hits > 0 && now <= g.until + MATCH.groupCommitGraceMs);
+    if (!inWindow && g.hits > 0) commitGroup(side, now, true);
+
+    g.hits += 1;
+    const mult = clamp(1 + (g.hits - 1) * MATCH.comboMultPerHit, 1, MATCH.comboMaxMult);
+    const add = Math.round(pts * mult);
+    g.pts += add;
+    g.impact += impact * mult;
+    g.until = now + MATCH.comboWindowMs;
+
+    return { groupPts: g.pts, mult };
+  }
+
+  function commitGroup(side, now, canKD) {
+    const g = (side === "you") ? match.youGroup : match.aiGroup;
+    if (g.hits <= 0) return;
+
+    if (side === "you") {
+      match.youRoundPts += g.pts;
+      match.youMatchPts += g.pts;
+      setStatus(`Point Group +${g.pts}`);
+    } else {
+      match.aiRoundPts += g.pts;
+      match.aiMatchPts += g.pts;
+    }
+
+    if (canKD) tryKDorKOFromGroup(side, g.pts, g.impact, now);
+
+    g.hits = 0; g.pts = 0; g.impact = 0; g.until = 0;
+  }
+
+  function tryKDorKOFromGroup(attackerSide, groupPts, groupImpact, now) {
+    if (now - match.lastKDAt < MATCH.kdCooldownMs) return;
+
+    const kdComboPts = Number(kdComboPtsEl.value);
+    const koComboPts = Number(koComboPtsEl.value);
+    const tkoKDs = Number(tkoKDsEl.value);
+
+    const defenderSide = (attackerSide === "you") ? "ai" : "you";
+    const defender = (defenderSide === "you") ? fighter.you : fighter.ai;
+
+    // only allow KD/KO if tired enough
+    const tiredEnough = defender.stamina <= MATCH.kdStaminaThreshold;
+
+    // KO: very strong combo + low HP + tired
+    if (tiredEnough && groupPts >= koComboPts && defender.hp <= 26) {
+      match.lastKDAt = now;
+      endMatch(attackerSide === "you" ? "KO — You win!" : "KO — AI wins!");
+      return;
+    }
+
+    // KD: combo points threshold + tired, chance-based with impact
+    if (!tiredEnough) return;
+    if (groupPts < kdComboPts) return;
+
+    const tired = clamp((MATCH.kdStaminaThreshold - defender.stamina) / MATCH.kdStaminaThreshold, 0, 1);
+    const big = clamp((groupImpact - kdComboPts) / 14.0, 0, 1);
+    const chance = clamp(MATCH.kdBaseChance + tired*0.30 + big*0.25, 0, MATCH.kdMaxChance);
+
+    if (Math.random() < chance) {
+      match.lastKDAt = now;
+
+      if (defenderSide === "ai") {
+        match.aiKD += 1;
+        match.aiKDMatch += 1;
+        match.aiDownUntil = now + MATCH.kdDownMs;
+        setStatus("KNOCKDOWN! (AI)");
+      } else {
+        match.youKD += 1;
+        match.youKDMatch += 1;
+        match.youDownUntil = now + MATCH.kdDownMs;
+        setStatus("KNOCKDOWN! (You)");
+      }
+
+      // round swing points
+      const kdBonus = 8;
+      if (attackerSide === "you") { match.youRoundPts += kdBonus; match.youMatchPts += kdBonus; }
+      else { match.aiRoundPts += kdBonus; match.aiMatchPts += kdBonus; }
+
+      // TKO
+      if (match.aiKDMatch >= tkoKDs) endMatch("TKO — You win!");
+      if (match.youKDMatch >= tkoKDs) endMatch("TKO — AI wins!");
+    }
+  }
+
+  function endMatch(msg){
+    setMode("End");
+    setStatus(msg);
+  }
+
+  // ============================================================
+  // Hit detection geometry (easier hits)
+  // ============================================================
+  function getAIHitTargets() {
+    ai.updateMatrixWorld(true);
+    const head = new THREE.Vector3(0, 2.05, 0).applyMatrix4(ai.matrixWorld);
+    const chest = new THREE.Vector3(0, 1.55, 0.15).applyMatrix4(ai.matrixWorld);
+    const body = new THREE.Vector3(0, 1.20, 0).applyMatrix4(ai.matrixWorld);
+    return [
+      { p: head,  r: 1.25 },
+      { p: chest, r: 1.60 },
+      { p: body,  r: 1.70 }
+    ];
+  }
+
+  function getYouTarget() {
+    return new THREE.Vector3(player.position.x, 1.55, player.position.z);
+  }
+
+  let lastYouContactAt = 0;
+  let lastAIContactAt = 0;
+
+  function staminaSpeedMul(sta) {
+    const t = clamp(sta / MATCH.staminaMax, 0, 1);
+    return lerp(MATCH.staminaFloorSpeed, 1.0, t);
+  }
+
+  function applyHitToDefender(defSide, punch, now, groupSide) {
+    const dmgScale = Number(dmgScaleEl.value);
+
+    const defender = (defSide === "you") ? fighter.you : fighter.ai;
+    const guarding = defender.guarding;
+
+    const cls = classifyPunch(punch.power, guarding);
+
+    // points group
+    addToGroup(groupSide, cls.pts, cls.impact, now);
+
+    // stamina loss (reduced when guarding)
+    const staLoss = guarding ? cls.staLoss * MATCH.guardStaminaMul : cls.staLoss;
+    defender.stamina = clamp(defender.stamina - staLoss, 0, MATCH.staminaMax);
+
+    // damage (reduced when guarding)
+    let dmg = cls.dmg * dmgScale;
+    if (guarding) dmg *= MATCH.guardDamageMul;
+    defender.hp = clamp(defender.hp - dmg, 0, MATCH.hpMax);
+
+    // if HP hits 0, KO
+    if (defender.hp <= 0) {
+      endMatch(defSide === "you" ? "KO — AI wins!" : "KO — You win!");
+    }
+
+    return cls.kind;
+  }
+
+  // ============================================================
+  // AI brain (calm, faces player, punches not too strong)
+  // ============================================================
+  const aiBrain = {
+    vx: 0, vz: 0,
+    nextDecision: 0,
+    guardingUntil: 0,
+
+    punching: false,
+    punchStart: 0,
+    punchUntil: 0,
+    cooldownUntil: 0,
+    activeHand: "R",
+    power: 0.55,
+    hitPoint: new THREE.Vector3()
+  };
+
+  function aiThink(now, dt) {
+    // AI always face player
+    const dx = player.position.x - ai.position.x;
+    const dz = player.position.z - ai.position.z;
+    const yaw = Math.atan2(dx, dz); // toward player
+    ai.rotation.y = yaw;
+
+    // down or not fighting
+    if (match.mode !== "Fight" || isAIDown(now)) {
+      aiBrain.vx *= 0.88;
+      aiBrain.vz *= 0.88;
+      fighter.ai.guarding = false;
+      aiBrain.punching = false;
+
+      // gloves up while down/rest
+      ai.userData.gL.position.set(-0.45, 1.72, 0.48);
+      ai.userData.gR.position.set( 0.45, 1.72, 0.48);
+      return;
+    }
+
+    const calm = Number(aiCalmEl.value);
+    const aiPow = Number(aiPowerEl.value);
+
+    // decisions
+    if (now > aiBrain.nextDecision) {
+      aiBrain.nextDecision = now + (260 + Math.random()*240) * calm;
+
+      // guard probability increases with low stamina/hp
+      const tired = clamp((MATCH.kdStaminaThreshold - fighter.ai.stamina) / MATCH.kdStaminaThreshold, 0, 1);
+      const hurt = clamp((40 - fighter.ai.hp) / 40, 0, 1);
+      const guardChance = clamp(0.10 + tired*0.30 + hurt*0.25, 0.10, 0.65);
+
+      if (Math.random() < guardChance) {
+        aiBrain.guardingUntil = now + (260 + Math.random()*220) * calm;
+      }
+    }
+    fighter.ai.guarding = now < aiBrain.guardingUntil;
+
+    // movement: circle + keep range
+    const dist = Math.hypot(dx, dz);
+    const dirTo = dist > 1e-6 ? { x: dx/dist, z: dz/dist } : { x: 0, z: 1 };
+    const perp = { x: -dirTo.z, z: dirTo.x };
+
+    const desiredDist = 3.35;
+    const delta = dist - desiredDist;
+
+    const circleDir = (Math.sin(now * 0.0010) > 0) ? 1 : -1;
+    let desiredVX = perp.x * (2.3 / calm) * circleDir + dirTo.x * clamp(delta, -1.6, 1.6) * 1.05;
+    let desiredVZ = perp.z * (2.3 / calm) * circleDir + dirTo.z * clamp(delta, -1.6, 1.6) * 1.05;
+
+    if (dist < 2.2) {
+      desiredVX += (-dirTo.x) * (3.0 / calm);
+      desiredVZ += (-dirTo.z) * (3.0 / calm);
+    }
+
+    const maxSpd = 6.6 / calm;
+    const len = Math.hypot(desiredVX, desiredVZ) || 1;
+    desiredVX = (desiredVX / len) * Math.min(maxSpd, len);
+    desiredVZ = (desiredVZ / len) * Math.min(maxSpd, len);
+
+    const a = 1 - Math.exp(-18.0 * dt);
+    const f = 1 - Math.exp(-16.0 * dt);
+    const wantMove = Math.hypot(desiredVX, desiredVZ) > 0.15;
+
+    aiBrain.vx += wantMove ? (desiredVX - aiBrain.vx) * a : (0 - aiBrain.vx) * f;
+    aiBrain.vz += wantMove ? (desiredVZ - aiBrain.vz) * a : (0 - aiBrain.vz) * f;
+
+    ai.position.x += aiBrain.vx * dt;
+    ai.position.z += aiBrain.vz * dt;
+
+    // stamina drain from movement
+    if (wantMove) {
+      const moveIntensity = clamp(Math.hypot(aiBrain.vx, aiBrain.vz) / (maxSpd + 1e-6), 0, 1);
+      fighter.ai.stamina = clamp(fighter.ai.stamina - MATCH.staminaDrainMove * moveIntensity * (dt*55), 0, MATCH.staminaMax);
+    }
+
+    // punching (calm)
+    aiBrain.punching = false;
+    const canPunch =
+      (now > aiBrain.cooldownUntil) &&
+      !fighter.ai.guarding &&
+      !isYouDown(now) &&
+      match.mode === "Fight";
+
+    if (canPunch && dist < 4.7) {
+      const baseP = 0.16;
+      const p = clamp(baseP / calm, 0.05, 0.18);
+
+      if (Math.random() < p) {
+        aiBrain.activeHand = (Math.random() < 0.5) ? "L" : "R";
+        aiBrain.power = clamp((0.35 + Math.random()*0.55) * aiPow, 0.25, 0.85);
+        aiBrain.punchStart = now;
+        aiBrain.punchUntil = now + (260 + Math.random()*140);
+        aiBrain.cooldownUntil = now + (540 + Math.random()*280) * calm;
+      }
+    }
+
+    // animate AI gloves (aligned to shoulders in AI local)
+    const idle = Math.sin(now * 0.007) * 0.08;
+    const gL = ai.userData.gL;
+    const gR = ai.userData.gR;
+
+    if (fighter.ai.guarding) {
+      gL.position.set(-0.42, 1.78 + idle, 0.70);
+      gR.position.set( 0.42, 1.78 - idle, 0.70);
+      return;
+    } else {
+      gL.position.set(-0.55, 1.62 + idle, 0.55 + Math.sin(now*0.006)*0.10);
+      gR.position.set( 0.55, 1.62 - idle, 0.55 + Math.cos(now*0.006)*0.10);
+    }
+
+    if (now < aiBrain.punchUntil) {
+      aiBrain.punching = true;
+      const t = clamp((now - aiBrain.punchStart) / Math.max(1, (aiBrain.punchUntil - aiBrain.punchStart)), 0, 1);
+      const pop = Math.sin(t * Math.PI) * (1.85 * aiBrain.power); // enemy gloves pop further
+
+      const g = (aiBrain.activeHand === "L") ? gL : gR;
+      g.position.z = 0.55 + pop;
+
+      // hitpoint along AI forward (world)
+      const fwd = new THREE.Vector3(0,0,1).applyQuaternion(ai.quaternion);
+      aiBrain.hitPoint.set(ai.position.x, 1.55, ai.position.z);
+      aiBrain.hitPoint.addScaledVector(fwd, 1.15 + pop);
+    }
+  }
+
+  // ============================================================
+  // Round flow
+  // ============================================================
+  function resetRoundScoring() {
+    match.youRoundPts = 0;
+    match.aiRoundPts = 0;
+    match.youGroup = { hits: 0, pts: 0, impact: 0, until: 0 };
+    match.aiGroup  = { hits: 0, pts: 0, impact: 0, until: 0 };
+    match.youKD = 0;
+    match.aiKD = 0;
+  }
+
+  function resetMatch() {
+    fighter.you.hp = MATCH.hpMax;
+    fighter.ai.hp  = MATCH.hpMax;
+    fighter.you.stamina = MATCH.staminaMax;
+    fighter.ai.stamina  = MATCH.staminaMax;
+    fighter.you.guarding = false;
+    fighter.ai.guarding = false;
+
+    player.position.set(0, 0, 2.6);
+    ai.position.set(0, 0, -2.8);
+
+    match.round = 1;
+    match.roundLeft = MATCH.roundSeconds;
+    match.restLeft = MATCH.restSeconds;
+
+    match.youJudgeTotal = 0;
+    match.aiJudgeTotal = 0;
+    match.youMatchPts = 0;
+    match.aiMatchPts = 0;
+
+    match.youKDMatch = 0;
+    match.aiKDMatch = 0;
+
+    match.youDownUntil = 0;
+    match.aiDownUntil = 0;
+    match.lastKDAt = 0;
+
+    resetRoundScoring();
+    setMode("Fight");
+    setStatus("Fight!");
+  }
+
+  function endRound(now) {
+    commitGroup("you", now, true);
+    commitGroup("ai",  now, true);
+
+    // 10-point must style (simple)
+    let you10 = 10, ai10 = 10;
+    if (match.youRoundPts > match.aiRoundPts) { you10 = 10; ai10 = 9; }
+    else if (match.aiRoundPts > match.youRoundPts) { you10 = 9; ai10 = 10; }
+
+    // knockdowns swing
+    ai10 = clamp(ai10 - match.aiKD, 7, 10);
+    you10 = clamp(you10 - match.youKD, 7, 10);
+
+    // 3 judges sum
+    match.youJudgeTotal += you10*3;
+    match.aiJudgeTotal  += ai10*3;
+
+    setMode("Rest");
+    match.restLeft = MATCH.restSeconds;
+    setStatus(`End R${match.round}: ${match.youRoundPts}-${match.aiRoundPts}`);
+  }
+
+  function startNextRound() {
+    match.round++;
+    if (match.round > MATCH.roundsTotal) {
+      const winner =
+        (match.youJudgeTotal > match.aiJudgeTotal) ? "Decision — You win!" :
+        (match.aiJudgeTotal > match.youJudgeTotal) ? "Decision — AI wins!" :
+        "Draw — Split Decision";
+      endMatch(winner);
+      return;
+    }
+    resetRoundScoring();
+    setMode("Fight");
+    match.roundLeft = MATCH.roundSeconds;
+    player.position.z =  2.7;
+    ai.position.z = -2.7;
+    setStatus(`Round ${match.round} — Fight!`);
+  }
+
+  // ============================================================
+  // Movement & Physics
+  // ============================================================
+  const physY = { velY: 0, grounded: false };
+  const movePhys = { vx: 0, vz: 0 };
+
+  // ============================================================
+  // Glove positioning: shoulder-aligned + tracking offsets
+  // ============================================================
+  const up = new THREE.Vector3(0,1,0);
+
+  function getFacingBasis(aPos, bPos) {
+    // forward points from A to B (on XZ plane)
+    const fwd = new THREE.Vector3(bPos.x - aPos.x, 0, bPos.z - aPos.z);
+    const len = fwd.length();
+    if (len < 1e-5) fwd.set(0,0,-1);
+    else fwd.multiplyScalar(1/len);
+
+    const right = new THREE.Vector3().crossVectors(up, fwd).normalize(); // right = up x fwd
+    return { fwd, right };
+  }
+
+  function updatePlayerGloves(now, dt) {
+    // Always compute shoulders from player->AI direction
+    const { fwd, right } = getFacingBasis(player.position, ai.position);
+
+    const leftShoulder = player.position.clone()
+      .addScaledVector(up, MATCH.shoulderY)
+      .addScaledVector(right, -MATCH.shoulderWidth);
+
+    const rightShoulder = player.position.clone()
+      .addScaledVector(up, MATCH.shoulderY)
+      .addScaledVector(right, MATCH.shoulderWidth);
+
+    // choose mapping based on swapGloves
+    const physLeft  = lastHandPoints.Left;
+    const physRight = lastHandPoints.Right;
+
+    const leftHand  = swapGloves ? physRight : physLeft;
+    const rightHand = swapGloves ? physLeft  : physRight;
+
+    const makeTarget = (shoulderPos, hand, sideSign) => {
+      // base glove: in front of shoulder
+      let target = shoulderPos.clone().addScaledVector(fwd, MATCH.gloveForwardBase);
+
+      if (hand) {
+        // hand nx,ny,nz normalized; turn into small offsets around shoulder
+        const dx = clamp((hand.nx - 0.5) * 2.0, -1, 1) * MATCH.gloveSideJitter;
+        const dy = clamp((0.55 - hand.ny) * 2.0, -1, 1) * MATCH.gloveUpJitter;
+        target.addScaledVector(right, dx * 0.55 * sideSign); // keep it on its side
+        target.addScaledVector(up, dy);
+
+        // thrust from nz + punch pop
+        const thrust = clamp((-hand.nz) * 4.8, 0, 2.2);
+        let pop = 0;
+        if (hand.punching) {
+          const t = clamp((now - hand.start) / Math.max(1, (hand.until - hand.start)), 0, 1);
+          pop = Math.sin(t * Math.PI) * (MATCH.gloveForwardPunchMax * (0.62 + 0.38*hand.power));
+        }
+        target.addScaledVector(fwd, thrust * 0.55 + pop);
+      }
+
+      return target;
+    };
+
+    const tgtL = makeTarget(leftShoulder, leftHand, -1);
+    const tgtR = makeTarget(rightShoulder, rightHand,  1);
+
+    // Smooth positions for stability
+    const tau = 0.045; // glove smoothing ~ quick but stable
+    if (!gloveSmoothing.L.ready) { gloveSmoothing.L.pos.copy(tgtL); gloveSmoothing.L.ready = true; }
+    if (!gloveSmoothing.R.ready) { gloveSmoothing.R.pos.copy(tgtR); gloveSmoothing.R.ready = true; }
+
+    gloveSmoothing.L.pos.lerp(tgtL, 1 - Math.exp(-dt/tau));
+    gloveSmoothing.R.pos.lerp(tgtR, 1 - Math.exp(-dt/tau));
+
+    glovePlaneL.visible = !!leftHand;
+    glovePlaneR.visible = !!rightHand;
+
+    glovePlaneL.position.copy(gloveSmoothing.L.pos);
+    glovePlaneR.position.copy(gloveSmoothing.R.pos);
+
+    // orient gloves to face the camera (billboard) but remain aligned to player direction
+    glovePlaneL.lookAt(camera3d.position);
+    glovePlaneR.lookAt(camera3d.position);
+
+    // scale a bit when punching
+    const sL = leftHand ? (0.95 + (leftHand.punching ? 0.18 : 0.0) + leftHand.power*0.10) : 1.0;
+    const sR = rightHand ? (0.95 + (rightHand.punching ? 0.18 : 0.0) + rightHand.power*0.10) : 1.0;
+    glovePlaneL.scale.set(sL, sL, sL);
+    glovePlaneR.scale.set(sR, sR, sR);
+
+    // return punch points (for collision)
+    return {
+      L: leftHand ? { pos: glovePlaneL.position.clone(), punching: leftHand.punching, power: leftHand.power } : null,
+      R: rightHand ? { pos: glovePlaneR.position.clone(), punching: rightHand.punching, power: rightHand.power } : null
+    };
+  }
+
+  // ============================================================
+  // FACE LOOK / CAMERA
+  // ============================================================
+  function updateCamera(now, dt) {
+    // orbit around a target (slight), controlled by face yaw/pitch
+    const baseTarget = new THREE.Vector3(player.position.x * 0.45, 2.2, 0);
+
+    const yawMax = (Number(lookYawEl.value) * Math.PI) / 180;
+    const pitchMax = (Number(lookPitchEl.value) * Math.PI) / 180;
+
+    const fx = faceControl.axes.x;
+    const fy = faceControl.axes.y;
+
+    if (faceControl.enabledLook) {
+      faceControl.lookYawTarget = clamp(fx, -1, 1) * yawMax;
+      faceControl.lookPitchTarget = clamp(fy, -1, 1) * pitchMax;
+    } else {
+      faceControl.lookYawTarget = 0;
+      faceControl.lookPitchTarget = 0;
+    }
+
+    // smooth look offsets (tau from smooth slider)
+    const tau = lerp(0.03, 0.22, clamp((faceControl.smooth - 0.02) / 0.38, 0, 1));
+    faceControl.lookYaw = smoothTo(faceControl.lookYaw, faceControl.lookYawTarget, dt, tau);
+    faceControl.lookPitch = smoothTo(faceControl.lookPitch, faceControl.lookPitchTarget, dt, tau);
+
+    // camera position
+    const r = MATCH.camRadius;
+    const baseZ = r;
+    const baseY = MATCH.camHeight + (faceControl.lookPitch * 4.0);
+
+    // rotate around Y by yaw
+    const sin = Math.sin(faceControl.lookYaw);
+    const cos = Math.cos(faceControl.lookYaw);
+
+    const camOff = new THREE.Vector3(
+      baseZ * sin,
+      baseY,
+      baseZ * cos
+    );
+
+    const desiredPos = baseTarget.clone().add(camOff);
+
+    // follow
+    if (!updateCamera.pos) updateCamera.pos = desiredPos.clone();
+    updateCamera.pos.lerp(desiredPos, 1 - Math.exp(-dt / 0.08));
+
+    camera3d.position.copy(updateCamera.pos);
+
+    // look at target with pitch influence
+    const lookTarget = baseTarget.clone();
+    lookTarget.y += (faceControl.lookPitch * 1.6);
+
+    camera3d.lookAt(lookTarget);
+  }
+
+  // ============================================================
+  // Overlay drawing
+  // ============================================================
+  function drawFaceOverlay() {
+    const w = overlay.width, h = overlay.height;
+    if (w <= 2 || h <= 2) return;
+
+    octx.clearRect(0,0,w,h);
+    octx.fillStyle = "rgba(0,0,0,0.10)";
+    octx.fillRect(0,0,w,h);
+
+    const cx = w*0.5, cy = h*0.5;
+    const r = Math.min(w,h)*0.38;
+
+    octx.strokeStyle = "rgba(255,255,255,0.20)";
+    octx.lineWidth = 2;
+    octx.beginPath();
+    octx.moveTo(cx-r, cy); octx.lineTo(cx+r, cy);
+    octx.moveTo(cx, cy-r); octx.lineTo(cx, cy+r);
+    octx.stroke();
+
+    const dz = clamp(faceControl.deadzone, 0, 0.5);
+    const dzR = r * dz;
+
+    octx.strokeStyle = "rgba(255,255,255,0.36)";
+    octx.beginPath(); octx.arc(cx,cy,dzR,0,Math.PI*2); octx.stroke();
+
+    octx.strokeStyle = "rgba(255,255,255,0.18)";
+    octx.beginPath(); octx.arc(cx,cy,r,0,Math.PI*2); octx.stroke();
+
+    const ax = clamp(faceControl.axes.x, -1, 1);
+    const ay = clamp(faceControl.axes.y, -1, 1);
+
+    const dx = ax*r, dy = -ay*r;
+
+    const insideDead = (Math.hypot(faceControl.raw.x, faceControl.raw.y) <= dz);
+    octx.fillStyle = insideDead ? "rgba(255,210,74,0.85)" : "rgba(255,255,255,0.92)";
+    octx.beginPath(); octx.arc(cx+dx, cy+dy, 7, 0, Math.PI*2); octx.fill();
+
+    octx.fillStyle = "rgba(255,255,255,0.72)";
+    octx.font = "12px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+    octx.fillText(`DZ ${dz.toFixed(2)}  Smooth ${faceControl.smooth.toFixed(2)}  Move ${faceControl.enabledMove?"On":"Off"}  Look ${faceControl.enabledLook?"On":"Off"}`, 10, 18);
+  }
+
+  // ============================================================
+  // Tuners sync
+  // ============================================================
+  function syncTuners(){
+    const moveBase = Number(sensMoveEl.value);
+    const ratio = Number(lrRatioEl.value);
+    const dz = Number(deadzoneEl.value);
+    const sm = Number(faceSmoothEl.value);
+
+    faceControl.moveGainBase = moveBase;
+    faceControl.moveGainY = moveBase;
+    faceControl.moveGainX = moveBase * ratio;
+    faceControl.deadzone = clamp(dz, 0, 0.45);
+    faceControl.smooth = clamp(sm, 0.02, 0.40);
+
+    sensMoveVal.textContent = moveBase.toFixed(1);
+    lrRatioVal.textContent = ratio.toFixed(2);
+    deadzoneVal.textContent = dz.toFixed(3);
+    faceSmoothVal.textContent = sm.toFixed(2);
+
+    lookYawVal.textContent = `${Number(lookYawEl.value)}°`;
+    lookPitchVal.textContent = `${Number(lookPitchEl.value)}°`;
+
+    hitAssistVal.textContent = Number(hitAssistEl.value).toFixed(2);
+    dmgScaleVal.textContent = Number(dmgScaleEl.value).toFixed(2);
+    kdComboPtsVal.textContent = String(Number(kdComboPtsEl.value));
+    koComboPtsVal.textContent = String(Number(koComboPtsEl.value));
+    tkoKDsVal.textContent = String(Number(tkoKDsEl.value));
+    aiCalmVal.textContent = Number(aiCalmEl.value).toFixed(2);
+    aiPowerVal.textContent = Number(aiPowerEl.value).toFixed(2);
+  }
+  [sensMoveEl, lrRatioEl, deadzoneEl, faceSmoothEl, lookYawEl, lookPitchEl, hitAssistEl, dmgScaleEl, kdComboPtsEl, koComboPtsEl, tkoKDsEl, aiCalmEl, aiPowerEl]
+    .forEach(el => el.addEventListener("input", syncTuners));
+  syncTuners();
+
+  // ============================================================
+  // HUD updates
+  // ============================================================
+  function setBar(fillEl, value, max, good, mid, bad){
+    const pct = clamp((value/max)*100, 0, 100);
+    fillEl.style.width = pct + "%";
+    fillEl.style.background = (pct > 60) ? good : (pct > 25) ? mid : bad;
+  }
+
+  function updateHUD(now){
+    // bars
+    setBar(hpYouEl, fighter.you.hp, MATCH.hpMax, "#39c26a", "#ffd24a", "#ff4b4b");
+    setBar(hpAIEl,  fighter.ai.hp,  MATCH.hpMax, "#ff4b4b", "#ffd24a", "#ff7a7a");
+
+    setBar(staYouEl, fighter.you.stamina, MATCH.staminaMax, "#39c26a", "#ffd24a", "#ff4b4b");
+    setBar(staAIEl,  fighter.ai.stamina,  MATCH.staminaMax, "#ff4b4b", "#ffd24a", "#ff7a7a");
+
+    hpYouTxt.textContent = String(Math.round(fighter.you.hp));
+    hpAITxt.textContent  = String(Math.round(fighter.ai.hp));
+    staYouTxt.textContent = String(Math.round(fighter.you.stamina));
+    staAITxt.textContent  = String(Math.round(fighter.ai.stamina));
+
+    roundTxt.textContent = `${match.round} / ${MATCH.roundsTotal}`;
+    clockTxt.textContent = (match.mode === "Fight") ? fmtClock(match.roundLeft) : fmtClock(match.restLeft);
+
+    rPtsTxt.textContent = `You ${match.youRoundPts} — AI ${match.aiRoundPts}`;
+    kdTxt.textContent = `KD ${match.youKD}-${match.aiKD}`;
+    judgeTxt.textContent = `${match.youJudgeTotal}–${match.aiJudgeTotal} (10pt)`;
+    matchTxt.textContent = `M ${match.youMatchPts}–${match.aiMatchPts}`;
+
+    // show your current group
+    const g = match.youGroup;
+    const alive = (g.hits > 0 && now <= g.until + MATCH.groupCommitGraceMs);
+    const pct = alive ? clamp((g.until - now) / MATCH.comboWindowMs, 0, 1) : 0;
+    grpFill.style.width = (pct*100) + "%";
+    grpFill.style.background = alive ? "#ffd24a" : "rgba(255,255,255,0.10)";
+    grpTxt.textContent = alive ? `+${g.pts}` : "+0";
+  }
+
+  // ============================================================
+  // Facing each other ALWAYS
+  // ============================================================
+  function faceEachOther() {
+    // player faces AI
+    {
+      const dx = ai.position.x - player.position.x;
+      const dz = ai.position.z - player.position.z;
+      player.rotation.y = Math.atan2(dx, dz);
+    }
+    // AI faces player (also set in AI, but keep hard lock)
+    {
+      const dx = player.position.x - ai.position.x;
+      const dz = player.position.z - ai.position.z;
+      ai.rotation.y = Math.atan2(dx, dz);
+    }
+  }
+
+  // ============================================================
+  // MAIN LOOP
+  // ============================================================
+  let lastT = performance.now();
+  let running = true;
+
+  function loop() {
+    if (!running) return;
+
+    const now = performance.now();
+    const dt = clamp((now - lastT) / 1000, 0, 0.033);
+    lastT = now;
+
+    // mode timers
+    if (match.mode === "Fight") {
+      match.roundLeft -= dt;
+      if (match.roundLeft <= 0) endRound(now);
+    } else if (match.mode === "Rest") {
+      match.restLeft -= dt;
+
+      fighter.you.stamina = clamp(fighter.you.stamina + MATCH.staminaRegenPerSec * dt, 0, MATCH.staminaMax);
+      fighter.ai.stamina  = clamp(fighter.ai.stamina  + MATCH.staminaRegenPerSec * dt, 0, MATCH.staminaMax);
+
+      if (match.restLeft <= 0) startNextRound();
+    }
+
+    // guarding
+    fighter.you.guarding = keys.has("ShiftLeft") || keys.has("ShiftRight");
+
+    // movement input (keyboard optional + face)
+    const canMove = (match.mode === "Fight") && !isYouDown(now) && match.mode !== "End";
+    let inX = 0, inFwd = 0;
+
+    if (canMove) {
+      if (keys.has("KeyA")) inX -= 1;
+      if (keys.has("KeyD")) inX += 1;
+      if (keys.has("KeyW")) inFwd += 1;
+      if (keys.has("KeyS")) inFwd -= 1;
+
+      const faceRecent = (now - faceControl.lastSeen) < 650;
+      if (faceControl.enabledMove && faceRecent) {
+        // full control: left/right AND up/down
+        inX += faceControl.axes.x * 2.0;
+        inFwd += faceControl.axes.y * 2.0;
+      }
+    }
+
+    // normalize inputs
+    const mag = Math.hypot(inX, inFwd);
+    if (mag > 1e-6) {
+      const s = Math.min(1, 1/mag);
+      inX *= s; inFwd *= s;
+    }
+
+    // stamina affects speed
+    const spMul = staminaSpeedMul(fighter.you.stamina);
+    const targetVX = inX * MATCH.maxSpeed * spMul;
+    const targetVZ = (-inFwd) * MATCH.maxSpeed * spMul; // forward is toward -Z side generally, but we keep world movement stable
+
+    const a = 1 - Math.exp(-MATCH.accel * dt);
+    const f = 1 - Math.exp(-MATCH.friction * dt);
+    const hasInput = (Math.abs(inX) > 0.001 || Math.abs(inFwd) > 0.001);
+
+    movePhys.vx += hasInput ? (targetVX - movePhys.vx) * a : (0 - movePhys.vx) * f;
+    movePhys.vz += hasInput ? (targetVZ - movePhys.vz) * a : (0 - movePhys.vz) * f;
+
+    player.position.x += movePhys.vx * dt;
+    player.position.z += movePhys.vz * dt;
+
+    // stamina drain from movement
+    if (match.mode === "Fight" && hasInput) {
+      const moveIntensity = clamp(Math.hypot(movePhys.vx, movePhys.vz) / (MATCH.maxSpeed + 1e-6), 0, 1);
+      fighter.you.stamina = clamp(fighter.you.stamina - MATCH.staminaDrainMove * moveIntensity * (dt*60), 0, MATCH.staminaMax);
+    }
+
+    // jump (optional)
+    if (canMove && keys.has("Space") && physY.grounded) {
+      physY.velY = MATCH.jumpVel;
+      physY.grounded = false;
+    }
+
+    // gravity
+    physY.velY += MATCH.gravity * dt;
+    player.position.y += physY.velY * dt;
+
+    // ground/platform collision
+    const gH = groundHeightAt(player.position.x, player.position.z);
+    if (player.position.y <= gH) {
+      player.position.y = gH;
+      physY.velY = 0;
+      physY.grounded = true;
+    } else {
+      physY.grounded = false;
+    }
+
+    keepInRing(player);
+    keepInRing(ai);
+
+    // AI update
+    aiThink(now, dt);
+    keepInRing(ai);
+
+    // ALWAYS face each other
+    faceEachOther();
+
+    // update camera (face look)
+    updateCamera(now, dt);
+
+    // update glove positions aligned to shoulders
+    const glovePunch = updatePlayerGloves(now, dt);
+
+    // commit groups on expiry
+    if (match.youGroup.hits > 0 && now > match.youGroup.until + MATCH.groupCommitGraceMs) commitGroup("you", now, true);
+    if (match.aiGroup.hits  > 0 && now > match.aiGroup.until  + MATCH.groupCommitGraceMs) commitGroup("ai",  now, true);
+
+    // ============================================================
+    // HIT CHECKS
+    // ============================================================
+    if (match.mode === "Fight" && !isYouDown(now) && !isAIDown(now) && match.mode !== "End") {
+      // YOUR punches (hands)
+      const hands = [glovePunch.L, glovePunch.R].filter(Boolean);
+      const targets = getAIHitTargets();
+      const assist = Number(hitAssistEl.value);
+      const extra = assist * 0.95;
+      const baseRange = MATCH.punchRangeBase + extra;
+
+      for (const h of hands) {
+        if (!h.punching) continue;
+        if (now - lastYouContactAt < 170) continue;
+
+        let best = { d: 999, r: 0 };
+        for (const t of targets) {
+          const d = h.pos.distanceTo(t.p);
+          if (d < best.d) best = { d, r: t.r };
+        }
+
+        if (best.d < (best.r + baseRange)) {
+          lastYouContactAt = now;
+
+          const kind = applyHitToDefender("ai", h, now, "you");
+          setStatus(kind === "block" ? "Blocked" : "Scored!");
+
+          // tiny knockback
+          const { fwd } = getFacingBasis(player.position, ai.position);
+          ai.position.addScaledVector(fwd, -0.10);
+
+          break;
+        }
+      }
+
+      // AI punches
+      if (aiBrain.punching && now - lastAIContactAt > 230) {
+        const youPoint = getYouTarget();
+        const hitR = 1.10 + assist*0.30;
+
+        if (aiBrain.hitPoint.distanceTo(youPoint) < hitR) {
+          lastAIContactAt = now;
+
+          const punch = { power: aiBrain.power };
+          const kind = applyHitToDefender("you", punch, now, "ai");
+          setStatus(kind === "block" ? "Block!" : "AI scored!");
+
+          // knockback
+          const { fwd } = getFacingBasis(ai.position, player.position);
+          player.position.addScaledVector(fwd, -0.08);
+        }
+      }
+    }
+
+    // if down, freeze a bit
+    if (isYouDown(now)) { movePhys.vx *= 0.90; movePhys.vz *= 0.90; }
+    if (isAIDown(now))  { aiBrain.vx *= 0.90; aiBrain.vz *= 0.90; }
+
+    updateHUD(now);
+    renderer.render(scene, camera3d);
+
+    requestAnimationFrame(loop);
+  }
+
+  // ============================================================
+  // RESIZE
+  // ============================================================
+  window.addEventListener("resize", () => {
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    camera3d.aspect = window.innerWidth / window.innerHeight;
+    camera3d.updateProjectionMatrix();
+  });
+
+  // ============================================================
+  // START + CAMERA
+  // ============================================================
+  startBtn.addEventListener("click", async () => {
+    modal.style.display = "none";
+    setStatus("Starting…");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+      video.srcObject = stream;
+      await video.play();
+      startVision();
+      setStatus("Fight!");
+    } catch (e) {
+      console.error(e);
+      alert("Camera permission denied or unavailable.");
+      modal.style.display = "flex";
+      setStatus("Camera blocked");
+    }
+  });
+
+  resetBtn.addEventListener("click", resetMatch);
+
+  // ============================================================
+  // Boot
+  // ============================================================
+  setFaceUI(false, "Waiting…");
+  setModeUI("Fight");
+  resetMatch();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

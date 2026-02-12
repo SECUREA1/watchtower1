@@ -1,0 +1,945 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Boxing Gloves Hand Tracking (3D Ring) + RetinaOps Face Move</title>
+  <style>
+    html, body { margin:0; padding:0; overflow:hidden; background:#0b0d12; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    #hud {
+      position: fixed; top: 12px; left: 12px; z-index: 10;
+      display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap;
+      color: #fff;
+      user-select: none;
+    }
+    .panel {
+      background: rgba(20, 24, 35, 0.72);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 12px;
+      padding: 10px 12px;
+      backdrop-filter: blur(8px);
+      min-width: 300px;
+    }
+    .row { display:flex; justify-content: space-between; gap: 10px; align-items: center; margin: 6px 0; }
+    .bar {
+      height: 10px; border-radius: 999px; background: rgba(255,255,255,0.15);
+      overflow: hidden; flex: 1; margin-left: 10px;
+    }
+    .fill { height:100%; width:100%; background: #fff; }
+    .btn {
+      cursor: pointer; border-radius: 10px; padding: 10px 12px;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.08);
+      color: #fff;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .btn:active { transform: translateY(1px); }
+    #videoWrap {
+      position: fixed; right: 12px; bottom: 12px; z-index: 10;
+      width: 220px;
+      background: rgba(20, 24, 35, 0.72);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 12px;
+      padding: 10px;
+      backdrop-filter: blur(8px);
+      display: none;
+    }
+    #video { width: 100%; border-radius: 10px; transform: scaleX(-1); background: #000; }
+    #tip { font-size: 12px; opacity: 0.85; margin-top: 8px; line-height: 1.25; }
+    #modal {
+      position: fixed; inset:0; z-index: 20;
+      display:flex; align-items:center; justify-content:center;
+      background: radial-gradient(ellipse at center, rgba(10,12,18,0.75), rgba(10,12,18,0.92));
+    }
+    #modalCard {
+      width: min(620px, calc(100% - 24px));
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(20, 24, 35, 0.75);
+      backdrop-filter: blur(10px);
+      color:#fff;
+      padding: 18px;
+    }
+    #modalCard h1 { margin: 0 0 8px; font-size: 18px; }
+    #modalCard p { margin: 0 0 12px; opacity: 0.9; line-height: 1.35; }
+    #kbd {
+      font-size: 12px; opacity: 0.85;
+      display:grid; grid-template-columns: 1fr 1fr; gap: 6px 16px;
+      margin-top: 10px;
+    }
+    #canvas3d { position: fixed; inset:0; }
+    .small { font-size: 12px; opacity: 0.8; }
+    .pill {
+      display:inline-flex; align-items:center; gap:8px;
+      padding: 6px 10px; border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.06);
+      font-size: 12px;
+      opacity: 0.95;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 999px; background: rgba(255,255,255,0.35); }
+  </style>
+
+  <!-- Three.js (global THREE) -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+
+  <!-- MediaPipe Hands -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
+  <!-- MediaPipe FaceMesh (RetinaOps-style face move) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+</head>
+<body>
+  <canvas id="canvas3d"></canvas>
+
+  <div id="hud">
+    <div class="panel">
+      <div class="row">
+        <div style="min-width:70px;">You</div>
+        <div class="bar"><div id="hpYou" class="fill"></div></div>
+        <div id="hpYouTxt" style="min-width:38px; text-align:right;">100</div>
+      </div>
+      <div class="row">
+        <div style="min-width:70px;">AI</div>
+        <div class="bar"><div id="hpAI" class="fill"></div></div>
+        <div id="hpAITxt" style="min-width:38px; text-align:right;">100</div>
+      </div>
+
+      <div class="row" style="gap:8px; flex-wrap:wrap; justify-content:flex-start;">
+        <button id="resetBtn" class="btn">Reset</button>
+        <button id="toggleFaceBtn" class="btn">Face Move: On</button>
+        <button id="calFaceBtn" class="btn">Calibrate Face</button>
+        <button id="flipYBtn" class="btn">Flip Up/Down</button>
+      </div>
+
+      <div class="row" style="justify-content:flex-start; gap:10px;">
+        <div class="pill"><span id="faceDot" class="dot"></span>Face <span id="faceTxt" class="small">Waiting…</span></div>
+        <div class="small" id="status">Ready</div>
+      </div>
+
+      <div class="small">
+        <b>Face Move:</b> up = forward, down = back, left/right = strafe.<br/>
+        <b>Punch:</b> thrust hand toward camera (hard) to pop glove forward + deal damage.<br/>
+        <b>Tip:</b> keep face + hands centered and well lit.
+      </div>
+    </div>
+  </div>
+
+  <div id="videoWrap">
+    <video id="video" playsinline></video>
+    <div id="tip">Camera preview (mirrored). Tracking uses this feed.</div>
+  </div>
+
+  <div id="modal">
+    <div id="modalCard">
+      <h1>3D Boxing Ring + Hands + High-Speed Face Movement</h1>
+      <p>
+        Click <b>Enable Camera</b>. Turn/tilt your head to move fast around the ring.
+        Punch by thrusting your hands toward the camera to pop the glove out and hit.
+      </p>
+      <button id="startBtn" class="btn">Enable Camera</button>
+      <div id="kbd">
+        <div><b>A / D</b> strafe</div><div><b>W / S</b> step in/out</div>
+        <div><b>Space</b> jump</div><div><b>Shift</b> guard</div>
+        <div><b>F</b> face calibrate</div><div><b>G</b> toggle face</div>
+        <div><b>H</b> flip up/down</div><div><b>R</b> reset</div>
+      </div>
+      <p class="small" style="margin-top:12px;">
+        Note: Camera requires HTTPS or localhost. Run with a local server.
+      </p>
+    </div>
+  </div>
+
+<script>
+(() => {
+  // ============================================================
+  // HIGH-GAMEPLAY TUNING (RetinaOps-like responsiveness)
+  // ============================================================
+  const TUNE = {
+    // Movement feel
+    maxSpeed: 9.5,         // <-- fast ring movement
+    accel: 46.0,           // <-- snap into motion
+    friction: 26.0,        // <-- stop quick when neutral
+    faceStrength: 1.9,     // <-- multiply face input (bigger = more movement)
+
+    // Face tracking sensitivity
+    faceGainX: 4.8,        // <-- left/right sensitivity
+    faceGainY: 5.4,        // <-- up/down sensitivity (forward/back)
+    faceDeadzone: 0.018,   // <-- tiny deadzone so it moves easily
+    faceSmooth: 0.48,      // <-- higher = snappier (0..1)
+
+    // Punch feel
+    punchWindowMs: 260,    // punch "active" time
+    punchCooldownMs: 320,
+    punchVzThreshold: -0.85,     // more strict than before (hard thrust)
+    punchRange: 1.65,            // glove-to-enemy distance for hit
+    punchBaseDamage: 8,
+    punchBonusDamage: 16,        // scaled by punch power
+    punchPopMax: 1.55,           // how far glove pops out in front
+
+    // Player glove placement (shoulder height)
+    shoulderY: 1.62,       // anchor glove at shoulder height
+    shoulderYJitter: 0.20, // allow small up/down from hand y
+    sideScale: 2.6,        // how far left/right hands can go
+    baseForward: 0.75,     // how far in front of player gloves sit when idle
+    thrustScale: 6.2,      // how much z contributes to thrust
+
+    // AI punch pop
+    aiPunchPop: 1.65,
+    aiPunchWindowMs: 320,
+    aiCooldownMs: 560
+  };
+
+  // ---------- DOM ----------
+  const canvas = document.getElementById("canvas3d");
+  const modal = document.getElementById("modal");
+  const startBtn = document.getElementById("startBtn");
+  const resetBtn = document.getElementById("resetBtn");
+  const toggleFaceBtn = document.getElementById("toggleFaceBtn");
+  const calFaceBtn = document.getElementById("calFaceBtn");
+  const flipYBtn = document.getElementById("flipYBtn");
+  const videoWrap = document.getElementById("videoWrap");
+  const video = document.getElementById("video");
+
+  const hpYouEl = document.getElementById("hpYou");
+  const hpAIEl = document.getElementById("hpAI");
+  const hpYouTxt = document.getElementById("hpYouTxt");
+  const hpAITxt = document.getElementById("hpAITxt");
+  const statusEl = document.getElementById("status");
+
+  const faceDot = document.getElementById("faceDot");
+  const faceTxt = document.getElementById("faceTxt");
+
+  // ---------- UTILS ----------
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const lerp = (a,b,t) => a + (b-a)*t;
+
+  let running = true;
+
+  const state = {
+    you: { hp: 100, guarding: false },
+    ai: { hp: 100 },
+    ko: false
+  };
+
+  // ---------- THREE.JS ----------
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0x0b0d12, 10, 35);
+
+  const camera3d = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 1000);
+  camera3d.position.set(0, 6.5, 14);
+  camera3d.lookAt(0, 2.2, 0);
+
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x223355, 0.9);
+  scene.add(hemi);
+  const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+  dir.position.set(8, 12, 6);
+  scene.add(dir);
+
+  // Ring
+  const ringSize = 10;
+  const half = ringSize / 2;
+
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(ringSize, ringSize),
+    new THREE.MeshStandardMaterial({ color: 0x1b2030, roughness: 0.95, metalness: 0.05 })
+  );
+  floor.rotation.x = -Math.PI / 2;
+  scene.add(floor);
+
+  const mark = new THREE.Mesh(
+    new THREE.RingGeometry(1.1, 1.25, 64),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6, side: THREE.DoubleSide })
+  );
+  mark.rotation.x = -Math.PI / 2;
+  mark.position.y = 0.01;
+  scene.add(mark);
+
+  // Posts + ropes
+  const postGeo = new THREE.CylinderGeometry(0.08, 0.08, 2.5, 16);
+  const postMat = new THREE.MeshStandardMaterial({ color: 0x888aa0, roughness: 0.4, metalness: 0.35 });
+  const ropeMat = new THREE.MeshStandardMaterial({ color: 0xaa3340, roughness: 0.8, metalness: 0.05 });
+  [[-half,1.25,-half],[half,1.25,-half],[-half,1.25,half],[half,1.25,half]].forEach(([x,y,z]) => {
+    const p = new THREE.Mesh(postGeo, postMat);
+    p.position.set(x,y,z);
+    scene.add(p);
+  });
+  function makeRope(y) {
+    const ropeGeo = new THREE.CylinderGeometry(0.035, 0.035, ringSize, 12);
+    const r1 = new THREE.Mesh(ropeGeo, ropeMat);
+    r1.rotation.z = Math.PI/2; r1.position.set(0,y,-half); scene.add(r1);
+    const r2 = r1.clone(); r2.position.set(0,y,half); scene.add(r2);
+    const r3 = r1.clone(); r3.rotation.z = 0; r3.rotation.x = Math.PI/2; r3.position.set(-half,y,0); scene.add(r3);
+    const r4 = r3.clone(); r4.position.set(half,y,0); scene.add(r4);
+  }
+  makeRope(0.75); makeRope(1.15); makeRope(1.55);
+
+  // Platforms
+  const platforms = [];
+  const platGeo = new THREE.BoxGeometry(1.8, 0.25, 1.2);
+  const platMat = new THREE.MeshStandardMaterial({ color: 0x2b3550, roughness: 0.9, metalness: 0.05 });
+  for (let i=0;i<3;i++){
+    const m = new THREE.Mesh(platGeo, platMat);
+    m.position.set(-2 + i*2, 0.55 + (i%2)*0.4, 1.5 - i*1.2);
+    scene.add(m); platforms.push(m);
+  }
+
+  // ---------- SVG GLOVE TEXTURE ----------
+  const gloveSVG = `
+  <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+    <defs>
+      <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#ff4b4b"/>
+        <stop offset="1" stop-color="#b3132a"/>
+      </linearGradient>
+      <filter id="s" x="-20%" y="-20%" width="140%" height="140%">
+        <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#000" flood-opacity="0.35"/>
+      </filter>
+    </defs>
+    <g filter="url(#s)">
+      <path d="M70 110 C55 95,55 70,75 58 C92 48,110 60,115 70 L122 58
+               C130 44,152 44,160 60 L168 78 L176 66 C186 48,212 58,206 82
+               L198 112 C205 118,208 128,204 140 L192 178 C186 195,172 206,154 210
+               L108 220 C92 224,78 216,72 200 L56 154 C52 142,56 128,66 120 Z"
+            fill="url(#g)" stroke="#4a0613" stroke-width="6" stroke-linejoin="round"/>
+      <path d="M70 178 L190 150 L206 196 C210 208,204 220,192 224 L98 246
+               C84 250,70 242,66 228 L58 196 C54 186,60 180,70 178 Z"
+            fill="#222a3a" stroke="#0c101a" stroke-width="6" stroke-linejoin="round"/>
+      <path d="M92 106 C85 86,98 70,116 68 C136 66,144 82,138 100
+               C132 118,106 124,92 106 Z" fill="rgba(255,255,255,0.22)"/>
+    </g>
+  </svg>`.trim();
+
+  const gloveURL = "data:image/svg+xml;utf8," + encodeURIComponent(gloveSVG);
+  const gloveTexture = new THREE.TextureLoader().load(gloveURL);
+  gloveTexture.colorSpace = THREE.SRGBColorSpace;
+
+  function makeGlovePlane() {
+    const geo = new THREE.PlaneGeometry(1.12, 1.12);
+    const mat = new THREE.MeshBasicMaterial({ map: gloveTexture, transparent: true, side: THREE.DoubleSide });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.visible = false;
+    scene.add(mesh);
+    return mesh;
+  }
+  const gloveL = makeGlovePlane();
+  const gloveR = makeGlovePlane();
+
+  // ---------- FIGHTERS ----------
+  function makeFighter(colorBody) {
+    const group = new THREE.Group();
+
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(0.9, 1.4, 0.5),
+      new THREE.MeshStandardMaterial({ color: colorBody, roughness: 0.8, metalness: 0.05 })
+    );
+    body.position.y = 1.2;
+    group.add(body);
+
+    const head = new THREE.Mesh(
+      new THREE.SphereGeometry(0.35, 18, 18),
+      new THREE.MeshStandardMaterial({ color: 0xe6d6c7, roughness: 0.95, metalness: 0.02 })
+    );
+    head.position.y = 2.05;
+    group.add(head);
+
+    const gloveGeo = new THREE.SphereGeometry(0.22, 14, 14);
+    const gloveMat = new THREE.MeshStandardMaterial({ color: 0xaa3340, roughness: 0.6, metalness: 0.1 });
+
+    const gL = new THREE.Mesh(gloveGeo, gloveMat);
+    const gR = gL.clone();
+    gL.position.set(-0.55, 1.62, 0.55);
+    gR.position.set( 0.55, 1.62, 0.55);
+    group.add(gL, gR);
+
+    group.userData = { body, head, gL, gR };
+    scene.add(group);
+    return group;
+  }
+
+  const player = makeFighter(0x39c26a);
+  player.position.set(0, 0, 2.5);
+
+  const ai = makeFighter(0xff4b4b);
+  ai.position.set(0, 0, -2.5);
+  ai.rotation.y = Math.PI;
+
+  // ---------- SIMPLE PHYSICS ----------
+  const phys = { velY: 0, gravity: -22, jumpVel: 9.5, grounded: false };
+
+  // Movement "game feel" physics (x/z)
+  const movePhys = {
+    vx: 0, vz: 0,
+    maxSpeed: TUNE.maxSpeed,
+    accel: TUNE.accel,
+    friction: TUNE.friction
+  };
+
+  // ---------- INPUT ----------
+  const keys = new Set();
+  window.addEventListener("keydown", (e) => {
+    keys.add(e.code);
+    if (e.code === "KeyR") resetGame();
+    if (e.code === "KeyF") calibrateFace();
+    if (e.code === "KeyG") toggleFaceMove();
+    if (e.code === "KeyH") flipFaceY();
+  });
+  window.addEventListener("keyup", (e) => keys.delete(e.code));
+
+  // ---------- FACE CONTROL (RetinaOps-like) ----------
+  const faceControl = {
+    enabled: true,
+    invertX: true,     // mirrored preview: turn head left -> move left
+    invertY: false,    // as requested: face up -> forward (we map it that way below)
+    gainX: TUNE.faceGainX,
+    gainY: TUNE.faceGainY,
+    deadzone: TUNE.faceDeadzone,
+    smooth: TUNE.faceSmooth,
+    strength: TUNE.faceStrength,
+    neutral: null,     // {yaw, pitch}
+    axes: { x: 0, y: 0 },
+    lastSeen: 0
+  };
+
+  function setStatus(t) { statusEl.textContent = t; }
+  function setFaceUI(active, text) {
+    faceDot.style.background = active ? "#39c26a" : "rgba(255,255,255,0.35)";
+    faceTxt.textContent = text;
+  }
+  function applyDeadzone(v, dz) {
+    const a = Math.abs(v);
+    if (a < dz) return 0;
+    const s = (a - dz) / (1 - dz);
+    return Math.sign(v) * s;
+  }
+
+  function calibrateFace() {
+    faceControl.neutral = null;
+    setStatus("Face calibrated");
+  }
+
+  function toggleFaceMove() {
+    faceControl.enabled = !faceControl.enabled;
+    toggleFaceBtn.textContent = `Face Move: ${faceControl.enabled ? "On" : "Off"}`;
+    setStatus(faceControl.enabled ? "Face move enabled" : "Face move disabled");
+  }
+
+  function flipFaceY() {
+    faceControl.invertY = !faceControl.invertY;
+    setStatus(faceControl.invertY ? "Face up/down flipped" : "Face up/down normal");
+  }
+
+  toggleFaceBtn.addEventListener("click", toggleFaceMove);
+  calFaceBtn.addEventListener("click", calibrateFace);
+  flipYBtn.addEventListener("click", flipFaceY);
+
+  // ---------- MediaPipe Vision ----------
+  let mpHands = null;
+  let mpFace = null;
+  let visionActive = false;
+
+  // Hand motion memory (punch power + pop)
+  const handMotion = {
+    Left:  { lastZ: null, lastT: null, lastVZ: 0, punchUntil: 0, cooldownUntil: 0, punchPower: 0, punchStart: 0 },
+    Right: { lastZ: null, lastT: null, lastVZ: 0, punchUntil: 0, cooldownUntil: 0, punchPower: 0, punchStart: 0 }
+  };
+
+  function startVision() {
+    if (visionActive) return;
+
+    mpHands = new Hands({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    });
+    mpHands.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.6
+    });
+    mpHands.onResults(onHandResults);
+
+    mpFace = new FaceMesh({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+    });
+    mpFace.setOptions({
+      maxNumFaces: 1,
+      refineLandmarks: true,
+      minDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.6
+    });
+    mpFace.onResults(onFaceResults);
+
+    visionActive = true;
+    videoWrap.style.display = "block";
+    setStatus("Tracking");
+    setFaceUI(false, "Waiting…");
+
+    // Throttled frame pump (30fps-ish)
+    let lastVisionT = performance.now();
+    const pump = async () => {
+      if (!visionActive) return;
+      const now = performance.now();
+      if (video.readyState >= 2 && (now - lastVisionT) > 28) {
+        lastVisionT = now;
+        try {
+          await mpHands.send({ image: video });
+          await mpFace.send({ image: video });
+        } catch (e) {
+          // If the tab is backgrounded, mediapipe can throw sometimes; ignore small hiccups
+        }
+      }
+      requestAnimationFrame(pump);
+    };
+    requestAnimationFrame(pump);
+  }
+
+  // ---------- Face results -> strong axis values ----------
+  function onFaceResults(results) {
+    const now = performance.now();
+    const faces = results.multiFaceLandmarks;
+    if (!faces || faces.length === 0) {
+      // decay to neutral if face disappears
+      faceControl.axes.x *= 0.90;
+      faceControl.axes.y *= 0.90;
+      setFaceUI(false, "Not found");
+      return;
+    }
+
+    const lm = faces[0];
+
+    // Normalize by face size (eye distance) for stable strong control
+    const nose = lm[1];
+    const le = lm[33];
+    const re = lm[263];
+
+    const eyeMidX = (le.x + re.x) * 0.5;
+    const eyeMidY = (le.y + re.y) * 0.5;
+    const eyeDist = Math.max(1e-6, Math.hypot(le.x - re.x, le.y - re.y));
+
+    // YAW: nose left/right relative to eyes center
+    let yaw = (nose.x - eyeMidX) / eyeDist;
+
+    // PITCH proxy: nose above/below eyes center
+    // We want: face UP => forward. (We map forward = -pitch below)
+    let pitch = (nose.y - eyeMidY) / eyeDist;
+
+    if (!faceControl.neutral) faceControl.neutral = { yaw, pitch };
+    yaw -= faceControl.neutral.yaw;
+    pitch -= faceControl.neutral.pitch;
+
+    // Map to axes
+    let ax = yaw * faceControl.gainX;
+
+    // forward/back: face up -> forward, face down -> back
+    // Using -pitch generally makes "nose up" => positive forward input.
+    let ay = (-pitch) * faceControl.gainY;
+
+    if (faceControl.invertX) ax = -ax;
+    if (faceControl.invertY) ay = -ay;
+
+    ax = applyDeadzone(ax, faceControl.deadzone);
+    ay = applyDeadzone(ay, faceControl.deadzone);
+
+    ax = clamp(ax, -1, 1);
+    ay = clamp(ay, -1, 1);
+
+    // Snappy smoothing
+    faceControl.axes.x += (ax - faceControl.axes.x) * faceControl.smooth;
+    faceControl.axes.y += (ay - faceControl.axes.y) * faceControl.smooth;
+
+    faceControl.lastSeen = now;
+    setFaceUI(true, "Tracking");
+  }
+
+  // ---------- Hands -> glove planes at shoulder height ----------
+  let lastHandPoints = { Left: null, Right: null };
+
+  function updateGloveFromLandmarks(handednessLabel, lm, now) {
+    // Palm-ish center
+    const x = (lm[0].x + lm[5].x + lm[17].x) / 3;
+    const y = (lm[0].y + lm[5].y + lm[17].y) / 3;
+    const z = (lm[0].z + lm[5].z + lm[17].z) / 3;
+
+    const m = handMotion[handednessLabel] || handMotion.Right;
+
+    // Punch detection + punchPower
+    let vz = 0;
+    if (m.lastZ != null && m.lastT != null) {
+      const dt = Math.max(0.001, (now - m.lastT) / 1000);
+      vz = (z - m.lastZ) / dt; // negative => toward camera
+      m.lastVZ = vz;
+
+      const punch = (vz < TUNE.punchVzThreshold);
+      if (punch && now > m.cooldownUntil && !state.ko) {
+        m.punchStart = now;
+        m.punchUntil = now + TUNE.punchWindowMs;
+        m.cooldownUntil = now + TUNE.punchCooldownMs;
+
+        // Power based on how hard the thrust is
+        const raw = (-vz - (-TUNE.punchVzThreshold)) / 2.0; // scale range
+        m.punchPower = clamp(raw, 0, 1);
+      }
+    }
+    m.lastZ = z;
+    m.lastT = now;
+
+    // L/R around player
+    const offX = (x - 0.5) * TUNE.sideScale;
+
+    // Shoulder height lock with small y influence (so it feels alive)
+    const yJit = (0.55 - y) * TUNE.shoulderYJitter;
+    const offY = player.position.y + TUNE.shoulderY + yJit;
+
+    // Base thrust from depth
+    const thrust = clamp((-z) * TUNE.thrustScale, 0, 3.6);
+
+    // Punch pop (sin curve inside punch window)
+    let punchPop = 0;
+    let punching = false;
+    if (now < m.punchUntil) {
+      punching = true;
+      const t = clamp((now - m.punchStart) / TUNE.punchWindowMs, 0, 1); // 0..1
+      punchPop = Math.sin(t * Math.PI) * (TUNE.punchPopMax * (0.55 + 0.45*m.punchPower));
+    } else {
+      // decay power slowly
+      m.punchPower = lerp(m.punchPower, 0, 0.12);
+    }
+
+    // Final forward offset (player faces toward -Z)
+    const offZ = TUNE.baseForward + thrust + punchPop;
+
+    const gloveMesh = (handednessLabel === "Left") ? gloveL : gloveR;
+    gloveMesh.visible = true;
+
+    gloveMesh.position.set(
+      player.position.x + offX,
+      offY,
+      player.position.z - offZ
+    );
+
+    // Scale slightly bigger when punching
+    const s = 0.92 + thrust*0.07 + punchPop*0.06;
+    gloveMesh.scale.set(s, s, s);
+
+    // Billboard to camera
+    gloveMesh.lookAt(camera3d.position);
+
+    return {
+      pos: gloveMesh.position.clone(),
+      punching,
+      power: m.punchPower
+    };
+  }
+
+  function onHandResults(results) {
+    const now = performance.now();
+
+    gloveL.visible = false;
+    gloveR.visible = false;
+    lastHandPoints.Left = null;
+    lastHandPoints.Right = null;
+
+    if (!results.multiHandLandmarks || !results.multiHandedness) return;
+
+    for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+      const lm = results.multiHandLandmarks[i];
+      const handedness = results.multiHandedness[i];
+      const label = handedness.label === "Left" ? "Left" : "Right";
+      const p = updateGloveFromLandmarks(label, lm, now);
+      lastHandPoints[label] = p;
+    }
+  }
+
+  // ---------- Combat ----------
+  let lastHitAI = 0;
+  let lastHitYou = 0;
+
+  function tryHitAI(now) {
+    if (state.ko) return;
+
+    const target = ai.position.clone();
+    target.y = 1.55;
+
+    const hands = [lastHandPoints.Left, lastHandPoints.Right].filter(Boolean);
+    for (const h of hands) {
+      if (!h.punching) continue;
+
+      const d = h.pos.distanceTo(target);
+      if (d < TUNE.punchRange && (now - lastHitAI) > 240) {
+        lastHitAI = now;
+
+        const dmg = Math.round(TUNE.punchBaseDamage + TUNE.punchBonusDamage * h.power);
+        state.ai.hp = Math.max(0, state.ai.hp - dmg);
+
+        setStatus(`HIT! -${dmg}`);
+        ai.position.z -= (0.16 + 0.16*h.power);
+
+        if (state.ai.hp <= 0) knockout("You win!");
+      }
+    }
+  }
+
+  const aiBrain = {
+    punchUntil: 0,
+    punchStart: 0,
+    cooldownUntil: 0,
+    activeHand: "R",
+    power: 0.7
+  };
+
+  function aiThink(now, dt) {
+    if (state.ko) return;
+
+    // Chase/positioning
+    const dx = player.position.x - ai.position.x;
+    ai.position.x += clamp(dx, -2.6, 2.6) * dt * 1.55;
+
+    const desiredZ = -2.4;
+    const dz = desiredZ - ai.position.z;
+    ai.position.z += clamp(dz, -2.4, 2.4) * dt * 0.95;
+
+    // Idle glove motion (more movement)
+    const idleBob = Math.sin(now * 0.008) * 0.06;
+    ai.userData.gL.position.y = 1.62 + idleBob;
+    ai.userData.gR.position.y = 1.62 - idleBob;
+
+    // Punch decision
+    const range = ai.position.distanceTo(player.position);
+    if (range < 5.6 && now > aiBrain.cooldownUntil) {
+      aiBrain.punchStart = now;
+      aiBrain.punchUntil = now + TUNE.aiPunchWindowMs;
+      aiBrain.cooldownUntil = now + TUNE.aiCooldownMs;
+      aiBrain.activeHand = (Math.random() < 0.5) ? "L" : "R";
+      aiBrain.power = 0.55 + Math.random() * 0.45;
+    }
+
+    // Animate AI glove pop (further)
+    const g = (aiBrain.activeHand === "L") ? ai.userData.gL : ai.userData.gR;
+
+    if (now < aiBrain.punchUntil) {
+      const t = clamp((now - aiBrain.punchStart) / TUNE.aiPunchWindowMs, 0, 1);
+      const pop = Math.sin(t * Math.PI) * (TUNE.aiPunchPop * aiBrain.power);
+      g.position.z = 0.55 + pop;
+
+      // Hit check
+      const hitPoint = new THREE.Vector3().copy(ai.position);
+      hitPoint.y = 1.55;
+      hitPoint.z += (1.10 + pop); // AI faces +Z
+
+      const youPoint = player.position.clone();
+      youPoint.y = 1.55;
+
+      if (hitPoint.distanceTo(youPoint) < (1.25 + 0.35*aiBrain.power) && (now - lastHitYou) > 320) {
+        lastHitYou = now;
+        const base = 9 + Math.round(7 * aiBrain.power);
+        const dmg = state.you.guarding ? Math.max(3, Math.round(base * 0.45)) : base;
+
+        state.you.hp = Math.max(0, state.you.hp - dmg);
+        setStatus(state.you.guarding ? `BLOCK! -${dmg}` : `AI HIT! -${dmg}`);
+
+        player.position.z += (0.16 + 0.14*aiBrain.power);
+        if (state.you.hp <= 0) knockout("AI wins!");
+      }
+    } else {
+      // Return to guard stance (more motion than before)
+      g.position.z = 0.55 + Math.sin(now * 0.007) * 0.10;
+    }
+  }
+
+  function knockout(msg) {
+    state.ko = true;
+    setStatus(msg);
+  }
+
+  // ---------- Ground/platform collision ----------
+  function groundHeightAt(x, z) {
+    let h = 0;
+    for (const p of platforms) {
+      const halfX = 0.9, halfZ = 0.6;
+      const onTop = Math.abs(x - p.position.x) <= halfX && Math.abs(z - p.position.z) <= halfZ;
+      if (onTop) {
+        const top = p.position.y + 0.125;
+        if (top > h) h = top;
+      }
+    }
+    return h;
+  }
+
+  function keepInRing(obj) {
+    const pad = 0.55;
+    obj.position.x = clamp(obj.position.x, -half + pad, half - pad);
+    obj.position.z = clamp(obj.position.z, -half + pad, half - pad);
+  }
+
+  // ---------- HUD ----------
+  function updateHUD() {
+    const you = clamp(state.you.hp, 0, 100);
+    const aiHP = clamp(state.ai.hp, 0, 100);
+    hpYouEl.style.width = you + "%";
+    hpAIEl.style.width = aiHP + "%";
+    hpYouTxt.textContent = String(you);
+    hpAITxt.textContent = String(aiHP);
+
+    hpYouEl.style.background = you > 40 ? "#39c26a" : (you > 15 ? "#ffd24a" : "#ff4b4b");
+    hpAIEl.style.background  = aiHP > 40 ? "#ff4b4b" : (aiHP > 15 ? "#ffd24a" : "#ff7a7a");
+  }
+
+  function resetGame() {
+    state.you.hp = 100;
+    state.ai.hp = 100;
+    state.ko = false;
+
+    player.position.set(0, 0, 2.5);
+    ai.position.set(0, 0, -2.5);
+
+    phys.velY = 0;
+    movePhys.vx = 0;
+    movePhys.vz = 0;
+
+    setStatus("Ready");
+  }
+
+  resetBtn.addEventListener("click", resetGame);
+
+  // ---------- Main loop ----------
+  let lastT = performance.now();
+
+  function loop() {
+    if (!running) return;
+
+    const now = performance.now();
+    const dt = clamp((now - lastT) / 1000, 0, 0.033);
+    lastT = now;
+
+    // Guarding: Shift reduces damage
+    state.you.guarding = keys.has("ShiftLeft") || keys.has("ShiftRight");
+
+    // Player move inputs
+    let inX = 0, inFwd = 0;
+
+    if (!state.ko) {
+      // Keyboard
+      if (keys.has("KeyA")) inX -= 1;
+      if (keys.has("KeyD")) inX += 1;
+      if (keys.has("KeyW")) inFwd += 1; // toward AI
+      if (keys.has("KeyS")) inFwd -= 1; // back
+
+      // Face (strong)
+      const faceRecent = (now - faceControl.lastSeen) < 650;
+      if (faceControl.enabled && faceRecent) {
+        inX  += faceControl.axes.x * faceControl.strength;
+        inFwd += faceControl.axes.y * faceControl.strength; // up => forward (as requested)
+      } else if (faceControl.enabled) {
+        // decay if not recent
+        faceControl.axes.x *= 0.90;
+        faceControl.axes.y *= 0.90;
+      }
+    }
+
+    // Normalize to avoid diagonal speed exploit
+    const mag = Math.hypot(inX, inFwd);
+    if (mag > 1e-6) {
+      const s = Math.min(1, 1 / mag);
+      inX *= s; inFwd *= s;
+    }
+
+    // Velocity model (snappy)
+    const targetVX = inX * movePhys.maxSpeed;
+    const targetVZ = (-inFwd) * movePhys.maxSpeed; // forward = -Z
+
+    const a = 1 - Math.exp(-movePhys.accel * dt);
+    const f = 1 - Math.exp(-movePhys.friction * dt);
+
+    movePhys.vx += (Math.abs(inX) > 0.001) ? (targetVX - movePhys.vx) * a : (0 - movePhys.vx) * f;
+    movePhys.vz += (Math.abs(inFwd) > 0.001) ? (targetVZ - movePhys.vz) * a : (0 - movePhys.vz) * f;
+
+    player.position.x += movePhys.vx * dt;
+    player.position.z += movePhys.vz * dt;
+
+    // Jump
+    if (!state.ko && keys.has("Space") && phys.grounded) {
+      phys.velY = phys.jumpVel;
+      phys.grounded = false;
+    }
+
+    // Gravity
+    phys.velY += phys.gravity * dt;
+    player.position.y += phys.velY * dt;
+
+    // Ground/platform collision
+    const gH = groundHeightAt(player.position.x, player.position.z);
+    if (player.position.y <= gH) {
+      player.position.y = gH;
+      phys.velY = 0;
+      phys.grounded = true;
+    } else {
+      phys.grounded = false;
+    }
+
+    keepInRing(player);
+    keepInRing(ai);
+
+    // AI update
+    aiThink(now, dt);
+
+    // Hands -> combat
+    tryHitAI(now);
+
+    // Face each other (simple)
+    player.rotation.y = 0;
+    ai.rotation.y = Math.PI;
+
+    // Camera follow
+    const camTarget = new THREE.Vector3(player.position.x * 0.45, 2.2, 0);
+    camera3d.position.lerp(new THREE.Vector3(camTarget.x, 6.5, 14), 0.07);
+    camera3d.lookAt(camTarget);
+
+    updateHUD();
+    renderer.render(scene, camera3d);
+    requestAnimationFrame(loop);
+  }
+
+  // ---------- Resize ----------
+  window.addEventListener("resize", () => {
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    camera3d.aspect = window.innerWidth / window.innerHeight;
+    camera3d.updateProjectionMatrix();
+  });
+
+  // ---------- Start ----------
+  startBtn.addEventListener("click", async () => {
+    modal.style.display = "none";
+    setStatus("Starting…");
+
+    try {
+      // user gesture camera start
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+      video.srcObject = stream;
+      await video.play();
+
+      startVision();
+      setStatus("Tracking");
+    } catch (e) {
+      console.error(e);
+      alert("Camera permission denied or unavailable.");
+      modal.style.display = "flex";
+      setStatus("Camera blocked");
+    }
+  });
+
+  requestAnimationFrame(loop);
+
+  // Initial UI
+  toggleFaceBtn.textContent = `Face Move: ${faceControl.enabled ? "On" : "Off"}`;
+  setFaceUI(false, "Waiting…");
+  resetGame();
+})();
+</script>
+</body>
+</html>

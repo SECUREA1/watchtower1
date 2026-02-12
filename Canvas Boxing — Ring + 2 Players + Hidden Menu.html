@@ -1,0 +1,719 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Canvas Boxing — Ring + 2 Players + Hidden Menu</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin:0; background:#0b0f16; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; overflow:hidden; }
+    #wrap{ position:fixed; inset:0; display:grid; place-items:center; }
+    #game{
+      background:#05070b;
+      border:1px solid rgba(255,255,255,0.12);
+      border-radius:14px;
+      box-shadow:0 20px 70px rgba(0,0,0,0.55);
+      display:block;
+    }
+    #hud{
+      position:fixed; left:14px; top:14px; z-index:10;
+      user-select:none; pointer-events:none;
+      display:grid; gap:8px;
+    }
+    .hudRow{
+      background:rgba(0,0,0,0.45);
+      border:1px solid rgba(255,255,255,0.12);
+      border-radius:10px;
+      padding:8px 10px;
+      font-size:13px;
+      line-height:1.25;
+      white-space:pre-line;
+      max-width:min(760px, 94vw);
+      backdrop-filter: blur(6px);
+    }
+
+    /* Hidden menu popup */
+    #overlay{
+      position:fixed; inset:0;
+      display:none;
+      place-items:center;
+      background:radial-gradient(900px 500px at 50% 40%, rgba(90,167,255,0.12), rgba(0,0,0,0.82));
+      z-index:50;
+    }
+    #panel{
+      width:min(920px, 92vw);
+      background:rgba(10,14,22,0.92);
+      border:1px solid rgba(255,255,255,0.14);
+      border-radius:18px;
+      padding:18px;
+      box-shadow:0 30px 90px rgba(0,0,0,0.7);
+    }
+    #panel h1{ margin:0 0 8px 0; font-weight:950; letter-spacing:.2px; font-size:24px; }
+    #panel p{ margin:8px 0; color:rgba(255,255,255,0.86); font-size:13px; line-height:1.45; }
+    .grid{ margin-top:14px; display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
+    .btn{
+      pointer-events:auto; cursor:pointer;
+      border:1px solid rgba(255,255,255,0.18);
+      background:rgba(255,255,255,0.06);
+      color:rgba(255,255,255,0.92);
+      border-radius:12px; padding:12px;
+      font-weight:850; font-size:13px;
+      transition:transform .05s ease, background .15s ease, outline-color .12s ease;
+      text-align:left;
+    }
+    .btn:hover{ background:rgba(255,255,255,0.10); }
+    .btn:active{ transform:translateY(1px); }
+    .btn.primary{ border-color:rgba(80,220,140,0.40); background:rgba(80,220,140,0.10); }
+    .btn.warn{ border-color:rgba(255,140,90,0.45); background:rgba(255,140,90,0.10); }
+    .kv{ margin-top:10px; display:grid; grid-template-columns: 180px 1fr; gap:10px; font-size:12.5px; color:rgba(255,255,255,0.84); }
+    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .tag{
+      display:inline-block; padding:2px 8px; border-radius:999px;
+      border:1px solid rgba(255,255,255,0.16);
+      background:rgba(255,255,255,0.06);
+      margin-left:8px; font-size:12px; color:rgba(255,255,255,0.88);
+    }
+  </style>
+</head>
+
+<body>
+  <div id="wrap"><canvas id="game"></canvas></div>
+
+  <div id="hud">
+    <div class="hudRow" id="hudTop">Boxing loaded. Press ESC for menu.</div>
+    <div class="hudRow" id="hudStats"></div>
+  </div>
+
+  <div id="overlay" aria-hidden="true">
+    <div id="panel">
+      <h1>Boxing Match <span class="tag">Ring • 2 Players • Hitboxes • Stamina • Block • Knockback</span></h1>
+      <p>
+        Everything “extra” lives here in the hidden popup menu.
+        Close/open with <b>Esc</b>. The match continues only when menu is closed.
+      </p>
+
+      <div class="grid">
+        <button class="btn primary" id="btnResume" type="button">Resume Match</button>
+        <button class="btn" id="btnRestart" type="button">Restart Round</button>
+        <button class="btn warn" id="btnToggleSlowmo" type="button">Slow Motion: OFF</button>
+
+        <button class="btn" id="btnToggleAssist" type="button">Auto-Face Each Other: ON</button>
+        <button class="btn" id="btnToggleShake" type="button">Hit Shake: ON</button>
+        <button class="btn" id="btnToggleWebcam" type="button">Webcam Controls: OFF (placeholder)</button>
+      </div>
+
+      <div class="kv">
+        <div>Player 1</div>
+        <div class="mono">Move A/D • Jump W • Jab F • Cross G • Block H</div>
+
+        <div>Player 2</div>
+        <div class="mono">Move ←/→ • Jump ↑ • Jab K • Cross L • Block ;</div>
+
+        <div>Win</div>
+        <div>Deplete opponent HP. Blocking reduces damage but drains stamina.</div>
+
+        <div>Tip</div>
+        <div>Try spacing: jab is faster/shorter; cross is slower/stronger with more reach.</div>
+      </div>
+
+      <div class="mono" id="menuStatus" style="margin-top:12px; color:rgba(255,255,255,0.85);">Status: ready.</div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const GAME_W = 960, GAME_H = 540;
+  const DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+
+  const hudTop = document.getElementById("hudTop");
+  const hudStats = document.getElementById("hudStats");
+
+  const overlay = document.getElementById("overlay");
+  const menuStatus = document.getElementById("menuStatus");
+
+  const btnResume = document.getElementById("btnResume");
+  const btnRestart = document.getElementById("btnRestart");
+  const btnToggleSlowmo = document.getElementById("btnToggleSlowmo");
+  const btnToggleAssist = document.getElementById("btnToggleAssist");
+  const btnToggleShake = document.getElementById("btnToggleShake");
+  const btnToggleWebcam = document.getElementById("btnToggleWebcam");
+
+  function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
+  function lerp(a,b,t){ return a + (b-a)*t; }
+  function now(){ return performance.now(); }
+
+  function layoutCanvas(){
+    canvas.width = Math.floor(GAME_W * DPR);
+    canvas.height = Math.floor(GAME_H * DPR);
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+
+    const scale = Math.min(window.innerWidth / GAME_W, window.innerHeight / GAME_H);
+    canvas.style.width = Math.floor(GAME_W * scale) + "px";
+    canvas.style.height = Math.floor(GAME_H * scale) + "px";
+  }
+  window.addEventListener("resize", layoutCanvas);
+  layoutCanvas();
+
+  const state = {
+    paused: false,
+    slowmo: false,
+    autoFace: true,
+    hitShake: true,
+    webcamPlaceholder: false,
+
+    time: now(),
+    last: now(),
+    shake: 0,
+
+    ring: {
+      x: 120, y: 95, w: 720, h: 360,
+      floorY: 95 + 360 - 56
+    },
+
+    keys: new Set(),
+    pressed: new Set(),
+
+    roundOver: false,
+    roundMsg: "",
+  };
+
+  function makeFighter(opts){
+    return {
+      name: opts.name,
+      x: opts.x, y: opts.y,
+      w: 52, h: 96,
+      vx: 0, vy: 0,
+      facing: opts.facing, // 1 right, -1 left
+
+      hp: 100,
+      stamina: 100,
+
+      onGround: true,
+      block: false,
+
+      // attack states
+      attack: null,         // "jab" | "cross" | null
+      attackUntil: 0,
+      attackHit: false,     // has this swing already hit
+      hurtUntil: 0,
+
+      colorA: opts.colorA,
+      colorB: opts.colorB,
+    };
+  }
+
+  const p1 = makeFighter({ name:"P1", x: 320, y: state.ring.floorY, facing: 1,  colorA:"rgba(90,167,255,0.95)",  colorB:"rgba(90,167,255,0.25)"});
+  const p2 = makeFighter({ name:"P2", x: 588, y: state.ring.floorY, facing: -1, colorA:"rgba(255,120,90,0.95)",  colorB:"rgba(255,120,90,0.22)"});
+
+  // Tuning
+  const PHYS = {
+    gravity: 2300,
+    moveSpeed: 520,
+    jumpVel: 960,
+    friction: 0.86,
+
+    jab:   { dur: 190, wind: 55, reach: 44, dmg: 8,  kb: 260, cost: 10 },
+    cross: { dur: 320, wind: 90, reach: 62, dmg: 14, kb: 420, cost: 16 },
+
+    blockDrainPerSec: 12,
+    staminaRegenPerSec: 22,
+
+    hurtInvulnMs: 140,
+  };
+
+  function isMenuOpen(){ return overlay.style.display !== "none"; }
+  function setMenu(open){
+    overlay.style.display = open ? "grid" : "none";
+    state.paused = open;
+    menuStatus.textContent = open ? "Status: menu open (game paused)." : "Status: running.";
+    hudTop.textContent = open ? "Menu open (paused). Press ESC to resume." : "Fight!";
+  }
+
+  function restartRound(){
+    state.roundOver = false;
+    state.roundMsg = "";
+    state.shake = 0;
+
+    p1.x = 320; p1.y = state.ring.floorY; p1.vx = p1.vy = 0; p1.facing = 1;
+    p2.x = 588; p2.y = state.ring.floorY; p2.vx = p2.vy = 0; p2.facing = -1;
+
+    for (const p of [p1,p2]){
+      p.hp = 100;
+      p.stamina = 100;
+      p.attack = null;
+      p.attackUntil = 0;
+      p.attackHit = false;
+      p.block = false;
+      p.hurtUntil = 0;
+      p.onGround = true;
+    }
+
+    hudTop.textContent = "Round restarted. Fight!";
+  }
+
+  btnResume.addEventListener("click", () => setMenu(false));
+  btnRestart.addEventListener("click", () => { restartRound(); setMenu(false); });
+  btnToggleSlowmo.addEventListener("click", () => {
+    state.slowmo = !state.slowmo;
+    btnToggleSlowmo.textContent = "Slow Motion: " + (state.slowmo ? "ON" : "OFF");
+  });
+  btnToggleAssist.addEventListener("click", () => {
+    state.autoFace = !state.autoFace;
+    btnToggleAssist.textContent = "Auto-Face Each Other: " + (state.autoFace ? "ON" : "OFF");
+  });
+  btnToggleShake.addEventListener("click", () => {
+    state.hitShake = !state.hitShake;
+    btnToggleShake.textContent = "Hit Shake: " + (state.hitShake ? "ON" : "OFF");
+  });
+  btnToggleWebcam.addEventListener("click", () => {
+    state.webcamPlaceholder = !state.webcamPlaceholder;
+    btnToggleWebcam.textContent = "Webcam Controls: " + (state.webcamPlaceholder ? "ON (placeholder)" : "OFF (placeholder)");
+  });
+
+  window.addEventListener("keydown", (e) => {
+    const k = e.key;
+    const kl = k.toLowerCase();
+    if (!state.keys.has(kl)) state.pressed.add(kl);
+    state.keys.add(kl);
+
+    if (k === "Escape"){
+      setMenu(!isMenuOpen());
+      e.preventDefault();
+      return;
+    }
+  });
+  window.addEventListener("keyup", (e) => {
+    state.keys.delete((e.key || "").toLowerCase());
+  });
+
+  function keyDown(k){ return state.keys.has(k); }
+  function keyPressed(k){ return state.pressed.has(k); }
+
+  function rectsOverlap(a,b){
+    return a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y;
+  }
+
+  function faceEachOther(){
+    const mid = (p1.x + p2.x) * 0.5;
+    p1.facing = (p1.x < mid) ? 1 : -1;
+    p2.facing = (p2.x < mid) ? 1 : -1;
+  }
+
+  function tryAttack(p, kind){
+    if (state.roundOver) return;
+    const t = now();
+    const cfg = PHYS[kind];
+    if (!cfg) return;
+
+    if (p.attack && t < p.attackUntil) return;
+    if (p.stamina < cfg.cost) return;
+
+    p.stamina = clamp(p.stamina - cfg.cost, 0, 100);
+    p.attack = kind;
+    p.attackUntil = t + cfg.dur;
+    p.attackHit = false;
+  }
+
+  function attackBox(p){
+    if (!p.attack) return null;
+    const t = now();
+    const cfg = PHYS[p.attack];
+    const startT = p.attackUntil - cfg.dur;
+    const elapsed = t - startT;
+
+    // only "active" after windup
+    if (elapsed < cfg.wind) return null;
+
+    // reach grows slightly over swing
+    const swingT = clamp((elapsed - cfg.wind) / Math.max(1, (cfg.dur - cfg.wind)), 0, 1);
+    const reach = cfg.reach * (0.85 + 0.25*swingT);
+
+    const ax = (p.facing > 0) ? (p.x + p.w - 2) : (p.x - reach + 2);
+    return {
+      x: ax,
+      y: p.y + 22,
+      w: reach,
+      h: 34,
+      kind: p.attack
+    };
+  }
+
+  function resolveHits(attacker, defender){
+    const t = now();
+    const ab = attackBox(attacker);
+    if (!ab) return;
+
+    // already hit once per swing
+    if (attacker.attackHit) return;
+
+    // invuln window when just hurt
+    if (t < defender.hurtUntil) return;
+
+    const db = { x:defender.x, y:defender.y, w:defender.w, h:defender.h };
+    if (!rectsOverlap(ab, db)) return;
+
+    attacker.attackHit = true;
+
+    const cfg = PHYS[ab.kind];
+    let dmg = cfg.dmg;
+    let kb = cfg.kb;
+
+    if (defender.block && defender.stamina > 0){
+      dmg = Math.max(2, Math.floor(dmg * 0.35));
+      kb *= 0.45;
+      defender.stamina = clamp(defender.stamina - 10, 0, 100);
+    } else {
+      defender.hurtUntil = t + PHYS.hurtInvulnMs;
+    }
+
+    defender.hp = clamp(defender.hp - dmg, 0, 100);
+
+    // knockback
+    defender.vx += (attacker.facing > 0 ? 1 : -1) * kb;
+
+    // screen shake
+    if (state.hitShake){
+      state.shake = Math.min(14, state.shake + 7);
+    }
+
+    if (defender.hp <= 0 && !state.roundOver){
+      state.roundOver = true;
+      state.roundMsg = attacker.name + " WINS!";
+      hudTop.textContent = state.roundMsg + "  (Press ESC → Restart Round)";
+    }
+  }
+
+  function updateFighter(p, other, dt){
+    const r = state.ring;
+    const t = now();
+
+    // Stamina regen
+    if (!p.attack && !p.block){
+      p.stamina = clamp(p.stamina + PHYS.staminaRegenPerSec*dt, 0, 100);
+    }
+
+    // Block drain
+    if (p.block){
+      p.stamina = clamp(p.stamina - PHYS.blockDrainPerSec*dt, 0, 100);
+      if (p.stamina <= 0) p.block = false;
+    }
+
+    // Clear attack when time ends
+    if (p.attack && t >= p.attackUntil){
+      p.attack = null;
+      p.attackUntil = 0;
+      p.attackHit = false;
+    }
+
+    // Physics
+    p.vy += PHYS.gravity * dt;
+
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+
+    // friction
+    p.vx *= Math.pow(PHYS.friction, dt*60);
+
+    // floor
+    if (p.y >= r.floorY){
+      p.y = r.floorY;
+      p.vy = 0;
+      p.onGround = true;
+    } else {
+      p.onGround = false;
+    }
+
+    // ring walls
+    const left = r.x + 28;
+    const right = r.x + r.w - 28 - p.w;
+    p.x = clamp(p.x, left, right);
+
+    // prevent overlap: simple separation
+    const minDist = 40;
+    const dx = (p.x + p.w/2) - (other.x + other.w/2);
+    if (Math.abs(dx) < minDist){
+      p.x += Math.sign(dx || 1) * (minDist - Math.abs(dx)) * 0.45;
+      p.x = clamp(p.x, left, right);
+    }
+  }
+
+  function handleControls(){
+    // Player 1
+    if (!state.roundOver){
+      const mv1 =
+        (keyDown("a") ? -1 : 0) +
+        (keyDown("d") ?  1 : 0);
+      if (!p1.block) p1.vx += mv1 * PHYS.moveSpeed * (1/60);
+
+      if (keyPressed("w") && p1.onGround){
+        p1.vy = -PHYS.jumpVel;
+      }
+      p1.block = keyDown("h");
+
+      if (keyPressed("f")) tryAttack(p1, "jab");
+      if (keyPressed("g")) tryAttack(p1, "cross");
+
+      // Player 2
+      const mv2 =
+        (keyDown("arrowleft") ? -1 : 0) +
+        (keyDown("arrowright")?  1 : 0);
+      if (!p2.block) p2.vx += mv2 * PHYS.moveSpeed * (1/60);
+
+      if (keyPressed("arrowup") && p2.onGround){
+        p2.vy = -PHYS.jumpVel;
+      }
+      p2.block = keyDown(";");
+
+      if (keyPressed("k")) tryAttack(p2, "jab");
+      if (keyPressed("l")) tryAttack(p2, "cross");
+    }
+  }
+
+  function drawRing(){
+    const r = state.ring;
+
+    // shake transform
+    let sx=0, sy=0;
+    if (state.shake > 0){
+      sx = (Math.random()*2-1)*state.shake;
+      sy = (Math.random()*2-1)*state.shake;
+    }
+    ctx.save();
+    ctx.translate(sx, sy);
+
+    // mat
+    ctx.fillStyle = "rgba(16,22,36,0.95)";
+    ctx.fillRect(r.x, r.y, r.w, r.h);
+
+    // center logo
+    ctx.beginPath();
+    ctx.fillStyle = "rgba(90,167,255,0.10)";
+    ctx.arc(r.x+r.w/2, r.y+r.h/2, 80, 0, Math.PI*2);
+    ctx.fill();
+
+    // canvas texture lines
+    ctx.strokeStyle = "rgba(255,255,255,0.06)";
+    ctx.lineWidth = 1;
+    for (let i=0;i<10;i++){
+      const y = r.y + 40 + i*30;
+      ctx.beginPath();
+      ctx.moveTo(r.x+20, y);
+      ctx.lineTo(r.x+r.w-20, y);
+      ctx.stroke();
+    }
+
+    // corner posts
+    function post(px,py){
+      ctx.fillStyle = "rgba(255,255,255,0.10)";
+      ctx.fillRect(px-10, py-10, 20, 20);
+      ctx.fillStyle = "rgba(255,255,255,0.18)";
+      ctx.fillRect(px-7, py-7, 14, 14);
+    }
+    post(r.x+18, r.y+18);
+    post(r.x+r.w-18, r.y+18);
+    post(r.x+18, r.y+r.h-18);
+    post(r.x+r.w-18, r.y+r.h-18);
+
+    // ropes
+    ctx.lineWidth = 6;
+    const ropeYs = [r.y+40, r.y+r.h/2, r.y+r.h-40];
+    for (const ry of ropeYs){
+      ctx.strokeStyle = "rgba(255,255,255,0.22)";
+      ctx.beginPath();
+      ctx.moveTo(r.x+18, ry);
+      ctx.lineTo(r.x+r.w-18, ry);
+      ctx.stroke();
+    }
+
+    // border
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "rgba(255,255,255,0.14)";
+    ctx.strokeRect(r.x, r.y, r.w, r.h);
+
+    ctx.restore();
+  }
+
+  function drawFighter(p){
+    // body
+    ctx.save();
+
+    // hurt flash
+    const t = now();
+    const hurt = t < p.hurtUntil;
+    const alpha = hurt ? 0.75 : 1.0;
+
+    // shadow
+    ctx.globalAlpha = 0.55;
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.beginPath();
+    ctx.ellipse(p.x+p.w/2, p.y+p.h-6, p.w*0.50, 10, 0, 0, Math.PI*2);
+    ctx.fill();
+
+    // torso
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = p.colorB;
+    ctx.fillRect(p.x+8, p.y+26, p.w-16, p.h-40);
+
+    // outline
+    ctx.strokeStyle = "rgba(255,255,255,0.16)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(p.x+8, p.y+26, p.w-16, p.h-40);
+
+    // head
+    ctx.fillStyle = "rgba(245,220,200,0.95)";
+    ctx.beginPath();
+    ctx.arc(p.x+p.w/2, p.y+18, 16, 0, Math.PI*2);
+    ctx.fill();
+
+    // gloves / guard
+    const gloveY = p.y+50;
+    const gX1 = p.x + (p.facing>0 ? p.w-10 : 10);
+    const gX2 = p.x + (p.facing>0 ? p.w-18 : 18);
+
+    // block stance
+    if (p.block){
+      ctx.fillStyle = p.colorA;
+      ctx.beginPath();
+      ctx.arc(gX2, gloveY, 10, 0, Math.PI*2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(gX1, gloveY-10, 10, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.10)";
+      ctx.fillRect(p.x+10, p.y+30, p.w-20, 18);
+    } else {
+      ctx.fillStyle = p.colorA;
+      ctx.beginPath();
+      ctx.arc(gX1, gloveY, 10, 0, Math.PI*2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(gX2, gloveY+10, 10, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    // attack extension
+    const ab = attackBox(p);
+    if (ab){
+      ctx.fillStyle = p.colorA;
+      ctx.globalAlpha = 0.85;
+      ctx.fillRect(ab.x, ab.y+10, ab.w, 12);
+      ctx.globalAlpha = 1.0;
+    }
+
+    // name tag
+    ctx.globalAlpha = 0.95;
+    ctx.fillStyle = "rgba(255,255,255,0.90)";
+    ctx.font = "900 12px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(p.name, p.x+p.w/2, p.y-8);
+
+    ctx.restore();
+  }
+
+  function drawBars(){
+    function bar(x,y,w,h, label, v, colA){
+      ctx.fillStyle = "rgba(0,0,0,0.35)";
+      ctx.fillRect(x,y,w,h);
+      ctx.fillStyle = colA;
+      ctx.fillRect(x,y, w*clamp(v/100,0,1), h);
+      ctx.strokeStyle = "rgba(255,255,255,0.18)";
+      ctx.strokeRect(x,y,w,h);
+      ctx.fillStyle = "rgba(255,255,255,0.86)";
+      ctx.font = "800 12px system-ui, sans-serif";
+      ctx.textAlign = "left";
+      ctx.fillText(label, x+6, y+h-4);
+    }
+
+    bar(24, 24, 260, 18, "P1 HP", p1.hp, "rgba(90,167,255,0.75)");
+    bar(24, 48, 260, 14, "STA",   p1.stamina, "rgba(90,167,255,0.35)");
+
+    bar(GAME_W-24-260, 24, 260, 18, "P2 HP", p2.hp, "rgba(255,120,90,0.75)");
+    bar(GAME_W-24-260, 48, 260, 14, "STA",   p2.stamina, "rgba(255,120,90,0.35)");
+
+    if (state.roundOver){
+      ctx.fillStyle = "rgba(0,0,0,0.45)";
+      ctx.fillRect(0, GAME_H/2 - 40, GAME_W, 80);
+      ctx.fillStyle = "rgba(255,255,255,0.92)";
+      ctx.font = "950 30px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(state.roundMsg, GAME_W/2, GAME_H/2 + 10);
+    }
+  }
+
+  function updateHUD(){
+    hudStats.textContent =
+      `P1: HP ${p1.hp.toFixed(0)} | STA ${p1.stamina.toFixed(0)} | ${p1.block ? "BLOCK" : (p1.attack||"idle")}\n` +
+      `P2: HP ${p2.hp.toFixed(0)} | STA ${p2.stamina.toFixed(0)} | ${p2.block ? "BLOCK" : (p2.attack||"idle")}\n` +
+      `ESC = menu | ${state.slowmo ? "SLOWMO ON" : "SLOWMO OFF"} | Auto-Face ${state.autoFace ? "ON" : "OFF"}`;
+  }
+
+  function tick(){
+    const t = now();
+    let dt = (t - state.last) / 1000;
+    state.last = t;
+
+    if (state.slowmo) dt *= 0.45;
+    dt = clamp(dt, 0, 1/20);
+
+    // decay shake
+    state.shake = Math.max(0, state.shake - dt*26);
+
+    if (!state.paused){
+      state.pressed.clear();
+      // (pressed set must persist from keydown, so clear after we use it)
+      // We'll copy it before clearing:
+      // — Instead we handle it like this:
+    }
+
+    // We must handle pressed keys before we clear
+    // so: build a snapshot, then clear.
+    const pressedSnapshot = new Set(state.pressed);
+
+    if (!state.paused){
+      // use snapshot in helpers
+      const pressedOrig = state.pressed;
+      state.pressed = pressedSnapshot;
+
+      handleControls();
+
+      if (state.autoFace) faceEachOther();
+
+      updateFighter(p1, p2, dt);
+      updateFighter(p2, p1, dt);
+
+      resolveHits(p1, p2);
+      resolveHits(p2, p1);
+
+      // restore, then clear original store for next frame
+      state.pressed = pressedOrig;
+      state.pressed.clear();
+    } else {
+      // while paused, don't consume pressed keys
+      // (so ESC works cleanly)
+      state.pressed.clear();
+    }
+
+    // render
+    ctx.clearRect(0,0,GAME_W,GAME_H);
+    drawRing();
+    drawFighter(p1);
+    drawFighter(p2);
+    drawBars();
+    updateHUD();
+
+    requestAnimationFrame(tick);
+  }
+
+  // Fix pressed-key pipeline: record presses in keydown, consume in tick()
+  // We already add to state.pressed in keydown. tick() snapshots it each frame.
+
+  // Start
+  restartRound();
+  hudTop.textContent = "Fight! (ESC opens menu)";
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>

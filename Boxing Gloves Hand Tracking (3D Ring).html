@@ -1,0 +1,1631 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>3D Boxing (Rounds + Judges + Combo Point Groups) + Hands + RetinaOps Face Move</title>
+  <style>
+    html, body { margin:0; padding:0; overflow:hidden; background:#0b0d12; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    #canvas3d { position: fixed; inset:0; }
+
+    #hud {
+      position: fixed; top: 12px; left: 12px; z-index: 10;
+      display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap;
+      color: #fff; user-select: none;
+    }
+    .panel {
+      background: rgba(20, 24, 35, 0.72);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 12px;
+      padding: 10px 12px;
+      backdrop-filter: blur(8px);
+      min-width: 360px;
+      max-width: 410px;
+    }
+    .row { display:flex; justify-content: space-between; gap: 10px; align-items: center; margin: 6px 0; }
+    .bar { height: 10px; border-radius: 999px; background: rgba(255,255,255,0.15); overflow: hidden; flex: 1; margin-left: 10px; }
+    .fill { height:100%; width:100%; background: #fff; }
+    .btn {
+      cursor: pointer; border-radius: 10px; padding: 9px 10px;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.08);
+      color: #fff; font-weight: 600; white-space: nowrap;
+    }
+    .btn:active { transform: translateY(1px); }
+    .small { font-size: 12px; opacity: 0.82; line-height: 1.25; }
+    .divider { height: 1px; background: rgba(255,255,255,0.12); margin: 10px 0; }
+    .pill {
+      display:inline-flex; align-items:center; gap:8px;
+      padding: 6px 10px; border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.06);
+      font-size: 12px; opacity: 0.95;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 999px; background: rgba(255,255,255,0.35); }
+
+    .tunerRow { display:flex; align-items:center; justify-content:space-between; gap:10px; margin: 8px 0; }
+    .tunerRow label { font-size: 12px; opacity: 0.85; min-width: 135px; }
+    .tunerRow input[type="range"] { width: 180px; }
+    .val { font-variant-numeric: tabular-nums; font-size: 12px; opacity: 0.9; min-width: 58px; text-align:right; }
+
+    #videoWrap {
+      position: fixed; right: 12px; bottom: 12px; z-index: 10;
+      width: 268px;
+      background: rgba(20, 24, 35, 0.72);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 12px;
+      padding: 10px;
+      backdrop-filter: blur(8px);
+      display: none;
+    }
+    #videoBox { position: relative; width: 100%; }
+    #video {
+      width: 100%;
+      border-radius: 10px;
+      transform: scaleX(-1);
+      background: #000;
+      display: block;
+    }
+    #overlay {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      border-radius: 10px;
+    }
+    #tip { font-size: 12px; opacity: 0.85; margin-top: 8px; line-height: 1.25; }
+
+    #modal {
+      position: fixed; inset:0; z-index: 20;
+      display:flex; align-items:center; justify-content:center;
+      background: radial-gradient(ellipse at center, rgba(10,12,18,0.75), rgba(10,12,18,0.92));
+    }
+    #modalCard {
+      width: min(760px, calc(100% - 24px));
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(20, 24, 35, 0.75);
+      backdrop-filter: blur(10px);
+      color:#fff;
+      padding: 18px;
+    }
+    #modalCard h1 { margin: 0 0 8px; font-size: 18px; }
+    #modalCard p { margin: 0 0 12px; opacity: 0.9; line-height: 1.35; }
+    #kbd {
+      font-size: 12px; opacity: 0.85;
+      display:grid; grid-template-columns: 1fr 1fr; gap: 6px 16px;
+      margin-top: 10px;
+    }
+  </style>
+
+  <!-- Three.js -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+
+  <!-- MediaPipe Hands -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
+  <!-- MediaPipe FaceMesh -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+</head>
+<body>
+  <canvas id="canvas3d"></canvas>
+
+  <div id="hud">
+    <div class="panel">
+      <!-- Stamina (not instant KO) -->
+      <div class="row">
+        <div style="min-width:86px;">You STA</div>
+        <div class="bar"><div id="staYou" class="fill"></div></div>
+        <div id="staYouTxt" style="min-width:46px; text-align:right;">100</div>
+      </div>
+      <div class="row">
+        <div style="min-width:86px;">AI STA</div>
+        <div class="bar"><div id="staAI" class="fill"></div></div>
+        <div id="staAITxt" style="min-width:46px; text-align:right;">100</div>
+      </div>
+
+      <!-- Round / clock / judges -->
+      <div class="row">
+        <div style="min-width:86px;">Round</div>
+        <div id="roundTxt" style="flex:1; text-align:left; opacity:0.92;">1 / 3</div>
+        <div id="clockTxt" style="min-width:72px; text-align:right;">01:30</div>
+      </div>
+
+      <div class="row">
+        <div style="min-width:86px;">Round Pts</div>
+        <div id="rPtsTxt" style="flex:1; text-align:left; opacity:0.92;">You 0 — AI 0</div>
+        <div id="kdTxt" style="min-width:72px; text-align:right; opacity:0.92;">KD 0–0</div>
+      </div>
+
+      <div class="row">
+        <div style="min-width:86px;">Judges</div>
+        <div id="judgeTxt" style="flex:1; text-align:left; opacity:0.92;">0–0 (10pt)</div>
+        <div id="matchTxt" style="min-width:72px; text-align:right; opacity:0.92;">M 0–0</div>
+      </div>
+
+      <!-- Combo point-group -->
+      <div class="row">
+        <div class="small" style="min-width:86px;">Point Group</div>
+        <div class="bar"><div id="grpFill" class="fill"></div></div>
+        <div id="grpTxt" style="min-width:72px; text-align:right;">+0</div>
+      </div>
+
+      <div class="row" style="gap:8px; flex-wrap:wrap; justify-content:flex-start;">
+        <button id="resetBtn" class="btn">Reset</button>
+        <button id="toggleFaceBtn" class="btn">Face Move: On</button>
+        <button id="calFaceBtn" class="btn">Calibrate Face</button>
+        <button id="flipYBtn" class="btn">Flip Up/Down</button>
+      </div>
+
+      <div class="row" style="justify-content:flex-start; gap:10px; flex-wrap:wrap;">
+        <div class="pill"><span id="faceDot" class="dot"></span>Face <span id="faceTxt" class="small">Waiting…</span></div>
+        <div class="pill"><span id="modeDot" class="dot"></span>Mode <span id="modeTxt" class="small">Fight</span></div>
+        <div class="small" id="status">Ready</div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="small" style="margin-bottom:6px;"><b>Face Movement Tuner</b></div>
+
+      <div class="tunerRow">
+        <label>Base Sensitivity</label>
+        <input id="sensBase" type="range" min="0.8" max="12" step="0.1" value="6.2" />
+        <div id="sensBaseVal" class="val">6.2</div>
+      </div>
+
+      <div class="tunerRow">
+        <label>Left/Right Ratio</label>
+        <input id="lrRatio" type="range" min="0.4" max="2.8" step="0.05" value="1.15" />
+        <div id="lrRatioVal" class="val">1.15</div>
+      </div>
+
+      <div class="tunerRow">
+        <label>Center Deadzone</label>
+        <input id="deadzone" type="range" min="0.00" max="0.30" step="0.005" value="0.05" />
+        <div id="deadzoneVal" class="val">0.050</div>
+      </div>
+
+      <div class="tunerRow">
+        <label>Face Smoothness</label>
+        <input id="faceSmooth" type="range" min="0.02" max="0.40" step="0.01" value="0.14" />
+        <div id="faceSmoothVal" class="val">0.14</div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="small" style="margin-bottom:6px;"><b>Match Tuner</b></div>
+
+      <div class="tunerRow">
+        <label>Hit Assist</label>
+        <input id="hitAssist" type="range" min="0.0" max="1.3" step="0.05" value="0.85" />
+        <div id="hitAssistVal" class="val">0.85</div>
+      </div>
+
+      <div class="tunerRow">
+        <label>AI Calmness</label>
+        <input id="aiCalm" type="range" min="0.60" max="1.30" step="0.05" value="1.05" />
+        <div id="aiCalmVal" class="val">1.05</div>
+      </div>
+
+      <div class="tunerRow">
+        <label>AI Power</label>
+        <input id="aiPower" type="range" min="0.35" max="0.95" step="0.05" value="0.55" />
+        <div id="aiPowerVal" class="val">0.55</div>
+      </div>
+
+      <div class="small">
+        <b>Realistic match:</b> wins by judges after rounds, not instant KO.<br/>
+        Knockdowns happen mainly from <b>big point groups</b> when stamina is low.
+      </div>
+    </div>
+  </div>
+
+  <div id="videoWrap">
+    <div id="videoBox">
+      <video id="video" playsinline></video>
+      <canvas id="overlay"></canvas>
+    </div>
+    <div id="tip">Overlay: deadzone circle + direction dot. Keep face centered for no movement.</div>
+  </div>
+
+  <div id="modal">
+    <div id="modalCard">
+      <h1>Boxing Match (Rounds + Judges + Combo Point Groups) + Hands + Face Movement</h1>
+      <p>
+        Click <b>Enable Camera</b>. Move with your face: up = forward, down = back, left/right = strafe.
+        Punch by thrusting your hands toward the camera (gloves pop out). Scoring is based on <b>point groups</b>
+        (combos) + round judges.
+      </p>
+      <button id="startBtn" class="btn">Enable Camera</button>
+      <div id="kbd">
+        <div><b>W / S</b> step in/out</div><div><b>A / D</b> strafe</div>
+        <div><b>Space</b> jump</div><div><b>Shift</b> guard</div>
+        <div><b>F</b> face calibrate</div><div><b>G</b> toggle face</div>
+        <div><b>H</b> flip up/down</div><div><b>R</b> reset</div>
+      </div>
+      <p class="small" style="margin-top:12px;">
+        Note: Camera requires HTTPS or localhost. Run with a local server.
+      </p>
+    </div>
+  </div>
+
+<script>
+(() => {
+  // ============================================================
+  // MATCH DESIGN (more realistic: rounds + judges + scoring)
+  // ============================================================
+  const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+  const lerp = (a,b,t)=>a+(b-a)*t;
+
+  const MATCH = {
+    roundsTotal: 3,
+    roundSeconds: 90,     // longer feel without being endless
+    restSeconds: 20,
+
+    // “10-point must” baseline, but driven by your point totals
+    // (winner gets 10, loser 9; knockdown can make it 10-8)
+    judgeRandomness: 0.15, // tiny random variance per judge
+
+    // Stamina: not instant KO; affects knockdown chance & movement feel
+    staminaMax: 100,
+    staminaRegenPerSec: 1.4,   // during rest
+    staminaDrainMove: 0.12,    // per second at full speed
+    staminaFloorSpeed: 0.72,   // speed multiplier at 0 stamina
+
+    // Point group rules
+    comboWindowMs: 1150,
+    comboMultPerHit: 0.10,  // group multiplier growth per consecutive hit
+    comboMaxMult: 1.65,
+    groupCommitGraceMs: 120, // small grace so group ends cleanly
+
+    // Hit scoring (points, not damage)
+    ptsJab: 1,
+    ptsClean: 2,
+    ptsBig: 3,
+    ptsBlocked: 0,          // blocked punches don’t score
+
+    // Stamina cost per hit
+    staLossJab: 1.0,
+    staLossClean: 1.6,
+    staLossBig: 2.4,
+
+    // Knockdown logic (comes from big point groups)
+    kdStaminaThreshold: 28,      // only when defender is tired
+    kdGroupImpactThreshold: 9.0, // big combos create impact
+    kdBaseChance: 0.22,
+    kdMaxChance: 0.70,
+    kdCooldownMs: 2400,
+    kdDownMs: 2600,
+    kdPerMatchTKO: 3,            // 3 KDs = TKO (keeps it boxing-like)
+
+    // Guard
+    guardScoreReduction: 0.0,    // blocked = 0 points
+    guardStaminaReduction: 0.45, // guarding reduces stamina loss
+
+    // Movement feel
+    maxSpeed: 10.5,
+    accel: 54.0,
+    friction: 30.0,
+    jumpVel: 9.5,
+    gravity: -22,
+
+    // Hand punch feel
+    punchWindowMs: 320,
+    punchCooldownMs: 260,
+    punchVzThreshold: -0.80,
+
+    // Glove mapping (shoulder height)
+    shoulderY: 1.62,
+    shoulderYJitter: 0.24,
+    sideScale: 2.75,
+    baseForward: 0.78,
+    thrustScale: 6.6,
+    punchPopMax: 1.70,
+
+    // Hit assist (slider expands range)
+    punchRangeBase: 2.05
+  };
+
+  // ============================================================
+  // DOM
+  // ============================================================
+  const canvas = document.getElementById("canvas3d");
+  const modal = document.getElementById("modal");
+  const startBtn = document.getElementById("startBtn");
+  const resetBtn = document.getElementById("resetBtn");
+  const toggleFaceBtn = document.getElementById("toggleFaceBtn");
+  const calFaceBtn = document.getElementById("calFaceBtn");
+  const flipYBtn = document.getElementById("flipYBtn");
+
+  const staYouEl = document.getElementById("staYou");
+  const staAIEl = document.getElementById("staAI");
+  const staYouTxt = document.getElementById("staYouTxt");
+  const staAITxt = document.getElementById("staAITxt");
+
+  const roundTxt = document.getElementById("roundTxt");
+  const clockTxt = document.getElementById("clockTxt");
+  const rPtsTxt = document.getElementById("rPtsTxt");
+  const kdTxt = document.getElementById("kdTxt");
+  const judgeTxt = document.getElementById("judgeTxt");
+  const matchTxt = document.getElementById("matchTxt");
+
+  const grpFill = document.getElementById("grpFill");
+  const grpTxt = document.getElementById("grpTxt");
+
+  const statusEl = document.getElementById("status");
+  const faceDot = document.getElementById("faceDot");
+  const faceTxt = document.getElementById("faceTxt");
+
+  const modeDot = document.getElementById("modeDot");
+  const modeTxt = document.getElementById("modeTxt");
+
+  const videoWrap = document.getElementById("videoWrap");
+  const video = document.getElementById("video");
+  const overlay = document.getElementById("overlay");
+  const octx = overlay.getContext("2d");
+
+  // tuners
+  const sensBaseEl = document.getElementById("sensBase");
+  const lrRatioEl = document.getElementById("lrRatio");
+  const deadzoneEl = document.getElementById("deadzone");
+  const faceSmoothEl = document.getElementById("faceSmooth");
+
+  const sensBaseVal = document.getElementById("sensBaseVal");
+  const lrRatioVal = document.getElementById("lrRatioVal");
+  const deadzoneVal = document.getElementById("deadzoneVal");
+  const faceSmoothVal = document.getElementById("faceSmoothVal");
+
+  const hitAssistEl = document.getElementById("hitAssist");
+  const aiCalmEl = document.getElementById("aiCalm");
+  const aiPowerEl = document.getElementById("aiPower");
+
+  const hitAssistVal = document.getElementById("hitAssistVal");
+  const aiCalmVal = document.getElementById("aiCalmVal");
+  const aiPowerVal = document.getElementById("aiPowerVal");
+
+  function setStatus(t){ statusEl.textContent = t; }
+  function setFaceUI(active, text){
+    faceDot.style.background = active ? "#39c26a" : "rgba(255,255,255,0.35)";
+    faceTxt.textContent = text;
+  }
+  function setModeUI(mode){
+    const c = (mode === "Rest") ? "#ffd24a" : (mode === "End") ? "#ff4b4b" : "#39c26a";
+    modeDot.style.background = c;
+    modeTxt.textContent = mode;
+  }
+
+  // ============================================================
+  // THREE.JS SCENE
+  // ============================================================
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0x0b0d12, 10, 35);
+
+  const camera3d = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 1000);
+  camera3d.position.set(0, 6.5, 14);
+  camera3d.lookAt(0, 2.2, 0);
+
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x223355, 0.9));
+  const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+  dir.position.set(8, 12, 6);
+  scene.add(dir);
+
+  // Ring
+  const ringSize = 10;
+  const half = ringSize / 2;
+
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(ringSize, ringSize),
+    new THREE.MeshStandardMaterial({ color: 0x1b2030, roughness: 0.95, metalness: 0.05 })
+  );
+  floor.rotation.x = -Math.PI / 2;
+  scene.add(floor);
+
+  const mark = new THREE.Mesh(
+    new THREE.RingGeometry(1.1, 1.25, 64),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6, side: THREE.DoubleSide })
+  );
+  mark.rotation.x = -Math.PI / 2;
+  mark.position.y = 0.01;
+  scene.add(mark);
+
+  // Posts + ropes
+  const postGeo = new THREE.CylinderGeometry(0.08, 0.08, 2.5, 16);
+  const postMat = new THREE.MeshStandardMaterial({ color: 0x888aa0, roughness: 0.4, metalness: 0.35 });
+  const ropeMat = new THREE.MeshStandardMaterial({ color: 0xaa3340, roughness: 0.8, metalness: 0.05 });
+  [[-half,1.25,-half],[half,1.25,-half],[-half,1.25,half],[half,1.25,half]].forEach(([x,y,z]) => {
+    const p = new THREE.Mesh(postGeo, postMat);
+    p.position.set(x,y,z);
+    scene.add(p);
+  });
+  function makeRope(y) {
+    const ropeGeo = new THREE.CylinderGeometry(0.035, 0.035, ringSize, 12);
+    const r1 = new THREE.Mesh(ropeGeo, ropeMat);
+    r1.rotation.z = Math.PI/2; r1.position.set(0,y,-half); scene.add(r1);
+    const r2 = r1.clone(); r2.position.set(0,y,half); scene.add(r2);
+    const r3 = r1.clone(); r3.rotation.z = 0; r3.rotation.x = Math.PI/2; r3.position.set(-half,y,0); scene.add(r3);
+    const r4 = r3.clone(); r4.position.set(half,y,0); scene.add(r4);
+  }
+  makeRope(0.75); makeRope(1.15); makeRope(1.55);
+
+  // Platforms
+  const platforms = [];
+  const platGeo = new THREE.BoxGeometry(1.8, 0.25, 1.2);
+  const platMat = new THREE.MeshStandardMaterial({ color: 0x2b3550, roughness: 0.9, metalness: 0.05 });
+  for (let i=0;i<3;i++){
+    const m = new THREE.Mesh(platGeo, platMat);
+    m.position.set(-2 + i*2, 0.55 + (i%2)*0.4, 1.5 - i*1.2);
+    scene.add(m); platforms.push(m);
+  }
+
+  // ============================================================
+  // GLOVE TEXTURE (SVG)
+  // ============================================================
+  const gloveSVG = `
+  <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+    <defs>
+      <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#ff4b4b"/>
+        <stop offset="1" stop-color="#b3132a"/>
+      </linearGradient>
+      <filter id="s" x="-20%" y="-20%" width="140%" height="140%">
+        <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#000" flood-opacity="0.35"/>
+      </filter>
+    </defs>
+    <g filter="url(#s)">
+      <path d="M70 110 C55 95,55 70,75 58 C92 48,110 60,115 70 L122 58
+               C130 44,152 44,160 60 L168 78 L176 66 C186 48,212 58,206 82
+               L198 112 C205 118,208 128,204 140 L192 178 C186 195,172 206,154 210
+               L108 220 C92 224,78 216,72 200 L56 154 C52 142,56 128,66 120 Z"
+            fill="url(#g)" stroke="#4a0613" stroke-width="6" stroke-linejoin="round"/>
+      <path d="M70 178 L190 150 L206 196 C210 208,204 220,192 224 L98 246
+               C84 250,70 242,66 228 L58 196 C54 186,60 180,70 178 Z"
+            fill="#222a3a" stroke="#0c101a" stroke-width="6" stroke-linejoin="round"/>
+      <path d="M92 106 C85 86,98 70,116 68 C136 66,144 82,138 100
+               C132 118,106 124,92 106 Z" fill="rgba(255,255,255,0.22)"/>
+    </g>
+  </svg>`.trim();
+
+  const gloveURL = "data:image/svg+xml;utf8," + encodeURIComponent(gloveSVG);
+  const gloveTexture = new THREE.TextureLoader().load(gloveURL);
+  gloveTexture.colorSpace = THREE.SRGBColorSpace;
+
+  function makeGlovePlane() {
+    const geo = new THREE.PlaneGeometry(1.12, 1.12);
+    const mat = new THREE.MeshBasicMaterial({ map: gloveTexture, transparent: true, side: THREE.DoubleSide });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.visible = false;
+    scene.add(mesh);
+    return mesh;
+  }
+  const gloveL = makeGlovePlane();
+  const gloveR = makeGlovePlane();
+
+  // ============================================================
+  // Fighters
+  // ============================================================
+  function makeFighter(colorBody) {
+    const group = new THREE.Group();
+
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(0.9, 1.4, 0.5),
+      new THREE.MeshStandardMaterial({ color: colorBody, roughness: 0.8, metalness: 0.05 })
+    );
+    body.position.y = 1.2;
+    group.add(body);
+
+    const head = new THREE.Mesh(
+      new THREE.SphereGeometry(0.35, 18, 18),
+      new THREE.MeshStandardMaterial({ color: 0xe6d6c7, roughness: 0.95, metalness: 0.02 })
+    );
+    head.position.y = 2.05;
+    group.add(head);
+
+    const gloveGeo = new THREE.SphereGeometry(0.22, 14, 14);
+    const gloveMat = new THREE.MeshStandardMaterial({ color: 0xaa3340, roughness: 0.6, metalness: 0.1 });
+    const gL = new THREE.Mesh(gloveGeo, gloveMat);
+    const gR = gL.clone();
+    gL.position.set(-0.55, 1.62, 0.55);
+    gR.position.set( 0.55, 1.62, 0.55);
+    group.add(gL, gR);
+
+    group.userData = { body, head, gL, gR };
+    scene.add(group);
+    return group;
+  }
+
+  const player = makeFighter(0x39c26a);
+  player.position.set(0, 0, 2.5);
+
+  const ai = makeFighter(0xff4b4b);
+  ai.position.set(0, 0, -2.7);
+  ai.scale.set(1.08, 1.08, 1.08); // slightly bigger target (easier to hit)
+
+  // ============================================================
+  // SIMPLE WORLD HELPERS
+  // ============================================================
+  function groundHeightAt(x, z) {
+    let h = 0;
+    for (const p of platforms) {
+      const halfX = 0.9, halfZ = 0.6;
+      const onTop = Math.abs(x - p.position.x) <= halfX && Math.abs(z - p.position.z) <= halfZ;
+      if (onTop) {
+        const top = p.position.y + 0.125;
+        if (top > h) h = top;
+      }
+    }
+    return h;
+  }
+  function keepInRing(obj) {
+    const pad = 0.55;
+    obj.position.x = clamp(obj.position.x, -half + pad, half - pad);
+    obj.position.z = clamp(obj.position.z, -half + pad, half - pad);
+  }
+  function fmtClock(sec){
+    sec = Math.max(0, Math.floor(sec));
+    const m = String(Math.floor(sec/60)).padStart(2,"0");
+    const s = String(sec%60).padStart(2,"0");
+    return `${m}:${s}`;
+  }
+
+  // ============================================================
+  // INPUT
+  // ============================================================
+  const keys = new Set();
+  window.addEventListener("keydown", (e) => {
+    keys.add(e.code);
+    if (e.code === "KeyR") resetMatch();
+    if (e.code === "KeyF") calibrateFace();
+    if (e.code === "KeyG") toggleFaceMove();
+    if (e.code === "KeyH") flipFaceY();
+  });
+  window.addEventListener("keyup", (e) => keys.delete(e.code));
+
+  // ============================================================
+  // FACE CONTROL (smoother & more stable)
+  // ============================================================
+  const faceControl = {
+    enabled: true,
+    invertX: true,
+    invertY: false,
+    gainX: 6.2,
+    gainY: 6.2,
+    deadzone: 0.05,
+
+    // smoothing uses time-based low-pass (stable)
+    smooth: 0.14,         // 0.02 fast, 0.40 very smooth
+    axes: { x: 0, y: 0 },
+    raw:  { x: 0, y: 0 },
+    neutral: null,
+    lastSeen: 0
+  };
+
+  function calibrateFace(){ faceControl.neutral = null; setStatus("Face calibrated"); }
+  function toggleFaceMove(){
+    faceControl.enabled = !faceControl.enabled;
+    toggleFaceBtn.textContent = `Face Move: ${faceControl.enabled ? "On" : "Off"}`;
+    setStatus(faceControl.enabled ? "Face move enabled" : "Face move disabled");
+  }
+  function flipFaceY(){ faceControl.invertY = !faceControl.invertY; setStatus(faceControl.invertY ? "Face up/down flipped" : "Face up/down normal"); }
+
+  toggleFaceBtn.addEventListener("click", toggleFaceMove);
+  calFaceBtn.addEventListener("click", calibrateFace);
+  flipYBtn.addEventListener("click", flipFaceY);
+
+  // radial deadzone (true center gap)
+  function applyRadialDeadzone(x, y, dz) {
+    const r = Math.hypot(x, y);
+    if (r <= dz) return { x: 0, y: 0 };
+    const nr = (r - dz) / (1 - dz);
+    const s = nr / r;
+    return { x: x*s, y: y*s };
+  }
+
+  // time-based smoothing: alpha = 1 - exp(-dt / tau)
+  function smoothTo(cur, target, dt, tau) {
+    const a = 1 - Math.exp(-dt / Math.max(1e-5, tau));
+    return cur + (target - cur) * a;
+  }
+
+  // ============================================================
+  // VISION (Hands + FaceMesh)
+  // ============================================================
+  let mpHands = null;
+  let mpFace = null;
+  let visionActive = false;
+
+  function startVision() {
+    if (visionActive) return;
+
+    mpHands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+    mpHands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+    mpHands.onResults(onHandResults);
+
+    mpFace = new FaceMesh({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}` });
+    mpFace.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+    mpFace.onResults(onFaceResults);
+
+    visionActive = true;
+    videoWrap.style.display = "block";
+    setStatus("Tracking");
+    setFaceUI(false, "Waiting…");
+
+    const resizeOverlay = () => {
+      const w = Math.max(1, video.clientWidth);
+      const h = Math.max(1, video.clientHeight);
+      if (overlay.width !== Math.floor(w) || overlay.height !== Math.floor(h)) {
+        overlay.width = Math.floor(w);
+        overlay.height = Math.floor(h);
+      }
+    };
+
+    let lastVisionT = performance.now();
+    const pump = async () => {
+      if (!visionActive) return;
+      resizeOverlay();
+
+      const now = performance.now();
+      // throttle for stability/perf
+      if (video.readyState >= 2 && (now - lastVisionT) > 30) {
+        lastVisionT = now;
+        try {
+          await mpHands.send({ image: video });
+          await mpFace.send({ image: video });
+        } catch {}
+      }
+      drawFaceOverlay();
+      requestAnimationFrame(pump);
+    };
+    requestAnimationFrame(pump);
+  }
+
+  function onFaceResults(results) {
+    const now = performance.now();
+    const faces = results.multiFaceLandmarks;
+
+    if (!faces || faces.length === 0) {
+      faceControl.axes.x *= 0.92;
+      faceControl.axes.y *= 0.92;
+      setFaceUI(false, "Not found");
+      return;
+    }
+
+    const lm = faces[0];
+    // stable set: nose tip + both eyes
+    const nose = lm[1];
+    const le = lm[33];
+    const re = lm[263];
+
+    const eyeMidX = (le.x + re.x) * 0.5;
+    const eyeMidY = (le.y + re.y) * 0.5;
+    const eyeDist = Math.max(1e-6, Math.hypot(le.x - re.x, le.y - re.y));
+
+    // normalized “yaw/pitch”
+    let yaw = (nose.x - eyeMidX) / eyeDist;
+    let pitch = (nose.y - eyeMidY) / eyeDist;
+
+    if (!faceControl.neutral) faceControl.neutral = { yaw, pitch };
+    yaw -= faceControl.neutral.yaw;
+    pitch -= faceControl.neutral.pitch;
+
+    let ax = yaw * faceControl.gainX;
+    let ay = (-pitch) * faceControl.gainY; // face up => forward
+
+    if (faceControl.invertX) ax = -ax;
+    if (faceControl.invertY) ay = -ay;
+
+    ax = clamp(ax, -1, 1);
+    ay = clamp(ay, -1, 1);
+
+    faceControl.raw.x = ax;
+    faceControl.raw.y = ay;
+
+    const dzOut = applyRadialDeadzone(ax, ay, faceControl.deadzone);
+    const tx = clamp(dzOut.x, -1, 1);
+    const ty = clamp(dzOut.y, -1, 1);
+
+    // smoothing tau derived from slider (bigger => smoother)
+    // map 0.02..0.40 to tau 0.03..0.28 seconds
+    const tau = lerp(0.03, 0.28, clamp((faceControl.smooth - 0.02) / 0.38, 0, 1));
+    // use an approximate dt for vision updates
+    const dt = 0.033;
+
+    faceControl.axes.x = smoothTo(faceControl.axes.x, tx, dt, tau);
+    faceControl.axes.y = smoothTo(faceControl.axes.y, ty, dt, tau);
+
+    faceControl.lastSeen = now;
+    setFaceUI(true, "Tracking");
+  }
+
+  // ============================================================
+  // HANDS -> glove planes + punch detection
+  // ============================================================
+  const handMotion = {
+    Left:  { lastZ: null, lastT: null, punchUntil: 0, cooldownUntil: 0, punchPower: 0, punchStart: 0 },
+    Right: { lastZ: null, lastT: null, punchUntil: 0, cooldownUntil: 0, punchPower: 0, punchStart: 0 }
+  };
+
+  let lastHandPoints = { Left: null, Right: null };
+
+  function updateGloveFromLandmarks(label, lm, now) {
+    const x = (lm[0].x + lm[5].x + lm[17].x) / 3;
+    const y = (lm[0].y + lm[5].y + lm[17].y) / 3;
+    const z = (lm[0].z + lm[5].z + lm[17].z) / 3;
+
+    const m = handMotion[label] || handMotion.Right;
+
+    if (m.lastZ != null && m.lastT != null) {
+      const dt = Math.max(0.001, (now - m.lastT) / 1000);
+      const vz = (z - m.lastZ) / dt; // negative => toward camera
+      const punch = (vz < MATCH.punchVzThreshold);
+
+      if (punch && now > m.cooldownUntil && match.mode === "Fight") {
+        m.punchStart = now;
+        m.punchUntil = now + MATCH.punchWindowMs;
+        m.cooldownUntil = now + MATCH.punchCooldownMs;
+
+        // normalize punch power (kept modest)
+        const raw = (-vz - (-MATCH.punchVzThreshold)) / 2.2;
+        m.punchPower = clamp(raw, 0, 1);
+      }
+    }
+    m.lastZ = z;
+    m.lastT = now;
+
+    const offX = (x - 0.5) * MATCH.sideScale;
+    const yJit = (0.55 - y) * MATCH.shoulderYJitter;
+    const offY = player.position.y + MATCH.shoulderY + yJit;
+
+    const thrust = clamp((-z) * MATCH.thrustScale, 0, 3.6);
+
+    let punchPop = 0;
+    let punching = false;
+    if (now < m.punchUntil) {
+      punching = true;
+      const t = clamp((now - m.punchStart) / MATCH.punchWindowMs, 0, 1);
+      punchPop = Math.sin(t * Math.PI) * (MATCH.punchPopMax * (0.60 + 0.40*m.punchPower));
+    }
+
+    const offZ = MATCH.baseForward + thrust + punchPop;
+
+    const gloveMesh = (label === "Left") ? gloveL : gloveR;
+    gloveMesh.visible = true;
+    gloveMesh.position.set(player.position.x + offX, offY, player.position.z - offZ);
+
+    const s = 0.92 + thrust*0.07 + punchPop*0.06;
+    gloveMesh.scale.set(s, s, s);
+    gloveMesh.lookAt(camera3d.position);
+
+    return { pos: gloveMesh.position.clone(), punching, power: m.punchPower };
+  }
+
+  function onHandResults(results) {
+    const now = performance.now();
+
+    gloveL.visible = false;
+    gloveR.visible = false;
+    lastHandPoints.Left = null;
+    lastHandPoints.Right = null;
+
+    if (!results.multiHandLandmarks || !results.multiHandedness) return;
+
+    for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+      const lm = results.multiHandLandmarks[i];
+      const handedness = results.multiHandedness[i];
+      const label = handedness.label === "Left" ? "Left" : "Right";
+      lastHandPoints[label] = updateGloveFromLandmarks(label, lm, now);
+    }
+  }
+
+  // ============================================================
+  // MATCH STATE: rounds, judges, point-groups, knockdowns
+  // ============================================================
+  const match = {
+    mode: "Fight",          // Fight | Rest | End
+    round: 1,
+    roundLeft: MATCH.roundSeconds,
+    restLeft: MATCH.restSeconds,
+
+    // per-round points (from committed point groups)
+    youRoundPts: 0,
+    aiRoundPts: 0,
+
+    // current point group being built
+    youGroup: { hits: 0, pts: 0, impact: 0, until: 0, lastHitAt: 0 },
+    aiGroup:  { hits: 0, pts: 0, impact: 0, until: 0, lastHitAt: 0 },
+
+    // match totals (round wins via judges 10-point)
+    youJudgeTotal: 0,
+    aiJudgeTotal: 0,
+    youRoundsWon: 0,
+    aiRoundsWon: 0,
+
+    // “match points” (raw points) just as a fun stat
+    youMatchPts: 0,
+    aiMatchPts: 0,
+
+    // knockdowns
+    youKD: 0,
+    aiKD: 0,
+    youKDMatch: 0,
+    aiKDMatch: 0,
+
+    // down state
+    youDownUntil: 0,
+    aiDownUntil: 0,
+    lastKDAt: 0
+  };
+
+  const fighter = {
+    you: { stamina: MATCH.staminaMax, guarding: false },
+    ai:  { stamina: MATCH.staminaMax, guarding: false }
+  };
+
+  function resetRoundScoring() {
+    match.youRoundPts = 0;
+    match.aiRoundPts = 0;
+    match.youGroup = { hits: 0, pts: 0, impact: 0, until: 0, lastHitAt: 0 };
+    match.aiGroup  = { hits: 0, pts: 0, impact: 0, until: 0, lastHitAt: 0 };
+    match.youKD = 0;
+    match.aiKD = 0;
+  }
+
+  function resetMatch() {
+    // fighters
+    fighter.you.stamina = MATCH.staminaMax;
+    fighter.ai.stamina  = MATCH.staminaMax;
+    fighter.you.guarding = false;
+    fighter.ai.guarding = false;
+
+    // positions
+    player.position.set(0, 0, 2.5);
+    ai.position.set(0, 0, -2.7);
+
+    // match
+    match.mode = "Fight";
+    match.round = 1;
+    match.roundLeft = MATCH.roundSeconds;
+    match.restLeft = MATCH.restSeconds;
+
+    match.youJudgeTotal = 0;
+    match.aiJudgeTotal = 0;
+    match.youRoundsWon = 0;
+    match.aiRoundsWon = 0;
+
+    match.youMatchPts = 0;
+    match.aiMatchPts = 0;
+
+    match.youKDMatch = 0;
+    match.aiKDMatch = 0;
+    match.lastKDAt = 0;
+    match.youDownUntil = 0;
+    match.aiDownUntil = 0;
+
+    resetRoundScoring();
+    setModeUI("Fight");
+    setStatus("Fight!");
+  }
+
+  resetBtn.addEventListener("click", resetMatch);
+
+  // ============================================================
+  // SCORING: point groups & knockdowns come from groups
+  // ============================================================
+  function classifyPunch(power, defenderGuarding) {
+    if (defenderGuarding) return { pts: MATCH.ptsBlocked, staLoss: 0, impact: 0.2 };
+    if (power < 0.35) return { pts: MATCH.ptsJab,   staLoss: MATCH.staLossJab,   impact: 1.0 };
+    if (power < 0.70) return { pts: MATCH.ptsClean, staLoss: MATCH.staLossClean, impact: 1.6 };
+    return { pts: MATCH.ptsBig,  staLoss: MATCH.staLossBig,  impact: 2.3 };
+  }
+
+  function addToGroup(side, pts, impact, now) {
+    const g = (side === "you") ? match.youGroup : match.aiGroup;
+
+    // combo continuity
+    const inWindow = (now <= g.until + MATCH.groupCommitGraceMs);
+    if (!inWindow) {
+      // commit previous group first
+      commitGroup(side, now, false);
+    }
+
+    g.hits += 1;
+    const mult = clamp(1 + (g.hits - 1) * MATCH.comboMultPerHit, 1, MATCH.comboMaxMult);
+    const add = Math.round(pts * mult);
+    g.pts += add;
+    g.impact += impact * mult;
+    g.until = now + MATCH.comboWindowMs;
+    g.lastHitAt = now;
+
+    return { groupPts: g.pts, mult };
+  }
+
+  function commitGroup(side, now, canKD) {
+    const g = (side === "you") ? match.youGroup : match.aiGroup;
+    if (g.hits <= 0) return;
+
+    // bank the group into round points + match points
+    if (side === "you") {
+      match.youRoundPts += g.pts;
+      match.youMatchPts += g.pts;
+      // small UI feedback
+      setStatus(`Point Group +${g.pts}`);
+    } else {
+      match.aiRoundPts += g.pts;
+      match.aiMatchPts += g.pts;
+    }
+
+    // knockdown attempt comes from BIG groups only (boxing-like)
+    if (canKD) {
+      tryKnockdownFromGroup(side, g.impact, now);
+    }
+
+    // reset group
+    g.hits = 0;
+    g.pts = 0;
+    g.impact = 0;
+    g.until = 0;
+    g.lastHitAt = 0;
+  }
+
+  function tryKnockdownFromGroup(attackerSide, groupImpact, now) {
+    if (now - match.lastKDAt < MATCH.kdCooldownMs) return;
+
+    const defenderSide = (attackerSide === "you") ? "ai" : "you";
+    const defender = (defenderSide === "you") ? fighter.you : fighter.ai;
+
+    // only when defender is tired
+    if (defender.stamina > MATCH.kdStaminaThreshold) return;
+    if (groupImpact < MATCH.kdGroupImpactThreshold) return;
+
+    const tired = clamp((MATCH.kdStaminaThreshold - defender.stamina) / MATCH.kdStaminaThreshold, 0, 1);
+    const big = clamp((groupImpact - MATCH.kdGroupImpactThreshold) / 10.0, 0, 1);
+    const chance = clamp(MATCH.kdBaseChance + tired*0.35 + big*0.30, 0, MATCH.kdMaxChance);
+
+    if (Math.random() < chance) {
+      match.lastKDAt = now;
+
+      if (defenderSide === "ai") {
+        match.aiKD += 1;
+        match.aiKDMatch += 1;
+        match.aiDownUntil = now + MATCH.kdDownMs;
+        setStatus("KNOCKDOWN! (AI)");
+      } else {
+        match.youKD += 1;
+        match.youKDMatch += 1;
+        match.youDownUntil = now + MATCH.kdDownMs;
+        setStatus("KNOCKDOWN! (You)");
+      }
+
+      // award bonus points for knockdown (realistic scoring swing)
+      const kdBonus = 8;
+      if (attackerSide === "you") {
+        match.youRoundPts += kdBonus;
+        match.youMatchPts += kdBonus;
+      } else {
+        match.aiRoundPts += kdBonus;
+        match.aiMatchPts += kdBonus;
+      }
+
+      // TKO rule
+      if (match.aiKDMatch >= MATCH.kdPerMatchTKO) endMatch("TKO — You win!");
+      if (match.youKDMatch >= MATCH.kdPerMatchTKO) endMatch("TKO — AI wins!");
+    }
+  }
+
+  function endMatch(msg){
+    match.mode = "End";
+    setModeUI("End");
+    setStatus(msg);
+  }
+
+  // ============================================================
+  // HIT DETECTION (easier to connect, but points-based)
+  // ============================================================
+  function getAIHitTargets() {
+    ai.updateMatrixWorld(true);
+    const head = new THREE.Vector3(0, 2.05, 0).applyMatrix4(ai.matrixWorld);
+    const body = new THREE.Vector3(0, 1.20, 0).applyMatrix4(ai.matrixWorld);
+    const mid  = new THREE.Vector3(0, 1.55, 0.25).applyMatrix4(ai.matrixWorld);
+    return [
+      { p: head, r: 1.25 },
+      { p: mid,  r: 1.55 },
+      { p: body, r: 1.65 }
+    ];
+  }
+
+  function getYouTarget() {
+    // simple point around chest/head
+    return new THREE.Vector3(player.position.x, 1.55, player.position.z);
+  }
+
+  let lastYouContactAt = 0;
+  let lastAIContactAt = 0;
+
+  function tryYouHit(now) {
+    if (match.mode !== "Fight") return;
+    if (now < match.youDownUntil || now < match.aiDownUntil) return;
+
+    const hands = [lastHandPoints.Left, lastHandPoints.Right].filter(Boolean);
+    if (hands.length === 0) return;
+
+    const targets = getAIHitTargets();
+    const assist = Number(hitAssistEl.value);
+    const extra = assist * 0.95;
+    const baseRange = MATCH.punchRangeBase + extra;
+
+    for (const h of hands) {
+      if (!h.punching) continue;
+      if (now - lastYouContactAt < 170) continue;
+
+      let best = { d: 999, r: 0 };
+      for (const t of targets) {
+        const d = h.pos.distanceTo(t.p);
+        if (d < best.d) best = { d, r: t.r };
+      }
+      const hit = best.d < (best.r + baseRange);
+      if (!hit) continue;
+
+      lastYouContactAt = now;
+
+      // guard check: AI calms/guards sometimes (handled in AI)
+      const defenderGuarding = fighter.ai.guarding;
+      const c = classifyPunch(h.power, defenderGuarding);
+
+      // add to point group
+      addToGroup("you", c.pts, c.impact, now);
+
+      // stamina drain on AI (reduced if guarding)
+      const loss = defenderGuarding ? c.staLoss * MATCH.guardStaminaReduction : c.staLoss;
+      fighter.ai.stamina = clamp(fighter.ai.stamina - loss, 0, MATCH.staminaMax);
+
+      // encourage “boxing rhythm”: commit group knockdown logic when group ends, not on every hit
+      // (we’ll attempt KD at group commit)
+      setStatus(defenderGuarding ? "Blocked" : "Scored!");
+
+      return;
+    }
+  }
+
+  function tryAIHit(now) {
+    if (match.mode !== "Fight") return;
+    if (now < match.youDownUntil || now < match.aiDownUntil) return;
+
+    if (now - lastAIContactAt < 220) return;
+    if (!aiBrain.punching) return;
+
+    const hitPoint = aiBrain.hitPoint;
+    const youPoint = getYouTarget();
+    const hitR = 1.10 + Number(hitAssistEl.value)*0.30; // mild forgiveness
+
+    if (hitPoint.distanceTo(youPoint) < hitR) {
+      lastAIContactAt = now;
+
+      const defenderGuarding = fighter.you.guarding;
+      const c = classifyPunch(aiBrain.power, defenderGuarding);
+
+      addToGroup("ai", c.pts, c.impact, now);
+
+      const loss = defenderGuarding ? c.staLoss * MATCH.guardStaminaReduction : c.staLoss;
+      fighter.you.stamina = clamp(fighter.you.stamina - loss, 0, MATCH.staminaMax);
+
+      setStatus(defenderGuarding ? "Block (AI scored 0)" : "AI scored!");
+    }
+  }
+
+  // ============================================================
+  // AI (calm, realistic rhythm, not too strong)
+  // ============================================================
+  const aiBrain = {
+    vx: 0, vz: 0,
+    nextDecision: 0,
+    guardingUntil: 0,
+
+    punching: false,
+    punchStart: 0,
+    punchUntil: 0,
+    cooldownUntil: 0,
+    activeHand: "R",
+    power: 0.55,
+    hitPoint: new THREE.Vector3()
+  };
+
+  function aiIsDown(now){ return now < match.aiDownUntil; }
+  function youIsDown(now){ return now < match.youDownUntil; }
+
+  function aiThink(now, dt) {
+    // face the user always
+    const dx = player.position.x - ai.position.x;
+    const dz = player.position.z - ai.position.z;
+    const yaw = Math.atan2(dx, dz); // +Z forward
+    ai.rotation.y = yaw;
+
+    // if down, “sit” and stop
+    if (aiIsDown(now) || match.mode !== "Fight") {
+      aiBrain.vx *= 0.88;
+      aiBrain.vz *= 0.88;
+      fighter.ai.guarding = false;
+      aiBrain.punching = false;
+      ai.userData.gL.position.set(-0.55, 1.42, 0.35);
+      ai.userData.gR.position.set( 0.55, 1.42, 0.35);
+      return;
+    }
+
+    const calm = Number(aiCalmEl.value);   // higher = calmer (less action)
+    const aiPow = Number(aiPowerEl.value); // lower = weaker
+
+    // decide behavior
+    if (now > aiBrain.nextDecision) {
+      // calmer AI waits longer between decisions
+      aiBrain.nextDecision = now + (260 + Math.random()*240) * calm;
+
+      // guard sometimes (especially if stamina low)
+      const tired = clamp((MATCH.kdStaminaThreshold - fighter.ai.stamina) / MATCH.kdStaminaThreshold, 0, 1);
+      const guardChance = clamp(0.10 + tired*0.35, 0.10, 0.55);
+
+      if (Math.random() < guardChance) {
+        aiBrain.guardingUntil = now + (240 + Math.random()*200) * calm;
+      }
+    }
+
+    fighter.ai.guarding = (now < aiBrain.guardingUntil);
+
+    // movement: circle and keep range (calm)
+    const toPlayer = new THREE.Vector3(dx, 0, dz);
+    const dist = toPlayer.length();
+    const dirTo = dist > 1e-6 ? toPlayer.clone().normalize() : new THREE.Vector3(0,0,1);
+    const perp = new THREE.Vector3(-dirTo.z, 0, dirTo.x);
+
+    const desiredDist = 3.35;
+    const delta = dist - desiredDist;
+
+    // calm AI does smaller lateral motion
+    const circleDir = (Math.sin(now * 0.0010) > 0) ? 1 : -1;
+    let desiredVX = perp.x * (2.2 / calm) * circleDir + dirTo.x * clamp(delta, -1.4, 1.4) * 1.0;
+    let desiredVZ = perp.z * (2.2 / calm) * circleDir + dirTo.z * clamp(delta, -1.4, 1.4) * 1.0;
+
+    // if very close, step back gently
+    if (dist < 2.2) {
+      desiredVX += (-dirTo.x) * (3.0 / calm);
+      desiredVZ += (-dirTo.z) * (3.0 / calm);
+    }
+
+    const maxSpd = 6.4 / calm;
+    const len = Math.hypot(desiredVX, desiredVZ) || 1;
+    desiredVX = (desiredVX / len) * Math.min(maxSpd, len);
+    desiredVZ = (desiredVZ / len) * Math.min(maxSpd, len);
+
+    // accel
+    const a = 1 - Math.exp(-18.0 * dt);
+    const f = 1 - Math.exp(-16.0 * dt);
+    const wantMove = (Math.hypot(desiredVX, desiredVZ) > 0.15);
+
+    aiBrain.vx += wantMove ? (desiredVX - aiBrain.vx) * a : (0 - aiBrain.vx) * f;
+    aiBrain.vz += wantMove ? (desiredVZ - aiBrain.vz) * a : (0 - aiBrain.vz) * f;
+
+    ai.position.x += aiBrain.vx * dt;
+    ai.position.z += aiBrain.vz * dt;
+
+    // punching: calmer AI jabs occasionally, not heavy combos
+    aiBrain.punching = false;
+
+    const canPunch =
+      (now > aiBrain.cooldownUntil) &&
+      !fighter.ai.guarding &&
+      !youIsDown(now) &&
+      match.mode === "Fight";
+
+    // only punch if within a reasonable range and not too frequently
+    if (canPunch && dist < 4.7) {
+      // calm reduces attack probability significantly
+      const baseP = 0.16;
+      const p = clamp(baseP / calm, 0.05, 0.18);
+
+      if (Math.random() < p) {
+        aiBrain.activeHand = (Math.random() < 0.5) ? "L" : "R";
+        // mostly lighter punches
+        aiBrain.power = clamp((0.35 + Math.random()*0.50) * aiPow, 0.25, 0.85);
+        aiBrain.punchStart = now;
+        aiBrain.punchUntil = now + (260 + Math.random()*120);
+        aiBrain.cooldownUntil = now + (520 + Math.random()*260) * calm;
+      }
+    }
+
+    // animate AI gloves with “real” jab pop
+    const idleBob = Math.sin(now * 0.007) * 0.07;
+
+    const gL = ai.userData.gL;
+    const gR = ai.userData.gR;
+
+    if (fighter.ai.guarding) {
+      gL.position.set(-0.42, 1.78 + idleBob, 0.62);
+      gR.position.set( 0.42, 1.78 - idleBob, 0.62);
+      return;
+    } else {
+      gL.position.y = 1.62 + idleBob;
+      gR.position.y = 1.62 - idleBob;
+      gL.position.z = 0.55 + Math.sin(now*0.006) * 0.10;
+      gR.position.z = 0.55 + Math.cos(now*0.006) * 0.10;
+    }
+
+    // punch window
+    if (now < aiBrain.punchUntil) {
+      aiBrain.punching = true;
+      const t = clamp((now - aiBrain.punchStart) / Math.max(1, (aiBrain.punchUntil - aiBrain.punchStart)), 0, 1);
+      const pop = Math.sin(t * Math.PI) * (1.55 * aiBrain.power);
+
+      const g = (aiBrain.activeHand === "L") ? gL : gR;
+      g.position.z = 0.55 + pop;
+
+      // compute hitpoint (AI forward is +Z in local)
+      const fwd = new THREE.Vector3(0,0,1).applyQuaternion(ai.quaternion);
+      aiBrain.hitPoint.set(ai.position.x, 1.55, ai.position.z);
+      aiBrain.hitPoint.addScaledVector(fwd, 1.08 + pop);
+    }
+  }
+
+  // ============================================================
+  // MOVEMENT (keyboard + face), stamina affects speed slightly
+  // ============================================================
+  const physY = { velY: 0, grounded: false };
+  const movePhys = { vx: 0, vz: 0 };
+
+  function staminaSpeedMul(sta) {
+    const t = clamp(sta / MATCH.staminaMax, 0, 1);
+    return lerp(MATCH.staminaFloorSpeed, 1.0, t);
+  }
+
+  // ============================================================
+  // OVERLAY
+  // ============================================================
+  function drawFaceOverlay() {
+    const w = overlay.width, h = overlay.height;
+    if (w <= 2 || h <= 2) return;
+
+    octx.clearRect(0,0,w,h);
+    octx.fillStyle = "rgba(0,0,0,0.10)";
+    octx.fillRect(0,0,w,h);
+
+    const cx = w*0.5, cy = h*0.5;
+    const r = Math.min(w,h)*0.38;
+
+    octx.strokeStyle = "rgba(255,255,255,0.20)";
+    octx.lineWidth = 2;
+    octx.beginPath();
+    octx.moveTo(cx-r, cy); octx.lineTo(cx+r, cy);
+    octx.moveTo(cx, cy-r); octx.lineTo(cx, cy+r);
+    octx.stroke();
+
+    const dz = clamp(faceControl.deadzone, 0, 0.5);
+    const dzR = r * dz;
+
+    octx.strokeStyle = "rgba(255,255,255,0.36)";
+    octx.beginPath(); octx.arc(cx,cy,dzR,0,Math.PI*2); octx.stroke();
+
+    octx.strokeStyle = "rgba(255,255,255,0.18)";
+    octx.beginPath(); octx.arc(cx,cy,r,0,Math.PI*2); octx.stroke();
+
+    const ax = clamp(faceControl.axes.x, -1, 1);
+    const ay = clamp(faceControl.axes.y, -1, 1);
+    const dx = ax*r, dy = -ay*r;
+
+    const insideDead = (Math.hypot(ax,ay) <= dz);
+    octx.fillStyle = insideDead ? "rgba(255,210,74,0.85)" : "rgba(255,255,255,0.92)";
+    octx.beginPath(); octx.arc(cx+dx, cy+dy, 7, 0, Math.PI*2); octx.fill();
+
+    octx.fillStyle = "rgba(255,255,255,0.72)";
+    octx.font = "12px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+    octx.fillText(`DZ ${dz.toFixed(2)}  Smooth ${faceControl.smooth.toFixed(2)}`, 10, 18);
+  }
+
+  // ============================================================
+  // UI + TUNERS
+  // ============================================================
+  function syncTuners(){
+    const base = Number(sensBaseEl.value);
+    const ratio = Number(lrRatioEl.value);
+    const dz = Number(deadzoneEl.value);
+    const sm = Number(faceSmoothEl.value);
+
+    faceControl.gainY = base;
+    faceControl.gainX = base * ratio;
+    faceControl.deadzone = clamp(dz, 0, 0.45);
+    faceControl.smooth = clamp(sm, 0.02, 0.40);
+
+    sensBaseVal.textContent = base.toFixed(1);
+    lrRatioVal.textContent = ratio.toFixed(2);
+    deadzoneVal.textContent = dz.toFixed(3);
+    faceSmoothVal.textContent = sm.toFixed(2);
+
+    hitAssistVal.textContent = Number(hitAssistEl.value).toFixed(2);
+    aiCalmVal.textContent = Number(aiCalmEl.value).toFixed(2);
+    aiPowerVal.textContent = Number(aiPowerEl.value).toFixed(2);
+  }
+  [sensBaseEl, lrRatioEl, deadzoneEl, faceSmoothEl, hitAssistEl, aiCalmEl, aiPowerEl].forEach(el => el.addEventListener("input", syncTuners));
+  syncTuners();
+
+  function updateHUD(now){
+    const ys = clamp(fighter.you.stamina, 0, MATCH.staminaMax);
+    const as = clamp(fighter.ai.stamina, 0, MATCH.staminaMax);
+
+    staYouEl.style.width = (ys) + "%";
+    staAIEl.style.width  = (as) + "%";
+    staYouTxt.textContent = String(Math.round(ys));
+    staAITxt.textContent  = String(Math.round(as));
+
+    staYouEl.style.background = ys > 45 ? "#39c26a" : (ys > 18 ? "#ffd24a" : "#ff4b4b");
+    staAIEl.style.background  = as > 45 ? "#ff4b4b" : (as > 18 ? "#ffd24a" : "#ff7a7a");
+
+    roundTxt.textContent = `${match.round} / ${MATCH.roundsTotal}`;
+    clockTxt.textContent = (match.mode === "Fight") ? fmtClock(match.roundLeft) : fmtClock(match.restLeft);
+
+    rPtsTxt.textContent = `You ${match.youRoundPts} — AI ${match.aiRoundPts}`;
+    kdTxt.textContent = `KD ${match.youKD}-${match.aiKD}`;
+
+    judgeTxt.textContent = `${match.youJudgeTotal}–${match.aiJudgeTotal} (10pt)`;
+    matchTxt.textContent = `M ${match.youMatchPts}–${match.aiMatchPts}`;
+
+    // show YOUR current point group (so you can “feel” scoring)
+    const g = match.youGroup;
+    const alive = (g.hits > 0 && now <= g.until + MATCH.groupCommitGraceMs);
+    const pct = alive ? clamp((g.until - now) / MATCH.comboWindowMs, 0, 1) : 0;
+    grpFill.style.width = (pct*100) + "%";
+    grpFill.style.background = alive ? "#ffd24a" : "rgba(255,255,255,0.10)";
+    grpTxt.textContent = alive ? `+${g.pts}` : "+0";
+  }
+
+  // ============================================================
+  // ROUND FLOW: fight/rest + judges scoring
+  // ============================================================
+  function endRound(now) {
+    // commit any open groups, with KD attempt
+    commitGroup("you", now, true);
+    commitGroup("ai",  now, true);
+
+    // 10-point must scoring
+    const youPts = match.youRoundPts;
+    const aiPts = match.aiRoundPts;
+
+    // base: winner gets 10, loser 9
+    let you10 = 10, ai10 = 10;
+    if (youPts > aiPts) { you10 = 10; ai10 = 9; }
+    else if (aiPts > youPts) { ai10 = 9; ai10 = 10; }
+    else { you10 = 10; ai10 = 10; } // draw round (rare)
+
+    // knockdowns swing the round (10-8)
+    // if you knock AI down in round, AI score drops
+    ai10 = clamp(ai10 - match.aiKD, 7, 10);
+    you10 = clamp(you10 - match.youKD, 7, 10);
+
+    // 3 judges: add tiny variance but keep mostly deterministic
+    let youJudge = 0, aiJudge = 0;
+    for (let j=0;j<3;j++){
+      let y = you10, a = ai10;
+      const r = (Math.random() - 0.5) * MATCH.judgeRandomness;
+      // small chance a close round is judged the other way
+      if (Math.abs(youPts - aiPts) <= 2 && Math.random() < (0.12 + Math.abs(r))) {
+        const tmp = y; y = a; a = tmp;
+      }
+      youJudge += y;
+      aiJudge += a;
+    }
+
+    match.youJudgeTotal += youJudge;
+    match.aiJudgeTotal  += aiJudge;
+
+    if (youJudge > aiJudge) match.youRoundsWon++;
+    else if (aiJudge > youJudge) match.aiRoundsWon++;
+
+    match.mode = "Rest";
+    setModeUI("Rest");
+    match.restLeft = MATCH.restSeconds;
+
+    setStatus(`End R${match.round}: ${youPts}-${aiPts} | Judges +${youJudge}-${aiJudge}`);
+  }
+
+  function startNextRound() {
+    match.round++;
+    if (match.round > MATCH.roundsTotal) {
+      // decision
+      match.mode = "End";
+      setModeUI("End");
+
+      const winner =
+        (match.youJudgeTotal > match.aiJudgeTotal) ? "Decision — You win!" :
+        (match.aiJudgeTotal > match.youJudgeTotal) ? "Decision — AI wins!" :
+        "Draw — Split Decision";
+
+      setStatus(winner);
+      return;
+    }
+
+    resetRoundScoring();
+    match.mode = "Fight";
+    setModeUI("Fight");
+    match.roundLeft = MATCH.roundSeconds;
+
+    // small between-round reset positions (boxing feel)
+    player.position.set(clamp(player.position.x, -1.0, 1.0), player.position.y,  2.7);
+    ai.position.set(clamp(ai.position.x, -1.0, 1.0), ai.position.y, -2.7);
+
+    setStatus(`Round ${match.round} — Fight!`);
+  }
+
+  // ============================================================
+  // MAIN LOOP
+  // ============================================================
+  let lastT = performance.now();
+  let running = true;
+
+  function loop() {
+    if (!running) return;
+
+    const now = performance.now();
+    const dt = clamp((now - lastT) / 1000, 0, 0.033);
+    lastT = now;
+
+    // mode timers
+    if (match.mode === "Fight") {
+      match.roundLeft -= dt;
+      if (match.roundLeft <= 0) endRound(now);
+    } else if (match.mode === "Rest") {
+      match.restLeft -= dt;
+
+      // regen stamina during rest
+      fighter.you.stamina = clamp(fighter.you.stamina + MATCH.staminaRegenPerSec * dt, 0, MATCH.staminaMax);
+      fighter.ai.stamina  = clamp(fighter.ai.stamina  + MATCH.staminaRegenPerSec * dt, 0, MATCH.staminaMax);
+
+      if (match.restLeft <= 0) startNextRound();
+    }
+
+    // guarding
+    fighter.you.guarding = keys.has("ShiftLeft") || keys.has("ShiftRight");
+    // AI guarding handled in aiThink
+
+    // movement input (disabled when down/rest/end)
+    const canMove = (match.mode === "Fight") && (now >= match.youDownUntil);
+    let inX = 0, inFwd = 0;
+
+    if (canMove) {
+      if (keys.has("KeyA")) inX -= 1;
+      if (keys.has("KeyD")) inX += 1;
+      if (keys.has("KeyW")) inFwd += 1;
+      if (keys.has("KeyS")) inFwd -= 1;
+
+      const faceRecent = (now - faceControl.lastSeen) < 650;
+      if (faceControl.enabled && faceRecent) {
+        inX  += faceControl.axes.x * 1.9;
+        inFwd += faceControl.axes.y * 1.9;
+      } else if (faceControl.enabled) {
+        faceControl.axes.x *= 0.92;
+        faceControl.axes.y *= 0.92;
+      }
+    }
+
+    const mag = Math.hypot(inX, inFwd);
+    if (mag > 1e-6) {
+      const s = Math.min(1, 1/mag);
+      inX *= s; inFwd *= s;
+    }
+
+    // stamina affects speed
+    const spMul = staminaSpeedMul(fighter.you.stamina);
+    const targetVX = inX * MATCH.maxSpeed * spMul;
+    const targetVZ = (-inFwd) * MATCH.maxSpeed * spMul;
+
+    const a = 1 - Math.exp(-MATCH.accel * dt);
+    const f = 1 - Math.exp(-MATCH.friction * dt);
+    const hasInput = (Math.abs(inX) > 0.001 || Math.abs(inFwd) > 0.001);
+
+    movePhys.vx += hasInput ? (targetVX - movePhys.vx) * a : (0 - movePhys.vx) * f;
+    movePhys.vz += hasInput ? (targetVZ - movePhys.vz) * a : (0 - movePhys.vz) * f;
+
+    player.position.x += movePhys.vx * dt;
+    player.position.z += movePhys.vz * dt;
+
+    // small stamina drain from movement
+    if (match.mode === "Fight" && hasInput) {
+      const moveIntensity = clamp(Math.hypot(movePhys.vx, movePhys.vz) / (MATCH.maxSpeed + 1e-6), 0, 1);
+      fighter.you.stamina = clamp(fighter.you.stamina - MATCH.staminaDrainMove * moveIntensity * (dt*60), 0, MATCH.staminaMax);
+    }
+
+    // jump
+    if (canMove && keys.has("Space") && physY.grounded) {
+      physY.velY = MATCH.jumpVel;
+      physY.grounded = false;
+    }
+
+    // gravity
+    physY.velY += MATCH.gravity * dt;
+    player.position.y += physY.velY * dt;
+
+    // ground/platform collision
+    const gH = groundHeightAt(player.position.x, player.position.z);
+    if (player.position.y <= gH) {
+      player.position.y = gH;
+      physY.velY = 0;
+      physY.grounded = true;
+    } else {
+      physY.grounded = false;
+    }
+
+    keepInRing(player);
+    keepInRing(ai);
+
+    // down animation nudge
+    if (now < match.youDownUntil) {
+      player.position.y = Math.max(player.position.y, 0);
+      movePhys.vx *= 0.90; movePhys.vz *= 0.90;
+    }
+    if (now < match.aiDownUntil) {
+      ai.position.y = Math.max(ai.position.y, 0);
+    }
+
+    // AI update
+    aiThink(now, dt);
+    keepInRing(ai);
+
+    // commit groups if expired (and attempt KD at commit)
+    if (match.youGroup.hits > 0 && now > match.youGroup.until + MATCH.groupCommitGraceMs) commitGroup("you", now, true);
+    if (match.aiGroup.hits  > 0 && now > match.aiGroup.until  + MATCH.groupCommitGraceMs) commitGroup("ai",  now, true);
+
+    // hit checks
+    tryYouHit(now);
+    tryAIHit(now);
+
+    // if someone is at 0 stamina, they become very vulnerable, but still require group to KD/TKO
+    if (fighter.ai.stamina <= 0 && match.aiKDMatch >= MATCH.kdPerMatchTKO) endMatch("TKO — You win!");
+    if (fighter.you.stamina <= 0 && match.youKDMatch >= MATCH.kdPerMatchTKO) endMatch("TKO — AI wins!");
+
+    // player faces forward (stable glove mapping)
+    player.rotation.y = 0;
+
+    // camera follow
+    const camTarget = new THREE.Vector3(player.position.x * 0.45, 2.2, 0);
+    camera3d.position.lerp(new THREE.Vector3(camTarget.x, 6.5, 14), 0.07);
+    camera3d.lookAt(camTarget);
+
+    updateHUD(now);
+    renderer.render(scene, camera3d);
+    requestAnimationFrame(loop);
+  }
+
+  // ============================================================
+  // STARTUP / RESIZE
+  // ============================================================
+  window.addEventListener("resize", () => {
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    camera3d.aspect = window.innerWidth / window.innerHeight;
+    camera3d.updateProjectionMatrix();
+  });
+
+  startBtn.addEventListener("click", async () => {
+    modal.style.display = "none";
+    setStatus("Starting…");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+      video.srcObject = stream;
+      await video.play();
+      startVision();
+      setStatus("Fight!");
+    } catch (e) {
+      console.error(e);
+      alert("Camera permission denied or unavailable.");
+      modal.style.display = "flex";
+      setStatus("Camera blocked");
+    }
+  });
+
+  // init
+  resetMatch();
+  setFaceUI(false, "Waiting…");
+  requestAnimationFrame(loop);
+
+})();
+</script>
+</body>
+</html>

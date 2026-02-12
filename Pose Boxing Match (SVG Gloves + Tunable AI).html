@@ -1,0 +1,1044 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Pose Boxing Match (SVG Gloves + Tunable AI)</title>
+
+  <style>
+    html,body{height:100%;margin:0;background:#000;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    #app{position:relative;width:100%;height:100%}
+
+    video{
+      position:absolute;inset:0;width:100%;height:100%;
+      object-fit:cover; transform:scaleX(-1);
+      background:#000;
+    }
+    canvas{
+      position:absolute;inset:0;width:100%;height:100%;
+      pointer-events:none;
+    }
+    svg{
+      position:absolute;inset:0;width:100%;height:100%;
+      transform:scaleX(-1);
+      pointer-events:none;
+    }
+
+    #hud{
+      position:absolute;left:16px;top:16px;z-index:10;
+      width:min(900px,calc(100% - 32px));
+      background:rgba(255,255,255,0.08);
+      border:1px solid rgba(255,255,255,0.12);
+      border-radius:14px; padding:14px;
+      backdrop-filter:blur(10px);
+      box-shadow:0 12px 30px rgba(0,0,0,.45);
+      color:rgba(255,255,255,.92);
+      pointer-events:auto;
+      user-select:none;
+    }
+    #row1{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+    #title{font-size:14px;font-weight:800;margin:0}
+    #status{font-size:12px;opacity:.86}
+
+    .bars{display:grid;grid-template-columns:1fr 1fr; gap:10px; margin-top:10px;}
+    .bar{
+      border-radius:999px; overflow:hidden;
+      background:rgba(255,255,255,0.12);
+      border:1px solid rgba(255,255,255,0.10);
+      height:14px;
+    }
+    .fill{height:100%; width:100%;}
+    .barLabel{display:flex; justify-content:space-between; font-size:12px; opacity:.9; margin-bottom:6px}
+
+    .grid{display:grid;grid-template-columns:1fr auto;gap:10px 12px;margin-top:12px;align-items:center}
+    label{font-size:12px;opacity:.85}
+    input[type="range"]{width:300px}
+    .toggles{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+    .toggle{display:inline-flex;gap:8px;align-items:center;padding:8px 10px;border-radius:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.10)}
+    .warn{margin-top:10px;font-size:12px;opacity:.78;line-height:1.35}
+    .warn code{background:rgba(255,255,255,.08);padding:2px 6px;border-radius:8px}
+    .btn{
+      cursor:pointer; border-radius:12px; padding:8px 10px;
+      background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.18);
+      color:#fff; font-weight:700;
+    }
+    .btn:active{transform:translateY(1px)}
+  </style>
+
+  <!-- MediaPipe -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+</head>
+
+<body>
+<div id="app">
+  <video id="video" autoplay playsinline muted></video>
+
+  <!-- game layer -->
+  <canvas id="game"></canvas>
+
+  <!-- your existing svg mesh overlay -->
+  <svg id="overlay" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice">
+    <defs>
+      <radialGradient id="torsoGrad" gradientUnits="userSpaceOnUse">
+        <stop offset="0%"   stop-color="rgba(255,255,255,0.18)"/>
+        <stop offset="45%"  stop-color="rgba(255,255,255,0.06)"/>
+        <stop offset="100%" stop-color="rgba(0,0,0,0.32)"/>
+      </radialGradient>
+
+      <linearGradient id="limbGrad" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"   stop-color="rgba(255,255,255,0.16)"/>
+        <stop offset="55%"  stop-color="rgba(255,255,255,0.05)"/>
+        <stop offset="100%" stop-color="rgba(0,0,0,0.30)"/>
+      </linearGradient>
+
+      <radialGradient id="muscleGrad" gradientUnits="userSpaceOnUse">
+        <stop offset="0%"   stop-color="rgba(255,255,255,0.22)"/>
+        <stop offset="70%"  stop-color="rgba(255,255,255,0.06)"/>
+        <stop offset="100%" stop-color="rgba(0,0,0,0.25)"/>
+      </radialGradient>
+
+      <filter id="softShadow" x="-40%" y="-40%" width="180%" height="180%">
+        <feDropShadow dx="0" dy="2.5" stdDeviation="2.5" flood-color="#000" flood-opacity="0.55"/>
+      </filter>
+    </defs>
+
+    <!-- Torso -->
+    <path id="torso" fill="rgba(255,255,255,0.09)" filter="url(#softShadow)"/>
+    <path id="torsoShade" fill="url(#torsoGrad)" opacity="0.9"/>
+
+    <!-- Limbs -->
+    <g id="limbs" filter="url(#softShadow)">
+      <path id="uArmL" fill="rgba(255,255,255,0.08)"/><path id="uArmLShade" fill="url(#limbGrad)" opacity="0.9"/>
+      <path id="fArmL" fill="rgba(255,255,255,0.08)"/><path id="fArmLShade" fill="url(#limbGrad)" opacity="0.9"/>
+      <path id="uArmR" fill="rgba(255,255,255,0.08)"/><path id="uArmRShade" fill="url(#limbGrad)" opacity="0.9"/>
+      <path id="fArmR" fill="rgba(255,255,255,0.08)"/><path id="fArmRShade" fill="url(#limbGrad)" opacity="0.9"/>
+
+      <path id="thighL" fill="rgba(255,255,255,0.08)"/><path id="thighLShade" fill="url(#limbGrad)" opacity="0.9"/>
+      <path id="calfL"  fill="rgba(255,255,255,0.08)"/><path id="calfLShade"  fill="url(#limbGrad)" opacity="0.9"/>
+      <path id="thighR" fill="rgba(255,255,255,0.08)"/><path id="thighRShade" fill="url(#limbGrad)" opacity="0.9"/>
+      <path id="calfR"  fill="rgba(255,255,255,0.08)"/><path id="calfRShade"  fill="url(#limbGrad)" opacity="0.9"/>
+
+      <path id="footL" fill="rgba(255,255,255,0.10)"/><path id="footLShade" fill="url(#limbGrad)" opacity="0.9"/>
+      <path id="footR" fill="rgba(255,255,255,0.10)"/><path id="footRShade" fill="url(#limbGrad)" opacity="0.9"/>
+    </g>
+
+    <!-- Muscles -->
+    <g id="muscles">
+      <ellipse id="bicepL" fill="url(#muscleGrad)"/><ellipse id="foreL"  fill="url(#muscleGrad)"/>
+      <ellipse id="bicepR" fill="url(#muscleGrad)"/><ellipse id="foreR"  fill="url(#muscleGrad)"/>
+      <ellipse id="quadL"  fill="url(#muscleGrad)"/><ellipse id="calfML" fill="url(#muscleGrad)"/>
+      <ellipse id="quadR"  fill="url(#muscleGrad)"/><ellipse id="calfMR" fill="url(#muscleGrad)"/>
+      <ellipse id="pecL"   fill="url(#muscleGrad)"/><ellipse id="pecR"  fill="url(#muscleGrad)"/>
+      <ellipse id="abs"    fill="url(#muscleGrad)"/>
+    </g>
+
+    <!-- Optional skeleton -->
+    <g id="skeleton" opacity="0">
+      <path id="bones" fill="none" stroke="rgba(0,255,180,0.85)" stroke-width="3" stroke-linecap="round"/>
+      <g id="dots"></g>
+    </g>
+  </svg>
+
+  <div id="hud">
+    <div id="row1">
+      <div id="title">Pose Boxing Match • SVG Gloves • Tunable AI</div>
+      <div id="status">Loading…</div>
+    </div>
+
+    <div class="bars">
+      <div>
+        <div class="barLabel"><span>You</span><span id="hpYouTxt">100</span></div>
+        <div class="bar"><div id="hpYou" class="fill" style="background:#39c26a"></div></div>
+      </div>
+      <div>
+        <div class="barLabel"><span>AI</span><span id="hpAiTxt">100</span></div>
+        <div class="bar"><div id="hpAi" class="fill" style="background:#ff4b4b"></div></div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <label for="meshOpacity">Mesh opacity</label>
+      <input id="meshOpacity" type="range" min="0" max="100" value="78"/>
+
+      <label for="thickness">Mesh thickness</label>
+      <input id="thickness" type="range" min="10" max="90" value="44"/>
+
+      <label for="muscle">Muscle intensity</label>
+      <input id="muscle" type="range" min="0" max="100" value="66"/>
+
+      <label for="smooth">Pose smoothing</label>
+      <input id="smooth" type="range" min="0" max="95" value="78"/>
+
+      <label for="moveSmooth">Player movement smoothing</label>
+      <input id="moveSmooth" type="range" min="0" max="95" value="80"/>
+
+      <label for="punchSens">Punch sensitivity (lower = easier)</label>
+      <input id="punchSens" type="range" min="10" max="120" value="55"/>
+
+      <label for="punchCooldown">Punch cooldown (ms)</label>
+      <input id="punchCooldown" type="range" min="80" max="900" value="260"/>
+
+      <label for="rangePx">Hit range (px)</label>
+      <input id="rangePx" type="range" min="40" max="280" value="140"/>
+
+      <label for="damage">Damage per hit</label>
+      <input id="damage" type="range" min="2" max="25" value="10"/>
+
+      <label for="aiAggro">AI aggression</label>
+      <input id="aiAggro" type="range" min="0" max="100" value="55"/>
+
+      <label for="aiSpeed">AI speed</label>
+      <input id="aiSpeed" type="range" min="10" max="140" value="70"/>
+
+      <label for="ringSize">Ring width</label>
+      <input id="ringSize" type="range" min="45" max="100" value="80"/>
+    </div>
+
+    <div class="toggles">
+      <label class="toggle"><input id="showVideo" type="checkbox" checked/> Show video</label>
+      <label class="toggle"><input id="showMesh" type="checkbox" checked/> Show mesh</label>
+      <label class="toggle"><input id="showSkeleton" type="checkbox"/> Show skeleton</label>
+      <button class="btn" id="resetBtn">Reset</button>
+    </div>
+
+    <div class="warn">
+      Run via local server (camera + wasm).<br/>
+      <code>python -m http.server 8000</code> → open <code>http://localhost:8000</code><br/>
+      Punch = fast arm extension. Guard = both hands near face.
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const video = document.getElementById("video");
+  const svg = document.getElementById("overlay");
+  const statusEl = document.getElementById("status");
+
+  const gameCanvas = document.getElementById("game");
+  const g = gameCanvas.getContext("2d");
+
+  const meshOpacityEl = document.getElementById("meshOpacity");
+  const thicknessEl = document.getElementById("thickness");
+  const muscleEl = document.getElementById("muscle");
+  const smoothEl = document.getElementById("smooth");
+  const moveSmoothEl = document.getElementById("moveSmooth");
+  const punchSensEl = document.getElementById("punchSens");
+  const punchCooldownEl = document.getElementById("punchCooldown");
+  const rangePxEl = document.getElementById("rangePx");
+  const damageEl = document.getElementById("damage");
+  const aiAggroEl = document.getElementById("aiAggro");
+  const aiSpeedEl = document.getElementById("aiSpeed");
+  const ringSizeEl = document.getElementById("ringSize");
+
+  const showVideoEl = document.getElementById("showVideo");
+  const showMeshEl = document.getElementById("showMesh");
+  const showSkeletonEl = document.getElementById("showSkeleton");
+  const resetBtn = document.getElementById("resetBtn");
+
+  const hpYouFill = document.getElementById("hpYou");
+  const hpAiFill = document.getElementById("hpAi");
+  const hpYouTxt = document.getElementById("hpYouTxt");
+  const hpAiTxt = document.getElementById("hpAiTxt");
+
+  const torso = document.getElementById("torso");
+  const torsoShade = document.getElementById("torsoShade");
+  const torsoGrad = document.getElementById("torsoGrad");
+  const limbGrad = document.getElementById("limbGrad");
+  const muscleGrad = document.getElementById("muscleGrad");
+
+  const skeletonG = document.getElementById("skeleton");
+  const bonesPath = document.getElementById("bones");
+  const dotsG = document.getElementById("dots");
+
+  const paths = {
+    uArmL: [document.getElementById("uArmL"), document.getElementById("uArmLShade")],
+    fArmL: [document.getElementById("fArmL"), document.getElementById("fArmLShade")],
+    uArmR: [document.getElementById("uArmR"), document.getElementById("uArmRShade")],
+    fArmR: [document.getElementById("fArmR"), document.getElementById("fArmRShade")],
+    thighL:[document.getElementById("thighL"),document.getElementById("thighLShade")],
+    calfL: [document.getElementById("calfL"), document.getElementById("calfLShade")],
+    thighR:[document.getElementById("thighR"),document.getElementById("thighRShade")],
+    calfR: [document.getElementById("calfR"), document.getElementById("calfRShade")],
+    footL: [document.getElementById("footL"), document.getElementById("footLShade")],
+    footR: [document.getElementById("footR"), document.getElementById("footRShade")]
+  };
+
+  const mus = {
+    bicepL: document.getElementById("bicepL"),
+    foreL:  document.getElementById("foreL"),
+    bicepR: document.getElementById("bicepR"),
+    foreR:  document.getElementById("foreR"),
+    quadL:  document.getElementById("quadL"),
+    calfML: document.getElementById("calfML"),
+    quadR:  document.getElementById("quadR"),
+    calfMR: document.getElementById("calfMR"),
+    pecL:   document.getElementById("pecL"),
+    pecR:   document.getElementById("pecR"),
+    abs:    document.getElementById("abs")
+  };
+
+  function setStatus(t){ statusEl.textContent = t; }
+  function clamp(v,lo,hi){ return Math.max(lo, Math.min(hi, v)); }
+  function lerp(a,b,t){ return a + (b-a)*t; }
+  function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+
+  // Pose indices
+  const IDX = {
+    nose:0,
+    lShoulder:11, rShoulder:12,
+    lElbow:13, rElbow:14,
+    lWrist:15, rWrist:16,
+    lHip:23, rHip:24,
+    lKnee:25, rKnee:26,
+    lAnkle:27, rAnkle:28,
+    lHeel:29, rHeel:30,
+    lFoot:31, rFoot:32
+  };
+
+  const CONNECTIONS = [
+    [IDX.lShoulder, IDX.rShoulder],
+    [IDX.lShoulder, IDX.lElbow],
+    [IDX.lElbow, IDX.lWrist],
+    [IDX.rShoulder, IDX.rElbow],
+    [IDX.rElbow, IDX.rWrist],
+    [IDX.lShoulder, IDX.lHip],
+    [IDX.rShoulder, IDX.rHip],
+    [IDX.lHip, IDX.rHip],
+    [IDX.lHip, IDX.lKnee],
+    [IDX.lKnee, IDX.lAnkle],
+    [IDX.rHip, IDX.rKnee],
+    [IDX.rKnee, IDX.rAnkle],
+    [IDX.lAnkle, IDX.lHeel],
+    [IDX.lHeel, IDX.lFoot],
+    [IDX.rAnkle, IDX.rHeel],
+    [IDX.rHeel, IDX.rFoot],
+  ];
+
+  // Smoothing (pose)
+  let lastPose = null;
+  function smoothLandmarks(curr, prev, alpha){
+    if(!prev) return curr;
+    const out = new Array(curr.length);
+    for(let i=0;i<curr.length;i++){
+      out[i] = {
+        x: lerp(prev[i].x, curr[i].x, alpha),
+        y: lerp(prev[i].y, curr[i].y, alpha),
+        z: lerp(prev[i].z ?? 0, curr[i].z ?? 0, alpha),
+        visibility: lerp(prev[i].visibility ?? 1, curr[i].visibility ?? 1, alpha),
+      };
+    }
+    return out;
+  }
+
+  // Convert to pixels
+  let W = 1280, H = 720;
+  function P(lm, i){
+    const p = lm[i];
+    return { x: p.x * W, y: p.y * H, z: (p.z ?? 0), v: p.visibility ?? 1 };
+  }
+
+  function polyPath(pts){
+    if(!pts || pts.length < 3) return "";
+    let d = `M ${pts[0].x.toFixed(2)} ${pts[0].y.toFixed(2)}`;
+    for(let i=1;i<pts.length;i++) d += ` L ${pts[i].x.toFixed(2)} ${pts[i].y.toFixed(2)}`;
+    return d + " Z";
+  }
+
+  function quadAround(a, b, tA, tB){
+    const vx = b.x - a.x, vy = b.y - a.y;
+    const len = Math.hypot(vx,vy) || 1;
+    const nx = -vy/len, ny = vx/len;
+    const aL = { x: a.x + nx*tA, y: a.y + ny*tA };
+    const aR = { x: a.x - nx*tA, y: a.y - ny*tA };
+    const bL = { x: b.x + nx*tB, y: b.y + ny*tB };
+    const bR = { x: b.x - nx*tB, y: b.y - ny*tB };
+    return [aL,bL,bR,aR];
+  }
+
+  function setLimb(id, pts){
+    const d = polyPath(pts);
+    paths[id][0].setAttribute("d", d);
+    paths[id][1].setAttribute("d", d);
+  }
+
+  function angleDeg(a,b){
+    return Math.atan2(b.y-a.y, b.x-a.x) * 180/Math.PI;
+  }
+
+  function setEllipse(el, cx, cy, rx, ry, angle, opacity){
+    el.setAttribute("cx", cx);
+    el.setAttribute("cy", cy);
+    el.setAttribute("rx", Math.max(0.1, rx));
+    el.setAttribute("ry", Math.max(0.1, ry));
+    el.setAttribute("opacity", opacity);
+    el.setAttribute("transform", `rotate(${angle.toFixed(2)} ${cx.toFixed(2)} ${cy.toFixed(2)})`);
+  }
+
+  // ---------- GAME / GLOVES ----------
+  const gloveSVG = `
+  <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+    <defs>
+      <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#ff4b4b"/><stop offset="1" stop-color="#b3132a"/>
+      </linearGradient>
+      <filter id="s" x="-20%" y="-20%" width="140%" height="140%">
+        <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#000" flood-opacity="0.35"/>
+      </filter>
+    </defs>
+    <g filter="url(#s)">
+      <path d="M70 110 C55 95,55 70,75 58 C92 48,110 60,115 70
+               L122 58 C130 44,152 44,160 60 L168 78 L176 66
+               C186 48,212 58,206 82 L198 112 C205 118,208 128,204 140
+               L192 178 C186 195,172 206,154 210 L108 220
+               C92 224,78 216,72 200 L56 154 C52 142,56 128,66 120 Z"
+            fill="url(#g)" stroke="#4a0613" stroke-width="6" stroke-linejoin="round"/>
+      <path d="M70 178 L190 150 L206 196 C210 208,204 220,192 224
+               L98 246 C84 250,70 242,66 228 L58 196 C54 186,60 180,70 178 Z"
+            fill="#222a3a" stroke="#0c101a" stroke-width="6" stroke-linejoin="round"/>
+      <path d="M92 106 C85 86,98 70,116 68 C136 66,144 82,138 100
+               C132 118,106 124,92 106 Z" fill="rgba(255,255,255,0.22)"/>
+    </g>
+  </svg>`;
+  const gloveImg = new Image();
+  gloveImg.src = "data:image/svg+xml;utf8," + encodeURIComponent(gloveSVG);
+
+  const game = {
+    you: { hp:100, x:0.5, wantsX:0.5, lastHit:0 },
+    ai:  { hp:100, x:0.5, lastHit:0, windupUntil:0, strikeAt:0, cooldownUntil:0 },
+    ko:false,
+    msg:""
+  };
+
+  function resetGame(){
+    game.you.hp = 100; game.ai.hp = 100;
+    game.you.x = 0.5; game.you.wantsX = 0.5;
+    game.ai.x = 0.5;
+    game.ko = false;
+    game.ai.windupUntil = 0;
+    game.ai.strikeAt = 0;
+    game.ai.cooldownUntil = 0;
+    game.msg = "";
+  }
+  resetBtn.addEventListener("click", resetGame);
+
+  function setHPBars(){
+    const y = clamp(game.you.hp,0,100);
+    const a = clamp(game.ai.hp,0,100);
+    hpYouFill.style.width = y + "%";
+    hpAiFill.style.width = a + "%";
+    hpYouTxt.textContent = String(y);
+    hpAiTxt.textContent = String(a);
+
+    hpYouFill.style.background = y > 40 ? "#39c26a" : (y > 15 ? "#ffd24a" : "#ff4b4b");
+    hpAiFill.style.background  = a > 40 ? "#ff4b4b" : (a > 15 ? "#ffd24a" : "#ff7a7a");
+  }
+
+  // punch detection memory (pose wrists)
+  const punchMem = {
+    L: { lastExt: null, lastT: null, cooldownUntil: 0, activeUntil: 0 },
+    R: { lastExt: null, lastT: null, cooldownUntil: 0, activeUntil: 0 }
+  };
+
+  function detectPunch(now, ext, side){
+    const sens = Number(punchSensEl.value); // lower = easier
+    const cooldown = Number(punchCooldownEl.value);
+
+    const m = punchMem[side];
+    if(m.lastExt != null && m.lastT != null){
+      const dt = Math.max(0.001, (now - m.lastT)/1000);
+      const v = (ext - m.lastExt)/dt; // extension speed
+      // threshold: scale with sens; typical good window 120..400
+      const thresh = sens * 6.0;
+      const minExt = 0.42; // must be extended enough
+      const punch = (v > thresh && ext > minExt);
+
+      if(punch && now > m.cooldownUntil && !game.ko){
+        m.activeUntil = now + 160;
+        m.cooldownUntil = now + cooldown;
+      }
+    }
+    m.lastExt = ext;
+    m.lastT = now;
+    return now < m.activeUntil;
+  }
+
+  function isGuard(nose, LW, RW, LS, RS){
+    // guard if both wrists are near face and above shoulders a bit
+    const faceY = nose.y;
+    const shoulderY = (LS.y + RS.y)/2;
+
+    const wristsUp = (LW.y < shoulderY + 0.10*H) && (RW.y < shoulderY + 0.10*H);
+    const nearFace = (Math.abs(LW.y - faceY) < 0.18*H) && (Math.abs(RW.y - faceY) < 0.18*H);
+
+    const closeTogether = dist(LW, RW) < 0.28*W;
+    return wristsUp && nearFace && closeTogether;
+  }
+
+  // ring mapping
+  function ringXtoPx(nx){
+    const ringW = (Number(ringSizeEl.value)/100) * W;
+    const left = (W - ringW)/2;
+    return left + nx * ringW;
+  }
+
+  // ---------- CANVAS RENDER ----------
+  function resizeCanvas(){
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    gameCanvas.width = Math.floor(window.innerWidth * dpr);
+    gameCanvas.height = Math.floor(window.innerHeight * dpr);
+    g.setTransform(dpr,0,0,dpr,0,0);
+  }
+  window.addEventListener("resize", resizeCanvas);
+  resizeCanvas();
+
+  function drawRing(){
+    const cw = window.innerWidth, ch = window.innerHeight;
+
+    // floor perspective
+    const floorTop = ch * 0.60;
+    const floorBottom = ch * 0.98;
+
+    // floor gradient
+    const grad = g.createLinearGradient(0, floorTop, 0, floorBottom);
+    grad.addColorStop(0, "rgba(10,12,18,0.10)");
+    grad.addColorStop(1, "rgba(0,0,0,0.55)");
+    g.fillStyle = grad;
+    g.fillRect(0, floorTop, cw, floorBottom - floorTop);
+
+    // ring mat
+    const ringW = (Number(ringSizeEl.value)/100) * cw;
+    const ringH = ch * 0.26;
+    const x = (cw - ringW)/2;
+    const y = ch * 0.68;
+
+    // mat
+    g.fillStyle = "rgba(27,32,48,0.65)";
+    roundRect(g, x, y, ringW, ringH, 18); g.fill();
+
+    // center mark
+    g.strokeStyle = "rgba(255,255,255,0.25)";
+    g.lineWidth = 3;
+    g.beginPath();
+    g.ellipse(cw/2, y + ringH*0.55, ringW*0.14, ringH*0.22, 0, 0, Math.PI*2);
+    g.stroke();
+
+    // ropes
+    g.lineWidth = 4;
+    g.strokeStyle = "rgba(170,51,64,0.55)";
+    for(const t of [0.18, 0.42, 0.66]){
+      g.beginPath();
+      g.moveTo(x, y + ringH*t);
+      g.lineTo(x + ringW, y + ringH*t);
+      g.stroke();
+    }
+
+    // posts
+    g.fillStyle = "rgba(170,170,190,0.55)";
+    for(const px of [x, x+ringW]){
+      for(const py of [y, y+ringH]){
+        g.beginPath();
+        g.roundRect(px-6, py-38, 12, 42, 6);
+        g.fill();
+      }
+    }
+
+    return { ringX:x, ringY:y, ringW, ringH };
+  }
+
+  function roundRect(ctx, x, y, w, h, r){
+    r = Math.min(r, w/2, h/2);
+    ctx.beginPath();
+    ctx.moveTo(x+r, y);
+    ctx.arcTo(x+w, y, x+w, y+h, r);
+    ctx.arcTo(x+w, y+h, x, y+h, r);
+    ctx.arcTo(x, y+h, x, y, r);
+    ctx.arcTo(x, y, x+w, y, r);
+    ctx.closePath();
+  }
+
+  function drawFighter(px, py, scale, colorBody, name, hp, isAI=false){
+    // body
+    g.save();
+    g.translate(px, py);
+    g.scale(scale, scale);
+
+    // shadow
+    g.fillStyle = "rgba(0,0,0,0.35)";
+    g.beginPath(); g.ellipse(0, 60, 34, 10, 0, 0, Math.PI*2); g.fill();
+
+    // torso
+    g.fillStyle = colorBody;
+    g.beginPath(); g.roundRect(-18, 10, 36, 46, 12); g.fill();
+
+    // head
+    g.fillStyle = "rgba(230,214,199,0.95)";
+    g.beginPath(); g.arc(0, -8, 14, 0, Math.PI*2); g.fill();
+
+    // label
+    g.fillStyle = "rgba(255,255,255,0.85)";
+    g.font = "12px system-ui";
+    g.textAlign = "center";
+    g.fillText(name, 0, -30);
+
+    // telegraph indicator
+    if(isAI && performance.now() < game.ai.windupUntil){
+      g.strokeStyle = "rgba(255,210,74,0.85)";
+      g.lineWidth = 3;
+      g.beginPath(); g.arc(0, -8, 20, 0, Math.PI*2); g.stroke();
+    }
+
+    g.restore();
+  }
+
+  function drawGloveAt(pt, size, flip=false, tint="rgba(255,255,255,1)"){
+    if(!pt) return;
+    g.save();
+    g.translate(pt.x, pt.y);
+    if(flip) g.scale(-1, 1);
+    g.globalAlpha = 0.95;
+    // simple tint backdrop
+    g.fillStyle = "rgba(0,0,0,0.28)";
+    g.beginPath(); g.ellipse(0, size*0.55, size*0.55, size*0.22, 0, 0, Math.PI*2); g.fill();
+
+    // draw svg glove
+    const s = size/256;
+    g.drawImage(gloveImg, -128*s, -128*s, 256*s, 256*s);
+
+    g.restore();
+  }
+
+  // ---------- POSE + MESH DRAW ----------
+  let latestPose = null;
+
+  function resetOverlay(){
+    torso.setAttribute("d", "");
+    torsoShade.setAttribute("d", "");
+    Object.values(paths).forEach(([a, b]) => { a.setAttribute("d", ""); b.setAttribute("d", ""); });
+    Object.values(mus).forEach((el) => el.setAttribute("opacity", "0"));
+    bonesPath.setAttribute("d", "");
+    dotsG.innerHTML = "";
+  }
+
+  // compute extension metric for punch detection (0..~1+)
+  function armExtension(S, E, Wp){
+    const se = dist(S,E) || 1;
+    const sw = dist(S,Wp) || 1;
+    // normalized: how far wrist is relative to upper-arm length
+    return clamp(sw / (se*2.2), 0, 1.25);
+  }
+
+  // AI logic
+  function updateAI(now, dtSec, ring){
+    if(game.ko) return;
+
+    const aggro = Number(aiAggroEl.value)/100;      // 0..1
+    const speed = Number(aiSpeedEl.value)/100;      // 0.1..1.4
+    const hitRange = Number(rangePxEl.value);
+    const dmg = Number(damageEl.value);
+
+    // move toward player
+    const aiPx = ringXtoPx(game.ai.x);
+    const youPx = ringXtoPx(game.you.x);
+    const dx = youPx - aiPx;
+
+    const step = clamp(dx, -1, 1) * (dtSec * (0.55 + speed*1.8));
+    game.ai.x = clamp(game.ai.x + step*0.015, 0, 1);
+
+    // decide to punch
+    const inRange = Math.abs(dx) < hitRange;
+
+    if(now > game.ai.cooldownUntil && inRange && Math.random() < (aggro * dtSec * 2.4)){
+      game.ai.windupUntil = now + 220;
+      game.ai.strikeAt = now + 220;
+      game.ai.cooldownUntil = now + 600 + (1-aggro)*600;
+    }
+
+    // strike moment
+    if(game.ai.strikeAt && now >= game.ai.strikeAt){
+      game.ai.strikeAt = 0;
+
+      // if still in range -> hit
+      const aiPx2 = ringXtoPx(game.ai.x);
+      const youPx2 = ringXtoPx(game.you.x);
+      const dx2 = youPx2 - aiPx2;
+      const stillInRange = Math.abs(dx2) < hitRange;
+
+      if(stillInRange && now - game.ai.lastHit > 260){
+        game.ai.lastHit = now;
+
+        // damage reduced if guarding (set elsewhere)
+        const reduced = game._guarding ? 0.45 : 1.0;
+        game.you.hp = Math.max(0, Math.round(game.you.hp - dmg*reduced));
+        game.msg = game._guarding ? "Blocked!" : "AI hit!";
+        if(game.you.hp <= 0){ game.ko = true; game.msg = "KO — AI wins"; }
+      }
+    }
+  }
+
+  function tryPlayerHit(now, sidePunching, LW, RW, ring){
+    if(game.ko) return;
+
+    const hitRange = Number(rangePxEl.value);
+    const dmg = Number(damageEl.value);
+
+    const youPx = ringXtoPx(game.you.x);
+    const aiPx = ringXtoPx(game.ai.x);
+    const dx = aiPx - youPx;
+
+    // Use glove screen location for hit check (more “gesture accurate”)
+    // If we have wrist points, use them; else use fighter center.
+    const strikePts = [];
+    if(sidePunching.L && LW) strikePts.push(LW);
+    if(sidePunching.R && RW) strikePts.push(RW);
+
+    // AI target point (on ring)
+    const aiTarget = { x: aiPx, y: ring.ringY + ring.ringH*0.40 };
+
+    const nowOk = (now - game.you.lastHit) > 220;
+    if(!nowOk) return;
+
+    for(const s of strikePts){
+      const d = dist(s, aiTarget);
+      if(d < hitRange){
+        game.you.lastHit = now;
+        game.ai.hp = Math.max(0, game.ai.hp - dmg);
+        game.msg = "You hit!";
+        // little knockback
+        game.ai.x = clamp(game.ai.x + (dx>0 ? 0.03 : -0.03), 0, 1);
+        if(game.ai.hp <= 0){ game.ko = true; game.msg = "KO — You win"; }
+        break;
+      }
+    }
+  }
+
+  // Draw everything each frame
+  function draw(){
+    // toggles
+    video.style.opacity = showVideoEl.checked ? "1" : "0";
+    svg.style.opacity = showMeshEl.checked ? "1" : "0";
+    skeletonG.style.opacity = showSkeletonEl.checked ? "1" : "0";
+
+    // mesh opacity
+    const opacity = Number(meshOpacityEl.value)/100;
+    torso.setAttribute("opacity", opacity);
+    torsoShade.setAttribute("opacity", opacity*0.95);
+    document.getElementById("limbs").setAttribute("opacity", opacity);
+    document.getElementById("muscles").setAttribute("opacity", opacity);
+
+    // canvas clear
+    g.clearRect(0,0, window.innerWidth, window.innerHeight);
+
+    // ring draw first
+    const ring = drawRing();
+
+    const poseLmRaw = latestPose?.poseLandmarks || null;
+    if(!poseLmRaw){
+      setStatus("No body detected");
+      lastPose = null;
+      resetOverlay();
+      game.msg = "";
+      setHPBars();
+      // draw fighters idle in ring
+      const youPx = ringXtoPx(game.you.x), aiPx = ringXtoPx(game.ai.x);
+      const baseY = ring.ringY + ring.ringH*0.50;
+      drawFighter(youPx, baseY, 1.0, "rgba(57,194,106,0.75)", "YOU", game.you.hp, false);
+      drawFighter(aiPx, baseY, 1.0, "rgba(255,75,75,0.75)", "AI", game.ai.hp, true);
+      return;
+    }
+
+    // fps / dt
+    const now = performance.now();
+    draw._t ??= now;
+    const dt = now - draw._t;
+    draw._t = now;
+    const fps = dt > 0 ? (1000/dt) : 0;
+
+    // smooth landmarks
+    const alpha = 1 - (Number(smoothEl.value)/100);
+    const lm = smoothLandmarks(poseLmRaw, lastPose, alpha);
+    lastPose = lm;
+
+    // points
+    const Nose = P(lm, IDX.nose);
+    const LS = P(lm, IDX.lShoulder), RS = P(lm, IDX.rShoulder);
+    const LE = P(lm, IDX.lElbow),    RE = P(lm, IDX.rElbow);
+    const LW = P(lm, IDX.lWrist),    RW = P(lm, IDX.rWrist);
+
+    const LH = P(lm, IDX.lHip),      RH = P(lm, IDX.rHip);
+    const LK = P(lm, IDX.lKnee),     RK = P(lm, IDX.rKnee);
+    const LA = P(lm, IDX.lAnkle),    RA = P(lm, IDX.rAnkle);
+    const LHeel = P(lm, IDX.lHeel),  RHeel = P(lm, IDX.rHeel);
+    const LFoot = P(lm, IDX.lFoot),  RFoot = P(lm, IDX.rFoot);
+
+    // thickness scale by body width
+    const shoulderW = dist(LS, RS);
+    const hipW = dist(LH, RH);
+    const scale = clamp(((shoulderW + hipW)/2) / 320, 0.55, 1.8);
+    const T = Number(thicknessEl.value) * scale;
+
+    // anchor gradients
+    const cx = (LS.x + RS.x + LH.x + RH.x) / 4;
+    const cy = (LS.y + RS.y + LH.y + RH.y) / 4;
+
+    torsoGrad.setAttribute("cx", cx);
+    torsoGrad.setAttribute("cy", cy - shoulderW*0.18);
+    torsoGrad.setAttribute("r", shoulderW*1.25);
+
+    limbGrad.setAttribute("x1", 0);
+    limbGrad.setAttribute("y1", cy - 260);
+    limbGrad.setAttribute("x2", 0);
+    limbGrad.setAttribute("y2", cy + 380);
+
+    muscleGrad.setAttribute("cx", cx);
+    muscleGrad.setAttribute("cy", cy);
+    muscleGrad.setAttribute("r", shoulderW*1.25);
+
+    // torso
+    const waistPinch = 0.12;
+    const midL = { x: lerp(LS.x, LH.x, 0.55), y: lerp(LS.y, LH.y, 0.55) };
+    const midR = { x: lerp(RS.x, RH.x, 0.55), y: lerp(RS.y, RH.y, 0.55) };
+    const torsoPts = [
+      {x: LS.x, y: LS.y},
+      {x: RS.x, y: RS.y},
+      {x: RH.x, y: RH.y},
+      {x: lerp(midR.x, cx, waistPinch), y: midR.y},
+      {x: lerp(midL.x, cx, waistPinch), y: midL.y},
+      {x: LH.x, y: LH.y},
+    ];
+    const torsoD = polyPath(torsoPts);
+    torso.setAttribute("d", torsoD);
+    torsoShade.setAttribute("d", torsoD);
+
+    // limbs
+    setLimb("uArmL", quadAround(LS, LE, T*0.58, T*0.44));
+    setLimb("uArmR", quadAround(RS, RE, T*0.58, T*0.44));
+    setLimb("fArmL", quadAround(LE, LW, T*0.42, T*0.30));
+    setLimb("fArmR", quadAround(RE, RW, T*0.42, T*0.30));
+
+    setLimb("thighL", quadAround(LH, LK, T*0.76, T*0.58));
+    setLimb("thighR", quadAround(RH, RK, T*0.76, T*0.58));
+    setLimb("calfL",  quadAround(LK, LA, T*0.58, T*0.44));
+    setLimb("calfR",  quadAround(RK, RA, T*0.58, T*0.44));
+
+    // feet pads
+    function footPoly(A, Heel, Toe){
+      const vx = Toe.x - A.x, vy = Toe.y - A.y;
+      const len = Math.hypot(vx,vy)||1;
+      const nx = -vy/len, ny = vx/len;
+      const pad = T*0.26;
+
+      const Aout = {x: A.x + nx*pad,     y: A.y + ny*pad};
+      const Ain  = {x: A.x - nx*pad,     y: A.y - ny*pad};
+      const Hout = {x: Heel.x + nx*pad*0.8, y: Heel.y + ny*pad*0.8};
+      const Hin  = {x: Heel.x - nx*pad*0.6, y: Heel.y - ny*pad*0.6};
+      const Tout = {x: Toe.x  + nx*pad*1.2, y: Toe.y  + ny*pad*1.2};
+      const Tin  = {x: Toe.x  - nx*pad*0.7, y: Toe.y  - ny*pad*0.7};
+
+      return [Aout, Hout, Tout, Tin, Hin, Ain];
+    }
+    setLimb("footL", footPoly(LA, LHeel, LFoot));
+    setLimb("footR", footPoly(RA, RHeel, RFoot));
+
+    // muscles intensity
+    const muscleK = Number(muscleEl.value)/100;
+
+    const bL = {x: lerp(LS.x, LE.x, 0.55), y: lerp(LS.y, LE.y, 0.55)};
+    const bR = {x: lerp(RS.x, RE.x, 0.55), y: lerp(RS.y, RE.y, 0.55)};
+    setEllipse(mus.bicepL, bL.x, bL.y, T*0.38, T*0.30, angleDeg(LS, LE), 0.90*muscleK);
+    setEllipse(mus.bicepR, bR.x, bR.y, T*0.38, T*0.30, angleDeg(RS, RE), 0.90*muscleK);
+
+    const fL = {x: lerp(LE.x, LW.x, 0.55), y: lerp(LE.y, LW.y, 0.55)};
+    const fR = {x: lerp(RE.x, RW.x, 0.55), y: lerp(RE.y, RW.y, 0.55)};
+    setEllipse(mus.foreL, fL.x, fL.y, T*0.32, T*0.24, angleDeg(LE, LW), 0.78*muscleK);
+    setEllipse(mus.foreR, fR.x, fR.y, T*0.32, T*0.24, angleDeg(RE, RW), 0.78*muscleK);
+
+    const qL = {x: lerp(LH.x, LK.x, 0.48), y: lerp(LH.y, LK.y, 0.48)};
+    const qR = {x: lerp(RH.x, RK.x, 0.48), y: lerp(RH.y, RK.y, 0.48)};
+    setEllipse(mus.quadL, qL.x, qL.y, T*0.52, T*0.36, angleDeg(LH, LK), 0.92*muscleK);
+    setEllipse(mus.quadR, qR.x, qR.y, T*0.52, T*0.36, angleDeg(RH, RK), 0.92*muscleK);
+
+    const cL = {x: lerp(LK.x, LA.x, 0.58), y: lerp(LK.y, LA.y, 0.58)};
+    const cR = {x: lerp(RK.x, RA.x, 0.58), y: lerp(RK.y, RA.y, 0.58)};
+    setEllipse(mus.calfML, cL.x, cL.y, T*0.46, T*0.32, angleDeg(LK, LA), 0.88*muscleK);
+    setEllipse(mus.calfMR, cR.x, cR.y, T*0.46, T*0.32, angleDeg(RK, RA), 0.88*muscleK);
+
+    const pecY = lerp((LS.y+RS.y)/2, (LH.y+RH.y)/2, 0.22);
+    const pecDx = shoulderW*0.18;
+    setEllipse(mus.pecL, cx - pecDx, pecY, shoulderW*0.16, shoulderW*0.11, 0, 0.72*muscleK);
+    setEllipse(mus.pecR, cx + pecDx, pecY, shoulderW*0.16, shoulderW*0.11, 0, 0.72*muscleK);
+
+    const absY = lerp((LS.y+RS.y)/2, (LH.y+RH.y)/2, 0.56);
+    setEllipse(mus.abs, cx, absY, shoulderW*0.20, shoulderW*0.28, 0, 0.55*muscleK);
+
+    // skeleton optional
+    if(showSkeletonEl.checked){
+      let d = "";
+      for(const [a,b] of CONNECTIONS){
+        const A = P(lm,a), B = P(lm,b);
+        d += `M ${A.x.toFixed(2)} ${A.y.toFixed(2)} L ${B.x.toFixed(2)} ${B.y.toFixed(2)} `;
+      }
+      bonesPath.setAttribute("d", d);
+
+      dotsG.innerHTML = "";
+      for(let i=0;i<lm.length;i++){
+        const p = P(lm,i);
+        if(p.v < 0.35) continue;
+        const c = document.createElementNS("http://www.w3.org/2000/svg","circle");
+        c.setAttribute("cx", p.x);
+        c.setAttribute("cy", p.y);
+        c.setAttribute("r", 2.2);
+        c.setAttribute("fill", "rgba(0,255,180,0.85)");
+        dotsG.appendChild(c);
+      }
+    }
+
+    // ---------- GAME UPDATE ----------
+    const dtSec = Math.max(0.001, dt/1000);
+
+    // player movement from body center X (hips+shoulders)
+    const bodyX = (LS.x + RS.x + LH.x + RH.x)/4;
+    const wants = clamp(bodyX / W, 0, 1);
+    game.you.wantsX = wants;
+
+    // movement smoothing (separate from pose smoothing)
+    const moveAlpha = 1 - (Number(moveSmoothEl.value)/100);
+    game.you.x = lerp(game.you.x, game.you.wantsX, moveAlpha);
+
+    // guard detection
+    const guarding = isGuard(Nose, LW, RW, LS, RS);
+    game._guarding = guarding;
+
+    // punch detection using arm extension velocity
+    const extL = armExtension(LS, LE, LW);
+    const extR = armExtension(RS, RE, RW);
+    const punchingL = detectPunch(now, extL, "L");
+    const punchingR = detectPunch(now, extR, "R");
+
+    // update AI
+    updateAI(now, dtSec, ring);
+
+    // render fighters in ring
+    const youPx = ringXtoPx(game.you.x);
+    const aiPx  = ringXtoPx(game.ai.x);
+    const baseY = ring.ringY + ring.ringH*0.55;
+
+    // draw AI + YOU markers
+    drawFighter(youPx, baseY, 1.05, guarding ? "rgba(57,194,106,0.55)" : "rgba(57,194,106,0.75)", "YOU", game.you.hp, false);
+    drawFighter(aiPx,  baseY, 1.05, "rgba(255,75,75,0.75)", "AI", game.ai.hp, true);
+
+    // draw your gloves at wrists (converted into boxing gloves)
+    const gloveSize = clamp(80 * scale, 55, 130);
+    drawGloveAt({x: LW.x*(window.innerWidth/W), y: LW.y*(window.innerHeight/H)}, gloveSize, false);
+    drawGloveAt({x: RW.x*(window.innerWidth/W), y: RW.y*(window.innerHeight/H)}, gloveSize, true);
+
+    // draw AI gloves (simple circles + strike)
+    const aiGloveY = baseY - 10;
+    const aiWindup = performance.now() < game.ai.windupUntil;
+    const aiStrike = aiWindup ? 18 : 0;
+    g.fillStyle = "rgba(255,75,75,0.85)";
+    g.beginPath(); g.arc(aiPx - 26, aiGloveY + (aiWindup? -6:0), 12, 0, Math.PI*2); g.fill();
+    g.beginPath(); g.arc(aiPx + 26 + aiStrike, aiGloveY + (aiWindup? -6:0), 12, 0, Math.PI*2); g.fill();
+
+    // player hit attempt (use wrist points for hit detection, mapped to viewport)
+    const LWv = { x: LW.x*(window.innerWidth/W), y: LW.y*(window.innerHeight/H) };
+    const RWv = { x: RW.x*(window.innerWidth/W), y: RW.y*(window.innerHeight/H) };
+    tryPlayerHit(now, {L:punchingL, R:punchingR}, LWv, RWv, ring);
+
+    // message + KO overlay
+    if(game.msg){
+      g.fillStyle = "rgba(255,255,255,0.90)";
+      g.font = "700 16px system-ui";
+      g.textAlign = "center";
+      g.fillText(game.msg, window.innerWidth/2, ring.ringY - 18);
+    }
+    if(game.ko){
+      g.fillStyle = "rgba(0,0,0,0.55)";
+      g.fillRect(0,0,window.innerWidth, window.innerHeight);
+      g.fillStyle = "rgba(255,255,255,0.95)";
+      g.font = "900 30px system-ui";
+      g.textAlign = "center";
+      g.fillText(game.msg || "KO", window.innerWidth/2, window.innerHeight/2);
+      g.font = "600 14px system-ui";
+      g.fillText("Press Reset", window.innerWidth/2, window.innerHeight/2 + 28);
+    }
+
+    setHPBars();
+    setStatus(`cam=${W}x${H} • pose=${lm.length} • ${fps.toFixed(1)}fps • guard=${guarding ? "ON":"off"} • punch(L/R)=${punchingL?1:0}/${punchingR?1:0}`);
+  }
+
+  async function waitVideoReady() {
+    for (let i=0;i<200;i++){
+      if (video.videoWidth && video.videoHeight) return true;
+      await new Promise(r=>setTimeout(r,25));
+    }
+    return false;
+  }
+
+  // Pose
+  const pose = new Pose({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+  });
+
+  pose.setOptions({
+    modelComplexity: 2,
+    smoothLandmarks: false,    // we smooth ourselves
+    enableSegmentation: false,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.7
+  });
+
+  pose.onResults((res) => { latestPose = res; });
+
+  let running = true;
+  async function pump(){
+    while(running){
+      if(video.readyState >= 2){
+        await pose.send({ image: video });
+        draw();
+      }
+      await new Promise(r=>requestAnimationFrame(r));
+    }
+  }
+
+  async function startCamera() {
+    setStatus("Requesting camera permission…");
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false
+    });
+    video.srcObject = stream;
+
+    const ok = await waitVideoReady();
+    if(!ok){
+      setStatus("Camera readyState timeout (try local server + permissions)");
+      return;
+    }
+
+    W = video.videoWidth || 1280;
+    H = video.videoHeight || 720;
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+
+    setStatus(`Camera OK • ${W}x${H} • loading model…`);
+
+    // warmup
+    for(let i=0;i<4;i++){
+      await pose.send({ image: video });
+    }
+
+    setStatus("Running…");
+    pump();
+  }
+
+  // Start
+  startCamera().catch(err => {
+    console.error(err);
+    const msg = (err && err.name) ? `${err.name}: ${err.message || ""}` : String(err);
+    setStatus("Camera/model error: " + msg);
+  });
+
+})();
+</script>
+</body>
+</html>
