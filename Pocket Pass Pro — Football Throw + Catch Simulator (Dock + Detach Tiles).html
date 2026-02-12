@@ -351,7 +351,29 @@
     .btnrow button.primary{background:var(--chip2);border-color:rgba(120,180,255,.30)}
     .btnrow button.primary:hover{background:rgba(120,180,255,.24)}
 
+
+
+    #mobileActionBar{
+      position:fixed;left:10px;right:10px;bottom:10px;
+      z-index:82;display:none;gap:8px;align-items:center;justify-content:space-between;
+      padding:8px;border-radius:16px;
+      background:rgba(8,10,16,.74);
+      border:1px solid rgba(255,255,255,.14);
+      backdrop-filter:blur(10px);
+      box-shadow:0 10px 36px rgba(0,0,0,.4);
+      pointer-events:auto;
+    }
+    #mobileActionBar .mobBtn{
+      appearance:none;border:1px solid rgba(255,255,255,.18);
+      background:rgba(255,255,255,.09);color:var(--text);
+      border-radius:12px;padding:11px 10px;font-weight:900;font-size:12px;
+      flex:1 1 0;min-width:0;
+    }
+    #mobileActionBar .mobBtn.primary{background:var(--chip2);border-color:rgba(120,180,255,.3)}
+
     @media (pointer:coarse){
+      #mobileActionBar{display:flex}
+
       #rightDock{width:380px}
       .dockBtn{padding:12px 12px}
       .tbtn{padding:8px 10px}
@@ -388,6 +410,14 @@
         <div class="hudTiny">Spin: <span id="rpmMini">—</span></div>
         <div class="hudTiny">Wind: <span id="windMini">0mph</span></div>
       </div>
+    </div>
+
+
+    <div id="mobileActionBar" class="mono" aria-label="Mobile quick actions">
+      <button class="mobBtn primary" id="throwBtnMobile">Throw</button>
+      <button class="mobBtn" id="catchBtnMobile">Catch</button>
+      <button class="mobBtn" id="resetBtnMobile">Reset</button>
+      <button class="mobBtn" id="togglePanelsMobile">Panels</button>
     </div>
 
     <div id="rightDock" class="uiPanel">
@@ -1261,12 +1291,49 @@ dockTileRight('cam', {focus:false});
 dockTileRight('settings', {focus:false});
 setHidden('field', true);
 
+function isMobileLayout(){
+  return matchMedia('(max-width: 900px), (pointer: coarse)').matches;
+}
+
+let mobileLayoutApplied = false;
+function applyMobileLayout(){
+  if (!isMobileLayout() || mobileLayoutApplied) return;
+  mobileLayoutApplied = true;
+
+  // Keep playfield clear on phones: collapse heavy docks and float field map.
+  if (rightDock){
+    Tile.dockCollapsed = true;
+    rightDock.classList.add('collapsed');
+  }
+  if (footerDock){
+    Tile.footerCollapsed = true;
+    footerDock.classList.add('collapsed');
+  }
+
+  setHidden('target', true);
+  setHidden('cam', true);
+  setHidden('settings', true);
+  setHidden('field', false);
+  detachToFloating('field', { x:12, y:90, w:Math.min(360, Math.max(250, window.innerWidth*0.58)), h:Math.min(270, Math.max(190, window.innerHeight*0.33)) });
+
+  const throwSelEl = el('throwCtrlSel');
+  const catchSelEl = el('catchCtrlSel');
+  const viewSelEl = el('viewSel');
+  if (throwSelEl){ throwSelEl.value = 'keyboard'; throwSelEl.dispatchEvent(new Event('change')); }
+  if (catchSelEl){ catchSelEl.value = 'keyboard'; catchSelEl.dispatchEvent(new Event('change')); }
+  if (viewSelEl){ viewSelEl.value = 'qb'; viewSelEl.dispatchEvent(new Event('change')); }
+  showCallout('Mobile mode: quick actions enabled');
+}
+
 // -----------------------------
 // Prevent orbit drag when interacting with UI
 // -----------------------------
 function isInUI(target){
-  return !!(target.closest && (target.closest('.tile') || target.closest('#rightDock') || target.closest('#footerDock') || target.closest('#topHUD')));
+  return !!(target.closest && (target.closest('.tile') || target.closest('#rightDock') || target.closest('#footerDock') || target.closest('#topHUD') || target.closest('#mobileActionBar')));
 }
+
+applyMobileLayout();
+addEventListener('resize', applyMobileLayout, { passive:true });
 
 // -----------------------------
 // FOOTBALL SIM / GAMEPLAY
@@ -1301,6 +1368,10 @@ const startCamBtnQ = el('startCamBtnQ');
 const throwBtnQ = el('throwBtnQ');
 const catchBtnQ = el('catchBtnQ');
 const resetBtnQ = el('resetBtnQ');
+const throwBtnMobile = el('throwBtnMobile');
+const catchBtnMobile = el('catchBtnMobile');
+const resetBtnMobile = el('resetBtnMobile');
+const togglePanelsMobile = el('togglePanelsMobile');
 
 // Settings refs
 const aiBtn = el('aiBtn');
@@ -2272,8 +2343,10 @@ function requestThrow(){
 
 if (throwBtn) throwBtn.addEventListener('click', requestThrow);
 if (throwBtnQ) throwBtnQ.addEventListener('click', requestThrow);
+if (throwBtnMobile) throwBtnMobile.addEventListener('click', requestThrow);
 if (catchBtn) catchBtn.addEventListener('click', ()=>{ if (canUserCatch()) requestCatch(); });
 if (catchBtnQ) catchBtnQ.addEventListener('click', ()=>{ if (canUserCatch()) requestCatch(); });
+if (catchBtnMobile) catchBtnMobile.addEventListener('click', ()=>{ if (canUserCatch()) requestCatch(); });
 
 addEventListener('keydown',(e)=>{
   if (e.code==="KeyP"){ e.preventDefault(); requestThrow(); }
@@ -2390,6 +2463,14 @@ function fullReset(){
 }
 if (resetBtn) resetBtn.addEventListener('click', fullReset);
 if (resetBtnQ) resetBtnQ.addEventListener('click', fullReset);
+if (resetBtnMobile) resetBtnMobile.addEventListener('click', fullReset);
+if (togglePanelsMobile) togglePanelsMobile.addEventListener('click', ()=>{
+  const nextCollapsed = !(Tile.dockCollapsed && Tile.footerCollapsed);
+  Tile.dockCollapsed = nextCollapsed;
+  Tile.footerCollapsed = nextCollapsed;
+  if (rightDock) rightDock.classList.toggle('collapsed', nextCollapsed);
+  if (footerDock) footerDock.classList.toggle('collapsed', nextCollapsed);
+});
 
 // --- Patch: better land dot mapping (based on play start LOS)
 function showLandDot(spotX, spotZ, losYdsStart){
