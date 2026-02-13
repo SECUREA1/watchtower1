@@ -6,6 +6,7 @@
   <title>RedNode Arcade — Troll Climber (2-Hand Auth + Pinch Jump Endless)</title>
   <style>
     :root{
+      --app-vh: 100dvh;
       --ui-bg: rgba(0,0,0,0.45);
       --ui-stroke: rgba(255,255,255,0.18);
       --ui-glow: rgba(255, 60, 0, 0.45);
@@ -21,8 +22,8 @@
     html, body {
       margin: 0;
       padding: 0;
-      height: 100%;
-      min-height: 100dvh;
+      height: var(--app-vh);
+      min-height: var(--app-vh);
       overflow: hidden;
       font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
       background: #0b0505;
@@ -31,14 +32,14 @@
     body {
       display: flex;
       width: 100%;
-      min-height: 100dvh;
+      min-height: var(--app-vh);
     }
     canvas#gameCanvas {
       display: block;
       flex: 1 1 auto;
       width: 100%;
       height: 100%;
-      min-height: 100dvh;
+      min-height: var(--app-vh);
       background: radial-gradient(1200px 900px at 50% 25%, #6b0000 0%, #220000 35%, #070000 100%);
     }
 
@@ -670,6 +671,7 @@
           <div class="row">
             <button class="cta" id="btnStartCam">Enable Camera</button>
             <button class="cta mini mobileOnly" id="btnMobileScanStart" disabled>Hand Scan + Start</button>
+            <button class="cta mini mobileOnly" id="btnMobileQuickPlay">Quick Play</button>
             <button class="cta mini" id="btnEnroll" disabled>Enroll Pose</button>
             <button class="cta mini" id="btnLogin" disabled>Login</button>
             <button class="cta mini" id="btnReset" disabled>Reset Enrollment</button>
@@ -711,6 +713,7 @@
 
     const btnStartCam = document.getElementById("btnStartCam");
     const btnMobileScanStart = document.getElementById("btnMobileScanStart");
+    const btnMobileQuickPlay = document.getElementById("btnMobileQuickPlay");
     const btnEnroll   = document.getElementById("btnEnroll");
     const btnLogin    = document.getElementById("btnLogin");
     const btnReset    = document.getElementById("btnReset");
@@ -841,6 +844,15 @@
     let loggedIn = false;
     let handControlEnabled = true;
     const isMobileLayout = window.matchMedia("(max-width: 860px), (pointer: coarse)").matches;
+
+    function syncViewportHeight() {
+      const vh = window.visualViewport?.height || window.innerHeight;
+      document.documentElement.style.setProperty("--app-vh", `${Math.max(320, Math.round(vh))}px`);
+    }
+    syncViewportHeight();
+    window.addEventListener("resize", syncViewportHeight, { passive: true });
+    window.visualViewport?.addEventListener("resize", syncViewportHeight, { passive: true });
+    window.visualViewport?.addEventListener("scroll", syncViewportHeight, { passive: true });
 
     let lastDebugPerf = 0;
 
@@ -1211,7 +1223,7 @@
       landmarker = await HandLandmarker.createFromOptions(vision, {
         baseOptions: {
           modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-          delegate: "GPU"
+          delegate: isMobileLayout ? "CPU" : "GPU"
         },
         runningMode: "VIDEO",
         numHands: 2
@@ -1223,7 +1235,10 @@
     }
 
     async function startCamera() {
-      if (!landmarker) return;
+      if (!landmarker) {
+        setStatus("Status: hand model is not ready yet. On mobile you can use Quick Play immediately.");
+        return;
+      }
 
       setStatus("Status: requesting camera permission…");
 
@@ -1250,6 +1265,17 @@
         : "Status: camera on. No enrollment found. Enroll a two-hand pose.");
 
       requestAnimationFrame(loopHands);
+    }
+
+    function enterMobileQuickPlay(reason = "") {
+      loggedIn = true;
+      mode = "idle";
+      authResetProgress();
+      handControlEnabled = false;
+      chkHandControl.checked = false;
+      authOverlay.classList.add("hidden");
+      setStatus(`Status: QUICK PLAY active.${reason ? ` ${reason}` : ""}\nTouch controls are enabled for instant mobile gameplay.`);
+      startGameBoot();
     }
 
     // ---------------- Main hands loop (auth + gameplay) ----------------
@@ -1428,6 +1454,10 @@ Move metric: ${isFinite(lastMoveMetric) ? lastMoveMetric.toFixed(4) : "—"}`
       }
     });
 
+    btnMobileQuickPlay.addEventListener("click", () => {
+      enterMobileQuickPlay("Hand login skipped for faster mobile startup.");
+    });
+
     btnEnroll.addEventListener("click", () => {
       if (!webcamOn) return;
       mode = "enroll";
@@ -1473,12 +1503,20 @@ Move metric: ${isFinite(lastMoveMetric) ? lastMoveMetric.toFixed(4) : "—"}`
       btnReset.disabled = true;
     } else {
       btnMobileScanStart.disabled = !isMobileLayout;
+      btnMobileQuickPlay.style.display = isMobileLayout ? "inline-flex" : "none";
       enrolled = loadEnrollment();
       btnReset.disabled = !enrolled;
+      if (isMobileLayout) {
+        setStatus("Status: mobile startup ready. Tap “Quick Play” for instant touch controls, or use “Hand Scan + Start” for gesture gameplay.");
+      }
       initLandmarker().catch((e) => {
         dotModel.className = "dot bad";
         lblModel.textContent = "Model: failed";
-        setStatus(`Status: model init failed.\n${String(e?.message || e)}`);
+        if (isMobileLayout) {
+          setStatus(`Status: hand model unavailable on this device.\nUse “Quick Play” to continue immediately.\n${String(e?.message || e)}`);
+        } else {
+          setStatus(`Status: model init failed.\n${String(e?.message || e)}`);
+        }
       });
     }
 
