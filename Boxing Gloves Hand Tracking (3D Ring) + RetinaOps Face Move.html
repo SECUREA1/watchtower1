@@ -459,6 +459,10 @@
     strength: TUNE.faceStrength,
     neutral: null,     // {yaw, pitch}
     axes: { x: 0, y: 0 },
+    targetAxes: { x: 0, y: 0 },
+    leadAxes: { x: 0, y: 0 },
+    lead: 0.32,
+    yAssist: 1.35,
     lastSeen: 0
   };
 
@@ -563,6 +567,8 @@
       // decay to neutral if face disappears
       faceControl.axes.x *= 0.90;
       faceControl.axes.y *= 0.90;
+      faceControl.leadAxes.x *= 0.86;
+      faceControl.leadAxes.y *= 0.86;
       setFaceUI(false, "Not found");
       return;
     }
@@ -603,11 +609,19 @@
     ay = applyDeadzone(ay, faceControl.deadzone);
 
     ax = clamp(ax, -1, 1);
-    ay = clamp(ay, -1, 1);
+    ay = clamp(ay * faceControl.yAssist, -1, 1);
 
-    // Snappy smoothing
-    faceControl.axes.x += (ax - faceControl.axes.x) * faceControl.smooth;
-    faceControl.axes.y += (ay - faceControl.axes.y) * faceControl.smooth;
+    faceControl.targetAxes.x = ax;
+    faceControl.targetAxes.y = ay;
+
+    const dxLead = faceControl.targetAxes.x - faceControl.axes.x;
+    const dyLead = faceControl.targetAxes.y - faceControl.axes.y;
+
+    // Lead-lag controller: smoother but responsive with less head movement
+    faceControl.axes.x += dxLead * faceControl.smooth;
+    faceControl.axes.y += dyLead * faceControl.smooth;
+    faceControl.leadAxes.x = clamp(faceControl.axes.x + dxLead * faceControl.lead, -1, 1);
+    faceControl.leadAxes.y = clamp(faceControl.axes.y + dyLead * faceControl.lead, -1, 1);
 
     faceControl.lastSeen = now;
     setFaceUI(true, "Tracking");
@@ -944,8 +958,8 @@
       // Face (strong)
       const faceRecent = (now - faceControl.lastSeen) < 650;
       if (faceControl.enabled && faceRecent) {
-        inX  += faceControl.axes.x * faceControl.strength;
-        inFwd += faceControl.axes.y * faceControl.strength; // up => forward (as requested)
+        inX  += faceControl.leadAxes.x * faceControl.strength;
+        inFwd += faceControl.leadAxes.y * faceControl.strength; // up => forward (as requested)
       } else if (faceControl.enabled) {
         // decay if not recent
         faceControl.axes.x *= 0.90;

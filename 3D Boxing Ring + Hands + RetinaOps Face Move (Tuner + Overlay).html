@@ -563,6 +563,10 @@
     strength: TUNE.faceStrength,
     neutral: null,
     axes: { x: 0, y: 0 },
+    targetAxes: { x: 0, y: 0 },
+    leadAxes: { x: 0, y: 0 },
+    lead: 0.32,
+    yAssist: 1.35,
     raw:  { x: 0, y: 0 },
     lastSeen: 0
   };
@@ -680,6 +684,8 @@
     if (!faces || faces.length === 0) {
       faceControl.axes.x *= 0.90;
       faceControl.axes.y *= 0.90;
+      faceControl.leadAxes.x *= 0.86;
+      faceControl.leadAxes.y *= 0.86;
       setFaceUI(false, "Not found");
       return;
     }
@@ -717,11 +723,19 @@
     // radial deadzone creates center “gap”
     const dzOut = applyRadialDeadzone(ax, ay, faceControl.deadzone);
     ax = clamp(dzOut.x, -1, 1);
-    ay = clamp(dzOut.y, -1, 1);
+    ay = clamp(dzOut.y * faceControl.yAssist, -1, 1);
 
-    // snappy smoothing
-    faceControl.axes.x += (ax - faceControl.axes.x) * faceControl.smooth;
-    faceControl.axes.y += (ay - faceControl.axes.y) * faceControl.smooth;
+    faceControl.targetAxes.x = ax;
+    faceControl.targetAxes.y = ay;
+
+    const dxLead = faceControl.targetAxes.x - faceControl.axes.x;
+    const dyLead = faceControl.targetAxes.y - faceControl.axes.y;
+
+    // lead-lag smoothing for smoother but faster response
+    faceControl.axes.x += dxLead * faceControl.smooth;
+    faceControl.axes.y += dyLead * faceControl.smooth;
+    faceControl.leadAxes.x = clamp(faceControl.axes.x + dxLead * faceControl.lead, -1, 1);
+    faceControl.leadAxes.y = clamp(faceControl.axes.y + dyLead * faceControl.lead, -1, 1);
 
     faceControl.lastSeen = now;
     setFaceUI(true, "Tracking");
@@ -1218,8 +1232,8 @@
       // face input
       const faceRecent = (now - faceControl.lastSeen) < 650;
       if (faceControl.enabled && faceRecent) {
-        inX  += faceControl.axes.x * faceControl.strength;
-        inFwd += faceControl.axes.y * faceControl.strength; // face up => forward (already mapped)
+        inX  += faceControl.leadAxes.x * faceControl.strength;
+        inFwd += faceControl.leadAxes.y * faceControl.strength; // face up => forward (already mapped)
       } else if (faceControl.enabled) {
         faceControl.axes.x *= 0.90;
         faceControl.axes.y *= 0.90;
