@@ -588,9 +588,12 @@
     gravity: -22,
 
     // hands punch
-    punchWindowMs: 420,     // slightly longer window
-    punchCooldownMs: 260,
+    punchWindowMs: 220,
+    punchCooldownMs: 80,
     punchVzThreshold: -0.80,
+    punchReturnBoost: 0.75,
+    comboChainWindowMs: 360,
+    comboChainMax: 3,
 
     // glove alignment (shoulder anchored)
     shoulderY: 1.60,
@@ -851,7 +854,7 @@
     gR.position.set( 0.55, 1.62, 0.55);
     group.add(gL, gR);
 
-    group.userData = { body, head, gL, gR };
+    group.userData = { body, head, gL, gR, hitAnim: null };
     scene.add(group);
     return group;
   }
@@ -1180,9 +1183,17 @@
   // Hands -> punch detection
   // ============================================================
   const handMotion = {
-    Left:  { lastZ: null, lastT: null, punchUntil: 0, cooldownUntil: 0, punchPower: 0, punchStart: 0 },
-    Right: { lastZ: null, lastT: null, punchUntil: 0, cooldownUntil: 0, punchPower: 0, punchStart: 0 }
+    Left:  { lastZ: null, lastT: null, punchUntil: 0, cooldownUntil: 0, punchPower: 0, punchStart: 0, comboHits: 0, comboUntil: 0, lastVz: 0 },
+    Right: { lastZ: null, lastT: null, punchUntil: 0, cooldownUntil: 0, punchPower: 0, punchStart: 0, comboHits: 0, comboUntil: 0, lastVz: 0 }
   };
+
+  function punchEnvelope(start, until, now) {
+    const total = Math.max(1, until - start);
+    const t = clamp((now - start) / total, 0, 1);
+    const attack = 0.20;
+    if (t <= attack) return t / attack;
+    return 1 - ((t - attack) / (1 - attack));
+  }
 
   let lastHandPoints = { Left: null, Right: null };
 
@@ -1211,21 +1222,31 @@
     if (m.lastZ != null && m.lastT != null) {
       const dt = Math.max(0.001, (now - m.lastT) / 1000);
       const vz = (z - m.lastZ) / dt;
+      m.lastVz = vz;
 
       if (vz < MATCH.punchVzThreshold && now > m.cooldownUntil && match.mode === "Fight") {
+        if (now <= m.comboUntil) m.comboHits = clamp(m.comboHits + 1, 1, MATCH.comboChainMax);
+        else m.comboHits = 1;
+        m.comboUntil = now + MATCH.comboChainWindowMs;
+
+        const chainBoost = 1 + (m.comboHits - 1) * 0.18;
         m.punchStart = now;
         m.punchUntil = now + MATCH.punchWindowMs;
-        m.cooldownUntil = now + MATCH.punchCooldownMs;
+        m.cooldownUntil = now + Math.max(20, MATCH.punchCooldownMs - (m.comboHits - 1) * 20);
 
         const raw = (-vz - (-MATCH.punchVzThreshold)) / 2.2;
-        m.punchPower = clamp(raw, 0, 1);
+        m.punchPower = clamp(raw * chainBoost, 0, 1);
       }
     }
 
     m.lastZ = z;
     m.lastT = now;
 
-    return { nx: x, ny: y, nz: z, punching: now < m.punchUntil, power: m.punchPower, start: m.punchStart, until: m.punchUntil };
+    return {
+      nx: x, ny: y, nz: z, punching: now < m.punchUntil,
+      power: m.punchPower, start: m.punchStart, until: m.punchUntil,
+      comboHits: m.comboHits, vz: m.lastVz
+    };
   }
 
   // ============================================================
@@ -1350,6 +1371,12 @@
 
     defender.hp = clamp(defender.hp - dmg, 0, MATCH.hpMax);
 
+    const punchNode = (attackerSide === "you") ? player : ai;
+    const defenderNode = (defenderSide === "you") ? player : ai;
+    const swing = 0.08 + punchPower * 0.12;
+    punchNode.userData.hitAnim = { until: now + 90, mag: swing * 0.65 };
+    defenderNode.userData.hitAnim = { until: now + 180, mag: swing };
+
     // hard KO on hp=0
     if (defender.hp <= 0) {
       endMatch(defenderSide === "you" ? "KO — AI wins!" : "KO — You win!");
@@ -1394,7 +1421,9 @@
     cooldownUntil: 0,
     activeHand: "R",
     power: 0.55,
-    hitPoint: new THREE.Vector3()
+    hitPoint: new THREE.Vector3(),
+    comboHits: 0,
+    comboUntil: 0
   };
 
   const up = new THREE.Vector3(0,1,0);
@@ -1488,11 +1517,15 @@
       const baseP = 0.16;
       const p = clamp(baseP / calm, 0.05, 0.18);
       if (Math.random() < p) {
+        if (now <= aiBrain.comboUntil) aiBrain.comboHits = clamp(aiBrain.comboHits + 1, 1, 3);
+        else aiBrain.comboHits = 1;
+        aiBrain.comboUntil = now + 360;
+
         aiBrain.activeHand = (Math.random() < 0.5) ? "L" : "R";
-        aiBrain.power = clamp((0.35 + Math.random()*0.55) * aiPow, 0.25, 0.85);
+        aiBrain.power = clamp((0.35 + Math.random()*0.55) * aiPow * (1 + (aiBrain.comboHits - 1) * 0.14), 0.25, 0.95);
         aiBrain.punchStart = now;
-        aiBrain.punchUntil = now + (300 + Math.random()*180);
-        aiBrain.cooldownUntil = now + (560 + Math.random()*300) * calm;
+        aiBrain.punchUntil = now + (220 + Math.random()*100);
+        aiBrain.cooldownUntil = now + (260 + Math.random()*120) * calm;
       }
     }
 
@@ -1513,8 +1546,7 @@
 
     if (now < aiBrain.punchUntil) {
       aiBrain.punching = true;
-      const t = clamp((now - aiBrain.punchStart) / Math.max(1, (aiBrain.punchUntil - aiBrain.punchStart)), 0, 1);
-      const pop = Math.sin(t * Math.PI) * (reach * (0.95 + 0.55*aiBrain.power)); // longer AI pop too
+      const pop = punchEnvelope(aiBrain.punchStart, aiBrain.punchUntil, now) * (reach * (0.95 + 0.55*aiBrain.power));
 
       const g = (aiBrain.activeHand === "L") ? gL : gR;
       g.position.z = 0.55 + pop;
@@ -1660,8 +1692,9 @@
       // punch pop: MUCH longer, controlled by reachUnits
       let pop = 0;
       if (hand.punching) {
-        const t = clamp((now - hand.start) / Math.max(1, (hand.until - hand.start)), 0, 1);
-        pop = Math.sin(t * Math.PI) * (reachUnits * (0.95 + 0.65*hand.power));
+        const curve = punchEnvelope(hand.start, hand.until, now);
+        const burst = clamp((-hand.vz - (-MATCH.punchVzThreshold)) * MATCH.punchReturnBoost, 0, 0.95);
+        pop = (curve + burst) * (reachUnits * (0.95 + 0.65*hand.power));
       }
       target.addScaledVector(fwd, pop);
 
@@ -1672,7 +1705,7 @@
     const R = makeTarget(rightShoulder, rightHand,  1);
 
     // smoothing
-    const tau = 0.045;
+    const tau = 0.020;
     if (!gloveSmooth.L.ready) { gloveSmooth.L.pos.copy(L.target); gloveSmooth.L.ready = true; }
     if (!gloveSmooth.R.ready) { gloveSmooth.R.pos.copy(R.target); gloveSmooth.R.ready = true; }
 
@@ -1762,6 +1795,25 @@
     lookTarget.y += (faceControl.lookPitch * 1.6);
 
     camera3d.lookAt(lookTarget);
+  }
+
+  function updateHitAnimations(now) {
+    [player, ai].forEach((node) => {
+      const anim = node.userData.hitAnim;
+      const bodyMat = node.userData.body?.material;
+      const headMat = node.userData.head?.material;
+      if (!anim || now > anim.until) {
+        if (bodyMat) bodyMat.emissive.setHex(0x000000);
+        if (headMat) headMat.emissive.setHex(0x000000);
+        node.rotation.z *= 0.75;
+        return;
+      }
+      const t = 1 - clamp((anim.until - now) / 180, 0, 1);
+      const pulse = Math.sin(t * Math.PI);
+      if (bodyMat) bodyMat.emissive.setRGB(0.35 * pulse, 0.07 * pulse, 0.07 * pulse);
+      if (headMat) headMat.emissive.setRGB(0.45 * pulse, 0.10 * pulse, 0.10 * pulse);
+      node.rotation.z = Math.sin(now * 0.05) * anim.mag * pulse;
+    });
   }
 
   // ============================================================
@@ -2107,6 +2159,7 @@
       }
     }
 
+    updateHitAnimations(now);
     updateHUD(now);
     renderer.render(scene, camera3d);
 
