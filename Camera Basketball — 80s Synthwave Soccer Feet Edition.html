@@ -170,6 +170,8 @@
       landmarks: null,
       leftPrev: null,
       rightPrev: null,
+      prevLeftFootPx: null,
+      prevRightFootPx: null,
       active: false,
       camera: null,
       pose: null,
@@ -254,8 +256,23 @@
     function posePoint(lm, index) {
       return {
         x: (1 - lm[index].x) * state.width,
-        y: state.floorY - (1 - lm[index].y) * (state.height * 0.96),
+        y: lm[index].y * state.height,
       };
+    }
+
+    function projectRigToPlayer(rig) {
+      const hipCenterX = (rig.leftHip.x + rig.rightHip.x) * 0.5;
+      const ankleCenterY = (rig.leftAnkle.y + rig.rightAnkle.y) * 0.5;
+      const shiftX = player.x - hipCenterX;
+      const shiftY = (state.floorY - 2) - ankleCenterY;
+      const out = {};
+      for (const key of POSE_KEYS) {
+        out[key] = {
+          x: rig[key].x + shiftX,
+          y: rig[key].y + shiftY,
+        };
+      }
+      return out;
     }
 
     function buildRig(lm) {
@@ -361,22 +378,31 @@
 
     function collideWithFoot(poly, footVx, footVy) {
       let minDist = Infinity;
-      let hitNormal = null;
+      let closestPoint = null;
 
       for (let i = 0; i < poly.length; i++) {
         const a = poly[i];
         const b = poly[(i + 1) % poly.length];
-        const d = pointSegmentDistance(ball.x, ball.y, a.x, a.y, b.x, b.y);
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const len2 = dx * dx + dy * dy || 1;
+        let t = ((ball.x - a.x) * dx + (ball.y - a.y) * dy) / len2;
+        t = Math.max(0, Math.min(1, t));
+        const cx = a.x + dx * t;
+        const cy = a.y + dy * t;
+        const d = Math.hypot(ball.x - cx, ball.y - cy);
         if (d < minDist) {
           minDist = d;
-          const edgeX = b.x - a.x;
-          const edgeY = b.y - a.y;
-          const nLen = Math.hypot(edgeX, edgeY) || 1;
-          hitNormal = { x: -edgeY / nLen, y: edgeX / nLen };
+          closestPoint = { x: cx, y: cy };
         }
       }
 
-      if (minDist < ball.r + 4 && hitNormal) {
+      if (minDist < ball.r + 4 && closestPoint) {
+        const nLen = Math.hypot(ball.x - closestPoint.x, ball.y - closestPoint.y) || 1;
+        const hitNormal = {
+          x: (ball.x - closestPoint.x) / nLen,
+          y: (ball.y - closestPoint.y) / nLen,
+        };
         const relVx = ball.vx - footVx;
         const relVy = ball.vy - footVy;
         const speedIntoSurface = relVx * hitNormal.x + relVy * hitNormal.y;
@@ -434,6 +460,7 @@
         player.vy = (vision.smoothBodyY - player.hipOffset) * 0.18;
         player.x += player.vx;
         player.hipOffset += player.vy;
+        liveRig = projectRigToPlayer(liveRig);
 
         const dxShoulders = rShoulder.x - lShoulder.x;
         const dyShoulders = rShoulder.y - lShoulder.y;
@@ -510,8 +537,28 @@
       const leftFoot = footShape(leftAnkleX, leftAnkleY, leftAngle);
       const rightFoot = footShape(rightAnkleX, rightAnkleY, rightAngle);
 
-      collideWithFoot(leftFoot, player.vx * 0.9, -player.leftFootLift * 0.28);
-      collideWithFoot(rightFoot, player.vx * 0.9, -player.rightFootLift * 0.28);
+      let leftFootVx = player.vx * 0.9;
+      let leftFootVy = -player.leftFootLift * 0.28;
+      let rightFootVx = player.vx * 0.9;
+      let rightFootVy = -player.rightFootLift * 0.28;
+      if (liveRig) {
+        if (vision.prevLeftFootPx) {
+          leftFootVx = leftAnkleX - vision.prevLeftFootPx.x;
+          leftFootVy = leftAnkleY - vision.prevLeftFootPx.y;
+        }
+        if (vision.prevRightFootPx) {
+          rightFootVx = rightAnkleX - vision.prevRightFootPx.x;
+          rightFootVy = rightAnkleY - vision.prevRightFootPx.y;
+        }
+        vision.prevLeftFootPx = { x: leftAnkleX, y: leftAnkleY };
+        vision.prevRightFootPx = { x: rightAnkleX, y: rightAnkleY };
+      } else {
+        vision.prevLeftFootPx = null;
+        vision.prevRightFootPx = null;
+      }
+
+      collideWithFoot(leftFoot, leftFootVx, leftFootVy);
+      collideWithFoot(rightFoot, rightFootVx, rightFootVy);
 
       if (ball.x - ball.r < 0) {
         ball.x = ball.r;
