@@ -100,7 +100,6 @@
       margin-top: 10px;
     }
 
-
     #arcadeControls {
       position: fixed;
       top: 12px;
@@ -118,7 +117,6 @@
       display: none !important;
     }
 
-  
     @media (max-width: 640px) {
       #arcadeControls {
         top: 10px;
@@ -127,7 +125,7 @@
         gap: 6px;
       }
     }
-</style>
+  </style>
 
   <!-- Three.js -->
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
@@ -143,7 +141,6 @@
     <button id="backToArcadeBtn" class="btn" type="button" onclick="window.location.href='/site/games.html'">Back to Arcade</button>
     <button id="togglePanelsBtn" class="btn">Show Settings & Health</button>
   </div>
-
 
   <div id="hud">
     <div class="panel">
@@ -216,7 +213,6 @@
       </div>
 
       <div class="divider"></div>
-
       <div class="small" style="margin-bottom:6px;"><b>Face Tuner (Move + Look)</b></div>
 
       <div class="tunerRow">
@@ -256,7 +252,6 @@
       </div>
 
       <div class="divider"></div>
-
       <div class="small" style="margin-bottom:6px;"><b>Fight Tuner (Combos + KO + Damage)</b></div>
 
       <div class="tunerRow">
@@ -301,9 +296,26 @@
         <div id="aiPowerVal" class="val">0.55</div>
       </div>
 
+      <div class="divider"></div>
+      <div class="small" style="margin-bottom:6px;"><b>Punch Tuner (Easier + Cleaner Punch)</b></div>
+
+      <!-- NEW: makes punching easier across camera distances -->
+      <div class="tunerRow">
+        <label>Punch Sensitivity</label>
+        <input id="punchSens" type="range" min="0.65" max="1.65" step="0.05" value="1.10" />
+        <div id="punchSensVal" class="val">1.10</div>
+      </div>
+
+      <div class="tunerRow">
+        <label>Min Punch Extension</label>
+        <input id="punchMinPush" type="range" min="0.010" max="0.090" step="0.002" value="0.032" />
+        <div id="punchMinPushVal" class="val">0.032</div>
+      </div>
+
       <div class="small">
         Face controls: <b>Look Up</b> = move forward, <b>Look Down</b> = move back, <b>Look Left/Right</b> = strafe.<br/>
-        <b>Auto-rest:</b> if face stays centered for <b>0.3s</b>, controls recenter (great for resting your neck).
+        <b>Auto-rest:</b> hold face centered for <b>0.3s</b> to recenter (rest your neck).<br/>
+        <b>Punching:</b> now uses <i>velocity + extension</i> with an auto baseline so it triggers reliably even if you move closer/farther from the camera.
       </div>
     </div>
   </div>
@@ -320,7 +332,7 @@
     <div id="modalCard">
       <h1>3D Boxing — Face Movement + Hand Punching + Combos + KO Tuners</h1>
       <p>
-        Click <b>Enable Camera</b>. Face controls movement + looking. Hands control punching (Z-thrust).
+        Click <b>Enable Camera</b>. Face controls movement + looking. Hands control punching.
         You score via <b>point groups</b> (combo clusters). Knockdowns come from strong combos; KO comes from KO combos.
       </p>
       <button id="startBtn" class="btn">Enable Camera</button>
@@ -339,13 +351,13 @@
 <script>
 (() => {
   // ============================================================
-  // Utils
+  // Small helpers (clean + reusable)
   // ============================================================
   const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
   const lerp = (a,b,t)=>a+(b-a)*t;
 
-  function smoothTo(cur, target, dt, tau) {
-    const a = 1 - Math.exp(-dt / Math.max(1e-5, tau));
+  function expSmoother(cur, target, dt, tau) {
+    const a = 1 - Math.exp(-dt / Math.max(1e-6, tau));
     return cur + (target - cur) * a;
   }
 
@@ -367,10 +379,12 @@
   // ============================================================
   // DOM
   // ============================================================
-  const canvas = document.getElementById("canvas3d");
-  const modal = document.getElementById("modal");
-  const startBtn = document.getElementById("startBtn");
-  const togglePanelsBtn = document.getElementById("togglePanelsBtn");
+  const el = (id) => document.getElementById(id);
+
+  const canvas = el("canvas3d");
+  const modal = el("modal");
+  const startBtn = el("startBtn");
+  const togglePanelsBtn = el("togglePanelsBtn");
 
   let panelsHidden = true;
   function setPanelsHidden(nextHidden) {
@@ -381,83 +395,91 @@
   togglePanelsBtn.addEventListener("click", () => setPanelsHidden(!panelsHidden));
   setPanelsHidden(true);
 
+  const resetBtn = el("resetBtn");
+  const toggleFaceBtn = el("toggleFaceBtn");
+  const calFaceBtn = el("calFaceBtn");
+  const swapGlovesBtn = el("swapGlovesBtn");
+  const flipXBtn = el("flipXBtn");
+  const flipYBtn = el("flipYBtn");
+  const toggleLookBtn = el("toggleLookBtn");
+  const toggleCameraViewBtn = el("toggleCameraViewBtn");
 
-  const resetBtn = document.getElementById("resetBtn");
-  const toggleFaceBtn = document.getElementById("toggleFaceBtn");
-  const calFaceBtn = document.getElementById("calFaceBtn");
-  const swapGlovesBtn = document.getElementById("swapGlovesBtn");
-  const flipXBtn = document.getElementById("flipXBtn");
-  const flipYBtn = document.getElementById("flipYBtn");
-  const toggleLookBtn = document.getElementById("toggleLookBtn");
-  const toggleCameraViewBtn = document.getElementById("toggleCameraViewBtn");
+  const statusEl = el("status");
+  const faceDot = el("faceDot");
+  const faceTxt = el("faceTxt");
+  const modeDot = el("modeDot");
+  const modeTxt = el("modeTxt");
 
-  const statusEl = document.getElementById("status");
-  const faceDot = document.getElementById("faceDot");
-  const faceTxt = document.getElementById("faceTxt");
-  const modeDot = document.getElementById("modeDot");
-  const modeTxt = document.getElementById("modeTxt");
+  const hpYouEl = el("hpYou");
+  const hpAIEl = el("hpAI");
+  const hpYouTxt = el("hpYouTxt");
+  const hpAITxt = el("hpAITxt");
 
-  const hpYouEl = document.getElementById("hpYou");
-  const hpAIEl = document.getElementById("hpAI");
-  const hpYouTxt = document.getElementById("hpYouTxt");
-  const hpAITxt = document.getElementById("hpAITxt");
+  const staYouEl = el("staYou");
+  const staAIEl = el("staAI");
+  const staYouTxt = el("staYouTxt");
+  const staAITxt = el("staAITxt");
 
-  const staYouEl = document.getElementById("staYou");
-  const staAIEl = document.getElementById("staAI");
-  const staYouTxt = document.getElementById("staYouTxt");
-  const staAITxt = document.getElementById("staAITxt");
+  const roundTxt = el("roundTxt");
+  const clockTxt = el("clockTxt");
+  const rPtsTxt = el("rPtsTxt");
+  const kdTxt = el("kdTxt");
+  const judgeTxt = el("judgeTxt");
+  const matchTxt = el("matchTxt");
 
-  const roundTxt = document.getElementById("roundTxt");
-  const clockTxt = document.getElementById("clockTxt");
-  const rPtsTxt = document.getElementById("rPtsTxt");
-  const kdTxt = document.getElementById("kdTxt");
-  const judgeTxt = document.getElementById("judgeTxt");
-  const matchTxt = document.getElementById("matchTxt");
+  const grpFill = el("grpFill");
+  const grpTxt = el("grpTxt");
 
-  const grpFill = document.getElementById("grpFill");
-  const grpTxt = document.getElementById("grpTxt");
-
-  const videoWrap = document.getElementById("videoWrap");
-  const video = document.getElementById("video");
-  const overlay = document.getElementById("overlay");
+  const videoWrap = el("videoWrap");
+  const video = el("video");
+  const overlay = el("overlay");
   const octx = overlay.getContext("2d");
+
   let cameraViewVisible = false;
   function setCameraViewVisible(visible){
     cameraViewVisible = !!visible;
     videoWrap.style.display = cameraViewVisible ? "block" : "none";
     if (toggleCameraViewBtn) toggleCameraViewBtn.textContent = `Camera View: ${cameraViewVisible ? "On" : "Off"}`;
   }
+  setCameraViewVisible(false);
 
-  // tuners
-  const sensMoveEl = document.getElementById("sensMove");
-  const lrRatioEl = document.getElementById("lrRatio");
-  const deadzoneEl = document.getElementById("deadzone");
-  const faceSmoothEl = document.getElementById("faceSmooth");
-  const lookYawEl = document.getElementById("lookYaw");
-  const lookPitchEl = document.getElementById("lookPitch");
+  // Tuners
+  const sensMoveEl = el("sensMove");
+  const lrRatioEl = el("lrRatio");
+  const deadzoneEl = el("deadzone");
+  const faceSmoothEl = el("faceSmooth");
+  const lookYawEl = el("lookYaw");
+  const lookPitchEl = el("lookPitch");
 
-  const hitAssistEl = document.getElementById("hitAssist");
-  const dmgScaleEl = document.getElementById("dmgScale");
-  const kdComboPtsEl = document.getElementById("kdComboPts");
-  const koComboPtsEl = document.getElementById("koComboPts");
-  const tkoKDsEl = document.getElementById("tkoKDs");
-  const aiCalmEl = document.getElementById("aiCalm");
-  const aiPowerEl = document.getElementById("aiPower");
+  const hitAssistEl = el("hitAssist");
+  const dmgScaleEl = el("dmgScale");
+  const kdComboPtsEl = el("kdComboPts");
+  const koComboPtsEl = el("koComboPts");
+  const tkoKDsEl = el("tkoKDs");
+  const aiCalmEl = el("aiCalm");
+  const aiPowerEl = el("aiPower");
 
-  const sensMoveVal = document.getElementById("sensMoveVal");
-  const lrRatioVal = document.getElementById("lrRatioVal");
-  const deadzoneVal = document.getElementById("deadzoneVal");
-  const faceSmoothVal = document.getElementById("faceSmoothVal");
-  const lookYawVal = document.getElementById("lookYawVal");
-  const lookPitchVal = document.getElementById("lookPitchVal");
+  // NEW punch tuners
+  const punchSensEl = el("punchSens");
+  const punchMinPushEl = el("punchMinPush");
 
-  const hitAssistVal = document.getElementById("hitAssistVal");
-  const dmgScaleVal = document.getElementById("dmgScaleVal");
-  const kdComboPtsVal = document.getElementById("kdComboPtsVal");
-  const koComboPtsVal = document.getElementById("koComboPtsVal");
-  const tkoKDsVal = document.getElementById("tkoKDsVal");
-  const aiCalmVal = document.getElementById("aiCalmVal");
-  const aiPowerVal = document.getElementById("aiPowerVal");
+  const sensMoveVal = el("sensMoveVal");
+  const lrRatioVal = el("lrRatioVal");
+  const deadzoneVal = el("deadzoneVal");
+  const faceSmoothVal = el("faceSmoothVal");
+  const lookYawVal = el("lookYawVal");
+  const lookPitchVal = el("lookPitchVal");
+
+  const hitAssistVal = el("hitAssistVal");
+  const dmgScaleVal = el("dmgScaleVal");
+  const kdComboPtsVal = el("kdComboPtsVal");
+  const koComboPtsVal = el("koComboPtsVal");
+  const tkoKDsVal = el("tkoKDsVal");
+  const aiCalmVal = el("aiCalmVal");
+  const aiPowerVal = el("aiPowerVal");
+
+  const punchSensVal = el("punchSensVal");
+  const punchMinPushVal = el("punchMinPushVal");
 
   function setStatus(t){ statusEl.textContent = t; }
   function setFaceUI(active, text){
@@ -470,12 +492,10 @@
     modeTxt.textContent = mode;
   }
 
-  setCameraViewVisible(false);
-
   // ============================================================
-  // GAME CONSTANTS
+  // Game config (kept together + readable)
   // ============================================================
-  const MATCH = {
+  const CFG = {
     roundsTotal: 3,
     roundSeconds: 90,
     restSeconds: 20,
@@ -517,17 +537,12 @@
     kdBaseChance: 0.18,
     kdMaxChance: 0.68,
 
-    // movement (FASTER)
+    // movement
     maxSpeed: 13.0,
     accel: 70.0,
     friction: 34.0,
     jumpVel: 9.5,
     gravity: -22,
-
-    // hands punch
-    punchWindowMs: 340,
-    punchCooldownMs: 260,
-    punchVzThreshold: -0.80,
 
     // glove mapping + alignment
     shoulderY: 1.60,
@@ -543,7 +558,21 @@
     // camera orbit
     camRadius: 14.0,
     camHeight: 6.5,
-    camFollow: 0.07
+    camFollow: 0.07,
+
+    // NEW: Punch detection defaults (easier + robust)
+    punch: {
+      windowMs: 320,
+      cooldownMs: 240,
+      // base threshold (scaled by Punch Sensitivity slider)
+      velZThreshold: -0.62,
+      // baseline-extension threshold (scaled by Min Punch Extension slider)
+      minPush: 0.032,
+      // baseline smoothing (keeps punch consistent at different camera distances)
+      baselineTau: 0.55,
+      // velocity smoothing to reduce jitter
+      velTau: 0.06
+    }
   };
 
   // ============================================================
@@ -725,13 +754,13 @@
   }
 
   // ============================================================
-  // State
+  // Match state
   // ============================================================
   const match = {
-    mode: "Fight",     // Fight | Rest | End
+    mode: "Fight", // Fight | Rest | End
     round: 1,
-    roundLeft: MATCH.roundSeconds,
-    restLeft: MATCH.restSeconds,
+    roundLeft: CFG.roundSeconds,
+    restLeft: CFG.restSeconds,
 
     youRoundPts: 0,
     aiRoundPts: 0,
@@ -755,16 +784,21 @@
   };
 
   const fighter = {
-    you: { hp: MATCH.hpMax, stamina: MATCH.staminaMax, guarding: false },
-    ai:  { hp: MATCH.hpMax, stamina: MATCH.staminaMax, guarding: false }
+    you: { hp: CFG.hpMax, stamina: CFG.staminaMax, guarding: false },
+    ai:  { hp: CFG.hpMax, stamina: CFG.staminaMax, guarding: false }
   };
 
-  function isYouDown(now){ return now < match.youDownUntil; }
-  function isAIDown(now){ return now < match.aiDownUntil; }
+  const isYouDown = (now)=> now < match.youDownUntil;
+  const isAIDown  = (now)=> now < match.aiDownUntil;
 
   function setMode(mode){
     match.mode = mode;
     setModeUI(mode);
+  }
+
+  function endMatch(msg){
+    setMode("End");
+    setStatus(msg);
   }
 
   // ============================================================
@@ -784,7 +818,7 @@
   window.addEventListener("keyup", (e) => keys.delete(e.code));
 
   // ============================================================
-  // Face control (AUTO-RECENTER AFTER 0.3s CENTER HOLD)
+  // Face control (auto recenter)
   // ============================================================
   const faceControl = {
     enabledMove: true,
@@ -792,7 +826,6 @@
     invertX: true,
     invertY: false,
 
-    moveGainBase: 9.5,
     moveGainX: 11.4,
     moveGainY: 9.5,
     deadzone: 0.055,
@@ -804,13 +837,11 @@
     raw: { x: 0, y: 0 },
     axes: { x: 0, y: 0 },
 
-    // look offsets (smoothed)
     lookYaw: 0,
     lookPitch: 0,
     lookYawTarget: 0,
     lookPitchTarget: 0,
 
-    // auto-rest / recenter
     centerHoldMs: 0,
     centerLatched: false,
     autoRecenterMs: 300,
@@ -848,7 +879,7 @@
 
   toggleFaceBtn.addEventListener("click", toggleFaceMove);
   toggleLookBtn.addEventListener("click", toggleFaceLook);
-  if (toggleCameraViewBtn) toggleCameraViewBtn.addEventListener("click", () => setCameraViewVisible(!cameraViewVisible));
+  toggleCameraViewBtn.addEventListener("click", () => setCameraViewVisible(!cameraViewVisible));
   calFaceBtn.addEventListener("click", calibrateFace);
   flipXBtn.addEventListener("click", flipFaceX);
   flipYBtn.addEventListener("click", flipFaceY);
@@ -883,7 +914,6 @@
     mpFace.onResults(onFaceResults);
 
     visionActive = true;
-    setCameraViewVisible(cameraViewVisible);
     setStatus("Tracking");
     setFaceUI(false, "Waiting…");
 
@@ -905,6 +935,7 @@
       if (video.readyState >= 2 && (now - lastVisionT) > 28) {
         lastVisionT = now;
         try {
+          // hands + face in same frame cycle
           await mpHands.send({ image: video });
           await mpFace.send({ image: video });
         } catch {}
@@ -920,12 +951,10 @@
     const now = performance.now();
     const faces = results.multiFaceLandmarks;
 
-    // dt for center-hold timing
     const dtMs = (faceControl.lastFaceProcess > 0) ? (now - faceControl.lastFaceProcess) : 33;
     faceControl.lastFaceProcess = now;
 
     if (!faces || faces.length === 0) {
-      // decay
       faceControl.axes.x *= 0.92;
       faceControl.axes.y *= 0.92;
       faceControl.centerHoldMs = 0;
@@ -943,21 +972,14 @@
     const eyeMidY = (le.y + re.y) * 0.5;
     const eyeDist = Math.max(1e-6, Math.hypot(le.x - re.x, le.y - re.y));
 
-    // RAW yaw/pitch (no neutral yet)
     const rawYaw0 = (nose.x - eyeMidX) / eyeDist;
     const rawPitch0 = (nose.y - eyeMidY) / eyeDist;
 
-    if (!faceControl.neutral) {
-      faceControl.neutral = { yaw: rawYaw0, pitch: rawPitch0 };
-    }
+    if (!faceControl.neutral) faceControl.neutral = { yaw: rawYaw0, pitch: rawPitch0 };
 
-    // offset from neutral
     let yaw = rawYaw0 - faceControl.neutral.yaw;
     let pitch = rawPitch0 - faceControl.neutral.pitch;
 
-    // mapping:
-    // - yaw left/right => strafe
-    // - pitch: look up (nose higher => pitch negative) => move forward
     let ax = yaw * faceControl.moveGainX;
     let ay = (-pitch) * faceControl.moveGainY;
 
@@ -970,19 +992,16 @@
     faceControl.raw.x = ax;
     faceControl.raw.y = ay;
 
-    // ---- AUTO-RECENTER AFTER 0.3s CENTER HOLD ----
+    // auto rest
     const r = Math.hypot(ax, ay);
     const dz = faceControl.deadzone;
 
     if (r <= dz) {
-      // inside deadzone
       if (!faceControl.centerLatched) {
         faceControl.centerHoldMs += dtMs;
         if (faceControl.centerHoldMs >= faceControl.autoRecenterMs) {
-          // lock new neutral at current raw values => "release to center"
           faceControl.neutral = { yaw: rawYaw0, pitch: rawPitch0 };
 
-          // force axes to 0 quickly (true rest)
           faceControl.axes.x = 0;
           faceControl.axes.y = 0;
           faceControl.lookYaw = 0;
@@ -991,42 +1010,129 @@
           faceControl.lookPitchTarget = 0;
 
           faceControl.centerLatched = true;
-          // keep hold counter (optional)
           faceControl.centerHoldMs = faceControl.autoRecenterMs;
         }
       }
     } else {
-      // outside deadzone -> unlock latch and reset timer
       faceControl.centerHoldMs = 0;
       faceControl.centerLatched = false;
     }
 
-    // Deadzone shaping (still used normally)
     const dzOut = applyRadialDeadzone(ax, ay, dz);
     const tx = clamp(dzOut.x, -1, 1);
     const ty = clamp(dzOut.y, -1, 1);
 
-    // smoothing
+    // more correct dt for smoothing (uses measured face dt)
+    const dt = clamp(dtMs / 1000, 0.01, 0.05);
     const tau = lerp(0.03, 0.28, clamp((faceControl.smooth - 0.02) / 0.38, 0, 1));
-    const dt = 0.033; // approximate vision dt
 
-    // if latched (rest), keep targets at 0 (prevents drift creep)
     const targetX = faceControl.centerLatched ? 0 : tx;
     const targetY = faceControl.centerLatched ? 0 : ty;
 
-    faceControl.axes.x = smoothTo(faceControl.axes.x, targetX, dt, tau);
-    faceControl.axes.y = smoothTo(faceControl.axes.y, targetY, dt, tau);
+    faceControl.axes.x = expSmoother(faceControl.axes.x, targetX, dt, tau);
+    faceControl.axes.y = expSmoother(faceControl.axes.y, targetY, dt, tau);
 
     faceControl.lastSeen = now;
     setFaceUI(true, faceControl.centerLatched ? "Rest (centered)" : "Tracking");
   }
 
   // ============================================================
-  // Hands -> punch detection + glove positioning helpers
+  // Punch detection (NEW: velocity + extension + baseline)
+  //   - More professional & reliable across camera distances
+  //   - Punch triggers when:
+  //       (forward velocity is strong) AND (hand extends beyond baseline by minPush)
   // ============================================================
-  const handMotion = {
-    Left:  { lastZ: null, lastT: null, punchUntil: 0, cooldownUntil: 0, punchPower: 0, punchStart: 0 },
-    Right: { lastZ: null, lastT: null, punchUntil: 0, cooldownUntil: 0, punchPower: 0, punchStart: 0 }
+  class PunchDetector {
+    constructor(label){
+      this.label = label;
+      this.last = null; // {x,y,z,t}
+      this.velZ = 0;    // smoothed
+      this.baselineZ = null;
+      this.punchUntil = 0;
+      this.cooldownUntil = 0;
+      this.punchPower = 0;
+      this.punchStart = 0;
+      this.pushAmt = 0;
+    }
+
+    reset(){
+      this.last = null;
+      this.velZ = 0;
+      this.baselineZ = null;
+      this.punchUntil = 0;
+      this.cooldownUntil = 0;
+      this.punchPower = 0;
+      this.punchStart = 0;
+      this.pushAmt = 0;
+    }
+
+    update({x,y,z}, now, dt){
+      // Baseline learns "resting" depth when not punching.
+      // This makes punch recognition consistent even if you move closer/farther from camera.
+      const baseTau = CFG.punch.baselineTau;
+      if (this.baselineZ == null) this.baselineZ = z;
+
+      const inPunch = now < this.punchUntil;
+      if (!inPunch) {
+        this.baselineZ = expSmoother(this.baselineZ, z, dt, baseTau);
+      }
+
+      // Velocity (smoothed)
+      if (this.last) {
+        const rawVz = (z - this.last.z) / Math.max(1e-6, dt); // z per sec
+        this.velZ = expSmoother(this.velZ, rawVz, dt, CFG.punch.velTau);
+      }
+      this.last = {x,y,z,t:now};
+
+      // Extension (push) is how far forward the hand is from baseline
+      // Punching forward => z decreases (more negative) in your current mapping,
+      // so push is (baseline - current).
+      this.pushAmt = (this.baselineZ - z);
+
+      return this._maybeTrigger(now);
+    }
+
+    _maybeTrigger(now){
+      if (match.mode !== "Fight") return this._snapshot(now);
+      if (now < this.cooldownUntil) return this._snapshot(now);
+
+      const sens = Number(punchSensEl.value);
+      const minPush = Number(punchMinPushEl.value);
+
+      const velThresh = CFG.punch.velZThreshold * (1.0 / clamp(sens, 0.65, 1.65));
+      const strongVel = this.velZ < velThresh;
+      const enoughPush = this.pushAmt >= minPush;
+
+      if (strongVel && enoughPush) {
+        this.punchStart = now;
+        this.punchUntil = now + CFG.punch.windowMs;
+        this.cooldownUntil = now + CFG.punch.cooldownMs;
+
+        // Power from both velocity + extension
+        // normalized for stable feel
+        const vScore = clamp((-this.velZ - (-velThresh)) / 2.2, 0, 1);
+        const pScore = clamp((this.pushAmt - minPush) / (minPush * 2.2), 0, 1);
+        this.punchPower = clamp(0.55*vScore + 0.45*pScore, 0, 1);
+      }
+
+      return this._snapshot(now);
+    }
+
+    _snapshot(now){
+      return {
+        punching: now < this.punchUntil,
+        power: this.punchPower,
+        start: this.punchStart,
+        until: this.punchUntil,
+        push: this.pushAmt,
+        velZ: this.velZ
+      };
+    }
+  }
+
+  const detectors = {
+    Left: new PunchDetector("Left"),
+    Right: new PunchDetector("Right")
   };
 
   let lastHandPoints = { Left: null, Right: null };
@@ -1039,39 +1145,24 @@
 
     if (!results.multiHandLandmarks || !results.multiHandedness) return;
 
+    // Use a stable "palm center" from wrist + two MCPs
+    // (less jitter than a single landmark)
     for (let i = 0; i < results.multiHandLandmarks.length; i++) {
       const lm = results.multiHandLandmarks[i];
-      const handedness = results.multiHandedness[i];
-      const label = handedness.label === "Left" ? "Left" : "Right";
-      lastHandPoints[label] = readHandPunch(label, lm, now);
+      const label = (results.multiHandedness[i].label === "Left") ? "Left" : "Right";
+
+      const x = (lm[0].x + lm[5].x + lm[17].x) / 3;
+      const y = (lm[0].y + lm[5].y + lm[17].y) / 3;
+      const z = (lm[0].z + lm[5].z + lm[17].z) / 3;
+
+      // dt based on last update
+      const det = detectors[label];
+      const lastT = det.last?.t ?? now;
+      const dt = clamp((now - lastT) / 1000, 0.01, 0.05);
+
+      const p = det.update({x,y,z}, now, dt);
+      lastHandPoints[label] = { nx:x, ny:y, nz:z, ...p };
     }
-  }
-
-  function readHandPunch(label, lm, now) {
-    const x = (lm[0].x + lm[5].x + lm[17].x) / 3;
-    const y = (lm[0].y + lm[5].y + lm[17].y) / 3;
-    const z = (lm[0].z + lm[5].z + lm[17].z) / 3;
-
-    const m = handMotion[label] || handMotion.Right;
-
-    if (m.lastZ != null && m.lastT != null) {
-      const dt = Math.max(0.001, (now - m.lastT) / 1000);
-      const vz = (z - m.lastZ) / dt;
-
-      if (vz < MATCH.punchVzThreshold && now > m.cooldownUntil && match.mode === "Fight") {
-        m.punchStart = now;
-        m.punchUntil = now + MATCH.punchWindowMs;
-        m.cooldownUntil = now + MATCH.punchCooldownMs;
-
-        const raw = (-vz - (-MATCH.punchVzThreshold)) / 2.2;
-        m.punchPower = clamp(raw, 0, 1);
-      }
-    }
-
-    m.lastZ = z;
-    m.lastT = now;
-
-    return { nx: x, ny: y, nz: z, punching: now < m.punchUntil, power: m.punchPower, start: m.punchStart, until: m.punchUntil };
   }
 
   // ============================================================
@@ -1087,15 +1178,15 @@
   function addToGroup(side, pts, impact, now) {
     const g = (side === "you") ? match.youGroup : match.aiGroup;
 
-    const inWindow = (g.hits > 0 && now <= g.until + MATCH.groupCommitGraceMs);
+    const inWindow = (g.hits > 0 && now <= g.until + CFG.groupCommitGraceMs);
     if (!inWindow && g.hits > 0) commitGroup(side, now, true);
 
     g.hits += 1;
-    const mult = clamp(1 + (g.hits - 1) * MATCH.comboMultPerHit, 1, MATCH.comboMaxMult);
+    const mult = clamp(1 + (g.hits - 1) * CFG.comboMultPerHit, 1, CFG.comboMaxMult);
     const add = Math.round(pts * mult);
     g.pts += add;
     g.impact += impact * mult;
-    g.until = now + MATCH.comboWindowMs;
+    g.until = now + CFG.comboWindowMs;
 
     return { groupPts: g.pts, mult };
   }
@@ -1119,7 +1210,7 @@
   }
 
   function tryKDorKOFromGroup(attackerSide, groupPts, groupImpact, now) {
-    if (now - match.lastKDAt < MATCH.kdCooldownMs) return;
+    if (now - match.lastKDAt < CFG.kdCooldownMs) return;
 
     const kdComboPts = Number(kdComboPtsEl.value);
     const koComboPts = Number(koComboPtsEl.value);
@@ -1128,7 +1219,7 @@
     const defenderSide = (attackerSide === "you") ? "ai" : "you";
     const defender = (defenderSide === "you") ? fighter.you : fighter.ai;
 
-    const tiredEnough = defender.stamina <= MATCH.kdStaminaThreshold;
+    const tiredEnough = defender.stamina <= CFG.kdStaminaThreshold;
 
     if (tiredEnough && groupPts >= koComboPts && defender.hp <= 26) {
       match.lastKDAt = now;
@@ -1139,9 +1230,9 @@
     if (!tiredEnough) return;
     if (groupPts < kdComboPts) return;
 
-    const tired = clamp((MATCH.kdStaminaThreshold - defender.stamina) / MATCH.kdStaminaThreshold, 0, 1);
+    const tired = clamp((CFG.kdStaminaThreshold - defender.stamina) / CFG.kdStaminaThreshold, 0, 1);
     const big = clamp((groupImpact - kdComboPts) / 14.0, 0, 1);
-    const chance = clamp(MATCH.kdBaseChance + tired*0.30 + big*0.25, 0, MATCH.kdMaxChance);
+    const chance = clamp(CFG.kdBaseChance + tired*0.30 + big*0.25, 0, CFG.kdMaxChance);
 
     if (Math.random() < chance) {
       match.lastKDAt = now;
@@ -1149,12 +1240,12 @@
       if (defenderSide === "ai") {
         match.aiKD += 1;
         match.aiKDMatch += 1;
-        match.aiDownUntil = now + MATCH.kdDownMs;
+        match.aiDownUntil = now + CFG.kdDownMs;
         setStatus("KNOCKDOWN! (AI)");
       } else {
         match.youKD += 1;
         match.youKDMatch += 1;
-        match.youDownUntil = now + MATCH.kdDownMs;
+        match.youDownUntil = now + CFG.kdDownMs;
         setStatus("KNOCKDOWN! (You)");
       }
 
@@ -1165,11 +1256,6 @@
       if (match.aiKDMatch >= tkoKDs) endMatch("TKO — You win!");
       if (match.youKDMatch >= tkoKDs) endMatch("TKO — AI wins!");
     }
-  }
-
-  function endMatch(msg){
-    setMode("End");
-    setStatus(msg);
   }
 
   // ============================================================
@@ -1195,8 +1281,8 @@
   let lastAIContactAt = 0;
 
   function staminaSpeedMul(sta) {
-    const t = clamp(sta / MATCH.staminaMax, 0, 1);
-    return lerp(MATCH.staminaFloorSpeed, 1.0, t);
+    const t = clamp(sta / CFG.staminaMax, 0, 1);
+    return lerp(CFG.staminaFloorSpeed, 1.0, t);
   }
 
   function applyHitToDefender(defSide, punch, now, groupSide) {
@@ -1209,22 +1295,23 @@
 
     addToGroup(groupSide, cls.pts, cls.impact, now);
 
-    const staLoss = guarding ? cls.staLoss * MATCH.guardStaminaMul : cls.staLoss;
-    defender.stamina = clamp(defender.stamina - staLoss, 0, MATCH.staminaMax);
+    const staLoss = guarding ? cls.staLoss * CFG.guardStaminaMul : cls.staLoss;
+    defender.stamina = clamp(defender.stamina - staLoss, 0, CFG.staminaMax);
 
     let dmg = cls.dmg * dmgScale;
-    if (guarding) dmg *= MATCH.guardDamageMul;
-    defender.hp = clamp(defender.hp - dmg, 0, MATCH.hpMax);
+    if (guarding) dmg *= CFG.guardDamageMul;
+    defender.hp = clamp(defender.hp - dmg, 0, CFG.hpMax);
 
+    // FIXED BUG: proper endMatch call
     if (defender.hp <= 0) {
-      endMatch(defSide === "you") ? "KO — AI wins!" : "KO — You win!";
+      endMatch(defSide === "you" ? "KO — AI wins!" : "KO — You win!");
     }
 
     return cls.kind;
   }
 
   // ============================================================
-  // AI brain
+  // AI brain (unchanged logic, tidied a bit)
   // ============================================================
   const aiBrain = {
     vx: 0, vz: 0,
@@ -1256,7 +1343,7 @@
     const dz = player.position.z - ai.position.z;
     ai.rotation.y = Math.atan2(dx, dz);
 
-    if (match.mode !== "Fight" || isAIDown(now)) {
+    if (match.mode !== "Fight" || isAIDown(now) || match.mode === "End") {
       aiBrain.vx *= 0.88; aiBrain.vz *= 0.88;
       fighter.ai.guarding = false;
       aiBrain.punching = false;
@@ -1271,7 +1358,7 @@
     if (now > aiBrain.nextDecision) {
       aiBrain.nextDecision = now + (260 + Math.random()*240) * calm;
 
-      const tired = clamp((MATCH.kdStaminaThreshold - fighter.ai.stamina) / MATCH.kdStaminaThreshold, 0, 1);
+      const tired = clamp((CFG.kdStaminaThreshold - fighter.ai.stamina) / CFG.kdStaminaThreshold, 0, 1);
       const hurt = clamp((40 - fighter.ai.hp) / 40, 0, 1);
       const guardChance = clamp(0.10 + tired*0.30 + hurt*0.25, 0.10, 0.65);
 
@@ -1314,7 +1401,7 @@
 
     if (wantMove) {
       const moveIntensity = clamp(Math.hypot(aiBrain.vx, aiBrain.vz) / (maxSpd + 1e-6), 0, 1);
-      fighter.ai.stamina = clamp(fighter.ai.stamina - MATCH.staminaDrainMove * moveIntensity * (dt*55), 0, MATCH.staminaMax);
+      fighter.ai.stamina = clamp(fighter.ai.stamina - CFG.staminaDrainMove * moveIntensity * (dt*55), 0, CFG.staminaMax);
     }
 
     aiBrain.punching = false;
@@ -1322,7 +1409,8 @@
       (now > aiBrain.cooldownUntil) &&
       !fighter.ai.guarding &&
       !isYouDown(now) &&
-      match.mode === "Fight";
+      match.mode === "Fight" &&
+      match.mode !== "End";
 
     if (canPunch && dist < 4.7) {
       const baseP = 0.16;
@@ -1377,19 +1465,23 @@
   }
 
   function resetMatch() {
-    fighter.you.hp = MATCH.hpMax;
-    fighter.ai.hp  = MATCH.hpMax;
-    fighter.you.stamina = MATCH.staminaMax;
-    fighter.ai.stamina  = MATCH.staminaMax;
+    fighter.you.hp = CFG.hpMax;
+    fighter.ai.hp  = CFG.hpMax;
+    fighter.you.stamina = CFG.staminaMax;
+    fighter.ai.stamina  = CFG.staminaMax;
     fighter.you.guarding = false;
     fighter.ai.guarding = false;
+
+    // reset punch detectors so baseline re-learns cleanly
+    detectors.Left.reset();
+    detectors.Right.reset();
 
     player.position.set(0, 0, 2.6);
     ai.position.set(0, 0, -2.8);
 
     match.round = 1;
-    match.roundLeft = MATCH.roundSeconds;
-    match.restLeft = MATCH.restSeconds;
+    match.roundLeft = CFG.roundSeconds;
+    match.restLeft = CFG.restSeconds;
 
     match.youJudgeTotal = 0;
     match.aiJudgeTotal = 0;
@@ -1423,13 +1515,13 @@
     match.aiJudgeTotal  += ai10*3;
 
     setMode("Rest");
-    match.restLeft = MATCH.restSeconds;
+    match.restLeft = CFG.restSeconds;
     setStatus(`End R${match.round}: ${match.youRoundPts}-${match.aiRoundPts}`);
   }
 
   function startNextRound() {
     match.round++;
-    if (match.round > MATCH.roundsTotal) {
+    if (match.round > CFG.roundsTotal) {
       const winner =
         (match.youJudgeTotal > match.aiJudgeTotal) ? "Decision — You win!" :
         (match.aiJudgeTotal > match.youJudgeTotal) ? "Decision — AI wins!" :
@@ -1439,7 +1531,7 @@
     }
     resetRoundScoring();
     setMode("Fight");
-    match.roundLeft = MATCH.roundSeconds;
+    match.roundLeft = CFG.roundSeconds;
     player.position.z =  2.7;
     ai.position.z = -2.7;
     setStatus(`Round ${match.round} — Fight!`);
@@ -1452,12 +1544,12 @@
     const { fwd, right } = getFacingBasis(player.position, ai.position);
 
     const leftShoulder = player.position.clone()
-      .addScaledVector(up, MATCH.shoulderY)
-      .addScaledVector(right, -MATCH.shoulderWidth);
+      .addScaledVector(up, CFG.shoulderY)
+      .addScaledVector(right, -CFG.shoulderWidth);
 
     const rightShoulder = player.position.clone()
-      .addScaledVector(up, MATCH.shoulderY)
-      .addScaledVector(right, MATCH.shoulderWidth);
+      .addScaledVector(up, CFG.shoulderY)
+      .addScaledVector(right, CFG.shoulderWidth);
 
     const physLeft  = lastHandPoints.Left;
     const physRight = lastHandPoints.Right;
@@ -1466,18 +1558,18 @@
     const rightHand = swapGloves ? physLeft  : physRight;
 
     const makeTarget = (shoulderPos, hand, sideSign) => {
-      let target = shoulderPos.clone().addScaledVector(fwd, MATCH.gloveForwardBase);
+      let target = shoulderPos.clone().addScaledVector(fwd, CFG.gloveForwardBase);
 
       if (hand) {
-        const dx = clamp((hand.nx - 0.5) * 2.0, -1, 1) * MATCH.gloveSideJitter;
-        const dy = clamp((0.55 - hand.ny) * 2.0, -1, 1) * MATCH.gloveUpJitter;
+        const dx = clamp((hand.nx - 0.5) * 2.0, -1, 1) * CFG.gloveSideJitter;
+        const dy = clamp((0.55 - hand.ny) * 2.0, -1, 1) * CFG.gloveUpJitter;
         target.addScaledVector(right, dx * 0.55 * sideSign);
         target.addScaledVector(up, dy);
 
         let pop = 0;
         if (hand.punching) {
           const t = clamp((now - hand.start) / Math.max(1, (hand.until - hand.start)), 0, 1);
-          pop = Math.sin(t * Math.PI) * (MATCH.gloveForwardPunchMax * (0.62 + 0.38*hand.power));
+          pop = Math.sin(t * Math.PI) * (CFG.gloveForwardPunchMax * (0.62 + 0.38*hand.power));
         }
         target.addScaledVector(fwd, pop);
       }
@@ -1523,7 +1615,7 @@
   }
 
   // ============================================================
-  // Face look / camera
+  // Face look / camera + impact FX
   // ============================================================
   const impactFx = { you: 0, ai: 0 };
   const impactColors = { you: new THREE.Color(0x44aaff), ai: new THREE.Color(0xff4545) };
@@ -1561,10 +1653,11 @@
   function updateImpactFX(dt) {
     impactFx.you = Math.max(0, impactFx.you - dt * 3.2);
     impactFx.ai = Math.max(0, impactFx.ai - dt * 3.2);
-    const applyTo = (fighter, side) => {
+
+    const applyTo = (fighterObj, side) => {
       const lvl = impactFx[side];
-      const body = fighter.userData?.body?.material;
-      const head = fighter.userData?.head?.material;
+      const body = fighterObj.userData?.body?.material;
+      const head = fighterObj.userData?.head?.material;
       if (body) {
         body.emissive = body.emissive || new THREE.Color(0x000000);
         body.emissive.copy(impactTmp.copy(impactColors[side]).multiplyScalar(lvl * 0.9));
@@ -1595,39 +1688,34 @@
       faceControl.lookPitchTarget = 0;
     }
 
-    // if resting, keep look perfectly centered
     if (faceControl.centerLatched) {
       faceControl.lookYawTarget = 0;
       faceControl.lookPitchTarget = 0;
     }
 
     const tau = lerp(0.03, 0.22, clamp((faceControl.smooth - 0.02) / 0.38, 0, 1));
-    faceControl.lookYaw = smoothTo(faceControl.lookYaw, faceControl.lookYawTarget, dt, tau);
-    faceControl.lookPitch = smoothTo(faceControl.lookPitch, faceControl.lookPitchTarget, dt, tau);
+    faceControl.lookYaw = expSmoother(faceControl.lookYaw, faceControl.lookYawTarget, dt, tau);
+    faceControl.lookPitch = expSmoother(faceControl.lookPitch, faceControl.lookPitchTarget, dt, tau);
 
-    const r = MATCH.camRadius;
+    const r = CFG.camRadius;
     const baseZ = r;
-    const baseY = MATCH.camHeight + (faceControl.lookPitch * 4.0);
+    const baseY = CFG.camHeight + (faceControl.lookPitch * 4.0);
 
     const sin = Math.sin(faceControl.lookYaw);
     const cos = Math.cos(faceControl.lookYaw);
 
-    const camOff = new THREE.Vector3(
+    const desiredPos = baseTarget.clone().add(new THREE.Vector3(
       baseZ * sin,
       baseY,
       baseZ * cos
-    );
-
-    const desiredPos = baseTarget.clone().add(camOff);
+    ));
 
     if (!updateCamera.pos) updateCamera.pos = desiredPos.clone();
     updateCamera.pos.lerp(desiredPos, 1 - Math.exp(-dt / 0.08));
-
     camera3d.position.copy(updateCamera.pos);
 
     const lookTarget = baseTarget.clone();
     lookTarget.y += (faceControl.lookPitch * 1.6);
-
     camera3d.lookAt(lookTarget);
   }
 
@@ -1670,7 +1758,6 @@
     octx.fillStyle = faceControl.centerLatched ? "rgba(57,194,106,0.95)" : (insideDead ? "rgba(255,210,74,0.85)" : "rgba(255,255,255,0.92)");
     octx.beginPath(); octx.arc(cx+dx, cy+dy, 7, 0, Math.PI*2); octx.fill();
 
-    // 0.3s recenter progress
     const hold = clamp(faceControl.centerHoldMs / faceControl.autoRecenterMs, 0, 1);
     octx.strokeStyle = "rgba(255,255,255,0.18)";
     octx.lineWidth = 3;
@@ -1684,7 +1771,7 @@
   }
 
   // ============================================================
-  // Tuners sync
+  // Tuners sync (includes new punch tuners)
   // ============================================================
   function syncTuners(){
     const moveBase = Number(sensMoveEl.value);
@@ -1692,7 +1779,6 @@
     const dz = Number(deadzoneEl.value);
     const sm = Number(faceSmoothEl.value);
 
-    faceControl.moveGainBase = moveBase;
     faceControl.moveGainY = moveBase;
     faceControl.moveGainX = moveBase * ratio;
     faceControl.deadzone = clamp(dz, 0, 0.45);
@@ -1713,9 +1799,16 @@
     tkoKDsVal.textContent = String(Number(tkoKDsEl.value));
     aiCalmVal.textContent = Number(aiCalmEl.value).toFixed(2);
     aiPowerVal.textContent = Number(aiPowerEl.value).toFixed(2);
+
+    punchSensVal.textContent = Number(punchSensEl.value).toFixed(2);
+    punchMinPushVal.textContent = Number(punchMinPushEl.value).toFixed(3);
   }
-  [sensMoveEl, lrRatioEl, deadzoneEl, faceSmoothEl, lookYawEl, lookPitchEl, hitAssistEl, dmgScaleEl, kdComboPtsEl, koComboPtsEl, tkoKDsEl, aiCalmEl, aiPowerEl]
-    .forEach(el => el.addEventListener("input", syncTuners));
+
+  [
+    sensMoveEl, lrRatioEl, deadzoneEl, faceSmoothEl, lookYawEl, lookPitchEl,
+    hitAssistEl, dmgScaleEl, kdComboPtsEl, koComboPtsEl, tkoKDsEl, aiCalmEl, aiPowerEl,
+    punchSensEl, punchMinPushEl
+  ].forEach(elm => elm.addEventListener("input", syncTuners));
   syncTuners();
 
   // ============================================================
@@ -1728,18 +1821,18 @@
   }
 
   function updateHUD(now){
-    setBar(hpYouEl, fighter.you.hp, MATCH.hpMax, "#39c26a", "#ffd24a", "#ff4b4b");
-    setBar(hpAIEl,  fighter.ai.hp,  MATCH.hpMax, "#ff4b4b", "#ffd24a", "#ff7a7a");
+    setBar(hpYouEl, fighter.you.hp, CFG.hpMax, "#39c26a", "#ffd24a", "#ff4b4b");
+    setBar(hpAIEl,  fighter.ai.hp,  CFG.hpMax, "#ff4b4b", "#ffd24a", "#ff7a7a");
 
-    setBar(staYouEl, fighter.you.stamina, MATCH.staminaMax, "#39c26a", "#ffd24a", "#ff4b4b");
-    setBar(staAIEl,  fighter.ai.stamina,  MATCH.staminaMax, "#ff4b4b", "#ffd24a", "#ff7a7a");
+    setBar(staYouEl, fighter.you.stamina, CFG.staminaMax, "#39c26a", "#ffd24a", "#ff4b4b");
+    setBar(staAIEl,  fighter.ai.stamina,  CFG.staminaMax, "#ff4b4b", "#ffd24a", "#ff7a7a");
 
     hpYouTxt.textContent = String(Math.round(fighter.you.hp));
     hpAITxt.textContent  = String(Math.round(fighter.ai.hp));
     staYouTxt.textContent = String(Math.round(fighter.you.stamina));
     staAITxt.textContent  = String(Math.round(fighter.ai.stamina));
 
-    roundTxt.textContent = `${match.round} / ${MATCH.roundsTotal}`;
+    roundTxt.textContent = `${match.round} / ${CFG.roundsTotal}`;
     clockTxt.textContent = (match.mode === "Fight") ? fmtClock(match.roundLeft) : fmtClock(match.restLeft);
 
     rPtsTxt.textContent = `You ${match.youRoundPts} — AI ${match.aiRoundPts}`;
@@ -1748,8 +1841,8 @@
     matchTxt.textContent = `M ${match.youMatchPts}–${match.aiMatchPts}`;
 
     const g = match.youGroup;
-    const alive = (g.hits > 0 && now <= g.until + MATCH.groupCommitGraceMs);
-    const pct = alive ? clamp((g.until - now) / MATCH.comboWindowMs, 0, 1) : 0;
+    const alive = (g.hits > 0 && now <= g.until + CFG.groupCommitGraceMs);
+    const pct = alive ? clamp((g.until - now) / CFG.comboWindowMs, 0, 1) : 0;
     grpFill.style.width = (pct*100) + "%";
     grpFill.style.background = alive ? "#ffd24a" : "rgba(255,255,255,0.10)";
     grpTxt.textContent = alive ? `+${g.pts}` : "+0";
@@ -1787,13 +1880,14 @@
     const dt = clamp((now - lastT) / 1000, 0, 0.033);
     lastT = now;
 
+    // round timer
     if (match.mode === "Fight") {
       match.roundLeft -= dt;
       if (match.roundLeft <= 0) endRound(now);
     } else if (match.mode === "Rest") {
       match.restLeft -= dt;
-      fighter.you.stamina = clamp(fighter.you.stamina + MATCH.staminaRegenPerSec * dt, 0, MATCH.staminaMax);
-      fighter.ai.stamina  = clamp(fighter.ai.stamina  + MATCH.staminaRegenPerSec * dt, 0, MATCH.staminaMax);
+      fighter.you.stamina = clamp(fighter.you.stamina + CFG.staminaRegenPerSec * dt, 0, CFG.staminaMax);
+      fighter.ai.stamina  = clamp(fighter.ai.stamina  + CFG.staminaRegenPerSec * dt, 0, CFG.staminaMax);
       if (match.restLeft <= 0) startNextRound();
     }
 
@@ -1810,7 +1904,6 @@
 
       const faceRecent = (now - faceControl.lastSeen) < 650;
       if (faceControl.enabledMove && faceRecent) {
-        // Look Up -> forward, Look Down -> back (same mapping)
         inX += faceControl.axes.x * 2.0;
         inFwd += faceControl.axes.y * 2.0;
       }
@@ -1823,11 +1916,11 @@
     }
 
     const spMul = staminaSpeedMul(fighter.you.stamina);
-    const targetVX = inX * MATCH.maxSpeed * spMul;
-    const targetVZ = (-inFwd) * MATCH.maxSpeed * spMul;
+    const targetVX = inX * CFG.maxSpeed * spMul;
+    const targetVZ = (-inFwd) * CFG.maxSpeed * spMul;
 
-    const a = 1 - Math.exp(-MATCH.accel * dt);
-    const f = 1 - Math.exp(-MATCH.friction * dt);
+    const a = 1 - Math.exp(-CFG.accel * dt);
+    const f = 1 - Math.exp(-CFG.friction * dt);
     const hasInput = (Math.abs(inX) > 0.001 || Math.abs(inFwd) > 0.001);
 
     movePhys.vx += hasInput ? (targetVX - movePhys.vx) * a : (0 - movePhys.vx) * f;
@@ -1837,16 +1930,16 @@
     player.position.z += movePhys.vz * dt;
 
     if (match.mode === "Fight" && hasInput) {
-      const moveIntensity = clamp(Math.hypot(movePhys.vx, movePhys.vz) / (MATCH.maxSpeed + 1e-6), 0, 1);
-      fighter.you.stamina = clamp(fighter.you.stamina - MATCH.staminaDrainMove * moveIntensity * (dt*60), 0, MATCH.staminaMax);
+      const moveIntensity = clamp(Math.hypot(movePhys.vx, movePhys.vz) / (CFG.maxSpeed + 1e-6), 0, 1);
+      fighter.you.stamina = clamp(fighter.you.stamina - CFG.staminaDrainMove * moveIntensity * (dt*60), 0, CFG.staminaMax);
     }
 
     if (canMove && keys.has("Space") && physY.grounded) {
-      physY.velY = MATCH.jumpVel;
+      physY.velY = CFG.jumpVel;
       physY.grounded = false;
     }
 
-    physY.velY += MATCH.gravity * dt;
+    physY.velY += CFG.gravity * dt;
     player.position.y += physY.velY * dt;
 
     const gH = groundHeightAt(player.position.x, player.position.z);
@@ -1869,20 +1962,21 @@
 
     const glovePunch = updatePlayerGloves(now, dt);
 
-    if (match.youGroup.hits > 0 && now > match.youGroup.until + MATCH.groupCommitGraceMs) commitGroup("you", now, true);
-    if (match.aiGroup.hits  > 0 && now > match.aiGroup.until  + MATCH.groupCommitGraceMs) commitGroup("ai",  now, true);
+    if (match.youGroup.hits > 0 && now > match.youGroup.until + CFG.groupCommitGraceMs) commitGroup("you", now, true);
+    if (match.aiGroup.hits  > 0 && now > match.aiGroup.until  + CFG.groupCommitGraceMs) commitGroup("ai",  now, true);
 
     // HIT CHECKS
     if (match.mode === "Fight" && !isYouDown(now) && !isAIDown(now) && match.mode !== "End") {
       const hands = [glovePunch.L, glovePunch.R].filter(Boolean);
       const targets = getAIHitTargets();
       const assist = Number(hitAssistEl.value);
-      const extra = assist * 0.95;
-      const baseRange = MATCH.punchRangeBase + extra;
+
+      // slightly more "ease of punch": power-based assist (strong punches get a little extra range)
+      const baseRange = CFG.punchRangeBase + assist * 0.95;
 
       for (const h of hands) {
         if (!h.punching) continue;
-        if (now - lastYouContactAt < 170) continue;
+        if (now - lastYouContactAt < 150) continue;
 
         let best = { d: 999, r: 0 };
         for (const t of targets) {
@@ -1890,7 +1984,8 @@
           if (d < best.d) best = { d, r: t.r };
         }
 
-        if (best.d < (best.r + baseRange)) {
+        const powerRangeBonus = 0.55 * h.power; // makes punches feel like they "connect"
+        if (best.d < (best.r + baseRange + powerRangeBonus)) {
           lastYouContactAt = now;
 
           const kind = applyHitToDefender("ai", h, now, "you");
@@ -1903,7 +1998,7 @@
         }
       }
 
-      if (aiBrain.punching && now - lastAIContactAt > 230) {
+      if (aiBrain.punching && now - lastAIContactAt > 210) {
         const youPoint = getYouTarget();
         const hitR = 1.10 + assist*0.30;
 
@@ -1967,7 +2062,6 @@
   resetMatch();
   requestAnimationFrame(loop);
 })();
-
 </script>
 
 </body>
