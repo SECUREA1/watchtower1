@@ -175,6 +175,7 @@
       pose: null,
       smoothBodyX: null,
       smoothBodyY: null,
+      rig: null,
     };
 
     const player = {
@@ -246,6 +247,49 @@
 
     function lerp(a, b, t) {
       return a + (b - a) * t;
+    }
+
+    const POSE_KEYS = ['nose', 'leftShoulder', 'rightShoulder', 'leftElbow', 'rightElbow', 'leftWrist', 'rightWrist', 'leftHip', 'rightHip', 'leftKnee', 'rightKnee', 'leftAnkle', 'rightAnkle'];
+
+    function posePoint(lm, index) {
+      return {
+        x: (1 - lm[index].x) * state.width,
+        y: state.floorY - (1 - lm[index].y) * (state.height * 0.96),
+      };
+    }
+
+    function buildRig(lm) {
+      return {
+        nose: posePoint(lm, 0),
+        leftShoulder: posePoint(lm, 11),
+        rightShoulder: posePoint(lm, 12),
+        leftElbow: posePoint(lm, 13),
+        rightElbow: posePoint(lm, 14),
+        leftWrist: posePoint(lm, 15),
+        rightWrist: posePoint(lm, 16),
+        leftHip: posePoint(lm, 23),
+        rightHip: posePoint(lm, 24),
+        leftKnee: posePoint(lm, 25),
+        rightKnee: posePoint(lm, 26),
+        leftAnkle: posePoint(lm, 27),
+        rightAnkle: posePoint(lm, 28),
+      };
+    }
+
+    function smoothRig(nextRig) {
+      if (!vision.rig) {
+        vision.rig = nextRig;
+        return nextRig;
+      }
+      const out = {};
+      for (const key of POSE_KEYS) {
+        out[key] = {
+          x: lerp(vision.rig[key].x, nextRig[key].x, 0.3),
+          y: lerp(vision.rig[key].y, nextRig[key].y, 0.3),
+        };
+      }
+      vision.rig = out;
+      return out;
     }
 
     function startVision() {
@@ -363,6 +407,7 @@
       const liftRight = state.keys.has('l');
 
       player.vx = 0;
+      let liveRig = null;
       if (state.inputMode === 'vision' && vision.active && vision.landmarks) {
         const lm = vision.landmarks;
         const lShoulder = lm[11];
@@ -378,6 +423,7 @@
         const lAnkle = lm[27];
         const rAnkle = lm[28];
 
+        liveRig = smoothRig(buildRig(lm));
         const bodyNormX = (lHip.x + rHip.x) * 0.5;
         const bodyNormY = (lHip.y + rHip.y) * 0.5;
         const targetX = (1 - bodyNormX) * state.width;
@@ -444,13 +490,22 @@
       const hipY = state.floorY - player.legLength - 14 + player.hipOffset;
       player.y = hipY - player.bodyHeight * 0.5;
 
-      const leftAnkleX = player.x - 28;
-      const leftAnkleY = state.floorY - player.leftFootLift;
-      const rightAnkleX = player.x + 28;
-      const rightAnkleY = state.floorY - player.rightFootLift;
+      const leftAnkleX = liveRig ? liveRig.leftAnkle.x : player.x - 28;
+      const leftAnkleY = liveRig ? Math.min(state.floorY, liveRig.leftAnkle.y) : state.floorY - player.leftFootLift;
+      const rightAnkleX = liveRig ? liveRig.rightAnkle.x : player.x + 28;
+      const rightAnkleY = liveRig ? Math.min(state.floorY, liveRig.rightAnkle.y) : state.floorY - player.rightFootLift;
 
-      const leftAngle = -0.08 - player.leftFootLift * 0.013;
-      const rightAngle = 0.08 + player.rightFootLift * 0.013;
+      if (liveRig) {
+        player.leftFootLift = Math.max(0, Math.min(86, state.floorY - leftAnkleY));
+        player.rightFootLift = Math.max(0, Math.min(86, state.floorY - rightAnkleY));
+      }
+
+      const leftAngle = liveRig
+        ? Math.atan2(liveRig.leftAnkle.y - liveRig.leftKnee.y, liveRig.leftAnkle.x - liveRig.leftKnee.x) * 0.7
+        : -0.08 - player.leftFootLift * 0.013;
+      const rightAngle = liveRig
+        ? Math.atan2(liveRig.rightAnkle.y - liveRig.rightKnee.y, liveRig.rightAnkle.x - liveRig.rightKnee.x) * 0.7
+        : 0.08 + player.rightFootLift * 0.013;
 
       const leftFoot = footShape(leftAnkleX, leftAnkleY, leftAngle);
       const rightFoot = footShape(rightAnkleX, rightAnkleY, rightAngle);
@@ -480,7 +535,7 @@
         ball.vy *= -0.85;
       }
 
-      draw(leftFoot, rightFoot, leftAnkleX, leftAnkleY, rightAnkleX, rightAnkleY, hipY);
+      draw(leftFoot, rightFoot, leftAnkleX, leftAnkleY, rightAnkleX, rightAnkleY, hipY, liveRig);
 
       bounceCountEl.textContent = `Bounces: ${state.bounces}`;
       kickSpeedEl.textContent = `Kick Speed: ${state.lastKickSpeed.toFixed(1)}`;
@@ -550,7 +605,7 @@
       ctx.restore();
     }
 
-    function draw(leftFoot, rightFoot, leftAnkleX, leftAnkleY, rightAnkleX, rightAnkleY, hipY) {
+    function draw(leftFoot, rightFoot, leftAnkleX, leftAnkleY, rightAnkleX, rightAnkleY, hipY, liveRig) {
       ctx.clearRect(0, 0, state.width, state.height);
       drawGrid();
 
@@ -568,15 +623,22 @@
       const shoulderY = player.y - 18;
       const headY = shoulderY - 36;
       const shoulderSpread = 42;
-      const leftShoulderX = player.x - Math.cos(player.shoulderTilt) * shoulderSpread;
-      const leftShoulderY = shoulderY - Math.sin(player.shoulderTilt) * shoulderSpread * 0.4;
-      const rightShoulderX = player.x + Math.cos(player.shoulderTilt) * shoulderSpread;
-      const rightShoulderY = shoulderY + Math.sin(player.shoulderTilt) * shoulderSpread * 0.4;
-      const armLen = 46;
-      const leftHandX = leftShoulderX + Math.cos(player.leftArmAngle) * armLen;
-      const leftHandY = leftShoulderY + Math.sin(player.leftArmAngle) * armLen;
-      const rightHandX = rightShoulderX + Math.cos(player.rightArmAngle) * armLen;
-      const rightHandY = rightShoulderY + Math.sin(player.rightArmAngle) * armLen;
+      const leftShoulderX = liveRig ? liveRig.leftShoulder.x : player.x - Math.cos(player.shoulderTilt) * shoulderSpread;
+      const leftShoulderY = liveRig ? liveRig.leftShoulder.y : shoulderY - Math.sin(player.shoulderTilt) * shoulderSpread * 0.4;
+      const rightShoulderX = liveRig ? liveRig.rightShoulder.x : player.x + Math.cos(player.shoulderTilt) * shoulderSpread;
+      const rightShoulderY = liveRig ? liveRig.rightShoulder.y : shoulderY + Math.sin(player.shoulderTilt) * shoulderSpread * 0.4;
+      const leftHandX = liveRig ? liveRig.leftWrist.x : leftShoulderX + Math.cos(player.leftArmAngle) * 46;
+      const leftHandY = liveRig ? liveRig.leftWrist.y : leftShoulderY + Math.sin(player.leftArmAngle) * 46;
+      const rightHandX = liveRig ? liveRig.rightWrist.x : rightShoulderX + Math.cos(player.rightArmAngle) * 46;
+      const rightHandY = liveRig ? liveRig.rightWrist.y : rightShoulderY + Math.sin(player.rightArmAngle) * 46;
+      const leftHipX = liveRig ? liveRig.leftHip.x : player.x;
+      const leftHipY = liveRig ? liveRig.leftHip.y : hipY;
+      const rightHipX = liveRig ? liveRig.rightHip.x : player.x;
+      const rightHipY = liveRig ? liveRig.rightHip.y : hipY;
+      const neckX = (leftShoulderX + rightShoulderX) * 0.5;
+      const neckY = (leftShoulderY + rightShoulderY) * 0.5;
+      const midHipX = (leftHipX + rightHipX) * 0.5;
+      const midHipY = (leftHipY + rightHipY) * 0.5;
 
       ctx.save();
       ctx.strokeStyle = 'rgba(255, 79, 221, 0.9)';
@@ -584,21 +646,25 @@
       ctx.shadowColor = '#ff4fdd';
       ctx.shadowBlur = 20;
       ctx.beginPath();
-      ctx.moveTo(player.x, shoulderY);
-      ctx.lineTo(player.x, hipY);
+      ctx.moveTo(neckX, neckY);
+      ctx.lineTo(midHipX, midHipY);
       ctx.moveTo(leftShoulderX, leftShoulderY);
       ctx.lineTo(rightShoulderX, rightShoulderY);
       ctx.moveTo(leftShoulderX, leftShoulderY);
       ctx.lineTo(leftHandX, leftHandY);
       ctx.moveTo(rightShoulderX, rightShoulderY);
       ctx.lineTo(rightHandX, rightHandY);
-      ctx.moveTo(player.x, hipY);
+      ctx.moveTo(leftHipX, leftHipY);
+      ctx.lineTo(liveRig ? liveRig.leftKnee.x : leftAnkleX, liveRig ? liveRig.leftKnee.y : leftAnkleY - 34);
       ctx.lineTo(leftAnkleX, leftAnkleY - 10);
-      ctx.moveTo(player.x, hipY);
+      ctx.moveTo(rightHipX, rightHipY);
+      ctx.lineTo(liveRig ? liveRig.rightKnee.x : rightAnkleX, liveRig ? liveRig.rightKnee.y : rightAnkleY - 34);
       ctx.lineTo(rightAnkleX, rightAnkleY - 10);
       ctx.stroke();
       ctx.beginPath();
-      ctx.arc(player.x, headY, 19, 0, Math.PI * 2);
+      const headX = liveRig ? liveRig.nose.x : player.x;
+      const headDrawY = liveRig ? liveRig.nose.y - 16 : headY;
+      ctx.arc(headX, headDrawY, 19, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
 
