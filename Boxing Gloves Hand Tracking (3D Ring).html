@@ -88,7 +88,6 @@
     }
     #tip { font-size: 12px; opacity: 0.85; margin-top: 8px; line-height: 1.25; }
 
-
     @media (max-width: 900px), (pointer: coarse) {
       #hud {
         top: max(8px, env(safe-area-inset-top));
@@ -115,7 +114,7 @@
     body.panels-hidden #videoWrap {
       display: none !important;
     }
-  
+
     @media (max-width: 640px) {
       #arcadeControls {
         top: 10px;
@@ -124,7 +123,7 @@
         gap: 6px;
       }
     }
-</style>
+  </style>
 
   <!-- Three.js -->
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
@@ -135,12 +134,14 @@
   <!-- MediaPipe FaceMesh -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
 </head>
+
 <body>
   <canvas id="canvas3d"></canvas>
 
   <div id="arcadeControls">
     <button id="backToArcadeBtn" class="btn" type="button" onclick="window.location.href='/site/games.html'">Back to Arcade</button>
     <button id="togglePanelsBtn" class="btn">Show Settings & Health</button>
+    <button id="toggleCamBtn" class="btn">Show Cam</button>
   </div>
 
   <div id="hud">
@@ -255,14 +256,18 @@
 
   <div id="videoWrap">
     <div id="videoBox">
-      <video id="video" playsinline></video>
+      <video id="video" playsinline muted></video>
       <canvas id="overlay"></canvas>
     </div>
     <div id="tip">Overlay: deadzone circle + direction dot. Keep face centered for no movement.</div>
   </div>
 
 <script>
+  // ============================================================
+  // SCREEN IMPACT FX (fixed: can tint fighters by passing refs)
+  // ============================================================
   const impactFx = { you: 0, ai: 0 };
+
   function spawnScreenImpact(side, amount = 1){
     const boom = document.createElement("div");
     const size = Math.round(90 + 70 * Math.max(0.2, amount));
@@ -286,22 +291,24 @@
     });
     setTimeout(() => boom.remove(), 280);
   }
+
   function triggerImpact(side, amount = 1){
     impactFx[side] = Math.min(1, (impactFx[side] || 0) + amount);
     spawnScreenImpact(side, amount);
   }
-  function updateImpactFX(dt){
+
+  function updateImpactFX(dt, playerRef, aiRef){
     impactFx.you = Math.max(0, impactFx.you - dt * 3.5);
-    impactFx.ai = Math.max(0, impactFx.ai - dt * 3.5);
+    impactFx.ai  = Math.max(0, impactFx.ai  - dt * 3.5);
+
     const tint = (fighter, side, color) => {
       const lvl = impactFx[side] || 0;
       const mat = fighter?.userData?.body?.material;
       if (mat && mat.emissive) mat.emissive.set(color).multiplyScalar(lvl * 0.8);
     };
-    tint(player, "you", 0x4aa8ff);
-    tint(ai, "ai", 0xff5555);
+    tint(playerRef, "you", 0x4aa8ff);
+    tint(aiRef,     "ai",  0xff5555);
   }
-
 
 (() => {
   // ============================================================
@@ -312,69 +319,57 @@
 
   const MATCH = {
     roundsTotal: 3,
-    roundSeconds: 90,     // longer feel without being endless
+    roundSeconds: 90,
     restSeconds: 20,
 
-    // “10-point must” baseline, but driven by your point totals
-    // (winner gets 10, loser 9; knockdown can make it 10-8)
-    judgeRandomness: 0.15, // tiny random variance per judge
+    judgeRandomness: 0.15,
 
-    // Stamina: not instant KO; affects knockdown chance & movement feel
     staminaMax: 100,
-    staminaRegenPerSec: 1.4,   // during rest
-    staminaDrainMove: 0.12,    // per second at full speed
-    staminaFloorSpeed: 0.72,   // speed multiplier at 0 stamina
+    staminaRegenPerSec: 1.4,
+    staminaDrainMove: 0.12,
+    staminaFloorSpeed: 0.72,
 
-    // Point group rules
     comboWindowMs: 1150,
-    comboMultPerHit: 0.10,  // group multiplier growth per consecutive hit
+    comboMultPerHit: 0.10,
     comboMaxMult: 1.65,
-    groupCommitGraceMs: 120, // small grace so group ends cleanly
+    groupCommitGraceMs: 120,
 
-    // Hit scoring (points, not damage)
     ptsJab: 1,
     ptsClean: 2,
     ptsBig: 3,
-    ptsBlocked: 0,          // blocked punches don’t score
+    ptsBlocked: 0,
 
-    // Stamina cost per hit
     staLossJab: 1.0,
     staLossClean: 1.6,
     staLossBig: 2.4,
 
-    // Knockdown logic (comes from big point groups)
-    kdStaminaThreshold: 28,      // only when defender is tired
-    kdGroupImpactThreshold: 9.0, // big combos create impact
+    kdStaminaThreshold: 28,
+    kdGroupImpactThreshold: 9.0,
     kdBaseChance: 0.22,
     kdMaxChance: 0.70,
     kdCooldownMs: 2400,
     kdDownMs: 2600,
-    kdPerMatchTKO: 3,            // 3 KDs = TKO (keeps it boxing-like)
+    kdPerMatchTKO: 3,
 
-    // Guard
-    guardScoreReduction: 0.0,    // blocked = 0 points
-    guardStaminaReduction: 0.45, // guarding reduces stamina loss
+    guardScoreReduction: 0.0,
+    guardStaminaReduction: 0.45,
 
-    // Movement feel
     maxSpeed: 10.5,
     accel: 54.0,
     friction: 30.0,
     jumpVel: 9.5,
     gravity: -22,
 
-    // Hand punch feel
     punchWindowMs: 320,
     punchCooldownMs: 260,
     punchVzThreshold: -0.80,
 
-    // Glove mapping (shoulder height)
     shoulderY: 1.62,
     shoulderYJitter: 0.24,
     sideScale: 2.75,
     baseForward: 0.78,
     punchPopMax: 1.70,
 
-    // Hit assist (slider expands range)
     punchRangeBase: 2.05
   };
 
@@ -383,6 +378,7 @@
   // ============================================================
   const canvas = document.getElementById("canvas3d");
   const togglePanelsBtn = document.getElementById("togglePanelsBtn");
+  const toggleCamBtn = document.getElementById("toggleCamBtn");
   const resetBtn = document.getElementById("resetBtn");
   const toggleFaceBtn = document.getElementById("toggleFaceBtn");
   const calFaceBtn = document.getElementById("calFaceBtn");
@@ -428,6 +424,7 @@
   function setCameraViewVisible(nextVisible) {
     cameraViewVisible = !!nextVisible;
     videoWrap.style.display = cameraViewVisible ? "block" : "none";
+    toggleCamBtn.textContent = cameraViewVisible ? "Hide Cam" : "Show Cam";
   }
 
   async function setCameraEnabled(on) {
@@ -436,7 +433,16 @@
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
       mediaStream = stream;
       video.srcObject = stream;
-      await video.play();
+
+      // autoplay reliability (Chrome/Safari/iOS)
+      video.muted = true;
+      video.setAttribute("muted", "");
+      video.autoplay = true;
+      video.setAttribute("autoplay", "");
+      video.setAttribute("playsinline", "");
+
+      try { await video.play(); } catch {}
+
       startVision();
       setStatus("Fight!");
       return;
@@ -452,6 +458,13 @@
 
   togglePanelsBtn.addEventListener("click", () => setPanelsHidden(!panelsHidden));
   setPanelsHidden(true);
+
+  toggleCamBtn.addEventListener("click", () => {
+    const next = !cameraViewVisible;
+    if (next && panelsHidden) setPanelsHidden(false); // needed because panels-hidden CSS hides videoWrap
+    setCameraViewVisible(next);
+  });
+  setCameraViewVisible(false);
 
   // tuners
   const sensBaseEl = document.getElementById("sensBase");
@@ -632,7 +645,7 @@
 
   const ai = makeFighter(0xff4b4b);
   ai.position.set(0, 0, -2.7);
-  ai.scale.set(1.08, 1.08, 1.08); // slightly bigger target (easier to hit)
+  ai.scale.set(1.08, 1.08, 1.08);
 
   // ============================================================
   // SIMPLE WORLD HELPERS
@@ -675,7 +688,7 @@
   window.addEventListener("keyup", (e) => keys.delete(e.code));
 
   // ============================================================
-  // FACE CONTROL (smoother & more stable)
+  // FACE CONTROL
   // ============================================================
   const faceControl = {
     enabled: true,
@@ -685,8 +698,7 @@
     gainY: 6.2,
     deadzone: 0.05,
 
-    // smoothing uses time-based low-pass (stable)
-    smooth: 0.14,         // 0.02 fast, 0.40 very smooth
+    smooth: 0.14,
     axes: { x: 0, y: 0 },
     raw:  { x: 0, y: 0 },
     neutral: null,
@@ -705,7 +717,6 @@
   calFaceBtn.addEventListener("click", calibrateFace);
   flipYBtn.addEventListener("click", flipFaceY);
 
-  // radial deadzone (true center gap)
   function applyRadialDeadzone(x, y, dz) {
     const r = Math.hypot(x, y);
     if (r <= dz) return { x: 0, y: 0 };
@@ -714,7 +725,6 @@
     return { x: x*s, y: y*s };
   }
 
-  // time-based smoothing: alpha = 1 - exp(-dt / tau)
   function smoothTo(cur, target, dt, tau) {
     const a = 1 - Math.exp(-dt / Math.max(1e-5, tau));
     return cur + (target - cur) * a;
@@ -739,7 +749,6 @@
     mpFace.onResults(onFaceResults);
 
     visionActive = true;
-    setCameraViewVisible(false);
     setStatus("Tracking");
     setFaceUI(false, "Waiting…");
 
@@ -758,7 +767,6 @@
       resizeOverlay();
 
       const now = performance.now();
-      // throttle for stability/perf
       if (video.readyState >= 2 && (now - lastVisionT) > 30) {
         lastVisionT = now;
         try {
@@ -784,7 +792,6 @@
     }
 
     const lm = faces[0];
-    // stable set: nose tip + both eyes
     const nose = lm[1];
     const le = lm[33];
     const re = lm[263];
@@ -793,7 +800,6 @@
     const eyeMidY = (le.y + re.y) * 0.5;
     const eyeDist = Math.max(1e-6, Math.hypot(le.x - re.x, le.y - re.y));
 
-    // normalized “yaw/pitch”
     let yaw = (nose.x - eyeMidX) / eyeDist;
     let pitch = (nose.y - eyeMidY) / eyeDist;
 
@@ -802,7 +808,7 @@
     pitch -= faceControl.neutral.pitch;
 
     let ax = yaw * faceControl.gainX;
-    let ay = (-pitch) * faceControl.gainY; // face up => forward
+    let ay = (-pitch) * faceControl.gainY;
 
     if (faceControl.invertX) ax = -ax;
     if (faceControl.invertY) ay = -ay;
@@ -817,10 +823,7 @@
     const tx = clamp(dzOut.x, -1, 1);
     const ty = clamp(dzOut.y, -1, 1);
 
-    // smoothing tau derived from slider (bigger => smoother)
-    // map 0.02..0.40 to tau 0.03..0.28 seconds
     const tau = lerp(0.03, 0.28, clamp((faceControl.smooth - 0.02) / 0.38, 0, 1));
-    // use an approximate dt for vision updates
     const dt = 0.033;
 
     faceControl.axes.x = smoothTo(faceControl.axes.x, tx, dt, tau);
@@ -849,7 +852,7 @@
 
     if (m.lastZ != null && m.lastT != null) {
       const dt = Math.max(0.001, (now - m.lastT) / 1000);
-      const vz = (z - m.lastZ) / dt; // negative => toward camera
+      const vz = (z - m.lastZ) / dt;
       const punch = (vz < MATCH.punchVzThreshold);
 
       if (punch && now > m.cooldownUntil && match.mode === "Fight") {
@@ -857,7 +860,6 @@
         m.punchUntil = now + MATCH.punchWindowMs;
         m.cooldownUntil = now + MATCH.punchCooldownMs;
 
-        // normalize punch power (kept modest)
         const raw = (-vz - (-MATCH.punchVzThreshold)) / 2.2;
         m.punchPower = clamp(raw, 0, 1);
       }
@@ -893,7 +895,6 @@
     gloveMesh.scale.set(s, s, s);
     gloveMesh.lookAt(camera3d.position);
 
-
     return { pos: gloveMesh.position.clone(), punching, power: m.punchPower };
   }
 
@@ -922,39 +923,33 @@
   }
 
   // ============================================================
-  // MATCH STATE: rounds, judges, point-groups, knockdowns
+  // MATCH STATE
   // ============================================================
   const match = {
-    mode: "Fight",          // Fight | Rest | End
+    mode: "Fight",
     round: 1,
     roundLeft: MATCH.roundSeconds,
     restLeft: MATCH.restSeconds,
 
-    // per-round points (from committed point groups)
     youRoundPts: 0,
     aiRoundPts: 0,
 
-    // current point group being built
     youGroup: { hits: 0, pts: 0, impact: 0, until: 0, lastHitAt: 0 },
     aiGroup:  { hits: 0, pts: 0, impact: 0, until: 0, lastHitAt: 0 },
 
-    // match totals (round wins via judges 10-point)
     youJudgeTotal: 0,
     aiJudgeTotal: 0,
     youRoundsWon: 0,
     aiRoundsWon: 0,
 
-    // “match points” (raw points) just as a fun stat
     youMatchPts: 0,
     aiMatchPts: 0,
 
-    // knockdowns
     youKD: 0,
     aiKD: 0,
     youKDMatch: 0,
     aiKDMatch: 0,
 
-    // down state
     youDownUntil: 0,
     aiDownUntil: 0,
     lastKDAt: 0
@@ -975,17 +970,14 @@
   }
 
   function resetMatch() {
-    // fighters
     fighter.you.stamina = MATCH.staminaMax;
     fighter.ai.stamina  = MATCH.staminaMax;
     fighter.you.guarding = false;
     fighter.ai.guarding = false;
 
-    // positions
     player.position.set(0, 0, 2.5);
     ai.position.set(0, 0, -2.7);
 
-    // match
     match.mode = "Fight";
     match.round = 1;
     match.roundLeft = MATCH.roundSeconds;
@@ -1013,7 +1005,7 @@
   resetBtn.addEventListener("click", resetMatch);
 
   // ============================================================
-  // SCORING: point groups & knockdowns come from groups
+  // SCORING: point groups & knockdowns
   // ============================================================
   function classifyPunch(power, defenderGuarding) {
     if (defenderGuarding) return { pts: MATCH.ptsBlocked, staLoss: 0, impact: 0.2 };
@@ -1025,10 +1017,8 @@
   function addToGroup(side, pts, impact, now) {
     const g = (side === "you") ? match.youGroup : match.aiGroup;
 
-    // combo continuity
     const inWindow = (now <= g.until + MATCH.groupCommitGraceMs);
     if (!inWindow) {
-      // commit previous group first
       commitGroup(side, now, false);
     }
 
@@ -1047,23 +1037,19 @@
     const g = (side === "you") ? match.youGroup : match.aiGroup;
     if (g.hits <= 0) return;
 
-    // bank the group into round points + match points
     if (side === "you") {
       match.youRoundPts += g.pts;
       match.youMatchPts += g.pts;
-      // small UI feedback
       setStatus(`Point Group +${g.pts}`);
     } else {
       match.aiRoundPts += g.pts;
       match.aiMatchPts += g.pts;
     }
 
-    // knockdown attempt comes from BIG groups only (boxing-like)
     if (canKD) {
       tryKnockdownFromGroup(side, g.impact, now);
     }
 
-    // reset group
     g.hits = 0;
     g.pts = 0;
     g.impact = 0;
@@ -1077,7 +1063,6 @@
     const defenderSide = (attackerSide === "you") ? "ai" : "you";
     const defender = (defenderSide === "you") ? fighter.you : fighter.ai;
 
-    // only when defender is tired
     if (defender.stamina > MATCH.kdStaminaThreshold) return;
     if (groupImpact < MATCH.kdGroupImpactThreshold) return;
 
@@ -1093,14 +1078,15 @@
         match.aiKDMatch += 1;
         match.aiDownUntil = now + MATCH.kdDownMs;
         setStatus("KNOCKDOWN! (AI)");
+        triggerImpact("ai", 1.0);
       } else {
         match.youKD += 1;
         match.youKDMatch += 1;
         match.youDownUntil = now + MATCH.kdDownMs;
         setStatus("KNOCKDOWN! (You)");
+        triggerImpact("you", 1.0);
       }
 
-      // award bonus points for knockdown (realistic scoring swing)
       const kdBonus = 8;
       if (attackerSide === "you") {
         match.youRoundPts += kdBonus;
@@ -1110,7 +1096,6 @@
         match.aiMatchPts += kdBonus;
       }
 
-      // TKO rule
       if (match.aiKDMatch >= MATCH.kdPerMatchTKO) endMatch("TKO — You win!");
       if (match.youKDMatch >= MATCH.kdPerMatchTKO) endMatch("TKO — AI wins!");
     }
@@ -1123,7 +1108,7 @@
   }
 
   // ============================================================
-  // HIT DETECTION (easier to connect, but points-based)
+  // HIT DETECTION
   // ============================================================
   function getAIHitTargets() {
     ai.updateMatrixWorld(true);
@@ -1138,7 +1123,6 @@
   }
 
   function getYouTarget() {
-    // simple point around chest/head
     return new THREE.Vector3(player.position.x, 1.55, player.position.z);
   }
 
@@ -1171,21 +1155,22 @@
 
       lastYouContactAt = now;
 
-      // guard check: AI calms/guards sometimes (handled in AI)
       const defenderGuarding = fighter.ai.guarding;
       const c = classifyPunch(h.power, defenderGuarding);
 
-      // add to point group
       addToGroup("you", c.pts, c.impact, now);
 
-      // stamina drain on AI (reduced if guarding)
       const loss = defenderGuarding ? c.staLoss * MATCH.guardStaminaReduction : c.staLoss;
       fighter.ai.stamina = clamp(fighter.ai.stamina - loss, 0, MATCH.staminaMax);
 
-      // encourage “boxing rhythm”: commit group knockdown logic when group ends, not on every hit
-      // (we’ll attempt KD at group commit)
-      setStatus(defenderGuarding ? "Blocked" : "Scored!");
+      // impact FX (FIX)
+      if (!defenderGuarding) {
+        triggerImpact("ai", 0.35 + c.impact * (0.35 + h.power));
+      } else {
+        triggerImpact("ai", 0.12);
+      }
 
+      setStatus(defenderGuarding ? "Blocked" : "Scored!");
       return;
     }
   }
@@ -1199,7 +1184,7 @@
 
     const hitPoint = aiBrain.hitPoint;
     const youPoint = getYouTarget();
-    const hitR = 1.10 + Number(hitAssistEl.value)*0.30; // mild forgiveness
+    const hitR = 1.10 + Number(hitAssistEl.value)*0.30;
 
     if (hitPoint.distanceTo(youPoint) < hitR) {
       lastAIContactAt = now;
@@ -1212,12 +1197,19 @@
       const loss = defenderGuarding ? c.staLoss * MATCH.guardStaminaReduction : c.staLoss;
       fighter.you.stamina = clamp(fighter.you.stamina - loss, 0, MATCH.staminaMax);
 
+      // impact FX (FIX)
+      if (!defenderGuarding) {
+        triggerImpact("you", 0.35 + c.impact * (0.35 + aiBrain.power));
+      } else {
+        triggerImpact("you", 0.12);
+      }
+
       setStatus(defenderGuarding ? "Block (AI scored 0)" : "AI scored!");
     }
   }
 
   // ============================================================
-  // AI (calm, realistic rhythm, not too strong)
+  // AI
   // ============================================================
   const aiBrain = {
     vx: 0, vz: 0,
@@ -1237,13 +1229,11 @@
   function youIsDown(now){ return now < match.youDownUntil; }
 
   function aiThink(now, dt) {
-    // face the user always
     const dx = player.position.x - ai.position.x;
     const dz = player.position.z - ai.position.z;
-    const yaw = Math.atan2(dx, dz); // +Z forward
+    const yaw = Math.atan2(dx, dz);
     ai.rotation.y = yaw;
 
-    // if down, “sit” and stop
     if (aiIsDown(now) || match.mode !== "Fight") {
       aiBrain.vx *= 0.88;
       aiBrain.vz *= 0.88;
@@ -1254,15 +1244,12 @@
       return;
     }
 
-    const calm = Number(aiCalmEl.value);   // higher = calmer (less action)
-    const aiPow = Number(aiPowerEl.value); // lower = weaker
+    const calm = Number(aiCalmEl.value);
+    const aiPow = Number(aiPowerEl.value);
 
-    // decide behavior
     if (now > aiBrain.nextDecision) {
-      // calmer AI waits longer between decisions
       aiBrain.nextDecision = now + (260 + Math.random()*240) * calm;
 
-      // guard sometimes (especially if stamina low)
       const tired = clamp((MATCH.kdStaminaThreshold - fighter.ai.stamina) / MATCH.kdStaminaThreshold, 0, 1);
       const guardChance = clamp(0.10 + tired*0.35, 0.10, 0.55);
 
@@ -1273,7 +1260,6 @@
 
     fighter.ai.guarding = (now < aiBrain.guardingUntil);
 
-    // movement: circle and keep range (calm)
     const toPlayer = new THREE.Vector3(dx, 0, dz);
     const dist = toPlayer.length();
     const dirTo = dist > 1e-6 ? toPlayer.clone().normalize() : new THREE.Vector3(0,0,1);
@@ -1282,12 +1268,10 @@
     const desiredDist = 3.35;
     const delta = dist - desiredDist;
 
-    // calm AI does smaller lateral motion
     const circleDir = (Math.sin(now * 0.0010) > 0) ? 1 : -1;
     let desiredVX = perp.x * (2.2 / calm) * circleDir + dirTo.x * clamp(delta, -1.4, 1.4) * 1.0;
     let desiredVZ = perp.z * (2.2 / calm) * circleDir + dirTo.z * clamp(delta, -1.4, 1.4) * 1.0;
 
-    // if very close, step back gently
     if (dist < 2.2) {
       desiredVX += (-dirTo.x) * (3.0 / calm);
       desiredVZ += (-dirTo.z) * (3.0 / calm);
@@ -1298,7 +1282,6 @@
     desiredVX = (desiredVX / len) * Math.min(maxSpd, len);
     desiredVZ = (desiredVZ / len) * Math.min(maxSpd, len);
 
-    // accel
     const a = 1 - Math.exp(-18.0 * dt);
     const f = 1 - Math.exp(-16.0 * dt);
     const wantMove = (Math.hypot(desiredVX, desiredVZ) > 0.15);
@@ -1309,7 +1292,6 @@
     ai.position.x += aiBrain.vx * dt;
     ai.position.z += aiBrain.vz * dt;
 
-    // punching: calmer AI jabs occasionally, not heavy combos
     aiBrain.punching = false;
 
     const canPunch =
@@ -1318,15 +1300,12 @@
       !youIsDown(now) &&
       match.mode === "Fight";
 
-    // only punch if within a reasonable range and not too frequently
     if (canPunch && dist < 4.7) {
-      // calm reduces attack probability significantly
       const baseP = 0.16;
       const p = clamp(baseP / calm, 0.05, 0.18);
 
       if (Math.random() < p) {
         aiBrain.activeHand = (Math.random() < 0.5) ? "L" : "R";
-        // mostly lighter punches
         aiBrain.power = clamp((0.35 + Math.random()*0.50) * aiPow, 0.25, 0.85);
         aiBrain.punchStart = now;
         aiBrain.punchUntil = now + (260 + Math.random()*120);
@@ -1334,7 +1313,6 @@
       }
     }
 
-    // animate AI gloves with “real” jab pop
     const idleBob = Math.sin(now * 0.007) * 0.07;
 
     const gL = ai.userData.gL;
@@ -1351,7 +1329,6 @@
       gR.position.z = 0.55 + Math.cos(now*0.006) * 0.10;
     }
 
-    // punch window
     if (now < aiBrain.punchUntil) {
       aiBrain.punching = true;
       const t = clamp((now - aiBrain.punchStart) / Math.max(1, (aiBrain.punchUntil - aiBrain.punchStart)), 0, 1);
@@ -1360,7 +1337,6 @@
       const g = (aiBrain.activeHand === "L") ? gL : gR;
       g.position.z = 0.55 + pop;
 
-      // compute hitpoint (AI forward is +Z in local)
       const fwd = new THREE.Vector3(0,0,1).applyQuaternion(ai.quaternion);
       aiBrain.hitPoint.set(ai.position.x, 1.55, ai.position.z);
       aiBrain.hitPoint.addScaledVector(fwd, 1.08 + pop);
@@ -1368,7 +1344,7 @@
   }
 
   // ============================================================
-  // MOVEMENT (keyboard + face), stamina affects speed slightly
+  // MOVEMENT
   // ============================================================
   const physY = { velY: 0, grounded: false };
   const movePhys = { vx: 0, vz: 0 };
@@ -1468,7 +1444,6 @@
     judgeTxt.textContent = `${match.youJudgeTotal}–${match.aiJudgeTotal} (10pt)`;
     matchTxt.textContent = `M ${match.youMatchPts}–${match.aiMatchPts}`;
 
-    // show YOUR current point group (so you can “feel” scoring)
     const g = match.youGroup;
     const alive = (g.hits > 0 && now <= g.until + MATCH.groupCommitGraceMs);
     const pct = alive ? clamp((g.until - now) / MATCH.comboWindowMs, 0, 1) : 0;
@@ -1478,34 +1453,27 @@
   }
 
   // ============================================================
-  // ROUND FLOW: fight/rest + judges scoring
+  // ROUND FLOW: fight/rest + judges scoring (FIXED)
   // ============================================================
   function endRound(now) {
-    // commit any open groups, with KD attempt
     commitGroup("you", now, true);
     commitGroup("ai",  now, true);
 
-    // 10-point must scoring
     const youPts = match.youRoundPts;
     const aiPts = match.aiRoundPts;
 
-    // base: winner gets 10, loser 9
     let you10 = 10, ai10 = 10;
     if (youPts > aiPts) { you10 = 10; ai10 = 9; }
-    else if (aiPts > youPts) { ai10 = 9; ai10 = 10; }
-    else { you10 = 10; ai10 = 10; } // draw round (rare)
+    else if (aiPts > youPts) { you10 = 9; ai10 = 10; }  // FIXED
+    else { you10 = 10; ai10 = 10; }
 
-    // knockdowns swing the round (10-8)
-    // if you knock AI down in round, AI score drops
     ai10 = clamp(ai10 - match.aiKD, 7, 10);
     you10 = clamp(you10 - match.youKD, 7, 10);
 
-    // 3 judges: add tiny variance but keep mostly deterministic
     let youJudge = 0, aiJudge = 0;
     for (let j=0;j<3;j++){
       let y = you10, a = ai10;
       const r = (Math.random() - 0.5) * MATCH.judgeRandomness;
-      // small chance a close round is judged the other way
       if (Math.abs(youPts - aiPts) <= 2 && Math.random() < (0.12 + Math.abs(r))) {
         const tmp = y; y = a; a = tmp;
       }
@@ -1529,7 +1497,6 @@
   function startNextRound() {
     match.round++;
     if (match.round > MATCH.roundsTotal) {
-      // decision
       match.mode = "End";
       setModeUI("End");
 
@@ -1547,7 +1514,6 @@
     setModeUI("Fight");
     match.roundLeft = MATCH.roundSeconds;
 
-    // small between-round reset positions (boxing feel)
     player.position.set(clamp(player.position.x, -1.0, 1.0), player.position.y,  2.7);
     ai.position.set(clamp(ai.position.x, -1.0, 1.0), ai.position.y, -2.7);
 
@@ -1567,25 +1533,20 @@
     const dt = clamp((now - lastT) / 1000, 0, 0.033);
     lastT = now;
 
-    // mode timers
     if (match.mode === "Fight") {
       match.roundLeft -= dt;
       if (match.roundLeft <= 0) endRound(now);
     } else if (match.mode === "Rest") {
       match.restLeft -= dt;
 
-      // regen stamina during rest
       fighter.you.stamina = clamp(fighter.you.stamina + MATCH.staminaRegenPerSec * dt, 0, MATCH.staminaMax);
       fighter.ai.stamina  = clamp(fighter.ai.stamina  + MATCH.staminaRegenPerSec * dt, 0, MATCH.staminaMax);
 
       if (match.restLeft <= 0) startNextRound();
     }
 
-    // guarding
     fighter.you.guarding = keys.has("ShiftLeft") || keys.has("ShiftRight");
-    // AI guarding handled in aiThink
 
-    // movement input (disabled when down/rest/end)
     const canMove = (match.mode === "Fight") && (now >= match.youDownUntil);
     let inX = 0, inFwd = 0;
 
@@ -1611,7 +1572,6 @@
       inX *= s; inFwd *= s;
     }
 
-    // stamina affects speed
     const spMul = staminaSpeedMul(fighter.you.stamina);
     const targetVX = inX * MATCH.maxSpeed * spMul;
     const targetVZ = (-inFwd) * MATCH.maxSpeed * spMul;
@@ -1626,23 +1586,19 @@
     player.position.x += movePhys.vx * dt;
     player.position.z += movePhys.vz * dt;
 
-    // small stamina drain from movement
     if (match.mode === "Fight" && hasInput) {
       const moveIntensity = clamp(Math.hypot(movePhys.vx, movePhys.vz) / (MATCH.maxSpeed + 1e-6), 0, 1);
       fighter.you.stamina = clamp(fighter.you.stamina - MATCH.staminaDrainMove * moveIntensity * (dt*60), 0, MATCH.staminaMax);
     }
 
-    // jump
     if (canMove && keys.has("Space") && physY.grounded) {
       physY.velY = MATCH.jumpVel;
       physY.grounded = false;
     }
 
-    // gravity
     physY.velY += MATCH.gravity * dt;
     player.position.y += physY.velY * dt;
 
-    // ground/platform collision
     const gH = groundHeightAt(player.position.x, player.position.z);
     if (player.position.y <= gH) {
       player.position.y = gH;
@@ -1655,7 +1611,6 @@
     keepInRing(player);
     keepInRing(ai);
 
-    // down animation nudge
     if (now < match.youDownUntil) {
       player.position.y = Math.max(player.position.y, 0);
       movePhys.vx *= 0.90; movePhys.vz *= 0.90;
@@ -1664,32 +1619,26 @@
       ai.position.y = Math.max(ai.position.y, 0);
     }
 
-    // AI update
     aiThink(now, dt);
     keepInRing(ai);
 
-    // commit groups if expired (and attempt KD at commit)
     if (match.youGroup.hits > 0 && now > match.youGroup.until + MATCH.groupCommitGraceMs) commitGroup("you", now, true);
     if (match.aiGroup.hits  > 0 && now > match.aiGroup.until  + MATCH.groupCommitGraceMs) commitGroup("ai",  now, true);
 
-    // hit checks
     tryYouHit(now);
     tryAIHit(now);
 
-    // if someone is at 0 stamina, they become very vulnerable, but still require group to KD/TKO
     if (fighter.ai.stamina <= 0 && match.aiKDMatch >= MATCH.kdPerMatchTKO) endMatch("TKO — You win!");
     if (fighter.you.stamina <= 0 && match.youKDMatch >= MATCH.kdPerMatchTKO) endMatch("TKO — AI wins!");
 
-    // player faces forward (stable glove mapping)
     player.rotation.y = 0;
 
-    // camera follow
     const camTarget = new THREE.Vector3(player.position.x * 0.45, 2.2, 0);
     camera3d.position.lerp(new THREE.Vector3(camTarget.x, 6.5, 14), 0.07);
     camera3d.lookAt(camTarget);
 
     updateHUD(now);
-    updateImpactFX(dt);
+    updateImpactFX(dt, player, ai); // FIXED
     renderer.render(scene, camera3d);
     requestAnimationFrame(loop);
   }
@@ -1703,7 +1652,6 @@
     camera3d.updateProjectionMatrix();
   });
 
-  // init
   resetMatch();
   setFaceUI(false, "Waiting…");
   setStatus("Starting camera…");
@@ -1714,7 +1662,6 @@
   requestAnimationFrame(loop);
 
 })();
-
 </script>
 
 </body>
