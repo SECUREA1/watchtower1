@@ -122,6 +122,40 @@
     #reticle:before{ width: 2px; height: 26px; }
     #reticle:after{ width: 26px; height: 2px; }
     #reticle.hidden{ opacity: 0; }
+
+    #uiToggle{
+      position:absolute; left:14px; bottom:14px; z-index:20;
+      padding:10px 12px; border-radius:999px;
+      border:1px solid rgba(255,255,255,.16);
+      background: rgba(10,12,18,.72); color: rgba(255,255,255,.92);
+      font-weight:800; backdrop-filter: blur(10px);
+    }
+    .uiHidden{ display:none !important; }
+
+    #touchDrive{
+      position:absolute; right:14px; bottom:14px; z-index:20;
+      width:220px; height:220px;
+      border-radius:18px;
+      border:1px solid rgba(255,255,255,.16);
+      background:
+        linear-gradient(to bottom, rgba(120,255,170,.08) 0 50%, rgba(255,170,120,.08) 50% 100%),
+        linear-gradient(to right, rgba(120,170,255,.08) 0 50%, rgba(255,120,180,.08) 50% 100%),
+        rgba(10,12,18,.52);
+      backdrop-filter: blur(8px);
+      touch-action:none;
+      user-select:none;
+      display:flex; align-items:center; justify-content:center;
+      color: rgba(255,255,255,.8); font-size:12px; font-weight:700;
+      text-align:center; line-height:1.25;
+    }
+    #touchDot{
+      position:absolute; width:26px; height:26px; border-radius:50%;
+      border:2px solid rgba(255,255,255,.8);
+      background: rgba(255,255,255,.16);
+      pointer-events:none; transform:translate(-50%,-50%);
+      left:50%; top:50%;
+    }
+
   </style>
 </head>
 <body>
@@ -204,6 +238,14 @@
     Pinky up at release = PASS.
   </div>
 
+
+  <button id="uiToggle">Hide HUD</button>
+
+  <div id="touchDrive" aria-label="Touch drive control">
+    Top = forward • Bottom = back/down<br/>Left/Right = turn
+    <div id="touchDot"></div>
+  </div>
+
   <!-- Three.js -->
   <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
 
@@ -231,6 +273,50 @@
     // UI
     // ============================================================
     const el = id => document.getElementById(id);
+
+    const uiToggleBtn = el('uiToggle');
+    const touchDriveEl = el('touchDrive');
+    const touchDotEl = el('touchDot');
+    const uiPanels = ['hud','rightStack','bottomHint'];
+    let uiHidden = false;
+    const drivePad = { active:false, turn:0, move:0 };
+
+    function setUiHidden(hidden){
+      uiHidden = hidden;
+      uiPanels.forEach(id => { const node = el(id); if (node) node.classList.toggle('uiHidden', hidden); });
+      uiToggleBtn.textContent = hidden ? 'Show HUD' : 'Hide HUD';
+    }
+
+    function updateDrivePadFromEvent(ev){
+      const r = touchDriveEl.getBoundingClientRect();
+      const cx = r.left + r.width * 0.5;
+      const cy = r.top + r.height * 0.5;
+      const nx = Math.max(-1, Math.min(1, (ev.clientX - cx) / (r.width * 0.5)));
+      const ny = Math.max(-1, Math.min(1, (ev.clientY - cy) / (r.height * 0.5)));
+      drivePad.turn = nx;
+      drivePad.move = -ny;
+      touchDotEl.style.left = `${50 + nx * 40}%`;
+      touchDotEl.style.top = `${50 + ny * 40}%`;
+    }
+
+    uiToggleBtn.addEventListener('click', ()=> setUiHidden(!uiHidden));
+
+    touchDriveEl.addEventListener('pointerdown', ev => {
+      drivePad.active = true;
+      touchDriveEl.setPointerCapture(ev.pointerId);
+      updateDrivePadFromEvent(ev);
+    });
+    touchDriveEl.addEventListener('pointermove', ev => { if (drivePad.active) updateDrivePadFromEvent(ev); });
+    function releaseDrivePad(){
+      drivePad.active = false;
+      drivePad.turn = 0;
+      drivePad.move = 0;
+      touchDotEl.style.left = '50%';
+      touchDotEl.style.top = '50%';
+    }
+    touchDriveEl.addEventListener('pointerup', releaseDrivePad);
+    touchDriveEl.addEventListener('pointercancel', releaseDrivePad);
+
 
     const releaseVelEl = el('releaseVel');
     const tossGainEl   = el('tossGain');
@@ -953,8 +1039,20 @@
     // Player movement: open = move, fist = stop
     // ============================================================
     const playerMove = { speed: 8.5, target: new THREE.Vector3(0,0,zMax-4.5) };
+    let playerYaw = 0;
 
     function updatePlayer(dt){
+      if (drivePad.active){
+        const turnRate = 2.35;
+        playerYaw += drivePad.turn * turnRate * dt;
+        const fwd = new THREE.Vector3(Math.sin(playerYaw), 0, -Math.cos(playerYaw));
+        const step = drivePad.move * (playerMove.speed * 1.15) * dt;
+        player.position.addScaledVector(fwd, step);
+        player.position.x = clamp(player.position.x, xMin+0.7, xMax-0.7);
+        player.position.z = clamp(player.position.z, zMin+1.0, zMax-1.0);
+        return;
+      }
+
       if (!handState.present) return;
 
       // throw cooldown prevents accidental drift during release
@@ -980,6 +1078,7 @@
         to.multiplyScalar(step / (d || 1));
         player.position.x += to.x;
         player.position.z += to.z;
+        playerYaw = Math.atan2(to.x, -to.z);
       }
 
       // teammate wander a bit
@@ -1049,6 +1148,7 @@
     }
 
     function updateCamera(dt){
+      camera.up.set(0,1,0);
       const hoopPos = new THREE.Vector3(hoopGroup.position.x, rimY, hoopGroup.position.z);
       const head = player.position.clone().add(new THREE.Vector3(0, 1.68, 0));
 
@@ -1057,7 +1157,9 @@
         ? (handState.pinkyUp ? teammate.position.clone().add(new THREE.Vector3(0,1.2,0)) : hoopPos.clone())
         : hoopPos.clone();
 
-      const forward = target.clone().sub(head).normalize();
+      const forward = (drivePad.active
+        ? new THREE.Vector3(Math.sin(playerYaw), 0, -Math.cos(playerYaw))
+        : target.clone().sub(head).setY(0).normalize());
 
       if (camMode === CAM.FP){
         // hide player body in FP so you don't see yourself
