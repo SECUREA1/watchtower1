@@ -254,6 +254,21 @@
   </div>
 
 <script>
+  const impactFx = { you: 0, ai: 0 };
+  function triggerImpact(side, amount = 1){ impactFx[side] = Math.min(1, (impactFx[side] || 0) + amount); }
+  function updateImpactFX(dt){
+    impactFx.you = Math.max(0, impactFx.you - dt * 3.5);
+    impactFx.ai = Math.max(0, impactFx.ai - dt * 3.5);
+    const tint = (fighter, side, color) => {
+      const lvl = impactFx[side] || 0;
+      const mat = fighter?.userData?.body?.material;
+      if (mat && mat.emissive) mat.emissive.set(color).multiplyScalar(lvl * 0.8);
+    };
+    tint(player, "you", 0x4aa8ff);
+    tint(ai, "ai", 0xff5555);
+  }
+
+
 (() => {
   // ============================================================
   // CORE TUNING
@@ -812,6 +827,12 @@
     gloveMesh.position.set(player.position.x + offX, offY, player.position.z - offZ);
 
     const s = 0.92 + thrust*0.07 + punchPop*0.06;
+    const anchorLocal = player.worldToLocal(gloveMesh.position.clone());
+    if (player.userData?.gL && player.userData?.gR) {
+      const linkedGlove = (handednessLabel === "Left") ? player.userData.gL : player.userData.gR;
+      linkedGlove.position.copy(anchorLocal);
+    }
+
     gloveMesh.scale.set(s, s, s);
     gloveMesh.lookAt(camera3d.position);
 
@@ -926,6 +947,7 @@
           setStatus(`SUPER HIT! -${dmg}`);
         } else {
           setStatus(`HIT! -${dmg}`);
+        triggerImpact("ai", 1);
         }
 
         if (state.ai.hp <= 0) knockout("You win!");
@@ -1148,6 +1170,7 @@
 
         state.you.hp = Math.max(0, state.you.hp - dmg);
         setStatus(state.you.guarding ? `BLOCK! -${dmg}` : `AI HIT! -${dmg}`);
+        triggerImpact("you", state.you.guarding ? 0.35 : 1);
 
         // knockback away from AI along forward
         player.position.addScaledVector(fwd, 0.18 + 0.16*aiBrain.power);
@@ -1455,6 +1478,7 @@
     camera3d.lookAt(camTarget);
 
     updateHUD(now);
+    updateImpactFX(dt);
     renderer.render(scene, camera3d);
     requestAnimationFrame(loop);
   }

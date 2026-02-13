@@ -1492,8 +1492,10 @@
     glovePlaneR.position.copy(gloveSmoothing.R.pos);
 
     if (player.userData.gL && player.userData.gR) {
-      player.userData.gL.position.copy(glovePlaneL.position);
-      player.userData.gR.position.copy(glovePlaneR.position);
+      const gLLocal = player.worldToLocal(glovePlaneL.position.clone());
+      const gRLocal = player.worldToLocal(glovePlaneR.position.clone());
+      player.userData.gL.position.copy(gLLocal);
+      player.userData.gR.position.copy(gRLocal);
     }
 
     glovePlaneL.lookAt(camera3d.position);
@@ -1513,6 +1515,34 @@
   // ============================================================
   // Face look / camera
   // ============================================================
+  const impactFx = { you: 0, ai: 0 };
+  const impactColors = { you: new THREE.Color(0x44aaff), ai: new THREE.Color(0xff4545) };
+  const impactTmp = new THREE.Color();
+
+  function triggerImpact(side, amount = 1) {
+    impactFx[side] = Math.min(1, impactFx[side] + amount);
+  }
+
+  function updateImpactFX(dt) {
+    impactFx.you = Math.max(0, impactFx.you - dt * 3.2);
+    impactFx.ai = Math.max(0, impactFx.ai - dt * 3.2);
+    const applyTo = (fighter, side) => {
+      const lvl = impactFx[side];
+      const body = fighter.userData?.body?.material;
+      const head = fighter.userData?.head?.material;
+      if (body) {
+        body.emissive = body.emissive || new THREE.Color(0x000000);
+        body.emissive.copy(impactTmp.copy(impactColors[side]).multiplyScalar(lvl * 0.9));
+      }
+      if (head) {
+        head.emissive = head.emissive || new THREE.Color(0x000000);
+        head.emissive.copy(impactTmp.copy(impactColors[side]).multiplyScalar(lvl * 0.6));
+      }
+    };
+    applyTo(player, 'you');
+    applyTo(ai, 'ai');
+  }
+
   function updateCamera(now, dt) {
     const baseTarget = new THREE.Vector3(player.position.x * 0.45, 2.2, 0);
 
@@ -1830,6 +1860,7 @@
 
           const kind = applyHitToDefender("ai", h, now, "you");
           setStatus(kind === "block" ? "Blocked" : "Scored!");
+          triggerImpact("ai", kind === "block" ? 0.35 : 1);
 
           const { fwd } = getFacingBasis(player.position, ai.position);
           ai.position.addScaledVector(fwd, -0.10);
@@ -1847,6 +1878,7 @@
           const punch = { power: aiBrain.power };
           const kind = applyHitToDefender("you", punch, now, "ai");
           setStatus(kind === "block" ? "Block!" : "AI scored!");
+          triggerImpact("you", kind === "block" ? 0.35 : 1);
 
           const { fwd } = getFacingBasis(ai.position, player.position);
           player.position.addScaledVector(fwd, -0.08);
@@ -1855,6 +1887,7 @@
     }
 
     updateHUD(now);
+    updateImpactFX(dt);
     renderer.render(scene, camera3d);
 
     requestAnimationFrame(loop);

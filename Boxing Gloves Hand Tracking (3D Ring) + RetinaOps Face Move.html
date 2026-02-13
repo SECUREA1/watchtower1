@@ -671,6 +671,12 @@
 
     // Scale slightly bigger when punching
     const s = 0.92 + thrust*0.07 + punchPop*0.06;
+    const anchorLocal = player.worldToLocal(gloveMesh.position.clone());
+    if (player.userData?.gL && player.userData?.gR) {
+      const linkedGlove = (handednessLabel === "Left") ? player.userData.gL : player.userData.gR;
+      linkedGlove.position.copy(anchorLocal);
+    }
+
     gloveMesh.scale.set(s, s, s);
 
     // Billboard to camera
@@ -702,6 +708,26 @@
     }
   }
 
+  const impactFx = { you: 0, ai: 0 };
+  const impactColors = { you: new THREE.Color(0x4aa8ff), ai: new THREE.Color(0xff5252) };
+  const impactTmp = new THREE.Color();
+
+  function triggerImpact(side, amount = 1) { impactFx[side] = Math.min(1, impactFx[side] + amount); }
+
+  function updateImpactFX(dt) {
+    impactFx.you = Math.max(0, impactFx.you - dt * 3.5);
+    impactFx.ai = Math.max(0, impactFx.ai - dt * 3.5);
+    const apply = (fighter, side) => {
+      const lvl = impactFx[side];
+      const bodyMat = fighter.userData?.body?.material;
+      const headMat = fighter.userData?.head?.material;
+      if (bodyMat) bodyMat.emissive.copy(impactTmp.copy(impactColors[side]).multiplyScalar(lvl * 0.9));
+      if (headMat) headMat.emissive.copy(impactTmp.copy(impactColors[side]).multiplyScalar(lvl * 0.5));
+    };
+    apply(player, 'you');
+    apply(ai, 'ai');
+  }
+
   // ---------- Combat ----------
   let lastHitAI = 0;
   let lastHitYou = 0;
@@ -724,6 +750,7 @@
         state.ai.hp = Math.max(0, state.ai.hp - dmg);
 
         setStatus(`HIT! -${dmg}`);
+        triggerImpact("ai", 1);
         ai.position.z -= (0.16 + 0.16*h.power);
 
         if (state.ai.hp <= 0) knockout("You win!");
@@ -788,6 +815,7 @@
 
         state.you.hp = Math.max(0, state.you.hp - dmg);
         setStatus(state.you.guarding ? `BLOCK! -${dmg}` : `AI HIT! -${dmg}`);
+        triggerImpact("you", state.you.guarding ? 0.35 : 1);
 
         player.position.z += (0.16 + 0.14*aiBrain.power);
         if (state.you.hp <= 0) knockout("AI wins!");
@@ -947,6 +975,7 @@
     camera3d.lookAt(camTarget);
 
     updateHUD();
+    updateImpactFX(dt);
     renderer.render(scene, camera3d);
     requestAnimationFrame(loop);
   }
