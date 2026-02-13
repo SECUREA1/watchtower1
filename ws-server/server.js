@@ -94,6 +94,10 @@ const MIME_TYPES = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
   ".gif": "image/gif",
+  ".glb": "model/gltf-binary",
+  ".gltf": "model/gltf+json",
+  ".bin": "application/octet-stream",
+  ".ktx2": "image/ktx2",
   ".vtt": "text/vtt",
   ".html": "text/html",
 };

@@ -1,5 +1,5 @@
 (() => {
-  const CLOUD_WS = "wss://watchtower-kw2o.onrender.com/ws";
+  const RUNTIME_WS = window.__WATCHTOWER_WS_URL || "";
 
   const ensureWsPath = (value) => {
     const trimmed = value.replace(/\/+$/, "");
@@ -29,18 +29,18 @@
     const sameOrigin = ensureWsPath(`${proto}://${location.host}`);
     const host = location.hostname;
 
-    if (location.protocol === "file:") return CLOUD_WS;
+    const runtime = normalizeWsUrl(RUNTIME_WS);
+    if (location.protocol === "file:") return runtime || "ws://localhost:10000/ws";
     if (host === "localhost" || host === "127.0.0.1" || host.endsWith(".local")) {
-      return sameOrigin;
+      return runtime || sameOrigin;
     }
-    if (location.host === new URL(CLOUD_WS).host) return CLOUD_WS;
-    return CLOUD_WS;
+    return runtime || sameOrigin;
   };
 
   const resolveWsUrl = (override) => normalizeWsUrl(override) || defaultWsUrl();
 
   window.rednodeWsConfig = {
-    cloudWs: CLOUD_WS,
+    cloudWs: normalizeWsUrl(RUNTIME_WS),
     normalizeWsUrl,
     defaultWsUrl,
     resolveWsUrl,
