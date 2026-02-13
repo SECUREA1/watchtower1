@@ -1357,10 +1357,36 @@
       let activeFilter = "all";
       let currentLaunchUrl = "";
 
-      const openMission = (game) => {
-        currentLaunchUrl = /^https?:\/\//.test(game.file)
-          ? game.file
-          : `/${encodeURI(game.file)}`;
+      const isAbsoluteUrl = (value) => /^https?:\/\//.test(value);
+
+      const buildLaunchCandidates = (file) => {
+        const encoded = encodeURI(file);
+        return [
+          `/${encoded}`,
+          `../${encoded}`,
+          encoded,
+        ];
+      };
+
+      const canLoadUrl = async (url) => {
+        try {
+          const res = await fetch(url, { method: "HEAD", cache: "no-store" });
+          return res.ok;
+        } catch {
+          return false;
+        }
+      };
+
+      const resolveLaunchUrl = async (file) => {
+        if (isAbsoluteUrl(file)) return file;
+        for (const candidate of buildLaunchCandidates(file)) {
+          if (await canLoadUrl(candidate)) return candidate;
+        }
+        return buildLaunchCandidates(file)[0];
+      };
+
+      const openMission = async (game) => {
+        currentLaunchUrl = await resolveLaunchUrl(game.file);
         playerLabel.textContent = `Now Playing: ${game.name}`;
         playerFrame.src = currentLaunchUrl;
         playerShell.classList.add("active");
@@ -1416,13 +1442,13 @@
 
         const play = document.createElement("a");
         play.className = "play-btn";
-        play.href = /^https?:\/\//.test(game.file)
+        play.href = isAbsoluteUrl(game.file)
           ? game.file
-          : `/${encodeURI(game.file)}`;
+          : buildLaunchCandidates(game.file)[0];
         play.textContent = "Launch Mission";
-        play.addEventListener("click", (event) => {
+        play.addEventListener("click", async (event) => {
           event.preventDefault();
-          openMission(game);
+          await openMission(game);
         });
 
         card.appendChild(play);
