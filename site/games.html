@@ -231,6 +231,80 @@
         gap: 6px;
         justify-content: center;
       }
+
+      .player-shell {
+        position: fixed;
+        inset: 0;
+        background: #05030a;
+        z-index: 50;
+        display: none;
+      }
+
+      .player-shell.active {
+        display: block;
+      }
+
+      .player-shell iframe {
+        width: 100%;
+        height: 100%;
+        border: 0;
+        background: #000;
+      }
+
+      .player-menu {
+        position: absolute;
+        top: 16px;
+        left: 16px;
+        right: 16px;
+        z-index: 2;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+        background: rgba(10, 8, 16, 0.75);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 10px;
+        backdrop-filter: blur(8px);
+      }
+
+      .player-menu .label {
+        color: var(--muted);
+        font-size: 0.85rem;
+        margin-right: auto;
+      }
+
+      .menu-btn {
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 8px 14px;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text);
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .menu-btn.primary {
+        background: var(--accent);
+        color: #130a20;
+        border-color: transparent;
+      }
+
+      .player-shell.gameplay-only .player-menu {
+        display: none;
+      }
+
+      .menu-reveal {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        z-index: 3;
+        display: none;
+      }
+
+      .player-shell.gameplay-only .menu-reveal {
+        display: inline-flex;
+      }
     </style>
   </head>
   <body>
@@ -320,6 +394,17 @@
         <div class="game-grid" id="boxing-grid"></div>
       </section>
     </main>
+
+    <section class="player-shell" id="player-shell" aria-live="polite">
+      <div class="player-menu" id="player-menu">
+        <button class="menu-btn" id="back-to-hub" type="button">← Back to Arcade</button>
+        <button class="menu-btn" id="toggle-gameplay" type="button">Hide Menu</button>
+        <button class="menu-btn" id="open-tab" type="button">Open in Tab</button>
+        <span class="label" id="player-label">Now Playing</span>
+      </div>
+      <button class="menu-btn menu-reveal" id="show-menu" type="button">Show Menu</button>
+      <iframe id="player-frame" title="Watchtower gameplay frame" allow="camera; microphone; autoplay; fullscreen"></iframe>
+    </section>
 
     <script>
       const games = [
@@ -1232,10 +1317,46 @@
       const basketballGrid = document.getElementById("basketball-grid");
       const baseballGrid = document.getElementById("baseball-grid");
       const boxingGrid = document.getElementById("boxing-grid");
+      const playerShell = document.getElementById("player-shell");
+      const playerFrame = document.getElementById("player-frame");
+      const playerLabel = document.getElementById("player-label");
+      const backToHubBtn = document.getElementById("back-to-hub");
+      const toggleGameplayBtn = document.getElementById("toggle-gameplay");
+      const showMenuBtn = document.getElementById("show-menu");
+      const openTabBtn = document.getElementById("open-tab");
       const tagSet = new Set(["all"]);
       games.forEach((game) => game.tags.forEach((tag) => tagSet.add(tag)));
 
       let activeFilter = "all";
+      let currentLaunchUrl = "";
+
+      const showGameplayOnly = () => {
+        playerShell.classList.add("gameplay-only");
+        toggleGameplayBtn.textContent = "Show Menu";
+      };
+
+      const showMenuChrome = () => {
+        playerShell.classList.remove("gameplay-only");
+        toggleGameplayBtn.textContent = "Hide Menu";
+      };
+
+      const openMission = (game) => {
+        currentLaunchUrl = /^https?:\/\//.test(game.file)
+          ? game.file
+          : `/${encodeURI(game.file)}`;
+        playerLabel.textContent = `Now Playing: ${game.name}`;
+        playerFrame.src = currentLaunchUrl;
+        playerShell.classList.add("active");
+        showMenuChrome();
+        document.body.style.overflow = "hidden";
+      };
+
+      const closeMission = () => {
+        playerShell.classList.remove("active");
+        playerFrame.src = "about:blank";
+        document.body.style.overflow = "";
+        currentLaunchUrl = "";
+      };
 
       const renderFilters = () => {
         filterBar.innerHTML = "";
@@ -1282,10 +1403,28 @@
           ? game.file
           : `/${encodeURI(game.file)}`;
         play.textContent = "Launch Mission";
+        play.addEventListener("click", (event) => {
+          event.preventDefault();
+          openMission(game);
+        });
 
         card.appendChild(play);
         return card;
       };
+
+      backToHubBtn.addEventListener("click", closeMission);
+      toggleGameplayBtn.addEventListener("click", () => {
+        if (playerShell.classList.contains("gameplay-only")) {
+          showMenuChrome();
+          return;
+        }
+        showGameplayOnly();
+      });
+      showMenuBtn.addEventListener("click", showMenuChrome);
+      openTabBtn.addEventListener("click", () => {
+        if (!currentLaunchUrl) return;
+        window.open(currentLaunchUrl, "_blank", "noopener");
+      });
 
       const renderGames = () => {
         gameGrid.innerHTML = "";
