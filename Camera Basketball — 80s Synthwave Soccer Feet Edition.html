@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Camera Basketball Clone — 80s Synthwave Soccer Feet Edition</title>
+  <style>
+    :root {
+      --bg-1: #070312;
+      --bg-2: #13072d;
+      --grid: rgba(94, 239, 255, 0.22);
+      --neon-pink: #ff4fdd;
+      --neon-cyan: #6df4ff;
+      --neon-gold: #ffe07a;
+      --panel: rgba(8, 8, 22, 0.7);
+      --line: rgba(255, 255, 255, 0.2);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: #f4f3ff;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background:
+        radial-gradient(circle at 20% 8%, rgba(255, 79, 221, 0.25), transparent 45%),
+        radial-gradient(circle at 80% 18%, rgba(109, 244, 255, 0.28), transparent 45%),
+        linear-gradient(170deg, var(--bg-2), var(--bg-1));
+      overflow: hidden;
+    }
+
+    #game {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    .hud {
+      position: fixed;
+      left: 16px;
+      top: 16px;
+      z-index: 10;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px 14px;
+      backdrop-filter: blur(6px);
+      box-shadow: 0 12px 34px rgba(0,0,0,0.45);
+      max-width: 440px;
+    }
+
+    .hud h1 {
+      margin: 0 0 8px;
+      font-size: 1rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--neon-gold);
+    }
+
+    .hud p {
+      margin: 6px 0;
+      font-size: 0.86rem;
+      line-height: 1.4;
+      color: #ded8fb;
+    }
+
+    .stat-row {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 6px;
+    }
+
+    .stat {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 0.8rem;
+      background: rgba(255,255,255,0.06);
+    }
+
+    .kick {
+      color: var(--neon-cyan);
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <aside class="hud">
+    <h1>80s Synthwave Soccer Lab</h1>
+    <p>
+      Clone vibe from Camera Basketball, now rebuilt as a full-body soccer game with reactive
+      neon feet. Bounce, juggle, and arc the ball across both feet with realistic kick impulse.
+    </p>
+    <p>Controls: <strong>A/D</strong> move body, <strong>J/L</strong> lift left/right foot, <strong>R</strong> reset ball.</p>
+    <div class="stat-row">
+      <span class="stat" id="bounceCount">Bounces: 0</span>
+      <span class="stat" id="kickSpeed">Kick Speed: 0.0</span>
+      <span class="stat kick" id="airCombo">Air Combo: 0</span>
+    </div>
+  </aside>
+
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const bounceCountEl = document.getElementById('bounceCount');
+    const kickSpeedEl = document.getElementById('kickSpeed');
+    const airComboEl = document.getElementById('airCombo');
+
+    const state = {
+      width: innerWidth,
+      height: innerHeight,
+      gravity: 0.42,
+      drag: 0.996,
+      bounce: 0.82,
+      floorY: innerHeight - 90,
+      bounces: 0,
+      combo: 0,
+      lastKickSpeed: 0,
+      keys: new Set(),
+    };
+
+    const player = {
+      x: innerWidth * 0.5,
+      y: innerHeight - 220,
+      bodyHeight: 170,
+      bodyWidth: 50,
+      legLength: 90,
+      leftFootLift: 0,
+      rightFootLift: 0,
+      vx: 0,
+    };
+
+    const ball = {
+      x: innerWidth * 0.5 + 140,
+      y: innerHeight * 0.45,
+      vx: -3,
+      vy: 1,
+      r: 24,
+      spin: 0,
+    };
+
+    const footShape = (x, y, angle = 0) => {
+      const length = 68;
+      const width = 28;
+      const toe = 14;
+      const points = [
+        { x: -length * 0.45, y: -width * 0.5 },
+        { x: length * 0.45, y: -width * 0.42 },
+        { x: length * 0.5 + toe, y: 0 },
+        { x: length * 0.45, y: width * 0.42 },
+        { x: -length * 0.45, y: width * 0.5 },
+      ];
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      return points.map((p) => ({
+        x: x + p.x * cos - p.y * sin,
+        y: y + p.x * sin + p.y * cos,
+      }));
+    };
+
+    function resize() {
+      state.width = innerWidth;
+      state.height = innerHeight;
+      state.floorY = innerHeight - 90;
+      canvas.width = innerWidth;
+      canvas.height = innerHeight;
+      if (player.y > state.floorY - 130) player.y = state.floorY - 130;
+    }
+    addEventListener('resize', resize);
+    resize();
+
+    addEventListener('keydown', (e) => {
+      state.keys.add(e.key.toLowerCase());
+      if (e.key.toLowerCase() === 'r') {
+        ball.x = state.width * 0.52;
+        ball.y = state.height * 0.4;
+        ball.vx = 3.5;
+        ball.vy = -2;
+        state.combo = 0;
+      }
+    });
+    addEventListener('keyup', (e) => state.keys.delete(e.key.toLowerCase()));
+
+    function pointSegmentDistance(px, py, x1, y1, x2, y2) {
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const len2 = dx * dx + dy * dy;
+      if (!len2) return Math.hypot(px - x1, py - y1);
+      let t = ((px - x1) * dx + (py - y1) * dy) / len2;
+      t = Math.max(0, Math.min(1, t));
+      const cx = x1 + t * dx;
+      const cy = y1 + t * dy;
+      return Math.hypot(px - cx, py - cy);
+    }
+
+    function collideWithFoot(poly, footVx, footVy) {
+      let minDist = Infinity;
+      let hitNormal = null;
+
+      for (let i = 0; i < poly.length; i++) {
+        const a = poly[i];
+        const b = poly[(i + 1) % poly.length];
+        const d = pointSegmentDistance(ball.x, ball.y, a.x, a.y, b.x, b.y);
+        if (d < minDist) {
+          minDist = d;
+          const edgeX = b.x - a.x;
+          const edgeY = b.y - a.y;
+          const nLen = Math.hypot(edgeX, edgeY) || 1;
+          hitNormal = { x: -edgeY / nLen, y: edgeX / nLen };
+        }
+      }
+
+      if (minDist < ball.r + 4 && hitNormal) {
+        const relVx = ball.vx - footVx;
+        const relVy = ball.vy - footVy;
+        const speedIntoSurface = relVx * hitNormal.x + relVy * hitNormal.y;
+
+        if (speedIntoSurface < 0) {
+          ball.vx -= (1.72 * speedIntoSurface) * hitNormal.x;
+          ball.vy -= (1.72 * speedIntoSurface) * hitNormal.y;
+        }
+
+        const kickBoost = Math.hypot(footVx, footVy) * 0.75 + 2.2;
+        ball.vx += hitNormal.x * kickBoost + footVx * 0.35;
+        ball.vy += hitNormal.y * kickBoost + footVy * 0.35;
+        ball.spin += footVx * 0.014;
+
+        state.bounces += 1;
+        state.combo += 1;
+        state.lastKickSpeed = Math.hypot(ball.vx, ball.vy);
+
+        ball.x += hitNormal.x * 5;
+        ball.y += hitNormal.y * 5;
+      }
+    }
+
+    function update() {
+      const moveLeft = state.keys.has('a');
+      const moveRight = state.keys.has('d');
+      const liftLeft = state.keys.has('j');
+      const liftRight = state.keys.has('l');
+
+      player.vx = 0;
+      if (moveLeft) player.vx = -5.6;
+      if (moveRight) player.vx = 5.6;
+      player.x += player.vx;
+      player.x = Math.max(90, Math.min(state.width - 90, player.x));
+
+      player.leftFootLift += (liftLeft ? 1 : -1) * 4.8;
+      player.rightFootLift += (liftRight ? 1 : -1) * 4.8;
+      player.leftFootLift = Math.max(0, Math.min(60, player.leftFootLift));
+      player.rightFootLift = Math.max(0, Math.min(60, player.rightFootLift));
+
+      ball.vy += state.gravity;
+      ball.vx *= state.drag;
+      ball.vy *= state.drag;
+      ball.x += ball.vx;
+      ball.y += ball.vy;
+      ball.spin *= 0.99;
+
+      const hipY = state.floorY - player.legLength - 14;
+      player.y = hipY - player.bodyHeight * 0.5;
+
+      const leftAnkleX = player.x - 28;
+      const leftAnkleY = state.floorY - player.leftFootLift;
+      const rightAnkleX = player.x + 28;
+      const rightAnkleY = state.floorY - player.rightFootLift;
+
+      const leftAngle = -0.08 - player.leftFootLift * 0.013;
+      const rightAngle = 0.08 + player.rightFootLift * 0.013;
+
+      const leftFoot = footShape(leftAnkleX, leftAnkleY, leftAngle);
+      const rightFoot = footShape(rightAnkleX, rightAnkleY, rightAngle);
+
+      collideWithFoot(leftFoot, player.vx * 0.9, -player.leftFootLift * 0.28);
+      collideWithFoot(rightFoot, player.vx * 0.9, -player.rightFootLift * 0.28);
+
+      if (ball.x - ball.r < 0) {
+        ball.x = ball.r;
+        ball.vx *= -0.9;
+      }
+      if (ball.x + ball.r > state.width) {
+        ball.x = state.width - ball.r;
+        ball.vx *= -0.9;
+      }
+
+      if (ball.y + ball.r > state.floorY) {
+        ball.y = state.floorY - ball.r;
+        ball.vy *= -state.bounce;
+        ball.vx *= 0.96;
+        if (Math.abs(ball.vy) < 1.2) ball.vy = -3;
+        state.combo = 0;
+      }
+
+      if (ball.y - ball.r < 0) {
+        ball.y = ball.r;
+        ball.vy *= -0.85;
+      }
+
+      draw(leftFoot, rightFoot, leftAnkleX, leftAnkleY, rightAnkleX, rightAnkleY, hipY);
+
+      bounceCountEl.textContent = `Bounces: ${state.bounces}`;
+      kickSpeedEl.textContent = `Kick Speed: ${state.lastKickSpeed.toFixed(1)}`;
+      airComboEl.textContent = `Air Combo: ${state.combo}`;
+
+      requestAnimationFrame(update);
+    }
+
+    function drawGrid() {
+      const horizon = state.height * 0.42;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(109, 244, 255, 0.2)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 24; i++) {
+        const y = horizon + Math.pow(i / 24, 1.6) * (state.height - horizon);
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(state.width, y);
+        ctx.stroke();
+      }
+      for (let i = -14; i <= 14; i++) {
+        const x = state.width * 0.5 + i * 90;
+        ctx.beginPath();
+        ctx.moveTo(state.width * 0.5, horizon);
+        ctx.lineTo(x, state.height);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function drawFoot(poly, glow) {
+      ctx.save();
+      ctx.beginPath();
+      poly.forEach((p, idx) => (idx ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+      ctx.closePath();
+      ctx.fillStyle = '#1f233c';
+      ctx.strokeStyle = glow;
+      ctx.lineWidth = 3;
+      ctx.shadowColor = glow;
+      ctx.shadowBlur = 16;
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawBall() {
+      ctx.save();
+      ctx.translate(ball.x, ball.y);
+      ctx.rotate(ball.spin);
+      ctx.beginPath();
+      ctx.arc(0, 0, ball.r, 0, Math.PI * 2);
+      const grad = ctx.createRadialGradient(-8, -10, 4, 0, 0, ball.r);
+      grad.addColorStop(0, '#fff');
+      grad.addColorStop(1, '#d8d4eb');
+      ctx.fillStyle = grad;
+      ctx.fill();
+      ctx.strokeStyle = '#251735';
+      ctx.lineWidth = 2;
+
+      for (let i = 0; i < 5; i++) {
+        const ang = (Math.PI * 2 * i) / 5;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.cos(ang) * (ball.r - 3), Math.sin(ang) * (ball.r - 3));
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function draw(leftFoot, rightFoot, leftAnkleX, leftAnkleY, rightAnkleX, rightAnkleY, hipY) {
+      ctx.clearRect(0, 0, state.width, state.height);
+      drawGrid();
+
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255, 224, 122, 0.95)';
+      ctx.shadowColor = '#ffe07a';
+      ctx.shadowBlur = 20;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(0, state.floorY + 2);
+      ctx.lineTo(state.width, state.floorY + 2);
+      ctx.stroke();
+      ctx.restore();
+
+      const shoulderY = player.y - 18;
+      const headY = shoulderY - 36;
+
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255, 79, 221, 0.9)';
+      ctx.lineWidth = 5;
+      ctx.shadowColor = '#ff4fdd';
+      ctx.shadowBlur = 20;
+      ctx.beginPath();
+      ctx.moveTo(player.x, shoulderY);
+      ctx.lineTo(player.x, hipY);
+      ctx.moveTo(player.x, shoulderY + 10);
+      ctx.lineTo(player.x - 42, shoulderY + 30);
+      ctx.moveTo(player.x, shoulderY + 10);
+      ctx.lineTo(player.x + 42, shoulderY + 30);
+      ctx.moveTo(player.x, hipY);
+      ctx.lineTo(leftAnkleX, leftAnkleY - 10);
+      ctx.moveTo(player.x, hipY);
+      ctx.lineTo(rightAnkleX, rightAnkleY - 10);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(player.x, headY, 19, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+
+      drawFoot(leftFoot, '#6df4ff');
+      drawFoot(rightFoot, '#ffe07a');
+      drawBall();
+    }
+
+    update();
+  </script>
+</body>
+</html>
