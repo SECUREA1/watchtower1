@@ -1712,6 +1712,34 @@
   // ============================================================
   // Camera look
   // ============================================================
+  const impactFx = { you: 0, ai: 0 };
+  const impactColors = { you: new THREE.Color(0x44aaff), ai: new THREE.Color(0xff4545) };
+  const impactTmp = new THREE.Color();
+
+  function triggerImpact(side, amount = 1) {
+    impactFx[side] = Math.min(1, impactFx[side] + amount);
+  }
+
+  function updateImpactFX(dt) {
+    impactFx.you = Math.max(0, impactFx.you - dt * 3.2);
+    impactFx.ai = Math.max(0, impactFx.ai - dt * 3.2);
+    const applyTo = (fighter, side) => {
+      const lvl = impactFx[side];
+      const body = fighter.userData?.body?.material;
+      const head = fighter.userData?.head?.material;
+      if (body) {
+        body.emissive = body.emissive || new THREE.Color(0x000000);
+        body.emissive.copy(impactTmp.copy(impactColors[side]).multiplyScalar(lvl * 0.9));
+      }
+      if (head) {
+        head.emissive = head.emissive || new THREE.Color(0x000000);
+        head.emissive.copy(impactTmp.copy(impactColors[side]).multiplyScalar(lvl * 0.6));
+      }
+    };
+    applyTo(player, 'you');
+    applyTo(ai, 'ai');
+  }
+
   function updateCamera(now, dt) {
     const baseTarget = new THREE.Vector3(player.position.x * 0.45, 2.2, 0);
 
@@ -2086,6 +2114,7 @@
           lastYouContactAt = now;
           const kind = applyHit("you", "ai", h.power, now);
           setStatus(kind === "block" ? "Blocked" : "Scored!");
+          triggerImpact("ai", kind === "block" ? 0.35 : 1);
 
           const { fwd } = getFacingBasis(player.position, ai.position);
           ai.position.addScaledVector(fwd, -0.10);
@@ -2101,6 +2130,7 @@
           lastAIContactAt = now;
           const kind = applyHit("ai", "you", aiBrain.power, now);
           setStatus(kind === "block" ? "Block!" : "AI scored!");
+          triggerImpact("you", kind === "block" ? 0.35 : 1);
           const { fwd } = getFacingBasis(ai.position, player.position);
           player.position.addScaledVector(fwd, -0.08);
         }
@@ -2108,6 +2138,7 @@
     }
 
     updateHUD(now);
+    updateImpactFX(dt);
     renderer.render(scene, camera3d);
 
     requestAnimationFrame(loop);
