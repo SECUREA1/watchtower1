@@ -125,9 +125,9 @@
     <h1>80s Synthwave Soccer Lab</h1>
     <p>
       Clone vibe from Camera Basketball, now rebuilt as a full-body soccer game with reactive
-      neon feet. Bounce, juggle, and arc the ball across both feet with realistic kick impulse.
+      neon feet. Your full pose now drives the entire avatar so you can freely move in-scene.
     </p>
-    <p>Vision controls: stand back so your full body is visible. Your ankles steer the player and kicks. Keyboard fallback still works.</p>
+    <p>Only the feet can touch the ball. Arms, torso, and head are visual-only so kicks stay authentic.</p>
     <div class="stat-row">
       <span class="stat" id="bounceCount">Bounces: 0</span>
       <span class="stat" id="kickSpeed">Kick Speed: 0.0</span>
@@ -167,14 +167,14 @@
     };
 
     const vision = {
-      leftAnkle: null,
-      rightAnkle: null,
+      landmarks: null,
       leftPrev: null,
       rightPrev: null,
       active: false,
       camera: null,
       pose: null,
       smoothBodyX: null,
+      smoothBodyY: null,
     };
 
     const player = {
@@ -183,9 +183,14 @@
       bodyHeight: 170,
       bodyWidth: 50,
       legLength: 90,
+      hipOffset: 0,
+      shoulderTilt: 0,
+      leftArmAngle: 0,
+      rightArmAngle: 0,
       leftFootLift: 0,
       rightFootLift: 0,
       vx: 0,
+      vy: 0,
     };
 
     const ball = {
@@ -265,13 +270,16 @@
         }
         const left = lm[27];
         const right = lm[28];
-        if (!(left?.visibility > 0.4 && right?.visibility > 0.4)) {
+        const leftHip = lm[23];
+        const rightHip = lm[24];
+        const leftShoulder = lm[11];
+        const rightShoulder = lm[12];
+        if (!(left?.visibility > 0.4 && right?.visibility > 0.4 && leftHip?.visibility > 0.4 && rightHip?.visibility > 0.4 && leftShoulder?.visibility > 0.35 && rightShoulder?.visibility > 0.35)) {
           visionStatusEl.textContent = 'Vision: tracking… (show both feet)';
           return;
         }
 
-        vision.leftAnkle = { x: left.x, y: left.y };
-        vision.rightAnkle = { x: right.x, y: right.y };
+        vision.landmarks = lm;
         vision.active = true;
         state.inputMode = 'vision';
         visionStatusEl.textContent = 'Vision: ON';
@@ -355,32 +363,67 @@
       const liftRight = state.keys.has('l');
 
       player.vx = 0;
-      if (state.inputMode === 'vision' && vision.active && vision.leftAnkle && vision.rightAnkle) {
-        const bodyNormX = (vision.leftAnkle.x + vision.rightAnkle.x) * 0.5;
+      if (state.inputMode === 'vision' && vision.active && vision.landmarks) {
+        const lm = vision.landmarks;
+        const lShoulder = lm[11];
+        const rShoulder = lm[12];
+        const lElbow = lm[13];
+        const rElbow = lm[14];
+        const lWrist = lm[15];
+        const rWrist = lm[16];
+        const lHip = lm[23];
+        const rHip = lm[24];
+        const lKnee = lm[25];
+        const rKnee = lm[26];
+        const lAnkle = lm[27];
+        const rAnkle = lm[28];
+
+        const bodyNormX = (lHip.x + rHip.x) * 0.5;
+        const bodyNormY = (lHip.y + rHip.y) * 0.5;
         const targetX = (1 - bodyNormX) * state.width;
+        const targetY = (bodyNormY - 0.5) * 180;
         vision.smoothBodyX = vision.smoothBodyX == null ? targetX : lerp(vision.smoothBodyX, targetX, 0.22);
+        vision.smoothBodyY = vision.smoothBodyY == null ? targetY : lerp(vision.smoothBodyY, targetY, 0.22);
         player.vx = (vision.smoothBodyX - player.x) * 0.26;
+        player.vy = (vision.smoothBodyY - player.hipOffset) * 0.18;
         player.x += player.vx;
+        player.hipOffset += player.vy;
+
+        const dxShoulders = rShoulder.x - lShoulder.x;
+        const dyShoulders = rShoulder.y - lShoulder.y;
+        player.shoulderTilt = lerp(player.shoulderTilt, Math.atan2(dyShoulders, dxShoulders), 0.25);
+
+        const leftArmTarget = Math.atan2((lWrist.y - lElbow.y), (lWrist.x - lElbow.x));
+        const rightArmTarget = Math.atan2((rWrist.y - rElbow.y), (rWrist.x - rElbow.x));
+        player.leftArmAngle = lerp(player.leftArmAngle, leftArmTarget, 0.25);
+        player.rightArmAngle = lerp(player.rightArmAngle, rightArmTarget, 0.25);
+
+        const kneeLiftInfluence = Math.max(0, (lHip.y - lKnee.y) * 180);
+        const kneeLiftInfluenceR = Math.max(0, (rHip.y - rKnee.y) * 180);
 
         const ankleToLift = (ankleY) => {
           const grounded = Math.max(0, Math.min(1, (ankleY - 0.56) / 0.38));
           return (1 - grounded) * 68;
         };
-        const nextLeftLift = ankleToLift(vision.leftAnkle.y);
-        const nextRightLift = ankleToLift(vision.rightAnkle.y);
+        const nextLeftLift = ankleToLift(lAnkle.y) + kneeLiftInfluence * 0.25;
+        const nextRightLift = ankleToLift(rAnkle.y) + kneeLiftInfluenceR * 0.25;
 
-        const leftVy = vision.leftPrev ? (vision.leftAnkle.y - vision.leftPrev.y) : 0;
-        const rightVy = vision.rightPrev ? (vision.rightAnkle.y - vision.rightPrev.y) : 0;
+        const leftVy = vision.leftPrev ? (lAnkle.y - vision.leftPrev.y) : 0;
+        const rightVy = vision.rightPrev ? (rAnkle.y - vision.rightPrev.y) : 0;
         player.leftFootLift = lerp(player.leftFootLift, Math.max(nextLeftLift, leftVy < -0.02 ? 78 : nextLeftLift), 0.36);
         player.rightFootLift = lerp(player.rightFootLift, Math.max(nextRightLift, rightVy < -0.02 ? 78 : nextRightLift), 0.36);
         player.leftFootLift = Math.max(0, Math.min(86, player.leftFootLift));
         player.rightFootLift = Math.max(0, Math.min(86, player.rightFootLift));
-        vision.leftPrev = { ...vision.leftAnkle };
-        vision.rightPrev = { ...vision.rightAnkle };
+        vision.leftPrev = { x: lAnkle.x, y: lAnkle.y };
+        vision.rightPrev = { x: rAnkle.x, y: rAnkle.y };
       } else {
         if (moveLeft) player.vx = -5.6;
         if (moveRight) player.vx = 5.6;
         player.x += player.vx;
+        player.hipOffset *= 0.85;
+        player.shoulderTilt *= 0.85;
+        player.leftArmAngle = lerp(player.leftArmAngle, Math.PI * 0.8, 0.2);
+        player.rightArmAngle = lerp(player.rightArmAngle, Math.PI * 0.2, 0.2);
 
         player.leftFootLift += (liftLeft ? 1 : -1) * 4.8;
         player.rightFootLift += (liftRight ? 1 : -1) * 4.8;
@@ -389,6 +432,7 @@
       }
 
       player.x = Math.max(90, Math.min(state.width - 90, player.x));
+      player.hipOffset = Math.max(-50, Math.min(90, player.hipOffset));
 
       ball.vy += state.gravity;
       ball.vx *= state.drag;
@@ -397,7 +441,7 @@
       ball.y += ball.vy;
       ball.spin *= 0.99;
 
-      const hipY = state.floorY - player.legLength - 14;
+      const hipY = state.floorY - player.legLength - 14 + player.hipOffset;
       player.y = hipY - player.bodyHeight * 0.5;
 
       const leftAnkleX = player.x - 28;
@@ -523,6 +567,16 @@
 
       const shoulderY = player.y - 18;
       const headY = shoulderY - 36;
+      const shoulderSpread = 42;
+      const leftShoulderX = player.x - Math.cos(player.shoulderTilt) * shoulderSpread;
+      const leftShoulderY = shoulderY - Math.sin(player.shoulderTilt) * shoulderSpread * 0.4;
+      const rightShoulderX = player.x + Math.cos(player.shoulderTilt) * shoulderSpread;
+      const rightShoulderY = shoulderY + Math.sin(player.shoulderTilt) * shoulderSpread * 0.4;
+      const armLen = 46;
+      const leftHandX = leftShoulderX + Math.cos(player.leftArmAngle) * armLen;
+      const leftHandY = leftShoulderY + Math.sin(player.leftArmAngle) * armLen;
+      const rightHandX = rightShoulderX + Math.cos(player.rightArmAngle) * armLen;
+      const rightHandY = rightShoulderY + Math.sin(player.rightArmAngle) * armLen;
 
       ctx.save();
       ctx.strokeStyle = 'rgba(255, 79, 221, 0.9)';
@@ -532,10 +586,12 @@
       ctx.beginPath();
       ctx.moveTo(player.x, shoulderY);
       ctx.lineTo(player.x, hipY);
-      ctx.moveTo(player.x, shoulderY + 10);
-      ctx.lineTo(player.x - 42, shoulderY + 30);
-      ctx.moveTo(player.x, shoulderY + 10);
-      ctx.lineTo(player.x + 42, shoulderY + 30);
+      ctx.moveTo(leftShoulderX, leftShoulderY);
+      ctx.lineTo(rightShoulderX, rightShoulderY);
+      ctx.moveTo(leftShoulderX, leftShoulderY);
+      ctx.lineTo(leftHandX, leftHandY);
+      ctx.moveTo(rightShoulderX, rightShoulderY);
+      ctx.lineTo(rightHandX, rightHandY);
       ctx.moveTo(player.x, hipY);
       ctx.lineTo(leftAnkleX, leftAnkleY - 10);
       ctx.moveTo(player.x, hipY);
