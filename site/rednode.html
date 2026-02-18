@@ -578,7 +578,7 @@
         <div class="auth-panel">
           <div class="brand-unified">
             <h3>Watchtower Unified Flex Fit</h3>
-            <p>Token-gated secure access only. Select Ethereum, Solana, or Cardano and validate against an approved unlock contract.</p>
+            <p>Token-gated secure access only. Select Ethereum, Cardano, or Guest access and validate against an approved unlock contract.</p>
           </div>
           <div>
             <label>Choose unlock network</label>
@@ -587,19 +587,19 @@
                 <span class="chain-icon"><img src="static/watchtown-wood-logo.svg" alt="Watchtower Ethereum icon"/></span>
                 <span class="chain-meta"><strong>Ethereum</strong><span>Mainnet token gate</span></span>
               </button>
-              <button type="button" class="chain-card" data-chain="solana" role="radio" aria-checked="false">
-                <span class="chain-icon"><img src="static/watchtown-wood-logo.svg" alt="Watchtower Solana icon"/></span>
-                <span class="chain-meta"><strong>Solana</strong><span>Fast unlock validation</span></span>
-              </button>
               <button type="button" class="chain-card" data-chain="cardano" role="radio" aria-checked="false">
                 <span class="chain-icon"><img src="static/watchtown-wood-logo.svg" alt="Watchtower Cardano icon"/></span>
                 <span class="chain-meta"><strong>Cardano</strong><span>UTXO token policy gate</span></span>
               </button>
+              <button type="button" class="chain-card" data-chain="guest" role="radio" aria-checked="false">
+                <span class="chain-icon"><img src="static/watchtown-wood-logo.svg" alt="Watchtower Guest icon"/></span>
+                <span class="chain-meta"><strong>Guest</strong><span>Password unlock (boots)</span></span>
+              </button>
             </div>
             <select id="walletChain" style="display:none">
               <option value="ethereum">Ethereum</option>
-              <option value="solana">Solana</option>
               <option value="cardano">Cardano</option>
+              <option value="guest">Guest</option>
             </select>
           </div>
           <div class="contract-select">
@@ -610,7 +610,11 @@
           </div>
           <div>
             <label>Contract</label>
-            <input id="walletContract" type="text" placeholder="0x… / addr… / base58"/>
+            <input id="walletContract" type="text" placeholder="0x… / addr… / guest-access"/>
+          </div>
+          <div>
+            <label>Guest passphrase</label>
+            <input id="walletGuestPassphrase" type="password" placeholder="Required for guest unlock"/>
           </div>
           <div>
             <label>Wallet status</label>
@@ -1287,7 +1291,7 @@ const state = {
   token: localStorage.getItem("rn_token") || "",
   email: localStorage.getItem("rn_email") || "",
   apiBase: (localStorage.getItem("rn_api_base") || "").trim().replace(/\/$/, ""),
-  walletChain: ["ethereum","solana","cardano"].includes(localStorage.getItem("rn_wallet_chain")) ? localStorage.getItem("rn_wallet_chain") : "ethereum",
+  walletChain: ["ethereum","cardano","guest"].includes(localStorage.getItem("rn_wallet_chain")) ? localStorage.getItem("rn_wallet_chain") : "ethereum",
   walletContract: localStorage.getItem("rn_wallet_contract") || "",
   walletAccount: localStorage.getItem("rn_wallet_account") || "",
 
@@ -2439,13 +2443,12 @@ const WALLET_CONTRACTS = {
     { label:"WT Unified ETH Gate A", value:"0x9fC58b9F6f2dE0d35Ebd0A51Dca9d61B3f79a7C1" },
     { label:"WT Unified ETH Gate B", value:"0x6A7D512Ea381Ba2F8b01f0b473f8BDF26d5D3A7D" }
   ],
-  solana: [
-    { label:"WT Unified SOL Gate A", value:"9xQeWvG816bUx9EPfQ8N6e7h22JfX5nM2X8fE6GxwQJQ" },
-    { label:"WT Unified SOL Gate B", value:"4Nd1m8qQhN9Qw5oNFDXL9uBeb5GsyhQ2E31x4n4t4WR4" }
-  ],
   cardano: [
     { label:"WT Unified ADA Gate A", value:"addr1qxpz7k8r3n2m0u6g6f4w0v3j5t8l8y8w7a9shm0k9n7m9h3l4kz4k8" },
     { label:"WT Unified ADA Gate B", value:"addr1qx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5n4z9t3gn7j4s2hr6jhn2" }
+  ],
+  guest: [
+    { label:"WT Guest Access", value:"guest-access" }
   ]
 };
 
@@ -2465,13 +2468,6 @@ function detectWallet(chain){
     }
     return { available:false, name:"No EVM wallet detected" };
   }
-  if(chain === "solana"){
-    if(window.solana?.connect){
-      const name = window.solana.isPhantom ? "Phantom" : "Solana wallet";
-      return { available:true, name };
-    }
-    return { available:false, name:"No Solana wallet detected" };
-  }
   if(chain === "cardano"){
     const cardano = window.cardano;
     if(!cardano) return { available:false, name:"No Cardano wallet detected" };
@@ -2482,6 +2478,9 @@ function detectWallet(chain){
     if(any) return { available:true, name:"Cardano wallet" };
     return { available:false, name:"No Cardano wallet detected" };
   }
+  if(chain === "guest"){
+    return { available:true, name:"Guest password unlock available" };
+  }
   return { available:false, name:"Unsupported network" };
 }
 
@@ -2491,11 +2490,11 @@ function validateContractInput(chain, contract){
   if(chain === "ethereum"){
     return /^0x[a-fA-F0-9]{40}$/.test(trimmed) ? "" : "expected 0x contract address";
   }
-  if(chain === "solana"){
-    return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(trimmed) ? "" : "expected Solana base58 address";
-  }
   if(chain === "cardano"){
     return /^(addr1|addr_test1|stake1)[0-9a-z]{20,}$/i.test(trimmed) ? "" : "expected Cardano address";
+  }
+  if(chain === "guest"){
+    return trimmed === "guest-access" ? "" : "expected guest-access";
   }
   return "unsupported network";
 }
@@ -2521,15 +2520,6 @@ async function connectEvmWallet(chain){
   return { account: accounts[0], chainId };
 }
 
-async function connectSolanaWallet(){
-  const provider = window.solana;
-  if(!provider?.connect) throw new Error("Solana wallet not detected");
-  const res = await provider.connect();
-  const account = provider.publicKey?.toString() || res?.publicKey?.toString();
-  if(!account) throw new Error("Solana wallet connected but no public key");
-  return { account };
-}
-
 function resolveCardanoProvider(){
   const cardano = window.cardano;
   if(!cardano) return null;
@@ -2553,24 +2543,51 @@ async function connectCardanoWallet(){
   return { account: account || provider.name, walletName: provider.name };
 }
 
+
+async function requestServerUnlock({ chain, contract, wallet, passphrase }){
+  const res = await fetch("/api/session/unlock", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chain, contract, wallet, passphrase, access_code: passphrase }),
+  });
+  if(!res.ok) throw new Error("Server unlock validation failed");
+}
+
 async function walletLogin(){
   $("walletMsg").textContent = "";
   try{
     const chain = $("walletChain").value;
-    const contract = $("walletContract").value.trim();
+    const contract = (chain === "guest" ? "guest-access" : $("walletContract").value.trim());
+    if(chain === "guest"){
+      $("walletContract").value = contract;
+    }
     const contractError = validateContractInput(chain, contract);
     if(contractError) throw new Error(contractError);
+    const contracts = WALLET_CONTRACTS[chain] || [];
+    if(!contracts.some(item => item.value === contract)) throw new Error("Contract is not approved for this network");
 
     let walletData = null;
+    let passphrase = "";
     if(chain === "ethereum"){
       walletData = await connectEvmWallet(chain);
-    }else if(chain === "solana"){
-      walletData = await connectSolanaWallet();
+      passphrase = "wallet-verified";
     }else if(chain === "cardano"){
       walletData = await connectCardanoWallet();
+      passphrase = "wallet-verified";
+    }else if(chain === "guest"){
+      passphrase = $("walletGuestPassphrase").value.trim();
+      if(passphrase.toLowerCase() !== "boots") throw new Error("Guest passphrase must be boots");
+      walletData = { account: "guest-user" };
     }else{
       throw new Error("Unsupported network");
     }
+
+    await requestServerUnlock({
+      chain,
+      contract,
+      wallet: walletData.account || "",
+      passphrase,
+    });
 
     state.walletChain = chain;
     state.walletContract = contract;
@@ -2580,11 +2597,15 @@ async function walletLogin(){
     localStorage.setItem("rn_wallet_contract", contract);
     localStorage.setItem("rn_wallet_account", state.walletAccount);
 
-    state.token = `wallet:${chain}:${state.walletAccount || "connected"}`;
+    state.token = chain === "guest"
+      ? "guest:boots"
+      : `wallet:${chain}:${state.walletAccount || "connected"}`;
     localStorage.setItem("rn_token", state.token);
 
     $("tokenInput").value = state.token;
-    $("walletMsg").textContent = `Wallet verified on ${chain}. Access granted.`;
+    $("walletMsg").textContent = chain === "guest"
+      ? "Guest unlock verified. Access granted."
+      : `Wallet verified on ${chain}. Access granted.`;
     setWalletStatus(`Connected: ${state.walletAccount || "wallet verified"}`, true);
     setAuthUI();
     await refreshAll();
@@ -2636,7 +2657,11 @@ function fillContractPresets(chain){
   if(hasCurrent){
     preset.value = state.walletContract;
   }else{
-    preset.value = "";
+    preset.value = chain === "guest" ? "guest-access" : "";
+    if(chain === "guest"){
+      state.walletContract = "guest-access";
+      $("walletContract").value = "guest-access";
+    }
     if(!state.walletContract) $("walletContract").value = "";
   }
 }
@@ -2645,6 +2670,14 @@ function updateWalletAvailability(){
   const chain = $("walletChain").value;
   setActiveChainCard(chain);
   fillContractPresets(chain);
+  const guestPass = $("walletGuestPassphrase");
+  if(guestPass) guestPass.disabled = chain !== "guest";
+  $("walletContract").disabled = chain === "guest";
+  if(chain === "guest"){
+    $("walletContract").value = "guest-access";
+    state.walletContract = "guest-access";
+    localStorage.setItem("rn_wallet_contract", state.walletContract);
+  }
   const info = detectWallet(chain);
   if(info.available){
     setWalletStatus(`${info.name} detected for ${chain}.`, true);
