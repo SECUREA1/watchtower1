@@ -1,4 +1,4 @@
-# app.py - GitHub-only RedNode API (complete) — updated UI serving logic
+# app.py - GitHub-only Watchtower API (complete) — updated UI serving logic
 import base64
 import hashlib
 import json
@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 # -------------------------------------------------------------------------
 REPO_ROOT = Path(__file__).resolve().parent
 
-DATA_DIR = Path(os.getenv("DATA_DIR", "/opt/rednode/data")).resolve()
+DATA_DIR = Path(os.getenv("DATA_DIR", "/opt/watchtower/data")).resolve()
 FACES_DIR = DATA_DIR / "faces"
 IMAGES_DIR = FACES_DIR / "images"
 META_DIR = FACES_DIR / "meta"
@@ -92,9 +92,9 @@ UI_ALLOWED_CONTRACTS = {
 # -------------------------------------------------------------------------
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO), format="[%(levelname)s] %(message)s")
-logger = logging.getLogger("rednode")
+logger = logging.getLogger("watchtower")
 
-app = FastAPI(title="RedNode Storage API")
+app = FastAPI(title="Watchtower Storage API")
 
 # -------------------------------------------------------------------------
 # Camera streaming (Jetson multi-camera)
@@ -381,28 +381,16 @@ def _validate_unlock_payload(payload: UnlockPayload) -> bool:
 # -------------------------------------------------------------------------
 # Friendly route aliases for long filenames (request paths with or without trailing slash)
 HTML_ALIASES = {
-    "/slots": "RedNode Slots.html",
-    "/blackjack": "RedNode Blackjack — Secure Login.html",
-    "/chess": "RedNode Chess — Secure Login.html",
-    "/eye-pro": "RedNode — Eye Pro (Fleet XR Console).html",
-    "/node-eye": "RedNode — Node Eye Console.html",
-    "/abyss": "RedNode.ai — Abyss Pilot (Submarine Viewport HUD).html",
-    "/redar": "RedAR + IonEye — Multi-Cam + Face_Object + Sentinel + WebXR.html",
+    "/watchtower": "home.html",
+    "/watchtower.html": "home.html",
     "/drone-dig": "DRONE DIG + SCOOP — DUAL HAND ISO CONTROLS.html",
-    "/gesture-sim": "Rednode Excavation — Gesture Controlled Sim.html",
-    "/sentinel-side": "Rednode Sentinel — Drone Dig + Pile + Boom Side View.html",
-    "/sentinel-side-full": "Rednode Sentinel — Drone Dig + Pile + Boom Side View (Hands Full Control).html",
     "/excavator-job": "Excavator Job Site — Gesture Driven.html",
     "/excavator-trainer": "Excavator — Terrain Map + Hand-Training Startup Calibration + Micro-Movement Tuner.html",
-    "/locked-views": "RedNode — Locked Views Excavator (2-Hand ISO Controls + Sensitivity Tuners).html",
-    "/indoor-ops": "RedNode Dashboard — Indoor Ops · Sentinel · Demo.html",
-    "/excavator dash": "dadda - Copy - Copy.html",
     "/market": "market.html",
-    "/rednode-dashboard-demo": "RedNode Dashboard — Full Demo.html",
-    "/ar-dashboard": "RedNode Dashboard — Full Demo.html",
-    "/ar-dashboard.html": "RedNode Dashboard — Full Demo.html",
-    "/rednode-dashboard": "RedNode Dashboard — Full Demo.html",
-    "/rednode-dashboard.html": "RedNode Dashboard — Full Demo.html",
+    "/ar-dashboard": "dashboard1.html",
+    "/ar-dashboard.html": "dashboard1.html",
+    "/watchtower-dashboard": "dashboard1.html",
+    "/watchtower-dashboard.html": "dashboard1.html",
     "/multi-camera": "site/multi_camera.html",
     "/multi-camera.html": "site/multi_camera.html",
     "/omconsole": "site/omconsole_render_single.html",
@@ -415,7 +403,7 @@ HTML_ALIASES = {
 
 HOME_PATHS = {"/home", "/home.html"}
 SECURE_PATHS = {"/secure", "/secure/", "/secure.html"}
-REDNODE_PATHS = {"/rednode", "/rednode.html"}
+WATCHTOWER_PATHS = {"/watchtower", "/watchtower.html"}
 DASHBOARD_PATHS = {"/dashboard", "/dashboard.html", "/dashboard1", "/dashboard1.html"}
 CHAINES_PATHS = {
     "/CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll",
@@ -644,7 +632,7 @@ def process_pending_commits_loop() -> None:
                     pr_url = None
                     if branch != GITHUB_BRANCH and (GITHUB_PR_FLOW or branch != GITHUB_BRANCH):
                         try:
-                            pr_url = open_pull_request(branch, title=message, body="Automated face ingestion from RedNode pending queue.")
+                            pr_url = open_pull_request(branch, title=message, body="Automated face ingestion from Watchtower pending queue.")
                         except HTTPException as pr_exc:
                             logger.warning("Pending commit %s: PR creation failed (%s)", pending_id, pr_exc.detail)
                     for face_id in face_ids:
@@ -781,7 +769,7 @@ def commit_to_github(files: Dict[str, bytes], face_id: str, prefer_pr: bool = Fa
             base_sha = get_ref_sha(GITHUB_BRANCH)
             create_branch(branch_name, base_sha)
             commit_sha = commit_files_to_github(files, message, branch=branch_name)
-            pr_url = open_pull_request(branch_name, title=f"Add face {face_ids_list[0]}", body="Automated face ingestion from RedNode sync.")
+            pr_url = open_pull_request(branch_name, title=f"Add face {face_ids_list[0]}", body="Automated face ingestion from Watchtower sync.")
             return {"committed": True, "sha": commit_sha, "pr_url": pr_url, "branch": branch_name, "message": None}
         commit_sha = commit_files_to_github(files, message, branch=branch_name)
         return {"committed": True, "sha": commit_sha, "pr_url": None, "branch": branch_name, "message": None}
@@ -1006,7 +994,7 @@ if STATIC_DIR.exists():
 
 def _fallback_ui() -> Optional[FileResponse]:
     """Return a usable UI when the requested path is missing."""
-    for candidate in ("start.html", "index.html", "rednode.html"):
+    for candidate in ("start.html", "index.html", "home.html"):
         response = serve_file(candidate)
         if response:
             return response
@@ -1043,8 +1031,8 @@ async def serve_frontend(full_path: str, request: Request):
         if response:
             return response
 
-    if url_path in REDNODE_PATHS:
-        response = serve_file("rednode.html")
+    if url_path in WATCHTOWER_PATHS:
+        response = serve_file("home.html")
         if response:
             return response
 
@@ -1079,7 +1067,7 @@ async def serve_frontend(full_path: str, request: Request):
             if html_response:
                 return html_response
 
-    # If nothing matched, fall back to a usable UI if available (spa/index/rednode)
+    # If nothing matched, fall back to a usable UI if available (spa/index/home)
     fallback = _fallback_ui()
     if fallback:
         return fallback
