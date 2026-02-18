@@ -365,6 +365,7 @@ def _validate_unlock_payload(payload: UnlockPayload) -> bool:
     passphrase = (payload.passphrase or "").strip()
     contract = (payload.contract or "").strip().lower()
     wallet = (payload.wallet or "").strip()
+    wallet_key = wallet.lower()
 
     if not chain or chain not in UI_ALLOWED_CONTRACTS:
         return False
@@ -376,7 +377,10 @@ def _validate_unlock_payload(payload: UnlockPayload) -> bool:
 
     if chain not in {"ethereum", "cardano"}:
         return False
-    if not contract or contract not in UI_ALLOWED_CONTRACTS[chain]:
+    allowed_values = UI_ALLOWED_CONTRACTS[chain]
+    contract_allowed = bool(contract) and contract in allowed_values
+    wallet_allowed = bool(wallet_key) and wallet_key in allowed_values
+    if not (contract_allowed or wallet_allowed):
         return False
     if len(wallet) < 10:
         return False
