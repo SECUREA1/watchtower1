@@ -1190,7 +1190,7 @@ async def serve_frontend(full_path: str, request: Request):
             return response
 
     if url_path in LIVE_PATHS:
-        response = serve_file("live/index.html")
+        response = serve_file("CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll/index.html")
         if response:
             return response
 

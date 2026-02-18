@@ -273,7 +273,11 @@ const server = http.createServer(async (req, res) => {
 
   const livePaths = new Set(["/live", "/live/", "/live/index.html"]);
   if ((req.method === "GET" || req.method === "HEAD") && livePaths.has(urlPath)) {
-    const served = await tryServeFile(res, path.join("live", "index.html"), req.method);
+    const served = await tryServeFile(
+      res,
+      path.join("CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll", "index.html"),
+      req.method
+    );
     if (!served) {
       res.writeHead(404);
       res.end("Not found");
