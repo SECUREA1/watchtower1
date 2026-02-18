@@ -222,13 +222,16 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "same-origin"
+    # Secure UI loads ML runtimes + model artifacts from trusted CDNs.
+    # Keep the policy strict while explicitly allowing those hosts.
     response.headers["Content-Security-Policy"] = "; ".join(
         [
             "default-src 'self'",
             "img-src 'self' data: blob:",
-            "script-src 'self' 'unsafe-inline'",
-            "style-src 'self' 'unsafe-inline'",
-            "connect-src 'self'",
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com",
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+            "font-src 'self' https://fonts.gstatic.com data:",
+            "connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com",
             "frame-ancestors 'none'",
         ]
     )
