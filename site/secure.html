@@ -1597,6 +1597,12 @@
       let camLatestLog = Array.from({ length: MAX_CAM_UI }, () => null);
       let camStreams = new Map();  // slotIdx -> MediaStream
       let camStates  = new Map();  // slotIdx -> state
+      const cloudRelay = {
+        enabled: true,
+        inFlight: new Set(),
+        lastUploadAt: new Map(),
+        minIntervalMs: 2000,
+      };
       let devices = [];            // videoinput list
       const cameraRecovery = {
         inProgress: false,
@@ -3265,7 +3271,44 @@
             demoDraw: null,
           },
           lastUnknownAt: 0,
+          fps: 0,
         };
+      }
+
+      async function uploadCloudFrame(idx, video, fps=0){
+        if(!cloudRelay.enabled) return;
+        if(cloudRelay.inFlight.has(idx)) return;
+        const now = Date.now();
+        const last = cloudRelay.lastUploadAt.get(idx) || 0;
+        if(now - last < cloudRelay.minIntervalMs) return;
+        if(!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) return;
+
+        cloudRelay.inFlight.add(idx);
+        try{
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.min(video.videoWidth, 640);
+          canvas.height = Math.round(canvas.width * (video.videoHeight / video.videoWidth));
+          const g = canvas.getContext("2d", { alpha:false });
+          g.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+          const blob = await new Promise(resolve=>canvas.toBlob(resolve, "image/jpeg", 0.72));
+          if(!blob) return;
+          const fd = new FormData();
+          fd.append("camera_id", `secure-cam-${idx}`);
+          fd.append("source", "secure-ui");
+          fd.append("resolution", `${video.videoWidth}x${video.videoHeight}`);
+          fd.append("fps", String(fps || 0));
+          fd.append("frame", blob, `secure-cam-${idx}.jpg`);
+          const res = await fetch("/api/cloud/cameras/frame", { method:"POST", body: fd });
+          if(!res.ok){
+            throw new Error(`Upload failed (${res.status})`);
+          }
+          cloudRelay.lastUploadAt.set(idx, now);
+        }catch(err){
+          addCvLog(`Cloud relay failed for Camera ${idx}: ${(err && err.message) || err}`, "warn");
+        }finally{
+          cloudRelay.inFlight.delete(idx);
+        }
       }
 
       /***********************
@@ -3345,9 +3388,14 @@
           if(now2 - lastFpsStamp > 1000){
             const fps = Math.round((frames * 1000) / (now2 - lastFpsStamp));
             el("camFps_"+idx).textContent = fps + " fps";
+            const s = camStates.get(idx);
+            if(s) s.fps = fps;
             frames = 0;
             lastFpsStamp = now2;
           }
+
+          const s2 = camStates.get(idx);
+          uploadCloudFrame(idx, v, s2?.fps || 0);
 
           requestAnimationFrame(tick);
         };
