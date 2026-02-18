@@ -1340,17 +1340,9 @@
       </div>
 
       <div class="start-access-grid">
-        <div>
-          <label for="startContractPreset">Unlock Contract</label>
-          <select id="startContractPreset"></select>
-        </div>
-        <div>
-          <label for="startWalletInput">Wallet Account</label>
-          <input id="startWalletInput" placeholder="0x..., base58..., addr1..." autocomplete="off" />
-        </div>
         <div class="full">
-          <label for="startPassphrase">Secure Access Code</label>
-          <input id="startPassphrase" type="password" placeholder="Enter secure access code" autocomplete="off" />
+          <label for="startPassphrase">Guest passphrase</label>
+          <input id="startPassphrase" type="password" placeholder="Only required for Guest (boots)" autocomplete="off" />
         </div>
       </div>
 
@@ -1971,51 +1963,19 @@
       const storageKey = 'watchtower_start_access_v2';
       const sessionKey = 'session_user';
       const contracts = {
-        ethereum: [
-          { label: 'WT ETH Main Gate A', value: '0x9fC58b9F6f2dE0d35Ebd0A51Dca9d61B3f79a7C1' },
-          { label: 'WT ETH Main Gate B', value: '0x6A7D512Ea381Ba2F8b01f0b473f8BDF26d5D3A7D' },
-          { label: 'WT ETH Custom Gate', value: '0xEf74118D5fB730E9B2729c7303DC29980b4771f0' }
-        ],
-        cardano: [
-          { label: 'WT ADA Main Gate A', value: 'addr1qxpz7k8r3n2m0u6g6f4w0v3j5t8l8y8w7a9shm0k9n7m9h3l4kz4k8' },
-          { label: 'WT ADA Main Gate B', value: 'addr1qx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5n4z9t3gn7j4s2hr6jhn2' },
-          { label: 'WT ADA Policy Gate A', value: 'd1ec168628a7cdbb92e8d92a184503223626188ddd2d34811b7f5816' },
-          { label: 'WT ADA Policy Gate B', value: '1d31efec7180b3a934856868d548ba205f20b8d6173a26b23a1b74e0' }
-        ],
-        guest: [
-          { label: 'WT Guest Access', value: 'guest-access' }
-        ]
+        ethereum: ['0x9fC58b9F6f2dE0d35Ebd0A51Dca9d61B3f79a7C1','0x6A7D512Ea381Ba2F8b01f0b473f8BDF26d5D3A7D','0xEf74118D5fB730E9B2729c7303DC29980b4771f0'],
+        cardano: ['addr1qxpz7k8r3n2m0u6g6f4w0v3j5t8l8y8w7a9shm0k9n7m9h3l4kz4k8','addr1qx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5n4z9t3gn7j4s2hr6jhn2','d1ec168628a7cdbb92e8d92a184503223626188ddd2d34811b7f5816','1d31efec7180b3a934856868d548ba205f20b8d6173a26b23a1b74e0'],
+        guest: ['guest-access']
       };
 
       const row = document.getElementById('startChainRow');
-      const preset = document.getElementById('startContractPreset');
-      const walletInput = document.getElementById('startWalletInput');
       const passInput = document.getElementById('startPassphrase');
       const msg = document.getElementById('startAccessMsg');
       let chain = 'ethereum';
 
-      const regexByChain = {
-        ethereum: /^0x[a-fA-F0-9]{40}$/,
-        cardano: /^(addr1|addr_test1|stake1)[0-9a-z]{20,}$/i,
-        guest: /^guest-user$/
-      };
-
       const setLocked = (locked) => {
         document.body.classList.toggle('start-locked', locked);
         overlay.classList.toggle('active', locked);
-      };
-
-
-      const renderContracts = () => {
-        const list = contracts[chain] || [];
-        preset.innerHTML = '<option value="">Select approved contract…</option>' + list.map(c => `<option value="${c.value}">${c.label}</option>`).join('');
-
-        const isGuest = chain === 'guest';
-        preset.value = isGuest ? list[0]?.value || '' : '';
-        preset.disabled = isGuest;
-        walletInput.value = isGuest ? 'guest-user' : '';
-        walletInput.disabled = isGuest;
-        walletInput.placeholder = isGuest ? 'guest-user' : '0x..., addr1...';
       };
 
       const setChain = (next) => {
@@ -2025,41 +1985,33 @@
           btn.classList.toggle('active', active);
           btn.setAttribute('aria-checked', active ? 'true' : 'false');
         });
-        renderContracts();
+        passInput.disabled = chain !== 'guest';
+        passInput.placeholder = chain === 'guest' ? 'Enter boots' : 'Not required for wallet unlock';
+        if (chain !== 'guest') passInput.value = '';
       };
 
-
       const detectWallet = (selectedChain) => {
-        if (selectedChain === 'ethereum') return !!window.ethereum?.request;
-        if (selectedChain === 'cardano') {
-          const cardano = window.cardano || {};
-          return Object.values(cardano).some((entry) => !!entry?.enable);
-        }
+        if (selectedChain === 'ethereum') return !!window.ethereum?.request && !!window.ethereum?.isMetaMask;
+        if (selectedChain === 'cardano') return !!window.cardano?.lace?.enable;
         return selectedChain === 'guest';
       };
 
       const connectWallet = async (selectedChain) => {
         if (selectedChain === 'ethereum') {
-          if (!window.ethereum?.request) throw new Error('MetaMask not detected.');
+          if (!window.ethereum?.request || !window.ethereum?.isMetaMask) throw new Error('MetaMask not detected.');
           const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
           if (!accounts?.length) throw new Error('No Ethereum account returned from MetaMask.');
           return accounts[0];
         }
         if (selectedChain === 'cardano') {
-          const cardano = window.cardano || {};
-          const provider = Object.values(cardano).find((entry) => !!entry?.enable);
-          if (!provider?.enable) throw new Error('Cardano wallet not detected.');
+          const provider = window.cardano?.lace;
+          if (!provider?.enable) throw new Error('Lace wallet not detected.');
           const wallet = await provider.enable();
           const used = wallet?.getUsedAddresses ? await wallet.getUsedAddresses() : [];
           const first = Array.isArray(used) && used.length ? used[0] : '';
           return first || 'cardano-wallet';
         }
         return 'guest-user';
-      };
-
-      const ensureApprovedContract = (selectedChain, contract) => {
-        const list = contracts[selectedChain] || [];
-        return list.some((item) => item.value === contract);
       };
 
       const getSaved = () => {
@@ -2112,21 +2064,12 @@
           }
         })();
 
-        const contract = preset.value.trim();
-        const wallet = walletInput.value.trim() || session?.username || '';
-        const phrase = passInput.value || session?.accessToken || '';
-
-        if (!contract || !wallet || !phrase) {
-          msg.textContent = 'Add contract, wallet, and secure access code to restore access.';
-          return;
-        }
-
         try {
           await unlock({ method: 'session', account: session?.username || 'watchtower-user' }, {
-            contract,
-            wallet,
-            passphrase: phrase,
-            accessCode: phrase,
+            contract: (contracts[chain] || [])[0] || '',
+            wallet: session?.username || 'watchtower-user',
+            passphrase: chain === 'guest' ? 'boots' : 'wallet-verified',
+            accessCode: chain === 'guest' ? 'boots' : 'wallet-verified',
           });
         } catch (err) {
           msg.textContent = 'Saved session failed server validation. Re-enter credentials.';
@@ -2137,8 +2080,7 @@
         msg.textContent = 'Validating secure access…';
         const isGuest = chain === 'guest';
         const phrase = passInput.value.trim();
-        const contract = isGuest ? (contracts.guest?.[0]?.value || 'guest-access') : preset.value.trim();
-        const wallet = isGuest ? 'guest-user' : walletInput.value.trim();
+        const contract = (contracts[chain] || [])[0] || '';
 
         if (isGuest && phrase.toLowerCase() !== 'boots') {
           msg.textContent = 'Guest access code is invalid.';
@@ -2152,43 +2094,23 @@
           return;
         }
 
-        if (!contract) {
-          msg.textContent = 'Select an approved unlock contract.';
-          return;
-        }
-
-        if (!ensureApprovedContract(chain, contract)) {
-          msg.textContent = 'Contract is not approved for this secure start page.';
-          return;
-        }
-
-        if (!regexByChain[chain].test(wallet)) {
-          msg.textContent = `Wallet account format is invalid for ${chain}.`;
-          return;
-        }
-
         if (!detectWallet(chain)) {
           msg.textContent = chain === 'ethereum'
             ? 'MetaMask is required for Ethereum unlock.'
-            : 'A Cardano wallet extension is required for Cardano unlock.';
-          return;
-        }
-
-        if (!phrase) {
-          msg.textContent = 'Secure access code is required.';
+            : 'Lace wallet extension is required for Cardano unlock.';
           return;
         }
 
         try {
           const walletAccount = await connectWallet(chain);
-          await unlock({ method: isGuest ? 'guest' : 'wallet', chain, contract, account: isGuest ? 'guest-user' : `${walletAccount.slice(0,6)}...${walletAccount.slice(-4)}` }, {
+          await unlock({ method: 'wallet', chain, contract, account: `${walletAccount.slice(0,6)}...${walletAccount.slice(-4)}` }, {
             contract,
-            wallet: isGuest ? 'guest-user' : walletAccount,
-            passphrase: phrase,
-            accessCode: phrase,
+            wallet: walletAccount,
+            passphrase: 'wallet-verified',
+            accessCode: 'wallet-verified',
           });
         } catch (err) {
-          msg.textContent = err?.message || 'Secure access code rejected by server gate.';
+          msg.textContent = err?.message || 'Wallet verification rejected by server gate.';
         }
       });
 

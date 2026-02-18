@@ -578,7 +578,7 @@
         <div class="auth-panel">
           <div class="brand-unified">
             <h3>Watchtower Unified Flex Fit</h3>
-            <p>Token-gated secure access only. Select Ethereum, Cardano, or Guest access and validate against an approved unlock contract.</p>
+            <p>Token-gated secure access only. Select Ethereum, Cardano, or Guest access. Ethereum opens MetaMask, Cardano checks Lace, and Guest unlocks with password <code>boots</code>.</p>
           </div>
           <div>
             <label>Choose unlock network</label>
@@ -601,16 +601,6 @@
               <option value="cardano">Cardano</option>
               <option value="guest">Guest</option>
             </select>
-          </div>
-          <div class="contract-select">
-            <label for="walletContractPreset">Unlock contract</label>
-            <select id="walletContractPreset">
-              <option value="">Select a secure contract…</option>
-            </select>
-          </div>
-          <div>
-            <label>Contract</label>
-            <input id="walletContract" type="text" placeholder="0x… / addr… / guest-access"/>
           </div>
           <div>
             <label>Guest passphrase</label>
@@ -2462,21 +2452,16 @@ function setWalletStatus(message, ok = null){
 
 function detectWallet(chain){
   if(chain === "ethereum"){
-    if(window.ethereum?.request){
-      const name = window.ethereum.isMetaMask ? "MetaMask" : "EVM wallet";
-      return { available:true, name };
+    if(window.ethereum?.request && window.ethereum.isMetaMask){
+      return { available:true, name:"MetaMask" };
     }
-    return { available:false, name:"No EVM wallet detected" };
+    return { available:false, name:"MetaMask not detected" };
   }
   if(chain === "cardano"){
     const cardano = window.cardano;
     if(!cardano) return { available:false, name:"No Cardano wallet detected" };
-    const known = ["nami","eternl","flint","typhon","lace","yoroi"];
-    const match = known.find(key => cardano[key]?.enable);
-    if(match) return { available:true, name:`${match} wallet` };
-    const any = Object.values(cardano).find(entry => entry?.enable);
-    if(any) return { available:true, name:"Cardano wallet" };
-    return { available:false, name:"No Cardano wallet detected" };
+    if(cardano.lace?.enable) return { available:true, name:"Lace wallet" };
+    return { available:false, name:"Lace wallet not detected" };
   }
   if(chain === "guest"){
     return { available:true, name:"Guest password unlock available" };
@@ -2484,23 +2469,8 @@ function detectWallet(chain){
   return { available:false, name:"Unsupported network" };
 }
 
-function validateContractInput(chain, contract){
-  const trimmed = contract.trim();
-  if(!trimmed) return "contract required";
-  if(chain === "ethereum"){
-    return /^0x[a-fA-F0-9]{40}$/.test(trimmed) ? "" : "expected 0x contract address";
-  }
-  if(chain === "cardano"){
-    return /^(addr1|addr_test1|stake1)[0-9a-z]{20,}$/i.test(trimmed) ? "" : "expected Cardano address";
-  }
-  if(chain === "guest"){
-    return trimmed === "guest-access" ? "" : "expected guest-access";
-  }
-  return "unsupported network";
-}
-
 async function connectEvmWallet(chain){
-  if(!window.ethereum?.request) throw new Error("EVM wallet not detected");
+  if(!window.ethereum?.request || !window.ethereum.isMetaMask) throw new Error("MetaMask not detected");
   const targetChainId = "0x1";
   const accounts = await window.ethereum.request({ method:"eth_requestAccounts" });
   if(!accounts?.length) throw new Error("No EVM accounts found");
@@ -2523,11 +2493,7 @@ async function connectEvmWallet(chain){
 function resolveCardanoProvider(){
   const cardano = window.cardano;
   if(!cardano) return null;
-  const known = ["nami","eternl","flint","typhon","lace","yoroi"];
-  const match = known.find(key => cardano[key]?.enable);
-  if(match) return { name:match, api:cardano[match] };
-  const entry = Object.entries(cardano).find(([, value]) => value?.enable);
-  if(entry) return { name:entry[0], api:entry[1] };
+  if(cardano.lace?.enable) return { name:"lace", api:cardano.lace };
   return null;
 }
 
@@ -2557,14 +2523,9 @@ async function walletLogin(){
   $("walletMsg").textContent = "";
   try{
     const chain = $("walletChain").value;
-    const contract = (chain === "guest" ? "guest-access" : $("walletContract").value.trim());
-    if(chain === "guest"){
-      $("walletContract").value = contract;
-    }
-    const contractError = validateContractInput(chain, contract);
-    if(contractError) throw new Error(contractError);
     const contracts = WALLET_CONTRACTS[chain] || [];
-    if(!contracts.some(item => item.value === contract)) throw new Error("Contract is not approved for this network");
+    const contract = contracts[0]?.value || "";
+    if(!contract) throw new Error("No approved contract configured for this network");
 
     let walletData = null;
     let passphrase = "";
@@ -2648,36 +2609,13 @@ function setActiveChainCard(chain){
   });
 }
 
-function fillContractPresets(chain){
-  const preset = $("walletContractPreset");
-  if(!preset) return;
-  const contracts = WALLET_CONTRACTS[chain] || [];
-  preset.innerHTML = `<option value="">Select a secure contract…</option>` + contracts.map(item => `<option value="${esc(item.value)}">${esc(item.label)}</option>`).join("");
-  const hasCurrent = contracts.some(item => item.value === state.walletContract);
-  if(hasCurrent){
-    preset.value = state.walletContract;
-  }else{
-    preset.value = chain === "guest" ? "guest-access" : "";
-    if(chain === "guest"){
-      state.walletContract = "guest-access";
-      $("walletContract").value = "guest-access";
-    }
-    if(!state.walletContract) $("walletContract").value = "";
-  }
-}
-
 function updateWalletAvailability(){
   const chain = $("walletChain").value;
   setActiveChainCard(chain);
-  fillContractPresets(chain);
   const guestPass = $("walletGuestPassphrase");
   if(guestPass) guestPass.disabled = chain !== "guest";
-  $("walletContract").disabled = chain === "guest";
-  if(chain === "guest"){
-    $("walletContract").value = "guest-access";
-    state.walletContract = "guest-access";
-    localStorage.setItem("rn_wallet_contract", state.walletContract);
-  }
+  state.walletContract = (WALLET_CONTRACTS[chain] || [])[0]?.value || "";
+  if(state.walletContract) localStorage.setItem("rn_wallet_contract", state.walletContract);
   const info = detectWallet(chain);
   if(info.available){
     setWalletStatus(`${info.name} detected for ${chain}.`, true);
@@ -3108,9 +3046,7 @@ async function init(){
   if(state.email) $("email").value = state.email;
   if(state.token) $("tokenInput").value = state.token;
   $("walletChain").value = state.walletChain;
-  $("walletContract").value = state.walletContract;
   setActiveChainCard(state.walletChain);
-  fillContractPresets(state.walletChain);
 
   setAuthUI();
 
@@ -3125,17 +3061,6 @@ async function init(){
     state.walletChain = $("walletChain").value;
     localStorage.setItem("rn_wallet_chain", state.walletChain);
     updateWalletAvailability();
-  });
-  $("walletContract").addEventListener("input", ()=>{
-    state.walletContract = $("walletContract").value;
-    localStorage.setItem("rn_wallet_contract", state.walletContract);
-  });
-  $("walletContractPreset").addEventListener("change", ()=>{
-    const contract = $("walletContractPreset").value;
-    if(!contract) return;
-    $("walletContract").value = contract;
-    state.walletContract = contract;
-    localStorage.setItem("rn_wallet_contract", state.walletContract);
   });
   document.querySelectorAll(".chain-card").forEach(card=>{
     card.addEventListener("click", ()=>{
