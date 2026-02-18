@@ -1201,12 +1201,41 @@
       font-weight: 700;
       letter-spacing: 0.01em;
       background: rgba(227, 194, 122, 0.12);
+      cursor: pointer;
     }
 
     .launch-btn.primary {
       background: linear-gradient(130deg, rgba(227, 194, 122, 0.95), rgba(255, 223, 156, 0.92));
       color: #2d1b0f;
       border-color: rgba(227, 194, 122, 0.85);
+    }
+
+    .hero-chat-status {
+      margin: 0.75rem 0 0;
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+
+    .hero-chat-status.ready {
+      color: #9ff5d1;
+    }
+
+    .hero-chat-status.warn {
+      color: #ffd6a6;
+    }
+
+    .chat-connect-status {
+      margin: 0;
+      font-size: 0.88rem;
+      color: var(--muted);
+    }
+
+    .chat-connect-status.ready {
+      color: #9ff5d1;
+    }
+
+    .chat-connect-status.warn {
+      color: #ffd6a6;
     }
 
     footer {
@@ -1587,6 +1616,8 @@
         <p class="hero-lead">A unified command center for cameras, sensors, and automations—built to keep every room protected and responsive.</p>
 
         <div class="hero-actions">
+          <button class="hero-btn" id="heroChatConnect" type="button">Connect Live Chat</button>
+          <a class="hero-btn primary" id="heroOpenWatchtowerChat" href="/live/">Go Live in Watchtower Chat</a>
           <a class="hero-btn primary" href="/spaces.html">Login to Watchtower Spaces</a>
           <a class="hero-btn" href="/secure.html">Open Secure Console</a>
           <a class="hero-btn" href="/multi_camera.html">View Live Devices</a>
@@ -1594,6 +1625,7 @@
           <a class="hero-btn" href="/marketplace.html">Browse Integrations</a>
           <a class="hero-btn" href="/games">Enter Arcade</a>
         </div>
+        <p class="hero-chat-status" id="heroChatStatus">Live chat is offline until you connect.</p>
 
         <div class="signal-list">
           <div class="signal-row">
@@ -1706,13 +1738,15 @@
     <p>Reconnect the crew, stream the OmConsole, and jump into the Watchtower Arcade from one launchpad.</p>
     <div class="command-grid">
       <div class="command-card">
-        <span class="badge">💬 Spaces Chat</span>
-        <strong>Spaces Social Deck</strong>
-        <p>Drop into the always-on chatroom to coordinate missions, device ops, and support.</p>
+        <span class="badge">💬 Watchtower + IonCore Chat</span>
+        <strong>Live Chat Command Deck</strong>
+        <p>Use the IonCore-style connect flow, then open Watchtower live chat with your operator identity preloaded.</p>
         <div class="command-actions">
-          <a class="launch-btn primary" href="/live">Open Chat &amp; Video →</a>
+          <button class="launch-btn" id="startChatConnect" type="button">Connect Live Chat</button>
+          <a class="launch-btn primary" id="openWatchtowerChat" href="/live/">Open Watchtower Chat →</a>
           <a class="launch-btn" href="/spaces.html">Open Spaces Deck →</a>
         </div>
+        <p class="chat-connect-status" id="startChatStatus">Not connected yet.</p>
       </div>
       <div class="command-card">
         <span class="badge">🎛️ OmConsole</span>
@@ -2218,6 +2252,128 @@
       }
 
       window.addEventListener('pointerdown', startEngineSound, { once: true });
+    })();
+
+
+    (() => {
+      const connectButtons = [
+        document.getElementById('heroChatConnect'),
+        document.getElementById('startChatConnect'),
+      ].filter(Boolean);
+      const openButtons = [
+        document.getElementById('heroOpenWatchtowerChat'),
+        document.getElementById('openWatchtowerChat'),
+      ].filter(Boolean);
+      const statusEls = [
+        document.getElementById('heroChatStatus'),
+        document.getElementById('startChatStatus'),
+      ].filter(Boolean);
+      if (!connectButtons.length || !openButtons.length || !statusEls.length) return;
+
+      const sanitize = (value = '') => value.replace(/[^a-zA-Z0-9_\-.]/g, '').slice(0, 24);
+
+      const getSessionUser = () => {
+        try {
+          const raw = sessionStorage.getItem('session_user');
+          if (!raw) return '';
+          const parsed = JSON.parse(raw);
+          return sanitize(parsed?.username || '');
+        } catch {
+          return '';
+        }
+      };
+
+      const getPreferredUser = () => {
+        const fromSession = getSessionUser();
+        if (fromSession) return fromSession;
+        try {
+          const fromRednode = sanitize(localStorage.getItem('rednode_username') || '');
+          if (fromRednode) return fromRednode;
+          return sanitize(localStorage.getItem('chaines_username') || '');
+        } catch {
+          return '';
+        }
+      };
+
+      const setStatus = (message, tone = '') => {
+        statusEls.forEach((status) => {
+          status.textContent = message;
+          status.classList.remove('ready', 'warn');
+          if (tone) status.classList.add(tone);
+        });
+      };
+
+      const persistUser = (username) => {
+        if (!username) return;
+        try {
+          localStorage.setItem('rednode_username', username);
+          localStorage.setItem('chaines_username', username);
+        } catch {}
+      };
+
+      const buildLocalWS = () => {
+        const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+        return `${proto}${location.host}/ws`;
+      };
+
+      const syncChatLaunch = () => {
+        const username = getPreferredUser();
+        persistUser(username);
+        openButtons.forEach((openBtn) => {
+          openBtn.href = '/live/';
+          openBtn.dataset.username = username;
+        });
+      };
+
+      const connectLive = async () => {
+        connectButtons.forEach((btn) => {
+          btn.disabled = true;
+          btn.dataset.originalLabel = btn.textContent;
+          btn.textContent = 'Connecting…';
+        });
+
+        try {
+          const response = await fetch('/ws-config.json', { cache: 'no-store' });
+          const cfg = response.ok ? await response.json() : {};
+          const localPath = typeof cfg.local === 'string' && cfg.local.startsWith('/') ? cfg.local : '/ws';
+          const localWs = `${location.protocol === 'https:' ? 'wss://' : 'ws://'}${location.host}${localPath}`;
+
+          try {
+            localStorage.setItem('rednode_ws_url', localWs);
+            localStorage.setItem('chaines_ws_url', localWs);
+            localStorage.setItem('chaines_ws_mode', 'local');
+          } catch {}
+
+          syncChatLaunch();
+          setStatus('Live chat connected (local-first). Watchtower is ready to open live.', 'ready');
+        } catch {
+          const fallback = buildLocalWS();
+          try {
+            localStorage.setItem('rednode_ws_url', fallback);
+            localStorage.setItem('chaines_ws_url', fallback);
+            localStorage.setItem('chaines_ws_mode', 'local');
+          } catch {}
+          syncChatLaunch();
+          setStatus('Connected with fallback local endpoint. Live chat can still be opened.', 'warn');
+        } finally {
+          connectButtons.forEach((btn) => {
+            btn.disabled = false;
+            btn.textContent = btn.dataset.originalLabel || 'Connect Live Chat';
+          });
+        }
+      };
+
+      connectButtons.forEach((btn) => {
+        btn.addEventListener('click', connectLive);
+      });
+
+      openButtons.forEach((openBtn) => {
+        openBtn.addEventListener('click', () => {
+          syncChatLaunch();
+        });
+      });
+
+      syncChatLaunch();
     })();
 
     (() => {
