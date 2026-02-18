@@ -1331,12 +1331,11 @@
         <img src="static/watchtown-wood-logo.svg" alt="Watchtower secure access icon" />
         <h3 id="startAccessTitle">Watchtower Main Start Secure Login</h3>
       </div>
-      <p class="start-access-copy">Secure access is required before entering the Watchtower start page. Use Ethereum, Solana, Cardano, or Guest access to continue.</p>
+      <p class="start-access-copy">Secure access is required before entering the Watchtower start page. Use Ethereum, Cardano, or Guest access to continue.</p>
 
       <div class="start-chain-row" id="startChainRow" role="radiogroup" aria-label="Choose network">
         <button class="start-chain-btn active" data-chain="ethereum" role="radio" aria-checked="true"><img src="static/watchtown-wood-logo.svg" alt=""/>Ethereum</button>
-        <button class="start-chain-btn" data-chain="solana" role="radio" aria-checked="false"><img src="static/watchtown-wood-logo.svg" alt=""/>Solana</button>
-        <button class="start-chain-btn" data-chain="cardano" role="radio" aria-checked="false"><img src="static/watchtown-wood-logo.svg" alt=""/>Cardano</button>
+                <button class="start-chain-btn" data-chain="cardano" role="radio" aria-checked="false"><img src="static/watchtown-wood-logo.svg" alt=""/>Cardano</button>
         <button class="start-chain-btn" data-chain="guest" role="radio" aria-checked="false"><img src="static/watchtown-wood-logo.svg" alt=""/>Guest</button>
       </div>
 
@@ -1977,10 +1976,6 @@
           { label: 'WT ETH Main Gate B', value: '0x6A7D512Ea381Ba2F8b01f0b473f8BDF26d5D3A7D' },
           { label: 'WT ETH Custom Gate', value: '0xEf74118D5fB730E9B2729c7303DC29980b4771f0' }
         ],
-        solana: [
-          { label: 'WT SOL Main Gate A', value: '9xQeWvG816bUx9EPfQ8N6e7h22JfX5nM2X8fE6GxwQJQ' },
-          { label: 'WT SOL Main Gate B', value: '4Nd1m8qQhN9Qw5oNFDXL9uBeb5GsyhQ2E31x4n4t4WR4' }
-        ],
         cardano: [
           { label: 'WT ADA Main Gate A', value: 'addr1qxpz7k8r3n2m0u6g6f4w0v3j5t8l8y8w7a9shm0k9n7m9h3l4kz4k8' },
           { label: 'WT ADA Main Gate B', value: 'addr1qx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5n4z9t3gn7j4s2hr6jhn2' },
@@ -2001,7 +1996,6 @@
 
       const regexByChain = {
         ethereum: /^0x[a-fA-F0-9]{40}$/,
-        solana: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/,
         cardano: /^(addr1|addr_test1|stake1)[0-9a-z]{20,}$/i,
         guest: /^guest-user$/
       };
@@ -2021,7 +2015,7 @@
         preset.disabled = isGuest;
         walletInput.value = isGuest ? 'guest-user' : '';
         walletInput.disabled = isGuest;
-        walletInput.placeholder = isGuest ? 'guest-user' : '0x..., base58..., addr1...';
+        walletInput.placeholder = isGuest ? 'guest-user' : '0x..., addr1...';
       };
 
       const setChain = (next) => {
@@ -2032,6 +2026,40 @@
           btn.setAttribute('aria-checked', active ? 'true' : 'false');
         });
         renderContracts();
+      };
+
+
+      const detectWallet = (selectedChain) => {
+        if (selectedChain === 'ethereum') return !!window.ethereum?.request;
+        if (selectedChain === 'cardano') {
+          const cardano = window.cardano || {};
+          return Object.values(cardano).some((entry) => !!entry?.enable);
+        }
+        return selectedChain === 'guest';
+      };
+
+      const connectWallet = async (selectedChain) => {
+        if (selectedChain === 'ethereum') {
+          if (!window.ethereum?.request) throw new Error('MetaMask not detected.');
+          const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+          if (!accounts?.length) throw new Error('No Ethereum account returned from MetaMask.');
+          return accounts[0];
+        }
+        if (selectedChain === 'cardano') {
+          const cardano = window.cardano || {};
+          const provider = Object.values(cardano).find((entry) => !!entry?.enable);
+          if (!provider?.enable) throw new Error('Cardano wallet not detected.');
+          const wallet = await provider.enable();
+          const used = wallet?.getUsedAddresses ? await wallet.getUsedAddresses() : [];
+          const first = Array.isArray(used) && used.length ? used[0] : '';
+          return first || 'cardano-wallet';
+        }
+        return 'guest-user';
+      };
+
+      const ensureApprovedContract = (selectedChain, contract) => {
+        const list = contracts[selectedChain] || [];
+        return list.some((item) => item.value === contract);
       };
 
       const getSaved = () => {
@@ -2129,14 +2157,20 @@
           return;
         }
 
+        if (!ensureApprovedContract(chain, contract)) {
+          msg.textContent = 'Contract is not approved for this secure start page.';
+          return;
+        }
+
         if (!regexByChain[chain].test(wallet)) {
           msg.textContent = `Wallet account format is invalid for ${chain}.`;
           return;
         }
 
-        const list = contracts[chain] || [];
-        if (!list.some((c) => c.value === contract)) {
-          msg.textContent = 'Contract is not approved for this secure start page.';
+        if (!detectWallet(chain)) {
+          msg.textContent = chain === 'ethereum'
+            ? 'MetaMask is required for Ethereum unlock.'
+            : 'A Cardano wallet extension is required for Cardano unlock.';
           return;
         }
 
@@ -2146,14 +2180,15 @@
         }
 
         try {
-          await unlock({ method: isGuest ? 'guest' : 'wallet', chain, contract, account: isGuest ? 'guest-user' : `${wallet.slice(0,6)}...${wallet.slice(-4)}` }, {
+          const walletAccount = await connectWallet(chain);
+          await unlock({ method: isGuest ? 'guest' : 'wallet', chain, contract, account: isGuest ? 'guest-user' : `${walletAccount.slice(0,6)}...${walletAccount.slice(-4)}` }, {
             contract,
-            wallet,
+            wallet: isGuest ? 'guest-user' : walletAccount,
             passphrase: phrase,
             accessCode: phrase,
           });
         } catch (err) {
-          msg.textContent = 'Secure access code rejected by server gate.';
+          msg.textContent = err?.message || 'Secure access code rejected by server gate.';
         }
       });
 

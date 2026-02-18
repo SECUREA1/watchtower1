@@ -78,15 +78,14 @@ UI_ALLOWED_CONTRACTS = {
         "0x6A7D512Ea381Ba2F8b01f0b473f8BDF26d5D3A7D".lower(),
         "0xEf74118D5fB730E9B2729c7303DC29980b4771f0".lower(),
     },
-    "solana": {
-        "9xQeWvG816bUx9EPfQ8N6e7h22JfX5nM2X8fE6GxwQJQ".lower(),
-        "4Nd1m8qQhN9Qw5oNFDXL9uBeb5GsyhQ2E31x4n4t4WR4".lower(),
-    },
     "cardano": {
         "addr1qxpz7k8r3n2m0u6g6f4w0v3j5t8l8y8w7a9shm0k9n7m9h3l4kz4k8".lower(),
         "addr1qx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5n4z9t3gn7j4s2hr6jhn2".lower(),
         "d1ec168628a7cdbb92e8d92a184503223626188ddd2d34811b7f5816".lower(),
         "1d31efec7180b3a934856868d548ba205f20b8d6173a26b23a1b74e0".lower(),
+    },
+    "guest": {
+        "guest-access",
     },
 }
 
@@ -364,29 +363,29 @@ def _is_valid_ui_secret(payload: UnlockPayload) -> bool:
 def _validate_unlock_payload(payload: UnlockPayload) -> bool:
     chain = (payload.chain or "").strip().lower()
     passphrase = (payload.passphrase or "").strip()
-
-    # Keep compatibility with the documented default unlock phrase.
-    if passphrase.lower() == "boots":
-        return True
-
-    # Keep guest access reliable for the start page workflow.
-    if chain == "guest" and passphrase.lower() == "boots":
-        return True
-
-    # Allow direct secret-based unlocks so the default passphrase (`boots`)
-    # can access the platform without requiring blockchain fields.
-    if _is_valid_ui_secret(payload):
-        return True
-
     contract = (payload.contract or "").strip().lower()
     wallet = (payload.wallet or "").strip()
+
     if not chain or chain not in UI_ALLOWED_CONTRACTS:
+        return False
+
+    if chain == "guest":
+        if passphrase.lower() not in {"boots", UI_ACCESS_PASSWORD.lower()}:
+            return False
+        return contract == "guest-access" and wallet in {"guest-user", "guest"}
+
+    if chain not in {"ethereum", "cardano"}:
         return False
     if not contract or contract not in UI_ALLOWED_CONTRACTS[chain]:
         return False
     if len(wallet) < 10:
         return False
-    return True
+
+    # Preserve support for custom hashed access secrets without bypassing chain validation.
+    if _is_valid_ui_secret(payload):
+        return True
+
+    return bool(passphrase)
 
 
 # -------------------------------------------------------------------------
