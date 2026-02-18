@@ -67,6 +67,14 @@ async function serveFile(req, res, filePath) {
 }
 
 const DB_PATH = process.env.DB_PATH || path.join(ROOT, "app.db");
+const MIME = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".json": "application/json; charset=utf-8",
+  ".vtt": "text/vtt; charset=utf-8",
+};
 const db = new Database(DB_PATH);
 db.exec(`
   CREATE TABLE IF NOT EXISTS chat_messages (
@@ -139,41 +147,59 @@ function loadHistory() {
 }
 
 const server = http.createServer(async (req, res) => {
-  const method = req.method || "GET";
-  if (method !== "GET" && method !== "HEAD") {
-    res.writeHead(405, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end("Method Not Allowed");
-    return;
-  }
-
-  const reqUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
-  const pathname = decodeURIComponent(reqUrl.pathname);
-
-  if (pathname === "/healthz") {
-    res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+  const rawPath = (req.url || "/").split("?")[0];
+  if (req.url === "/healthz") {
+    res.writeHead(200);
     res.end("ok");
     return;
   }
 
-  if (pathname === "/ws-config.json") {
-    const payload = JSON.stringify({ local: "/ws", cloud: CLOUD_WS_URL, mode: "local-first" });
-    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-    if (method === "GET") res.end(payload);
-    else res.end();
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    res.writeHead(405, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Method not allowed");
     return;
   }
 
-  if (ROUTES.has(pathname)) {
-    await serveFile(req, res, ROUTES.get(pathname));
+  const routeMap = {
+    "/": "index.html",
+    "/index.html": "index.html",
+    "/contact": "contact.html",
+    "/contact.html": "contact.html",
+    "/chains-ops": "ops.html",
+    "/ops": "ops.html",
+    "/ops.html": "ops.html",
+  };
+
+  const mapped = routeMap[rawPath];
+  if (mapped) {
+    try {
+      const html = await readFile(path.join(ROOT, mapped));
+      res.writeHead(200, { "Content-Type": "text/html" });
+      if (req.method === "GET") res.end(html); else res.end();
+    } catch {
+      res.writeHead(404);
+      res.end("Not found");
+    }
     return;
   }
 
-  if (pathname.startsWith("/static/") || pathname.startsWith("/assets/") || pathname.startsWith("/captions/")) {
-    await serveFile(req, res, pathname.slice(1));
+  const cleaned = path.normalize(rawPath).replace(/^([.][.][/\\])+/, "");
+  const filePath = path.resolve(ROOT, `.${cleaned}`);
+  if (!filePath.startsWith(ROOT)) {
+    res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Forbidden");
     return;
   }
 
-  res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+  try {
+    const file = await readFile(filePath);
+    const ext = path.extname(filePath).toLowerCase();
+    res.writeHead(200, { "Content-Type": MIME[ext] || "application/octet-stream" });
+    if (req.method === "GET") res.end(file); else res.end();
+    return;
+  } catch {}
+
+  res.writeHead(404, { "Content-Type": "text/plain" });
   res.end("Not found");
 });
 
