@@ -498,6 +498,7 @@ CHAINES_PATHS = {
     "/CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll/index.html",
 }
 LIVE_PATHS = {"/live", "/live/", "/live/index.html"}
+CHAINES_LIVE_ROOT = "CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll"
 
 
 def _resolve_path(relative: str) -> Optional[Path]:
@@ -1188,9 +1189,16 @@ async def serve_frontend(full_path: str, request: Request):
             return response
 
     if url_path in LIVE_PATHS:
-        response = serve_file("live/index.html")
+        response = serve_file(f"{CHAINES_LIVE_ROOT}/index.html")
         if response:
             return response
+
+    if url_path.startswith("/live/"):
+        live_relative = url_path.removeprefix("/live/")
+        if live_relative:
+            response = serve_file(f"{CHAINES_LIVE_ROOT}/{live_relative}")
+            if response:
+                return response
 
     # Alias handling for friendly extensionless routes (e.g. /ar-dashboard)
     alias_resp = alias_response(url_path)
