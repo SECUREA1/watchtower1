@@ -168,7 +168,7 @@
     init();
   }
 
-  window.rednodeWS = {
+  window.watchtowerWS = {
     connect,
     close: clearSocket,
     wsRef: () => state.socket,

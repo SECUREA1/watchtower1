@@ -100,26 +100,14 @@ const MIME_TYPES = {
 
 // Friendly route aliases for long filenames (request paths with or without trailing slash)
 const htmlAliases = new Map([
-  ["/slots", "RedNode Slots.html"],
-  ["/blackjack", "RedNode Blackjack — Secure Login.html"],
-  ["/chess", "RedNode Chess — Secure Login.html"],
-  ["/eye-pro", "RedNode — Eye Pro (Fleet XR Console).html"],
-  ["/node-eye", "RedNode — Node Eye Console.html"],
-  ["/abyss", "RedNode.ai — Abyss Pilot (Submarine Viewport HUD).html"],
-  ["/redar", "RedAR + IonEye — Multi-Cam + Face_Object + Sentinel + WebXR.html"],
+  ["/watchtower", "home.html"],
+  ["/watchtower.html", "home.html"],
   ["/drone-dig", "DRONE DIG + SCOOP — DUAL HAND ISO CONTROLS.html"],
-  ["/gesture-sim", "Rednode Excavation — Gesture Controlled Sim.html"],
-  ["/sentinel-side", "Rednode Sentinel — Drone Dig + Pile + Boom Side View.html"],
-  ["/sentinel-side-full", "Rednode Sentinel — Drone Dig + Pile + Boom Side View (Hands Full Control).html"],
   ["/excavator-job", "Excavator Job Site — Gesture Driven.html"],
   ["/excavator-trainer", "Excavator — Terrain Map + Hand-Training Startup Calibration + Micro-Movement Tuner.html"],
-  ["/locked-views", "RedNode — Locked Views Excavator (2-Hand ISO Controls + Sensitivity Tuners).html"],
-  ["/indoor-ops", "RedNode Dashboard — Indoor Ops · Sentinel · Demo.html"],
-  ["/dadda", "dadda - Copy - Copy.html"],
   ["/market", "market.html"],
-  ["/ar-dashboard", "RedNode Dashboard — Full Demo.html"],
-  ["/rednode-dashboard", "RedNode Dashboard — Full Demo.html"],
-  ["/rednode-dashboard-demo", "RedNode Dashboard — Full Demo.html"],
+  ["/ar-dashboard", "dashboard1.html"],
+  ["/watchtower-dashboard", "dashboard1.html"],
 ]);
 
 async function tryServeFile(res, relativePath, method) {
@@ -228,9 +216,9 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  const isRednodeRequest = ["/rednode", "/rednode.html"].includes(urlPath);
-  if ((req.method === "GET" || req.method === "HEAD") && isRednodeRequest) {
-    const served = await tryServeFile(res, "rednode.html", req.method);
+  const isWatchtowerRequest = ["/watchtower", "/watchtower.html"].includes(urlPath);
+  if ((req.method === "GET" || req.method === "HEAD") && isWatchtowerRequest) {
+    const served = await tryServeFile(res, "home.html", req.method);
     if (!served) {
       res.writeHead(404);
       res.end("Not found");
@@ -252,12 +240,12 @@ const server = http.createServer(async (req, res) => {
     "/ar-dashboard",
     "/ar-dashboard.html",
     "/ar-dashboard/",
-    "/rednode-dashboard",
-    "/rednode-dashboard.html",
-    "/rednode-dashboard/",
+    "/watchtower-dashboard",
+    "/watchtower-dashboard.html",
+    "/watchtower-dashboard/",
   ]);
   if ((req.method === "GET" || req.method === "HEAD") && arDashboardPaths.has(urlPath)) {
-    const served = await tryServeFile(res, "RedNode Dashboard — Full Demo.html", req.method);
+    const served = await tryServeFile(res, "dashboard1.html", req.method);
     if (!served) {
       res.writeHead(404);
       res.end("Not found");
@@ -387,7 +375,7 @@ function broadcastLivePeers() {
 wss.on("connection", (ws) => {
   ws.id = uid();
   clients.set(ws.id, ws);
-  ws.send(JSON.stringify({ type: "system", text: "Connected to RedNode Excavation WS" }));
+  ws.send(JSON.stringify({ type: "system", text: "Connected to Watchtower Web Service WS" }));
   ws.send(JSON.stringify({ type: "history", messages: loadHistory() }));
   ws.send(JSON.stringify({ type: "id", id: ws.id }));
   broadcastUsers();
