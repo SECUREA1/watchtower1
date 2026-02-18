@@ -137,7 +137,12 @@ async function tryServeFile(res, relativePath, method) {
       if (method === "GET") {
         let data = await readFile(normalized);
         if (ext === ".html") {
-          const injection = `\n<!-- Live presence counter -->\n<script src="/static/js/live-counter.js"></script>\n`;
+          const injection = [
+            "\n<!-- Live presence counter -->",
+            "<script src=\"/static/js/live-counter.js\"></script>",
+            "<!-- Cloud live pairing bridge -->",
+            "<script src=\"/static/js/live-cloud-bridge.js\"></script>\n",
+          ].join("\n");
           try {
             const text = data.toString();
             if (!text.includes("live-counter.js")) {
@@ -333,7 +338,6 @@ const thumbnails = new Map();
 // track viewers per broadcaster
 const listeners = new Map(); // hostId -> Set of watcherIds
 const watching = new Map();  // watcherId -> Set of hostIds
-let guestApproved = null; // currently approved guest broadcaster
 
 function uid(){
   return Math.random().toString(36).slice(2,9);
@@ -364,6 +368,22 @@ function sendListenerCount(id){
   }
 }
 
+function broadcastLivePeers() {
+  const peers = [];
+  for (const [id, client] of broadcasters.entries()) {
+    peers.push({
+      id,
+      user: client?.username || "guest",
+      thumb: thumbnails.get(id) || null,
+      listeners: listeners.get(id)?.size || 0,
+    });
+  }
+  const payload = JSON.stringify({ type: "live-peers", peers });
+  for (const client of wss.clients) {
+    if (client.readyState === 1) client.send(payload);
+  }
+}
+
 wss.on("connection", (ws) => {
   ws.id = uid();
   clients.set(ws.id, ws);
@@ -371,6 +391,7 @@ wss.on("connection", (ws) => {
   ws.send(JSON.stringify({ type: "history", messages: loadHistory() }));
   ws.send(JSON.stringify({ type: "id", id: ws.id }));
   broadcastUsers();
+  broadcastLivePeers();
   for(const [id, thumb] of thumbnails.entries()){
     ws.send(JSON.stringify({ type: "thumb", id, thumb }));
   }
@@ -381,12 +402,12 @@ wss.on("connection", (ws) => {
       for (const client of wss.clients) {
         if (client.readyState === 1) client.send(JSON.stringify({ type: "bye", id: ws.id }));
       }
-      if (guestApproved === ws.id || broadcasters.size <= 1) guestApproved = null;
       if(listeners.has(ws.id)){
         listeners.delete(ws.id);
         sendListenerCount(ws.id);
       }
       thumbnails.delete(ws.id);
+      broadcastLivePeers();
     }
     const watched = watching.get(ws.id);
     if(watched){
@@ -401,6 +422,7 @@ wss.on("connection", (ws) => {
       watching.delete(ws.id);
     }
     broadcastUsers();
+    broadcastLivePeers();
   });
   ws.on("message", async (raw) => {
     let msg; try { msg = JSON.parse(raw); } catch { return; }
@@ -411,12 +433,9 @@ wss.on("connection", (ws) => {
     }
     switch (msg?.type) {
       case "broadcaster":
-        if (broadcasters.size > 0 && ws.id !== guestApproved) {
-          ws.send(JSON.stringify({ type: "join-denied" }));
-          return;
-        }
         broadcasters.set(ws.id, ws);
         broadcastUsers();
+        broadcastLivePeers();
         return;
       case "end-broadcast":
         if (broadcasters.has(ws.id)) {
@@ -427,41 +446,33 @@ wss.on("connection", (ws) => {
           }
           broadcasters.delete(ws.id);
           thumbnails.delete(ws.id);
-          if (guestApproved === ws.id || broadcasters.size <= 1) guestApproved = null;
           if(listeners.has(ws.id)){
             listeners.delete(ws.id);
             sendListenerCount(ws.id);
           }
           broadcastUsers();
+          broadcastLivePeers();
         }
         return;
       case "join-request": {
-        if (guestApproved) {
-          ws.send(JSON.stringify({ type: "join-denied" }));
-          return;
-        }
         const host = broadcasters.get(msg.id);
         if (host && host.readyState === 1) {
-          host.send(
-            JSON.stringify({ type: "join-request", id: ws.id, user: ws.username })
-          );
+          ws.send(JSON.stringify({ type: "join-approved", id: host.id }));
         } else {
           ws.send(JSON.stringify({ type: "join-denied" }));
         }
         return;
       }
-      case "approve-join": {
-        if (guestApproved) return;
-        const guest = clients.get(msg.id);
-        if (guest && broadcasters.has(ws.id)) {
-          guestApproved = msg.id;
-          guest.send(JSON.stringify({ type: "join-approved" }));
-        }
-        return;
-      }
+      case "approve-join":
       case "deny-join": {
         const guest = clients.get(msg.id);
-        if (guest) guest.send(JSON.stringify({ type: "join-denied" }));
+        if (guest) {
+          guest.send(
+            JSON.stringify({
+              type: msg.type === "approve-join" ? "join-approved" : "join-denied",
+            })
+          );
+        }
         return;
       }
       case "watcher": {
@@ -497,6 +508,7 @@ wss.on("connection", (ws) => {
           for (const client of wss.clients) {
             if (client.readyState === 1) client.send(payload);
           }
+          broadcastLivePeers();
         }
         return;
       }
