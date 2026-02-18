@@ -13,6 +13,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 
 const DB_PATH = process.env.DB_PATH || path.join(ROOT, "app.db");
+const MIME = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".json": "application/json; charset=utf-8",
+  ".vtt": "text/vtt; charset=utf-8",
+};
 const db = new Database(DB_PATH);
 db.exec(`
   CREATE TABLE IF NOT EXISTS chat_messages (
@@ -85,16 +93,33 @@ function loadHistory() {
 }
 
 const server = http.createServer(async (req, res) => {
+  const rawPath = (req.url || "/").split("?")[0];
   if (req.url === "/healthz") {
     res.writeHead(200);
     res.end("ok");
     return;
   }
 
-  // Serve chat client for root requests
-  if ((req.method === "GET" || req.method === "HEAD") && (req.url === "/" || req.url === "/index.html")) {
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    res.writeHead(405, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Method not allowed");
+    return;
+  }
+
+  const routeMap = {
+    "/": "index.html",
+    "/index.html": "index.html",
+    "/contact": "contact.html",
+    "/contact.html": "contact.html",
+    "/chains-ops": "ops.html",
+    "/ops": "ops.html",
+    "/ops.html": "ops.html",
+  };
+
+  const mapped = routeMap[rawPath];
+  if (mapped) {
     try {
-      const html = await readFile(path.join(ROOT, "index.html"));
+      const html = await readFile(path.join(ROOT, mapped));
       res.writeHead(200, { "Content-Type": "text/html" });
       if (req.method === "GET") res.end(html); else res.end();
     } catch {
@@ -103,6 +128,22 @@ const server = http.createServer(async (req, res) => {
     }
     return;
   }
+
+  const cleaned = path.normalize(rawPath).replace(/^([.][.][/\\])+/, "");
+  const filePath = path.resolve(ROOT, `.${cleaned}`);
+  if (!filePath.startsWith(ROOT)) {
+    res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Forbidden");
+    return;
+  }
+
+  try {
+    const file = await readFile(filePath);
+    const ext = path.extname(filePath).toLowerCase();
+    res.writeHead(200, { "Content-Type": MIME[ext] || "application/octet-stream" });
+    if (req.method === "GET") res.end(file); else res.end();
+    return;
+  } catch {}
 
   res.writeHead(404, { "Content-Type": "text/plain" });
   res.end("Not found");
