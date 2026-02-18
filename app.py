@@ -76,6 +76,7 @@ UI_ALLOWED_CONTRACTS = {
     "ethereum": {
         "0x9fC58b9F6f2dE0d35Ebd0A51Dca9d61B3f79a7C1".lower(),
         "0x6A7D512Ea381Ba2F8b01f0b473f8BDF26d5D3A7D".lower(),
+        "0xEf74118D5fB730E9B2729c7303DC29980b4771f0".lower(),
     },
     "solana": {
         "9xQeWvG816bUx9EPfQ8N6e7h22JfX5nM2X8fE6GxwQJQ".lower(),
@@ -84,6 +85,8 @@ UI_ALLOWED_CONTRACTS = {
     "cardano": {
         "addr1qxpz7k8r3n2m0u6g6f4w0v3j5t8l8y8w7a9shm0k9n7m9h3l4kz4k8".lower(),
         "addr1qx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5n4z9t3gn7j4s2hr6jhn2".lower(),
+        "d1ec168628a7cdbb92e8d92a184503223626188ddd2d34811b7f5816".lower(),
+        "1d31efec7180b3a934856868d548ba205f20b8d6173a26b23a1b74e0".lower(),
     },
 }
 
