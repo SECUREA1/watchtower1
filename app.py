@@ -32,6 +32,7 @@ META_DIR = FACES_DIR / "meta"
 INDEX_PATH = FACES_DIR / "index.json"
 LOGS_DIR = DATA_DIR / "logs"
 PENDING_DIR = DATA_DIR / "pending_commits"
+CLOUD_CAMERAS_DIR = DATA_DIR / "cloud_cameras"
 
 # Prefer an explicit STATIC_DIR, then the repo's bundled site/, and finally
 # the container-friendly /app/site location. This avoids "UI not found" when
@@ -130,6 +131,75 @@ def _frame_stream(camera_id: str):
             b"Content-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
         )
 
+
+def _cloud_camera_path(camera_id: str) -> Path:
+    safe = "".join(ch for ch in camera_id if ch.isalnum() or ch in {"-", "_"}).strip("-_")
+    if not safe:
+        safe = "camera"
+    return CLOUD_CAMERAS_DIR / f"{safe}.jpg"
+
+
+def _cloud_camera_meta_path(camera_id: str) -> Path:
+    safe = "".join(ch for ch in camera_id if ch.isalnum() or ch in {"-", "_"}).strip("-_")
+    if not safe:
+        safe = "camera"
+    return CLOUD_CAMERAS_DIR / f"{safe}.json"
+
+
+def _list_cloud_cameras() -> List[dict]:
+    cameras: List[dict] = []
+    if not CLOUD_CAMERAS_DIR.exists():
+        return cameras
+    now = time.time()
+    for meta_path in sorted(CLOUD_CAMERAS_DIR.glob("*.json")):
+        try:
+            payload = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        camera_id = str(payload.get("camera_id") or meta_path.stem)
+        ts = float(payload.get("timestamp") or 0)
+        age = max(0.0, now - ts) if ts else None
+        cameras.append(
+            {
+                "id": camera_id,
+                "type": "cloud",
+                "device": "browser",
+                "sensor_id": None,
+                "resolution": payload.get("resolution") or "unknown",
+                "fps_target": payload.get("fps_target") or 1,
+                "flip": 0,
+                "stats": {
+                    "fps": float(payload.get("fps") or 0),
+                    "frames": int(payload.get("frames") or 0),
+                    "dropped": 0,
+                    "last_frame_ts": ts,
+                    "last_error": None if (age is not None and age <= 15) else "stale",
+                },
+                "cloud": {
+                    "source": payload.get("source") or "secure",
+                    "last_upload_age_s": age,
+                    "live": bool(age is not None and age <= 15),
+                },
+            }
+        )
+    return cameras
+
+
+def _cloud_frame_stream(camera_id: str):
+    boundary = b"frame"
+    frame_path = _cloud_camera_path(camera_id)
+    while True:
+        if not frame_path.exists():
+            time.sleep(0.2)
+            continue
+        try:
+            frame = frame_path.read_bytes()
+        except Exception:
+            time.sleep(0.2)
+            continue
+        yield b"--" + boundary + b"\r\nContent-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
+        time.sleep(0.25)
+
 # CORS
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "")
 if ALLOWED_ORIGINS:
@@ -155,7 +225,7 @@ async def add_security_headers(request: Request, call_next):
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
         "img-src 'self' data: blob:; "
-        "script-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
         "style-src 'self' 'unsafe-inline'; "
         "connect-src 'self'; "
         "frame-ancestors 'none'; "
@@ -165,6 +235,7 @@ async def add_security_headers(request: Request, call_next):
 
 @app.on_event("startup")
 def start_camera_manager() -> None:
+    CLOUD_CAMERAS_DIR.mkdir(parents=True, exist_ok=True)
     if camera_manager:
         camera_manager.start()
 
@@ -460,19 +531,73 @@ def alias_response(url_path: str) -> Optional[FileResponse]:
 
 @app.get("/api/cameras")
 def list_cameras() -> JSONResponse:
-    if not camera_manager:
-        return JSONResponse({"ok": False, "error": "camera manager not available"}, status_code=503)
-    return JSONResponse({"ok": True, "cameras": camera_manager.status()})
+    cameras: List[dict] = []
+    if camera_manager:
+        cameras.extend(camera_manager.status())
+    cloud_cameras = _list_cloud_cameras()
+    if cloud_cameras:
+        cameras.extend(cloud_cameras)
+    if not cameras:
+        return JSONResponse({"ok": False, "error": "no active edge/cloud cameras found"}, status_code=503)
+    return JSONResponse({"ok": True, "cameras": cameras})
 
 
 @app.get("/api/cameras/{camera_id}/mjpeg")
 def stream_camera(camera_id: str) -> StreamingResponse:
-    if not camera_manager:
-        raise HTTPException(status_code=503, detail="camera manager not available")
-    return StreamingResponse(
-        _frame_stream(camera_id),
-        media_type="multipart/x-mixed-replace; boundary=frame",
+    if camera_manager and camera_manager.latest_frame(camera_id) is not None:
+        return StreamingResponse(
+            _frame_stream(camera_id),
+            media_type="multipart/x-mixed-replace; boundary=frame",
+        )
+
+    cloud_meta = _cloud_camera_meta_path(camera_id)
+    if cloud_meta.exists():
+        return StreamingResponse(
+            _cloud_frame_stream(camera_id),
+            media_type="multipart/x-mixed-replace; boundary=frame",
+        )
+
+    raise HTTPException(status_code=404, detail="camera not found")
+
+
+@app.post("/api/cloud/cameras/frame")
+async def upload_cloud_camera_frame(
+    camera_id: str = Form(...),
+    frame: UploadFile = File(...),
+    source: str = Form("secure"),
+    resolution: str = Form(""),
+    fps: float = Form(0.0),
+) -> JSONResponse:
+    data = await frame.read()
+    validate_upload(frame.content_type or "image/jpeg", data)
+    image_path = _cloud_camera_path(camera_id)
+    meta_path = _cloud_camera_meta_path(camera_id)
+
+    previous = {}
+    if meta_path.exists():
+        try:
+            previous = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            previous = {}
+    frames = int(previous.get("frames") or 0) + 1
+    ts = time.time()
+
+    image_path.write_bytes(data)
+    meta_path.write_text(
+        json.dumps(
+            {
+                "camera_id": camera_id,
+                "source": source,
+                "resolution": resolution,
+                "fps": fps,
+                "fps_target": max(1, int(round(fps or 1))),
+                "frames": frames,
+                "timestamp": ts,
+            }
+        ),
+        encoding="utf-8",
     )
+    return JSONResponse({"ok": True, "camera_id": camera_id, "timestamp": ts, "frames": frames})
 
 
 def build_image_path(face_id: str, content_type: str) -> Path:
