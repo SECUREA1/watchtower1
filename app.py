@@ -73,8 +73,6 @@ INDEX_LOCK = threading.Lock()
 AUTH_COOKIE_NAME = "watchtower_access"
 UI_ACCESS_PASSWORD = os.getenv("WATCHTOWER_ACCESS_PASSWORD", "boots")
 UI_ACCESS_CODE = os.getenv("WATCHTOWER_ACCESS_CODE", "")
-WATCHTOWER_WS_LOCAL_PATH = os.getenv("WATCHTOWER_WS_LOCAL_PATH", "/ws")
-WATCHTOWER_CLOUD_WS_URL = os.getenv("WATCHTOWER_CLOUD_WS_URL", "wss://chaines-io-chat.onrender.com/ws")
 UI_ALLOWED_CONTRACTS = {
     "ethereum": {
         "0x9fC58b9F6f2dE0d35Ebd0A51Dca9d61B3f79a7C1".lower(),
@@ -224,15 +222,13 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "same-origin"
-    response.headers["Content-Security-Policy"] = "; ".join(
-        [
-            "default-src 'self'",
-            "img-src 'self' data: blob:",
-            "script-src 'self' 'unsafe-inline'",
-            "style-src 'self' 'unsafe-inline'",
-            "connect-src 'self'",
-            "frame-ancestors 'none'",
-        ]
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "img-src 'self' data: blob:; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'; "
     )
     return response
 
@@ -398,7 +394,6 @@ def _is_public_ui_path(path: str) -> bool:
         "/api/session/logout",
         "/healthz",
         "/health",
-        "/ws-config.json",
         "/favicon.ico",
     }
 
@@ -503,7 +498,6 @@ CHAINES_PATHS = {
     "/CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll/index.html",
 }
 LIVE_PATHS = {"/live", "/live/", "/live/index.html"}
-CHAINES_LIVE_ROOT = "CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll"
 
 
 def _resolve_path(relative: str) -> Optional[Path]:
@@ -1100,15 +1094,6 @@ async def health():
     return {"ok": True}
 
 
-@app.get("/ws-config.json")
-async def ws_config():
-    return {
-        "local": WATCHTOWER_WS_LOCAL_PATH,
-        "cloud": WATCHTOWER_CLOUD_WS_URL,
-        "mode": "local-first",
-    }
-
-
 @app.get("/api/session/status")
 async def session_status(request: Request):
     return {"ok": True, "authenticated": is_ui_authenticated(request)}
@@ -1203,16 +1188,9 @@ async def serve_frontend(full_path: str, request: Request):
             return response
 
     if url_path in LIVE_PATHS:
-        response = serve_file(f"{CHAINES_LIVE_ROOT}/index.html")
+        response = serve_file("live/index.html")
         if response:
             return response
-
-    if url_path.startswith("/live/"):
-        live_relative = url_path.removeprefix("/live/")
-        if live_relative:
-            response = serve_file(f"{CHAINES_LIVE_ROOT}/{live_relative}")
-            if response:
-                return response
 
     # Alias handling for friendly extensionless routes (e.g. /ar-dashboard)
     alias_resp = alias_response(url_path)
