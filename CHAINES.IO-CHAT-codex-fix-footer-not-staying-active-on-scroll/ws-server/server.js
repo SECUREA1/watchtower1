@@ -12,6 +12,60 @@ const PORT = process.env.PORT || 10000; // Render provides PORT
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 
+const CLOUD_WS_URL = process.env.CLOUD_WS_URL || "wss://chaines-io-chat.onrender.com/ws";
+const ROUTES = new Map([
+  ["/", "index.html"],
+  ["/index.html", "index.html"],
+  ["/contact", "contact.html"],
+  ["/contact.html", "contact.html"],
+  ["/chains-ops", "ops.html"],
+  ["/ops.html", "ops.html"],
+  ["/start", "start.html"],
+  ["/start.html", "start.html"],
+]);
+const MIME_TYPES = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".json": "application/json; charset=utf-8",
+  ".vtt": "text/vtt; charset=utf-8",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".ico": "image/x-icon",
+};
+
+function safePath(filePath) {
+  const resolved = path.resolve(ROOT, filePath);
+  if (!resolved.startsWith(ROOT + path.sep) && resolved !== ROOT) return null;
+  return resolved;
+}
+
+async function serveFile(req, res, filePath) {
+  const safe = safePath(filePath);
+  if (!safe) {
+    res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Forbidden");
+    return;
+  }
+  try {
+    let body = await readFile(safe);
+    const ext = path.extname(safe).toLowerCase();
+    const headers = { "Content-Type": MIME_TYPES[ext] || "application/octet-stream" };
+    if (ext === ".html") {
+      body = Buffer.from(body.toString("utf8").replace("<body>", `<body data-cloud-ws="${CLOUD_WS_URL}">`));
+    }
+    res.writeHead(200, headers);
+    if (req.method === "GET") res.end(body);
+    else res.end();
+  } catch {
+    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Not found");
+  }
+}
+
 const DB_PATH = process.env.DB_PATH || path.join(ROOT, "app.db");
 const db = new Database(DB_PATH);
 db.exec(`
@@ -85,26 +139,41 @@ function loadHistory() {
 }
 
 const server = http.createServer(async (req, res) => {
-  if (req.url === "/healthz") {
-    res.writeHead(200);
+  const method = req.method || "GET";
+  if (method !== "GET" && method !== "HEAD") {
+    res.writeHead(405, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Method Not Allowed");
+    return;
+  }
+
+  const reqUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+  const pathname = decodeURIComponent(reqUrl.pathname);
+
+  if (pathname === "/healthz") {
+    res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
     res.end("ok");
     return;
   }
 
-  // Serve chat client for root requests
-  if ((req.method === "GET" || req.method === "HEAD") && (req.url === "/" || req.url === "/index.html")) {
-    try {
-      const html = await readFile(path.join(ROOT, "index.html"));
-      res.writeHead(200, { "Content-Type": "text/html" });
-      if (req.method === "GET") res.end(html); else res.end();
-    } catch {
-      res.writeHead(404);
-      res.end("Not found");
-    }
+  if (pathname === "/ws-config.json") {
+    const payload = JSON.stringify({ local: "/ws", cloud: CLOUD_WS_URL, mode: "local-first" });
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    if (method === "GET") res.end(payload);
+    else res.end();
     return;
   }
 
-  res.writeHead(404, { "Content-Type": "text/plain" });
+  if (ROUTES.has(pathname)) {
+    await serveFile(req, res, ROUTES.get(pathname));
+    return;
+  }
+
+  if (pathname.startsWith("/static/") || pathname.startsWith("/assets/") || pathname.startsWith("/captions/")) {
+    await serveFile(req, res, pathname.slice(1));
+    return;
+  }
+
+  res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
   res.end("Not found");
 });
 
@@ -149,7 +218,7 @@ function sendListenerCount(id){
 wss.on("connection", (ws) => {
   ws.id = uid();
   clients.set(ws.id, ws);
-  ws.send(JSON.stringify({ type: "system", text: "Connected to CHAINeS WS" }));
+  ws.send(JSON.stringify({ type: "system", text: "Connected to Watchtower WS" }));
   ws.send(JSON.stringify({ type: "history", messages: loadHistory() }));
   ws.send(JSON.stringify({ type: "id", id: ws.id }));
   broadcastUsers();

@@ -73,6 +73,8 @@ INDEX_LOCK = threading.Lock()
 AUTH_COOKIE_NAME = "watchtower_access"
 UI_ACCESS_PASSWORD = os.getenv("WATCHTOWER_ACCESS_PASSWORD", "boots")
 UI_ACCESS_CODE = os.getenv("WATCHTOWER_ACCESS_CODE", "")
+WATCHTOWER_WS_LOCAL_PATH = os.getenv("WATCHTOWER_WS_LOCAL_PATH", "/ws")
+WATCHTOWER_CLOUD_WS_URL = os.getenv("WATCHTOWER_CLOUD_WS_URL", "wss://chaines-io-chat.onrender.com/ws")
 UI_ALLOWED_CONTRACTS = {
     "ethereum": {
         "0x9fC58b9F6f2dE0d35Ebd0A51Dca9d61B3f79a7C1".lower(),
@@ -394,6 +396,7 @@ def _is_public_ui_path(path: str) -> bool:
         "/api/session/logout",
         "/healthz",
         "/health",
+        "/ws-config.json",
         "/favicon.ico",
     }
 
@@ -1092,6 +1095,15 @@ async def healthz():
 @app.get("/health")
 async def health():
     return {"ok": True}
+
+
+@app.get("/ws-config.json")
+async def ws_config():
+    return {
+        "local": WATCHTOWER_WS_LOCAL_PATH,
+        "cloud": WATCHTOWER_CLOUD_WS_URL,
+        "mode": "local-first",
+    }
 
 
 @app.get("/api/session/status")
