@@ -1,6 +1,6 @@
 // server.js
 import http from "http";
-import { readFile } from "fs/promises";
+import { readFile, stat } from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 import { WebSocketServer } from "ws";
@@ -11,16 +11,10 @@ const PORT = process.env.PORT || 10000; // Render provides PORT
 // Locate repo root to serve the client HTML
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
+const SITE_ROOT = path.join(ROOT, "site");
+const SERVE_ROOTS = [ROOT, SITE_ROOT];
 
 const DB_PATH = process.env.DB_PATH || path.join(ROOT, "app.db");
-const MIME = {
-  ".html": "text/html; charset=utf-8",
-  ".js": "application/javascript; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".svg": "image/svg+xml",
-  ".json": "application/json; charset=utf-8",
-  ".vtt": "text/vtt; charset=utf-8",
-};
 const db = new Database(DB_PATH);
 db.exec(`
   CREATE TABLE IF NOT EXISTS chat_messages (
@@ -92,58 +86,238 @@ function loadHistory() {
   }));
 }
 
+const MIME_TYPES = {
+  ".js": "text/javascript",
+  ".css": "text/css",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".vtt": "text/vtt",
+  ".html": "text/html",
+};
+
+// Friendly route aliases for long filenames (request paths with or without trailing slash)
+const htmlAliases = new Map([
+  ["/watchtower", "home.html"],
+  ["/watchtower.html", "home.html"],
+  ["/drone-dig", "DRONE DIG + SCOOP — DUAL HAND ISO CONTROLS.html"],
+  ["/excavator-job", "Excavator Job Site — Gesture Driven.html"],
+  ["/excavator-trainer", "Excavator — Terrain Map + Hand-Training Startup Calibration + Micro-Movement Tuner.html"],
+  ["/market", "market.html"],
+  ["/ar-dashboard", "dashboard1.html"],
+  ["/watchtower-dashboard", "dashboard1.html"],
+]);
+
+async function tryServeFile(res, relativePath, method) {
+  for (const base of SERVE_ROOTS) {
+    const normalized = path.normalize(path.join(base, relativePath));
+    if (!normalized.startsWith(base)) continue;
+
+    try {
+      const info = await stat(normalized);
+      if (!info.isFile()) continue;
+      const ext = path.extname(normalized).toLowerCase();
+      const headers = { "Content-Type": MIME_TYPES[ext] || "application/octet-stream" };
+      res.writeHead(200, headers);
+
+      if (method === "GET") {
+        let data = await readFile(normalized);
+        if (ext === ".html") {
+          const injection = [
+            "\n<!-- Live presence counter -->",
+            "<script src=\"/static/js/live-counter.js\"></script>",
+            "<!-- Cloud live pairing bridge -->",
+            "<script src=\"/static/js/live-cloud-bridge.js\"></script>\n",
+          ].join("\n");
+          try {
+            const text = data.toString();
+            if (!text.includes("live-counter.js")) {
+              const needsAppend = !text.includes("</body>");
+              const updated = needsAppend
+                ? text + injection
+                : text.replace("</body>", `${injection}</body>`);
+              data = Buffer.from(updated);
+            }
+          } catch {
+            // If decoding fails, just serve original data
+          }
+        }
+        res.end(data);
+      } else {
+        res.end();
+      }
+      return true;
+    } catch {
+      // try next base
+    }
+  }
+  return false;
+}
+
 const server = http.createServer(async (req, res) => {
-  const rawPath = (req.url || "/").split("?")[0];
   if (req.url === "/healthz") {
     res.writeHead(200);
     res.end("ok");
     return;
   }
 
-  if (req.method !== "GET" && req.method !== "HEAD") {
-    res.writeHead(405, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end("Method not allowed");
+  const urlPath = decodeURIComponent(req.url.split('?')[0]);
+
+  if (req.method === "POST" && urlPath === "/api/excavator") {
+    let body = "";
+    req.on("data", (chunk) => body += chunk);
+    req.on("end", () => {
+      try {
+        const { command } = JSON.parse(body);
+        console.log("Excavator command:", command);
+      } catch {}
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    });
     return;
   }
 
-  const routeMap = {
-    "/": "index.html",
-    "/index.html": "index.html",
-    "/contact": "contact.html",
-    "/contact.html": "contact.html",
-    "/chains-ops": "ops.html",
-    "/ops": "ops.html",
-    "/ops.html": "ops.html",
-  };
-
-  const mapped = routeMap[rawPath];
-  if (mapped) {
-    try {
-      const html = await readFile(path.join(ROOT, mapped));
-      res.writeHead(200, { "Content-Type": "text/html" });
-      if (req.method === "GET") res.end(html); else res.end();
-    } catch {
+  // Serve chat client for root requests
+  const isRootRequest = ["/", "/index.html", "/start", "/start.html"].includes(urlPath);
+  if ((req.method === "GET" || req.method === "HEAD") && isRootRequest) {
+    if (urlPath === "/" || urlPath === "/index.html") {
+      res.writeHead(302, { Location: "/start.html" });
+      res.end();
+      return;
+    }
+    const served = await tryServeFile(res, "start.html", req.method);
+    if (!served) {
       res.writeHead(404);
       res.end("Not found");
     }
     return;
   }
 
-  const cleaned = path.normalize(rawPath).replace(/^([.][.][/\\])+/, "");
-  const filePath = path.resolve(ROOT, `.${cleaned}`);
-  if (!filePath.startsWith(ROOT)) {
-    res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end("Forbidden");
+  const homePaths = new Set(["/home", "/home.html"]);
+  if ((req.method === "GET" || req.method === "HEAD") && homePaths.has(urlPath)) {
+    const served = await tryServeFile(res, "home.html", req.method);
+    if (!served) {
+      res.writeHead(404);
+      res.end("Not found");
+    }
     return;
   }
 
-  try {
-    const file = await readFile(filePath);
-    const ext = path.extname(filePath).toLowerCase();
-    res.writeHead(200, { "Content-Type": MIME[ext] || "application/octet-stream" });
-    if (req.method === "GET") res.end(file); else res.end();
+    // Security page (handles both /secure and /secure.html)
+  const securePaths = new Set(["/secure", "/secure/", "/secure.html"]);
+  if ((req.method === "GET" || req.method === "HEAD") && securePaths.has(urlPath)) {
+    const served = await tryServeFile(res, "secure.html", req.method);
+    if (!served) {
+      res.writeHead(404);
+      res.end("Not found");
+    }
     return;
-  } catch {}
+  }
+
+  const isWatchtowerRequest = ["/watchtower", "/watchtower.html"].includes(urlPath);
+  if ((req.method === "GET" || req.method === "HEAD") && isWatchtowerRequest) {
+    const served = await tryServeFile(res, "home.html", req.method);
+    if (!served) {
+      res.writeHead(404);
+      res.end("Not found");
+    }
+    return;
+  }
+
+  const dashboardPaths = new Set(["/dashboard", "/dashboard.html", "/dashboard1", "/dashboard1.html"]);
+  if ((req.method === "GET" || req.method === "HEAD") && dashboardPaths.has(urlPath)) {
+    const served = await tryServeFile(res, "dashboard1.html", req.method);
+    if (!served) {
+      res.writeHead(404);
+      res.end("Not found");
+    }
+    return;
+  }
+
+  const arDashboardPaths = new Set([
+    "/ar-dashboard",
+    "/ar-dashboard.html",
+    "/ar-dashboard/",
+    "/watchtower-dashboard",
+    "/watchtower-dashboard.html",
+    "/watchtower-dashboard/",
+  ]);
+  if ((req.method === "GET" || req.method === "HEAD") && arDashboardPaths.has(urlPath)) {
+    const served = await tryServeFile(res, "dashboard1.html", req.method);
+    if (!served) {
+      res.writeHead(404);
+      res.end("Not found");
+    }
+    return;
+  }
+
+  const chainesPaths = new Set([
+    "/CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll",
+    "/CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll/",
+    "/CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll/index.html",
+  ]);
+  if ((req.method === "GET" || req.method === "HEAD") && chainesPaths.has(urlPath)) {
+    const served = await tryServeFile(
+      res,
+      path.join("CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll", "index.html"),
+      req.method
+    );
+    if (!served) {
+      res.writeHead(404);
+      res.end("Not found");
+    }
+    return;
+  }
+
+  const livePaths = new Set(["/live", "/live/", "/live/index.html"]);
+  if ((req.method === "GET" || req.method === "HEAD") && livePaths.has(urlPath)) {
+    const served = await tryServeFile(
+      res,
+      path.join("CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll", "index.html"),
+      req.method
+    );
+    if (!served) {
+      res.writeHead(404);
+      res.end("Not found");
+    }
+    return;
+  }
+
+  const aliasKey = urlPath.endsWith("/") && urlPath !== "/" ? urlPath.slice(0, -1) : urlPath;
+  if ((req.method === "GET" || req.method === "HEAD") && htmlAliases.has(aliasKey)) {
+    const served = await tryServeFile(res, htmlAliases.get(aliasKey), req.method);
+    if (!served) {
+      res.writeHead(404);
+      res.end("Not found");
+    }
+    return;
+  }
+
+  // Serve static assets
+  if ((req.method === "GET" || req.method === "HEAD") && urlPath.startsWith("/static/")) {
+    const served = await tryServeFile(res, urlPath.slice(1), req.method);
+    if (!served) {
+      res.writeHead(404);
+      res.end("Not found");
+    }
+    return;
+  }
+
+  if ((req.method === "GET" || req.method === "HEAD") && urlPath !== "/") {
+    const relative = urlPath.replace(/^\/+/, "");
+    if (relative) {
+      let served = await tryServeFile(res, relative, req.method);
+      if (served) return;
+
+      // Allow extensionless routes to resolve to .html files (new experiences)
+      if (!path.extname(relative)) {
+        served = await tryServeFile(res, `${relative}.html`, req.method);
+        if (served) return;
+      }
+    }
+  }
 
   res.writeHead(404, { "Content-Type": "text/plain" });
   res.end("Not found");
@@ -156,7 +330,6 @@ const thumbnails = new Map();
 // track viewers per broadcaster
 const listeners = new Map(); // hostId -> Set of watcherIds
 const watching = new Map();  // watcherId -> Set of hostIds
-let guestApproved = null; // currently approved guest broadcaster
 
 function uid(){
   return Math.random().toString(36).slice(2,9);
@@ -187,13 +360,30 @@ function sendListenerCount(id){
   }
 }
 
+function broadcastLivePeers() {
+  const peers = [];
+  for (const [id, client] of broadcasters.entries()) {
+    peers.push({
+      id,
+      user: client?.username || "guest",
+      thumb: thumbnails.get(id) || null,
+      listeners: listeners.get(id)?.size || 0,
+    });
+  }
+  const payload = JSON.stringify({ type: "live-peers", peers });
+  for (const client of wss.clients) {
+    if (client.readyState === 1) client.send(payload);
+  }
+}
+
 wss.on("connection", (ws) => {
   ws.id = uid();
   clients.set(ws.id, ws);
-  ws.send(JSON.stringify({ type: "system", text: "Connected to CHAINeS WS" }));
+  ws.send(JSON.stringify({ type: "system", text: "Connected to Watchtower Web Service WS" }));
   ws.send(JSON.stringify({ type: "history", messages: loadHistory() }));
   ws.send(JSON.stringify({ type: "id", id: ws.id }));
   broadcastUsers();
+  broadcastLivePeers();
   for(const [id, thumb] of thumbnails.entries()){
     ws.send(JSON.stringify({ type: "thumb", id, thumb }));
   }
@@ -204,12 +394,12 @@ wss.on("connection", (ws) => {
       for (const client of wss.clients) {
         if (client.readyState === 1) client.send(JSON.stringify({ type: "bye", id: ws.id }));
       }
-      if (guestApproved === ws.id || broadcasters.size <= 1) guestApproved = null;
       if(listeners.has(ws.id)){
         listeners.delete(ws.id);
         sendListenerCount(ws.id);
       }
       thumbnails.delete(ws.id);
+      broadcastLivePeers();
     }
     const watched = watching.get(ws.id);
     if(watched){
@@ -224,6 +414,7 @@ wss.on("connection", (ws) => {
       watching.delete(ws.id);
     }
     broadcastUsers();
+    broadcastLivePeers();
   });
   ws.on("message", async (raw) => {
     let msg; try { msg = JSON.parse(raw); } catch { return; }
@@ -234,12 +425,9 @@ wss.on("connection", (ws) => {
     }
     switch (msg?.type) {
       case "broadcaster":
-        if (broadcasters.size > 0 && ws.id !== guestApproved) {
-          ws.send(JSON.stringify({ type: "join-denied" }));
-          return;
-        }
         broadcasters.set(ws.id, ws);
         broadcastUsers();
+        broadcastLivePeers();
         return;
       case "end-broadcast":
         if (broadcasters.has(ws.id)) {
@@ -250,41 +438,33 @@ wss.on("connection", (ws) => {
           }
           broadcasters.delete(ws.id);
           thumbnails.delete(ws.id);
-          if (guestApproved === ws.id || broadcasters.size <= 1) guestApproved = null;
           if(listeners.has(ws.id)){
             listeners.delete(ws.id);
             sendListenerCount(ws.id);
           }
           broadcastUsers();
+          broadcastLivePeers();
         }
         return;
       case "join-request": {
-        if (guestApproved) {
-          ws.send(JSON.stringify({ type: "join-denied" }));
-          return;
-        }
         const host = broadcasters.get(msg.id);
         if (host && host.readyState === 1) {
-          host.send(
-            JSON.stringify({ type: "join-request", id: ws.id, user: ws.username })
-          );
+          ws.send(JSON.stringify({ type: "join-approved", id: host.id }));
         } else {
           ws.send(JSON.stringify({ type: "join-denied" }));
         }
         return;
       }
-      case "approve-join": {
-        if (guestApproved) return;
-        const guest = clients.get(msg.id);
-        if (guest && broadcasters.has(ws.id)) {
-          guestApproved = msg.id;
-          guest.send(JSON.stringify({ type: "join-approved" }));
-        }
-        return;
-      }
+      case "approve-join":
       case "deny-join": {
         const guest = clients.get(msg.id);
-        if (guest) guest.send(JSON.stringify({ type: "join-denied" }));
+        if (guest) {
+          guest.send(
+            JSON.stringify({
+              type: msg.type === "approve-join" ? "join-approved" : "join-denied",
+            })
+          );
+        }
         return;
       }
       case "watcher": {
@@ -320,6 +500,7 @@ wss.on("connection", (ws) => {
           for (const client of wss.clients) {
             if (client.readyState === 1) client.send(payload);
           }
+          broadcastLivePeers();
         }
         return;
       }
