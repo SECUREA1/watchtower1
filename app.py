@@ -85,6 +85,9 @@ UI_ALLOWED_CONTRACTS = {
         "addr1qxpz7k8r3n2m0u6g6f4w0v3j5t8l8y8w7a9shm0k9n7m9h3l4kz4k8".lower(),
         "addr1qx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5n4z9t3gn7j4s2hr6jhn2".lower(),
     },
+    "guest": {
+        "guest-access",
+    },
 }
 
 # -------------------------------------------------------------------------
@@ -364,6 +367,8 @@ def _validate_unlock_payload(payload: UnlockPayload) -> bool:
         return False
     if not contract or contract not in UI_ALLOWED_CONTRACTS[chain]:
         return False
+    if chain == "guest":
+        return _is_valid_ui_secret(payload)
     if len(wallet) < 10:
         return False
     return _is_valid_ui_secret(payload)
