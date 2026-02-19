@@ -148,7 +148,6 @@ app.add_middleware(
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "same-origin"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
@@ -156,7 +155,6 @@ async def add_security_headers(request: Request, call_next):
         "script-src 'self'; "
         "style-src 'self' 'unsafe-inline'; "
         "connect-src 'self'; "
-        "frame-ancestors 'none'; "
     )
     return response
 
