@@ -578,7 +578,7 @@
         <div class="auth-panel">
           <div class="brand-unified">
             <h3>Watchtower Unified Flex Fit</h3>
-            <p>Token-gated secure access only. Select Ethereum, Cardano, or Guest access. Ethereum opens MetaMask, Cardano checks Lace, and Guest unlocks with password <code>boots</code>.</p>
+            <p>Token-gated secure access only. Select Ethereum, Solana, or Cardano and validate against an approved unlock contract.</p>
           </div>
           <div>
             <label>Choose unlock network</label>
@@ -587,24 +587,30 @@
                 <span class="chain-icon"><img src="static/watchtown-wood-logo.svg" alt="Watchtower Ethereum icon"/></span>
                 <span class="chain-meta"><strong>Ethereum</strong><span>Mainnet token gate</span></span>
               </button>
+              <button type="button" class="chain-card" data-chain="solana" role="radio" aria-checked="false">
+                <span class="chain-icon"><img src="static/watchtown-wood-logo.svg" alt="Watchtower Solana icon"/></span>
+                <span class="chain-meta"><strong>Solana</strong><span>Fast unlock validation</span></span>
+              </button>
               <button type="button" class="chain-card" data-chain="cardano" role="radio" aria-checked="false">
                 <span class="chain-icon"><img src="static/watchtown-wood-logo.svg" alt="Watchtower Cardano icon"/></span>
                 <span class="chain-meta"><strong>Cardano</strong><span>UTXO token policy gate</span></span>
               </button>
-              <button type="button" class="chain-card" data-chain="guest" role="radio" aria-checked="false">
-                <span class="chain-icon"><img src="static/watchtown-wood-logo.svg" alt="Watchtower Guest icon"/></span>
-                <span class="chain-meta"><strong>Guest</strong><span>Password unlock (boots)</span></span>
-              </button>
             </div>
             <select id="walletChain" style="display:none">
               <option value="ethereum">Ethereum</option>
+              <option value="solana">Solana</option>
               <option value="cardano">Cardano</option>
-              <option value="guest">Guest</option>
+            </select>
+          </div>
+          <div class="contract-select">
+            <label for="walletContractPreset">Unlock contract</label>
+            <select id="walletContractPreset">
+              <option value="">Select a secure contract…</option>
             </select>
           </div>
           <div>
-            <label>Guest passphrase</label>
-            <input id="walletGuestPassphrase" type="password" placeholder="Required for guest unlock"/>
+            <label>Contract</label>
+            <input id="walletContract" type="text" placeholder="0x… / addr… / base58"/>
           </div>
           <div>
             <label>Wallet status</label>
@@ -1281,7 +1287,7 @@ const state = {
   token: localStorage.getItem("rn_token") || "",
   email: localStorage.getItem("rn_email") || "",
   apiBase: (localStorage.getItem("rn_api_base") || "").trim().replace(/\/$/, ""),
-  walletChain: ["ethereum","cardano","guest"].includes(localStorage.getItem("rn_wallet_chain")) ? localStorage.getItem("rn_wallet_chain") : "ethereum",
+  walletChain: ["ethereum","solana","cardano"].includes(localStorage.getItem("rn_wallet_chain")) ? localStorage.getItem("rn_wallet_chain") : "ethereum",
   walletContract: localStorage.getItem("rn_wallet_contract") || "",
   walletAccount: localStorage.getItem("rn_wallet_account") || "",
 
@@ -2431,17 +2437,15 @@ const SECRET_ACCESS_PASSWORD = "tightass";
 const WALLET_CONTRACTS = {
   ethereum: [
     { label:"WT Unified ETH Gate A", value:"0x9fC58b9F6f2dE0d35Ebd0A51Dca9d61B3f79a7C1" },
-    { label:"WT Unified ETH Gate B", value:"0x6A7D512Ea381Ba2F8b01f0b473f8BDF26d5D3A7D" },
-    { label:"WT Unified ETH Gate C", value:"0xEf74118D5fB730E9B2729c7303DC29980b4771f0" }
+    { label:"WT Unified ETH Gate B", value:"0x6A7D512Ea381Ba2F8b01f0b473f8BDF26d5D3A7D" }
+  ],
+  solana: [
+    { label:"WT Unified SOL Gate A", value:"9xQeWvG816bUx9EPfQ8N6e7h22JfX5nM2X8fE6GxwQJQ" },
+    { label:"WT Unified SOL Gate B", value:"4Nd1m8qQhN9Qw5oNFDXL9uBeb5GsyhQ2E31x4n4t4WR4" }
   ],
   cardano: [
     { label:"WT Unified ADA Gate A", value:"addr1qxpz7k8r3n2m0u6g6f4w0v3j5t8l8y8w7a9shm0k9n7m9h3l4kz4k8" },
-    { label:"WT Unified ADA Gate B", value:"addr1qx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5n4z9t3gn7j4s2hr6jhn2" },
-    { label:"WT Unified ADA Policy C", value:"d1ec168628a7cdbb92e8d92a184503223626188ddd2d34811b7f5816" },
-    { label:"WT Unified ADA Policy D", value:"1d31efec7180b3a934856868d548ba205f20b8d6173a26b23a1b74e0" }
-  ],
-  guest: [
-    { label:"WT Guest Access", value:"guest-access" }
+    { label:"WT Unified ADA Gate B", value:"addr1qx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5n4z9t3gn7j4s2hr6jhn2" }
   ]
 };
 
@@ -2455,25 +2459,49 @@ function setWalletStatus(message, ok = null){
 
 function detectWallet(chain){
   if(chain === "ethereum"){
-    if(window.ethereum?.request && window.ethereum.isMetaMask){
-      return { available:true, name:"MetaMask" };
+    if(window.ethereum?.request){
+      const name = window.ethereum.isMetaMask ? "MetaMask" : "EVM wallet";
+      return { available:true, name };
     }
-    return { available:false, name:"MetaMask not detected" };
+    return { available:false, name:"No EVM wallet detected" };
+  }
+  if(chain === "solana"){
+    if(window.solana?.connect){
+      const name = window.solana.isPhantom ? "Phantom" : "Solana wallet";
+      return { available:true, name };
+    }
+    return { available:false, name:"No Solana wallet detected" };
   }
   if(chain === "cardano"){
     const cardano = window.cardano;
     if(!cardano) return { available:false, name:"No Cardano wallet detected" };
-    if(cardano.lace?.enable) return { available:true, name:"Lace wallet" };
-    return { available:false, name:"Lace wallet not detected" };
-  }
-  if(chain === "guest"){
-    return { available:true, name:"Guest password unlock available" };
+    const known = ["nami","eternl","flint","typhon","lace","yoroi"];
+    const match = known.find(key => cardano[key]?.enable);
+    if(match) return { available:true, name:`${match} wallet` };
+    const any = Object.values(cardano).find(entry => entry?.enable);
+    if(any) return { available:true, name:"Cardano wallet" };
+    return { available:false, name:"No Cardano wallet detected" };
   }
   return { available:false, name:"Unsupported network" };
 }
 
+function validateContractInput(chain, contract){
+  const trimmed = contract.trim();
+  if(!trimmed) return "contract required";
+  if(chain === "ethereum"){
+    return /^0x[a-fA-F0-9]{40}$/.test(trimmed) ? "" : "expected 0x contract address";
+  }
+  if(chain === "solana"){
+    return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(trimmed) ? "" : "expected Solana base58 address";
+  }
+  if(chain === "cardano"){
+    return /^(addr1|addr_test1|stake1)[0-9a-z]{20,}$/i.test(trimmed) ? "" : "expected Cardano address";
+  }
+  return "unsupported network";
+}
+
 async function connectEvmWallet(chain){
-  if(!window.ethereum?.request || !window.ethereum.isMetaMask) throw new Error("MetaMask not detected");
+  if(!window.ethereum?.request) throw new Error("EVM wallet not detected");
   const targetChainId = "0x1";
   const accounts = await window.ethereum.request({ method:"eth_requestAccounts" });
   if(!accounts?.length) throw new Error("No EVM accounts found");
@@ -2493,10 +2521,23 @@ async function connectEvmWallet(chain){
   return { account: accounts[0], chainId };
 }
 
+async function connectSolanaWallet(){
+  const provider = window.solana;
+  if(!provider?.connect) throw new Error("Solana wallet not detected");
+  const res = await provider.connect();
+  const account = provider.publicKey?.toString() || res?.publicKey?.toString();
+  if(!account) throw new Error("Solana wallet connected but no public key");
+  return { account };
+}
+
 function resolveCardanoProvider(){
   const cardano = window.cardano;
   if(!cardano) return null;
-  if(cardano.lace?.enable) return { name:"lace", api:cardano.lace };
+  const known = ["nami","eternl","flint","typhon","lace","yoroi"];
+  const match = known.find(key => cardano[key]?.enable);
+  if(match) return { name:match, api:cardano[match] };
+  const entry = Object.entries(cardano).find(([, value]) => value?.enable);
+  if(entry) return { name:entry[0], api:entry[1] };
   return null;
 }
 
@@ -2512,46 +2553,24 @@ async function connectCardanoWallet(){
   return { account: account || provider.name, walletName: provider.name };
 }
 
-
-async function requestServerUnlock({ chain, contract, wallet, passphrase }){
-  const res = await fetch("/api/session/unlock", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chain, contract, wallet, passphrase, access_code: passphrase }),
-  });
-  if(!res.ok) throw new Error("Server unlock validation failed");
-}
-
 async function walletLogin(){
   $("walletMsg").textContent = "";
   try{
     const chain = $("walletChain").value;
-    const contracts = WALLET_CONTRACTS[chain] || [];
-    const contract = contracts[0]?.value || "";
-    if(!contract) throw new Error("No approved contract configured for this network");
+    const contract = $("walletContract").value.trim();
+    const contractError = validateContractInput(chain, contract);
+    if(contractError) throw new Error(contractError);
 
     let walletData = null;
-    let passphrase = "";
     if(chain === "ethereum"){
       walletData = await connectEvmWallet(chain);
-      passphrase = "wallet-verified";
+    }else if(chain === "solana"){
+      walletData = await connectSolanaWallet();
     }else if(chain === "cardano"){
       walletData = await connectCardanoWallet();
-      passphrase = "wallet-verified";
-    }else if(chain === "guest"){
-      passphrase = $("walletGuestPassphrase").value.trim();
-      if(passphrase.toLowerCase() !== "boots") throw new Error("Guest passphrase must be boots");
-      walletData = { account: "guest-user" };
     }else{
       throw new Error("Unsupported network");
     }
-
-    await requestServerUnlock({
-      chain,
-      contract,
-      wallet: walletData.account || "",
-      passphrase,
-    });
 
     state.walletChain = chain;
     state.walletContract = contract;
@@ -2561,15 +2580,11 @@ async function walletLogin(){
     localStorage.setItem("rn_wallet_contract", contract);
     localStorage.setItem("rn_wallet_account", state.walletAccount);
 
-    state.token = chain === "guest"
-      ? "guest:boots"
-      : `wallet:${chain}:${state.walletAccount || "connected"}`;
+    state.token = `wallet:${chain}:${state.walletAccount || "connected"}`;
     localStorage.setItem("rn_token", state.token);
 
     $("tokenInput").value = state.token;
-    $("walletMsg").textContent = chain === "guest"
-      ? "Guest unlock verified. Access granted."
-      : `Wallet verified on ${chain}. Access granted.`;
+    $("walletMsg").textContent = `Wallet verified on ${chain}. Access granted.`;
     setWalletStatus(`Connected: ${state.walletAccount || "wallet verified"}`, true);
     setAuthUI();
     await refreshAll();
@@ -2612,13 +2627,24 @@ function setActiveChainCard(chain){
   });
 }
 
+function fillContractPresets(chain){
+  const preset = $("walletContractPreset");
+  if(!preset) return;
+  const contracts = WALLET_CONTRACTS[chain] || [];
+  preset.innerHTML = `<option value="">Select a secure contract…</option>` + contracts.map(item => `<option value="${esc(item.value)}">${esc(item.label)}</option>`).join("");
+  const hasCurrent = contracts.some(item => item.value === state.walletContract);
+  if(hasCurrent){
+    preset.value = state.walletContract;
+  }else{
+    preset.value = "";
+    if(!state.walletContract) $("walletContract").value = "";
+  }
+}
+
 function updateWalletAvailability(){
   const chain = $("walletChain").value;
   setActiveChainCard(chain);
-  const guestPass = $("walletGuestPassphrase");
-  if(guestPass) guestPass.disabled = chain !== "guest";
-  state.walletContract = (WALLET_CONTRACTS[chain] || [])[0]?.value || "";
-  if(state.walletContract) localStorage.setItem("rn_wallet_contract", state.walletContract);
+  fillContractPresets(chain);
   const info = detectWallet(chain);
   if(info.available){
     setWalletStatus(`${info.name} detected for ${chain}.`, true);
@@ -3049,7 +3075,9 @@ async function init(){
   if(state.email) $("email").value = state.email;
   if(state.token) $("tokenInput").value = state.token;
   $("walletChain").value = state.walletChain;
+  $("walletContract").value = state.walletContract;
   setActiveChainCard(state.walletChain);
+  fillContractPresets(state.walletChain);
 
   setAuthUI();
 
@@ -3064,6 +3092,17 @@ async function init(){
     state.walletChain = $("walletChain").value;
     localStorage.setItem("rn_wallet_chain", state.walletChain);
     updateWalletAvailability();
+  });
+  $("walletContract").addEventListener("input", ()=>{
+    state.walletContract = $("walletContract").value;
+    localStorage.setItem("rn_wallet_contract", state.walletContract);
+  });
+  $("walletContractPreset").addEventListener("change", ()=>{
+    const contract = $("walletContractPreset").value;
+    if(!contract) return;
+    $("walletContract").value = contract;
+    state.walletContract = contract;
+    localStorage.setItem("rn_wallet_contract", state.walletContract);
   });
   document.querySelectorAll(".chain-card").forEach(card=>{
     card.addEventListener("click", ()=>{

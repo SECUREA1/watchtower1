@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 # -------------------------------------------------------------------------
 REPO_ROOT = Path(__file__).resolve().parent
 
-DATA_DIR = Path(os.getenv("DATA_DIR", "/opt/watchtower/data")).resolve()
+DATA_DIR = Path(os.getenv("DATA_DIR", "/opt/rednode/data")).resolve()
 FACES_DIR = DATA_DIR / "faces"
 IMAGES_DIR = FACES_DIR / "images"
 META_DIR = FACES_DIR / "meta"
@@ -150,15 +150,13 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "same-origin"
-    response.headers["Content-Security-Policy"] = "; ".join(
-        [
-            "default-src 'self'",
-            "img-src 'self' data: blob:",
-            "script-src 'self'",
-            "style-src 'self' 'unsafe-inline'",
-            "connect-src 'self'",
-            "frame-ancestors 'none'",
-        ]
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "img-src 'self' data: blob:; "
+        "script-src 'self'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'; "
     )
     return response
 
@@ -378,10 +376,6 @@ def _validate_unlock_payload(payload: UnlockPayload) -> bool:
 # -------------------------------------------------------------------------
 # Friendly route aliases for long filenames (request paths with or without trailing slash)
 HTML_ALIASES = {
-    "/arcade": "site/games.html",
-    "/arcade.html": "site/games.html",
-    "/the-arcade": "site/games.html",
-    "/the-arcade.html": "site/games.html",
     "/slots": "RedNode Slots.html",
     "/blackjack": "RedNode Blackjack — Secure Login.html",
     "/chess": "RedNode Chess — Secure Login.html",

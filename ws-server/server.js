@@ -100,14 +100,26 @@ const MIME_TYPES = {
 
 // Friendly route aliases for long filenames (request paths with or without trailing slash)
 const htmlAliases = new Map([
-  ["/watchtower", "home.html"],
-  ["/watchtower.html", "home.html"],
+  ["/slots", "RedNode Slots.html"],
+  ["/blackjack", "RedNode Blackjack — Secure Login.html"],
+  ["/chess", "RedNode Chess — Secure Login.html"],
+  ["/eye-pro", "RedNode — Eye Pro (Fleet XR Console).html"],
+  ["/node-eye", "RedNode — Node Eye Console.html"],
+  ["/abyss", "RedNode.ai — Abyss Pilot (Submarine Viewport HUD).html"],
+  ["/redar", "RedAR + IonEye — Multi-Cam + Face_Object + Sentinel + WebXR.html"],
   ["/drone-dig", "DRONE DIG + SCOOP — DUAL HAND ISO CONTROLS.html"],
+  ["/gesture-sim", "Rednode Excavation — Gesture Controlled Sim.html"],
+  ["/sentinel-side", "Rednode Sentinel — Drone Dig + Pile + Boom Side View.html"],
+  ["/sentinel-side-full", "Rednode Sentinel — Drone Dig + Pile + Boom Side View (Hands Full Control).html"],
   ["/excavator-job", "Excavator Job Site — Gesture Driven.html"],
   ["/excavator-trainer", "Excavator — Terrain Map + Hand-Training Startup Calibration + Micro-Movement Tuner.html"],
+  ["/locked-views", "RedNode — Locked Views Excavator (2-Hand ISO Controls + Sensitivity Tuners).html"],
+  ["/indoor-ops", "RedNode Dashboard — Indoor Ops · Sentinel · Demo.html"],
+  ["/dadda", "dadda - Copy - Copy.html"],
   ["/market", "market.html"],
-  ["/ar-dashboard", "dashboard1.html"],
-  ["/watchtower-dashboard", "dashboard1.html"],
+  ["/ar-dashboard", "RedNode Dashboard — Full Demo.html"],
+  ["/rednode-dashboard", "RedNode Dashboard — Full Demo.html"],
+  ["/rednode-dashboard-demo", "RedNode Dashboard — Full Demo.html"],
 ]);
 
 async function tryServeFile(res, relativePath, method) {
@@ -125,12 +137,7 @@ async function tryServeFile(res, relativePath, method) {
       if (method === "GET") {
         let data = await readFile(normalized);
         if (ext === ".html") {
-          const injection = [
-            "\n<!-- Live presence counter -->",
-            "<script src=\"/static/js/live-counter.js\"></script>",
-            "<!-- Cloud live pairing bridge -->",
-            "<script src=\"/static/js/live-cloud-bridge.js\"></script>\n",
-          ].join("\n");
+          const injection = `\n<!-- Live presence counter -->\n<script src="/static/js/live-counter.js"></script>\n`;
           try {
             const text = data.toString();
             if (!text.includes("live-counter.js")) {
@@ -216,9 +223,9 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  const isWatchtowerRequest = ["/watchtower", "/watchtower.html"].includes(urlPath);
-  if ((req.method === "GET" || req.method === "HEAD") && isWatchtowerRequest) {
-    const served = await tryServeFile(res, "home.html", req.method);
+  const isRednodeRequest = ["/rednode", "/rednode.html"].includes(urlPath);
+  if ((req.method === "GET" || req.method === "HEAD") && isRednodeRequest) {
+    const served = await tryServeFile(res, "rednode.html", req.method);
     if (!served) {
       res.writeHead(404);
       res.end("Not found");
@@ -240,12 +247,12 @@ const server = http.createServer(async (req, res) => {
     "/ar-dashboard",
     "/ar-dashboard.html",
     "/ar-dashboard/",
-    "/watchtower-dashboard",
-    "/watchtower-dashboard.html",
-    "/watchtower-dashboard/",
+    "/rednode-dashboard",
+    "/rednode-dashboard.html",
+    "/rednode-dashboard/",
   ]);
   if ((req.method === "GET" || req.method === "HEAD") && arDashboardPaths.has(urlPath)) {
-    const served = await tryServeFile(res, "dashboard1.html", req.method);
+    const served = await tryServeFile(res, "RedNode Dashboard — Full Demo.html", req.method);
     if (!served) {
       res.writeHead(404);
       res.end("Not found");
@@ -273,11 +280,7 @@ const server = http.createServer(async (req, res) => {
 
   const livePaths = new Set(["/live", "/live/", "/live/index.html"]);
   if ((req.method === "GET" || req.method === "HEAD") && livePaths.has(urlPath)) {
-    const served = await tryServeFile(
-      res,
-      path.join("CHAINES.IO-CHAT-codex-fix-footer-not-staying-active-on-scroll", "index.html"),
-      req.method
-    );
+    const served = await tryServeFile(res, path.join("live", "index.html"), req.method);
     if (!served) {
       res.writeHead(404);
       res.end("Not found");
@@ -330,6 +333,7 @@ const thumbnails = new Map();
 // track viewers per broadcaster
 const listeners = new Map(); // hostId -> Set of watcherIds
 const watching = new Map();  // watcherId -> Set of hostIds
+let guestApproved = null; // currently approved guest broadcaster
 
 function uid(){
   return Math.random().toString(36).slice(2,9);
@@ -360,30 +364,13 @@ function sendListenerCount(id){
   }
 }
 
-function broadcastLivePeers() {
-  const peers = [];
-  for (const [id, client] of broadcasters.entries()) {
-    peers.push({
-      id,
-      user: client?.username || "guest",
-      thumb: thumbnails.get(id) || null,
-      listeners: listeners.get(id)?.size || 0,
-    });
-  }
-  const payload = JSON.stringify({ type: "live-peers", peers });
-  for (const client of wss.clients) {
-    if (client.readyState === 1) client.send(payload);
-  }
-}
-
 wss.on("connection", (ws) => {
   ws.id = uid();
   clients.set(ws.id, ws);
-  ws.send(JSON.stringify({ type: "system", text: "Connected to Watchtower Web Service WS" }));
+  ws.send(JSON.stringify({ type: "system", text: "Connected to RedNode Excavation WS" }));
   ws.send(JSON.stringify({ type: "history", messages: loadHistory() }));
   ws.send(JSON.stringify({ type: "id", id: ws.id }));
   broadcastUsers();
-  broadcastLivePeers();
   for(const [id, thumb] of thumbnails.entries()){
     ws.send(JSON.stringify({ type: "thumb", id, thumb }));
   }
@@ -394,12 +381,12 @@ wss.on("connection", (ws) => {
       for (const client of wss.clients) {
         if (client.readyState === 1) client.send(JSON.stringify({ type: "bye", id: ws.id }));
       }
+      if (guestApproved === ws.id || broadcasters.size <= 1) guestApproved = null;
       if(listeners.has(ws.id)){
         listeners.delete(ws.id);
         sendListenerCount(ws.id);
       }
       thumbnails.delete(ws.id);
-      broadcastLivePeers();
     }
     const watched = watching.get(ws.id);
     if(watched){
@@ -414,7 +401,6 @@ wss.on("connection", (ws) => {
       watching.delete(ws.id);
     }
     broadcastUsers();
-    broadcastLivePeers();
   });
   ws.on("message", async (raw) => {
     let msg; try { msg = JSON.parse(raw); } catch { return; }
@@ -425,9 +411,12 @@ wss.on("connection", (ws) => {
     }
     switch (msg?.type) {
       case "broadcaster":
+        if (broadcasters.size > 0 && ws.id !== guestApproved) {
+          ws.send(JSON.stringify({ type: "join-denied" }));
+          return;
+        }
         broadcasters.set(ws.id, ws);
         broadcastUsers();
-        broadcastLivePeers();
         return;
       case "end-broadcast":
         if (broadcasters.has(ws.id)) {
@@ -438,33 +427,41 @@ wss.on("connection", (ws) => {
           }
           broadcasters.delete(ws.id);
           thumbnails.delete(ws.id);
+          if (guestApproved === ws.id || broadcasters.size <= 1) guestApproved = null;
           if(listeners.has(ws.id)){
             listeners.delete(ws.id);
             sendListenerCount(ws.id);
           }
           broadcastUsers();
-          broadcastLivePeers();
         }
         return;
       case "join-request": {
+        if (guestApproved) {
+          ws.send(JSON.stringify({ type: "join-denied" }));
+          return;
+        }
         const host = broadcasters.get(msg.id);
         if (host && host.readyState === 1) {
-          ws.send(JSON.stringify({ type: "join-approved", id: host.id }));
+          host.send(
+            JSON.stringify({ type: "join-request", id: ws.id, user: ws.username })
+          );
         } else {
           ws.send(JSON.stringify({ type: "join-denied" }));
         }
         return;
       }
-      case "approve-join":
+      case "approve-join": {
+        if (guestApproved) return;
+        const guest = clients.get(msg.id);
+        if (guest && broadcasters.has(ws.id)) {
+          guestApproved = msg.id;
+          guest.send(JSON.stringify({ type: "join-approved" }));
+        }
+        return;
+      }
       case "deny-join": {
         const guest = clients.get(msg.id);
-        if (guest) {
-          guest.send(
-            JSON.stringify({
-              type: msg.type === "approve-join" ? "join-approved" : "join-denied",
-            })
-          );
-        }
+        if (guest) guest.send(JSON.stringify({ type: "join-denied" }));
         return;
       }
       case "watcher": {
@@ -500,7 +497,6 @@ wss.on("connection", (ws) => {
           for (const client of wss.clients) {
             if (client.readyState === 1) client.send(payload);
           }
-          broadcastLivePeers();
         }
         return;
       }
