@@ -1358,8 +1358,6 @@
       let currentLaunchUrl = "";
       let monitorSocket = null;
       let monitorSocketReady = false;
-      let monitorFeedStream = null;
-      let monitorFeedVideo = null;
       let monitorFeedCanvas = null;
       let monitorFeedTimer = null;
 
@@ -1396,41 +1394,43 @@
           clearInterval(monitorFeedTimer);
           monitorFeedTimer = null;
         }
-        if (monitorFeedStream) {
-          monitorFeedStream.getTracks().forEach((track) => track.stop());
-          monitorFeedStream = null;
-        }
-        monitorFeedVideo = null;
         monitorFeedCanvas = null;
         sendMonitorMessage({ type: "end-broadcast" });
       };
 
+      const drawBroadcastCard = (label) => {
+        if (!monitorFeedCanvas) return;
+        const ctx = monitorFeedCanvas.getContext("2d");
+        if (!ctx) return;
+
+        const w = monitorFeedCanvas.width;
+        const h = monitorFeedCanvas.height;
+        const now = new Date();
+        const stamp = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+        const bg = ctx.createLinearGradient(0, 0, w, h);
+        bg.addColorStop(0, "#1f2937");
+        bg.addColorStop(1, "#0f172a");
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, w, h);
+
+        ctx.fillStyle = "#22d3ee";
+        ctx.fillRect(0, 0, w, 24);
+        ctx.fillStyle = "#082f49";
+        ctx.font = "bold 13px Inter, system-ui, sans-serif";
+        ctx.fillText("WATCHTOWER ARCADE LIVE", 10, 16);
+
+        ctx.fillStyle = "#f8fafc";
+        ctx.font = "600 18px Inter, system-ui, sans-serif";
+        ctx.fillText(label, 10, 80);
+        ctx.font = "500 14px Inter, system-ui, sans-serif";
+        ctx.fillStyle = "#cbd5e1";
+        ctx.fillText("Gameplay active on device", 10, 108);
+        ctx.fillText(`Updated ${stamp}`, 10, 134);
+      };
+
       const startMonitorFeed = async (label) => {
         ensureMonitorSocket();
-        if (!monitorFeedStream) {
-          try {
-            monitorFeedStream = await navigator.mediaDevices.getUserMedia({
-              video: { width: 640, height: 360, facingMode: "user" },
-              audio: false,
-            });
-          } catch {
-            return;
-          }
-        }
-
-        if (!monitorFeedVideo) {
-          monitorFeedVideo = document.createElement("video");
-          monitorFeedVideo.muted = true;
-          monitorFeedVideo.autoplay = true;
-          monitorFeedVideo.playsInline = true;
-          monitorFeedVideo.srcObject = monitorFeedStream;
-          try {
-            await monitorFeedVideo.play();
-          } catch {
-            return;
-          }
-        }
-
         if (!monitorFeedCanvas) {
           monitorFeedCanvas = document.createElement("canvas");
           monitorFeedCanvas.width = 320;
@@ -1441,14 +1441,16 @@
 
         sendMonitorMessage({ type: "caption", text: `Playing ${label}` });
         monitorFeedTimer = setInterval(() => {
-          if (!monitorFeedVideo || !monitorFeedCanvas) return;
-          const ctx = monitorFeedCanvas.getContext("2d");
-          if (!ctx) return;
-          ctx.drawImage(monitorFeedVideo, 0, 0, monitorFeedCanvas.width, monitorFeedCanvas.height);
+          if (!monitorFeedCanvas) return;
+          drawBroadcastCard(label);
           const thumb = monitorFeedCanvas.toDataURL("image/jpeg", 0.6);
           sendMonitorMessage({ type: "thumb", thumb });
           sendMonitorMessage({ type: "caption", text: `Playing ${label}` });
         }, 1200);
+
+        drawBroadcastCard(label);
+        const initialThumb = monitorFeedCanvas.toDataURL("image/jpeg", 0.6);
+        sendMonitorMessage({ type: "thumb", thumb: initialThumb });
       };
 
       const isAbsoluteUrl = (value) => /^https?:\/\//.test(value);
