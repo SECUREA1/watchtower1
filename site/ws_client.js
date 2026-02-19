@@ -34,6 +34,12 @@
 
   function buildWsUrl() {
     const overrideRaw = (getEl('serverUrl')?.value || '').trim();
+    const configuredResolver = window.rednodeWsConfig?.resolveWsUrl;
+    if (typeof configuredResolver === 'function') {
+      const resolved = configuredResolver(overrideRaw);
+      if (resolved) return resolved;
+    }
+
     const defaultProto = window.location.protocol === 'https:' ? 'wss' : 'ws';
     const defaultUrl = `${defaultProto}://${window.location.host}/ws`;
 

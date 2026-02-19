@@ -20,7 +20,9 @@
   <h1>Watchtower Device Monitor</h1>
   <p class="meta">Live camera and sensor streams served from your Watchtower hub.</p>
   <div id="grid" class="grid"></div>
+  <p class="meta" id="ws-state">WS: connecting…</p>
 
+  <script src="/static/js/ws-config.js"></script>
   <script>
     async function loadCameras() {
       const res = await fetch('/api/cameras');
@@ -48,6 +50,53 @@
     }
     loadCameras();
     setInterval(loadCameras, 5000);
+
+    let ws;
+    let wsTimer;
+    let wsDelay = 1000;
+    const wsStateEl = document.getElementById('ws-state');
+
+    function setWsState(text){
+      if (wsStateEl) wsStateEl.textContent = `WS: ${text}`;
+    }
+
+    function connectPresenceWs(){
+      const fallbackProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const fallback = `${fallbackProto}//${location.host}/ws`;
+      const wsUrl = window.rednodeWsConfig?.resolveWsUrl?.() || fallback;
+      setWsState(`connecting ${wsUrl}`);
+      try {
+        ws = new WebSocket(wsUrl);
+      } catch (_err) {
+        setWsState('error (retrying)');
+        scheduleWsReconnect();
+        return;
+      }
+
+      ws.addEventListener('open', () => {
+        wsDelay = 1000;
+        setWsState('live');
+        try { ws.send(JSON.stringify({ type: 'join', user: 'multi-camera' })); } catch (_err) {}
+      });
+      ws.addEventListener('close', () => {
+        setWsState('disconnected (retrying)');
+        scheduleWsReconnect();
+      });
+      ws.addEventListener('error', () => {
+        setWsState('error (retrying)');
+        try { ws.close(); } catch (_err) {}
+      });
+    }
+
+    function scheduleWsReconnect(){
+      if (wsTimer) clearTimeout(wsTimer);
+      wsTimer = setTimeout(() => {
+        wsDelay = Math.min(15000, Math.floor(wsDelay * 1.7));
+        connectPresenceWs();
+      }, wsDelay);
+    }
+
+    connectPresenceWs();
   </script>
 </body>
 </html>
