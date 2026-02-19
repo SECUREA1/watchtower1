@@ -22,94 +22,11 @@
   <h1>Watchtower Device Monitor</h1>
   <p class="meta">Live camera and sensor streams served from your Watchtower hub.</p>
   <section class="section">
-    <h2>Arcade Live Feeds</h2>
-    <div id="arcade-grid" class="grid"></div>
-  </section>
-  <section class="section">
     <h2>Connected Cameras</h2>
     <div id="grid" class="grid"></div>
   </section>
 
   <script>
-    const arcadeGrid = document.getElementById('arcade-grid');
-    const arcadeFeeds = new Map();
-
-    function wsUrl() {
-      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      return `${proto}://${location.host}/ws`;
-    }
-
-    function renderArcadeFeeds() {
-      arcadeGrid.innerHTML = '';
-      if (!arcadeFeeds.size) {
-        arcadeGrid.innerHTML = '<div class="card"><div class="meta">No active game camera feeds yet.</div></div>';
-        return;
-      }
-
-      arcadeFeeds.forEach((feed, id) => {
-        const card = document.createElement('div');
-        card.className = 'card';
-        card.innerHTML = `
-          <div class="meta"><strong>${feed.user || 'arcade-player'}</strong> · stream ${id}</div>
-          <img src="${feed.thumb || ''}" alt="${id}" />
-          <div class="status">
-            <span>${feed.caption || 'Gameplay stream active'}</span>
-            <span class="badge">LIVE</span>
-          </div>
-        `;
-        arcadeGrid.appendChild(card);
-      });
-    }
-
-    function connectArcadeWs() {
-      const ws = new WebSocket(wsUrl());
-
-      ws.addEventListener('message', (event) => {
-        let payload;
-        try {
-          payload = JSON.parse(event.data);
-        } catch {
-          return;
-        }
-
-        if (payload.type === 'live-peers' && Array.isArray(payload.peers)) {
-          payload.peers.forEach((peer) => {
-            const current = arcadeFeeds.get(peer.id) || {};
-            arcadeFeeds.set(peer.id, { ...current, user: peer.user, thumb: peer.thumb || current.thumb || '' });
-          });
-          const peerIds = new Set(payload.peers.map((peer) => peer.id));
-          [...arcadeFeeds.keys()].forEach((id) => {
-            if (!peerIds.has(id)) arcadeFeeds.delete(id);
-          });
-          renderArcadeFeeds();
-          return;
-        }
-
-        if (payload.type === 'thumb' && payload.id) {
-          const current = arcadeFeeds.get(payload.id) || {};
-          arcadeFeeds.set(payload.id, { ...current, thumb: payload.thumb || '' });
-          renderArcadeFeeds();
-          return;
-        }
-
-        if (payload.type === 'caption' && payload.id) {
-          const current = arcadeFeeds.get(payload.id) || {};
-          arcadeFeeds.set(payload.id, { ...current, caption: payload.text || '' });
-          renderArcadeFeeds();
-          return;
-        }
-
-        if (payload.type === 'bye' && payload.id) {
-          arcadeFeeds.delete(payload.id);
-          renderArcadeFeeds();
-        }
-      });
-
-      ws.addEventListener('close', () => {
-        setTimeout(connectArcadeWs, 1000);
-      });
-    }
-
     async function loadCameras() {
       const res = await fetch('/api/cameras');
       const data = await res.json();
@@ -140,8 +57,6 @@
         grid.appendChild(card);
       });
     }
-    connectArcadeWs();
-    renderArcadeFeeds();
     loadCameras();
     setInterval(loadCameras, 5000);
   </script>
