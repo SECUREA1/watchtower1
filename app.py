@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 # -------------------------------------------------------------------------
 REPO_ROOT = Path(__file__).resolve().parent
 
-DATA_DIR = Path(os.getenv("DATA_DIR", "/opt/rednode/data")).resolve()
+DATA_DIR = Path(os.getenv("DATA_DIR", "/opt/watchtower/data")).resolve()
 FACES_DIR = DATA_DIR / "faces"
 IMAGES_DIR = FACES_DIR / "images"
 META_DIR = FACES_DIR / "meta"
