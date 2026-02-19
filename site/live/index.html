@@ -1430,13 +1430,12 @@
     modeLabel.textContent = 'Offline';
     modeToggle.classList.add('off');
     modeToggle.addEventListener('click', () => {
-      if (onlineMode === 'cloud') {
-        try { socket && socket.close(); } catch {}
-        socket = null;
-        setStatus(bc ? 'local' : 'off');
-      } else {
-        connectWS();
+      cloudPreferred = !cloudPreferred;
+      if(cloudPreferred){
+        connectWS({ force: true });
+        return;
       }
+      disconnectWS({ fallbackToLocal: true });
     });
     broadcastBtn.addEventListener('click', async () => {
       if (broadcasting) { endBroadcast(); return; }
@@ -1507,6 +1506,10 @@
     let socket = null;
     let bc = null;
     let onlineMode = 'off'; // 'cloud' | 'local' | 'off'
+    let cloudPreferred = true;
+    let reconnectDelay = 1000;
+    const MAX_RECONNECT_DELAY = 60000;
+    let reconnectTimer = null;
     const seen = new Set();
     const seenComments = new Set();
 
@@ -1673,7 +1676,8 @@
         if(streams[id]) streams[id].count.textContent = n;
       }
     function sendJoin(){
-      try { socket && socket.readyState === 1 && socket.send(JSON.stringify({ type:'join', user: store.user })); } catch {}
+      const user = store.user || `watchtower-${Math.floor(Math.random()*9999)}`;
+      try { socket && socket.readyState === 1 && socket.send(JSON.stringify({ type:'join', user })); } catch {}
     }
 
     function defaultWS(){
@@ -1694,7 +1698,7 @@
       if(mode === 'cloud'){
         modeLabel.textContent = 'Cloud';
       } else if(mode === 'local'){
-        modeLabel.textContent = 'Local';
+        modeLabel.textContent = 'Live';
         updateUsers([]);
       } else {
         modeLabel.textContent = 'Offline';
@@ -1702,17 +1706,76 @@
       }
     }
 
-    function connectWS(){
+    function clearReconnectTimer(){
+      if(!reconnectTimer) return;
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+
+    function scheduleReconnect(){
+      if(!cloudPreferred) return;
+      clearReconnectTimer();
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        reconnectDelay = Math.min(MAX_RECONNECT_DELAY, Math.floor(reconnectDelay * 1.8));
+        connectWS({ force: true });
+      }, reconnectDelay);
+    }
+
+    function disconnectWS({ fallbackToLocal = false } = {}){
+      clearReconnectTimer();
+      if(socket){
+        try {
+          socket.onopen = null;
+          socket.onclose = null;
+          socket.onerror = null;
+          socket.onmessage = null;
+          socket.close();
+        } catch {}
+      }
+      socket = null;
+      if(fallbackToLocal){
+        setStatus(bc ? 'local' : 'off');
+      }
+    }
+
+    function connectWS({ force = false } = {}){
+      if(!cloudPreferred && !force) return;
       const url = store.wsURL;
       if(!('WebSocket' in window)) return setStatus('off');
-      try {
-        socket = new WebSocket(url);
-      } catch { setStatus('off'); return; }
+      disconnectWS();
+      setStatus('off');
+      modeLabel.textContent = 'Cloud…';
 
-      socket.addEventListener('open', () => { setStatus('cloud'); sendJoin(); });
-      socket.addEventListener('close', () => { setStatus(bc? 'local' : 'off'); });
-      socket.addEventListener('error', () => { setStatus(bc? 'local' : 'off'); });
-      socket.addEventListener('message', ev => {
+      let nextSocket = null;
+      try {
+        nextSocket = new WebSocket(url);
+      } catch {
+        setStatus(bc ? 'local' : 'off');
+        scheduleReconnect();
+        return;
+      }
+      socket = nextSocket;
+
+      nextSocket.addEventListener('open', () => {
+        reconnectDelay = 1000;
+        setStatus('cloud');
+        sendJoin();
+      });
+
+      nextSocket.addEventListener('close', () => {
+        if(socket !== nextSocket) return;
+        socket = null;
+        setStatus(bc ? 'local' : 'off');
+        scheduleReconnect();
+      });
+
+      nextSocket.addEventListener('error', () => {
+        if(socket !== nextSocket) return;
+        try { nextSocket.close(); } catch {}
+      });
+
+      nextSocket.addEventListener('message', ev => {
         try {
           const data = JSON.parse(ev.data);
           if(data && data.type === 'chat') receive(data);
@@ -1817,6 +1880,7 @@
     el('#save-ws').addEventListener('click', (e) => {
       e.preventDefault();
       store.wsURL = wsUrlInput.value.trim();
+      if(cloudPreferred) connectWS({ force: true });
       alert('Saved WebSocket URL.');
     });
 
@@ -2458,6 +2522,9 @@
     }
 
     // Boot
+    setupLocal();
+    cloudPreferred = true;
+    connectWS({ force: true });
     requireAuth();
   })();
   </script>
