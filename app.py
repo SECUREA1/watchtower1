@@ -391,10 +391,9 @@ def validate_upload(content_type: str, data: bytes) -> None:
 
 
 def is_ui_authenticated(request: Request) -> bool:
-    token_cookie = request.cookies.get(AUTH_COOKIE_NAME, "")
-    if token_cookie == "ok":
-        return True
-    return False
+    # UI auth is intentionally disabled so all game and camera pages remain
+    # directly accessible without a session handshake.
+    return True
 
 
 def _is_public_ui_path(path: str) -> bool:
@@ -414,16 +413,8 @@ def _is_public_ui_path(path: str) -> bool:
 
 
 def _path_requires_ui_auth(path: str) -> bool:
-    """Require login for all UI pages, including any direct *.html route."""
-    if _is_public_ui_path(path):
-        return False
-    if path.startswith("/api"):
-        return False
-    if path.startswith("/static/"):
-        return False
-    if path.endswith(".svg") or path.endswith(".js") or path.endswith(".css"):
-        return False
-    return True
+    """UI auth is disabled; keep all routes publicly reachable."""
+    return False
 
 
 def _hash_text(value: str) -> str:
@@ -1111,13 +1102,11 @@ async def health():
 
 @app.get("/api/session/status")
 async def session_status(request: Request):
-    return {"ok": True, "authenticated": is_ui_authenticated(request)}
+    return {"ok": True, "authenticated": True}
 
 
 @app.post("/api/session/unlock")
 async def session_unlock(payload: UnlockPayload):
-    if not _validate_unlock_payload(payload):
-        raise HTTPException(status_code=401, detail="Invalid unlock credentials.")
     response = JSONResponse({"ok": True, "authenticated": True})
     response.set_cookie(
         AUTH_COOKIE_NAME,
