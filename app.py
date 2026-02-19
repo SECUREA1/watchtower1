@@ -60,6 +60,9 @@ ALLOWED_MIME = {"image/jpeg", "image/png", "image/webp"}
 
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 ALLOW_PUBLIC_INGEST = os.getenv("ALLOW_PUBLIC_INGEST", "1").lower() in {"1", "true", "yes"}
+# CSP frame-ancestors policy used for iframe embedding (e.g., game player pages).
+# Defaults to same-origin embedding while allowing deployments to opt in to additional origins.
+FRAME_ANCESTORS = os.getenv("FRAME_ANCESTORS", "'self'").strip() or "'self'"
 
 GITHUB_ENABLED = os.getenv("GITHUB_ENABLED", "0").lower() in {"1", "true", "yes"}
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
@@ -220,8 +223,15 @@ app.add_middleware(
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "same-origin"
+    # X-Frame-Options only supports DENY/SAMEORIGIN in modern browsers.
+    # Keep it aligned with frame-ancestors when possible and rely on CSP for custom origins.
+    frame_ancestors_normalized = FRAME_ANCESTORS.lower().replace('"', "'").strip()
+    if frame_ancestors_normalized in {"'none'", "none"}:
+        response.headers["X-Frame-Options"] = "DENY"
+    elif frame_ancestors_normalized in {"'self'", "self"}:
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"
+
     # Secure UI loads ML runtimes + model artifacts from trusted CDNs.
     # Keep the policy strict while explicitly allowing those hosts.
     response.headers["Content-Security-Policy"] = "; ".join(
@@ -232,7 +242,7 @@ async def add_security_headers(request: Request, call_next):
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
             "font-src 'self' https://fonts.gstatic.com data:",
             "connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com",
-            "frame-ancestors 'none'",
+            f"frame-ancestors {FRAME_ANCESTORS}",
         ]
     )
     return response
