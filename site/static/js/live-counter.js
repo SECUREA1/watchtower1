@@ -165,7 +165,8 @@
 
   const connect = () => {
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-    const url = `${protocol}//${location.host}/ws`;
+    const fallback = `${protocol}//${location.host}/ws`;
+    const url = window.rednodeWsConfig?.resolveWsUrl?.() || fallback;
     try {
       ws = new WebSocket(url);
     } catch (e) {
