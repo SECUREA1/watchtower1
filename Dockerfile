@@ -1,4 +1,4 @@
-# Dockerfile (nginx static site) — fixed for PORT substitution and streaming helpers
+# Dockerfile (nginx static site) — fixed for PORT substitution and new pages
 FROM nginx:alpine
 
 LABEL maintainer="RedNode <ops@rednode.ai>"
@@ -30,7 +30,6 @@ RUN chown -R nginx:nginx /usr/share/nginx/html \
  && find /usr/share/nginx/html -type f -exec chmod 644 {} \;
 
 # Create nginx config template at build-time. Template uses ${PORT} so it can be replaced at container start.
-# Includes a WebSocket proxy block (for signaling server) and HLS handling for .m3u8/.ts assets.
 RUN cat > /etc/nginx/conf.d/default.conf.template <<'EOF_CONF'
 server {
     listen ${PORT};
@@ -45,40 +44,14 @@ server {
         return 200 '{"ok": true}';
     }
 
-    # Proxy websocket (signaling) - assumes a local backend (adjust as needed)
-    # If you run your signaling server on another hostname/port, change proxy_pass accordingly.
-    # Example: proxy_pass http://127.0.0.1:3000;
-    location /ws/ {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "Upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_read_timeout 86400;
-    }
-
-    # Dashboard files directly (avoid SPA fallback)
+    # Serve dashboard files directly (avoid SPA fallback)
     location ^~ /dashboard/ {
         try_files $uri $uri/ $uri.html =404;
     }
 
-    # Live folder - try files first then fallback to index (useful for HLS manifests)
+    # Live folder - try files first then fallback to index
     location ^~ /live/ {
         try_files $uri $uri/ $uri.html /index.html;
-    }
-
-    # HLS (.m3u8/.ts) handling: correct MIME types and allow CORS for playback
-    location ~* \.(m3u8|ts)$ {
-        add_header Access-Control-Allow-Origin *;
-        add_header Cache-Control "no-cache";
-        types {
-            application/vnd.apple.mpegurl m3u8;
-            video/mp2t ts;
-        }
-        # Serve directly
-        try_files $uri =404;
     }
 
     # SPA fallback for other routes
@@ -99,9 +72,8 @@ server {
 }
 EOF_CONF
 
-# Install curl so HEALTHCHECK can probe /healthz and gettext for envsubst.
-# Also install ffmpeg (useful for HLS/transcoding). Note: ffmpeg on alpine may not include proprietary codecs.
-RUN apk add --no-cache curl gettext ffmpeg
+# Install curl so HEALTHCHECK can probe /healthz
+RUN apk add --no-cache curl
 
 # Informal port hint. We expose the default HTTP port (container env PORT may vary at runtime).
 EXPOSE 80
