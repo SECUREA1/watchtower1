@@ -8,6 +8,8 @@
     body { font-family: system-ui, sans-serif; background:#2b180d; color:#f6ead8; margin:0; padding:24px; }
     h1 { margin:0 0 12px; }
     .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:16px; }
+    .section { margin-bottom: 16px; }
+    .section h2 { margin: 0 0 10px; font-size: 1.05rem; color:#f3cc9f; }
     .card { background:#3f2616; border:1px solid #5b3a22; border-radius:12px; padding:12px; box-shadow: 0 18px 40px rgba(24,12,6,0.45); }
     .meta { font-size:12px; color:#d2b28f; margin-bottom:8px; }
     img { width:100%; border-radius:8px; background:#2f1b0f; }
@@ -19,9 +21,95 @@
 <body>
   <h1>Watchtower Device Monitor</h1>
   <p class="meta">Live camera and sensor streams served from your Watchtower hub.</p>
-  <div id="grid" class="grid"></div>
+  <section class="section">
+    <h2>Arcade Live Feeds</h2>
+    <div id="arcade-grid" class="grid"></div>
+  </section>
+  <section class="section">
+    <h2>Connected Cameras</h2>
+    <div id="grid" class="grid"></div>
+  </section>
 
   <script>
+    const arcadeGrid = document.getElementById('arcade-grid');
+    const arcadeFeeds = new Map();
+
+    function wsUrl() {
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      return `${proto}://${location.host}/ws`;
+    }
+
+    function renderArcadeFeeds() {
+      arcadeGrid.innerHTML = '';
+      if (!arcadeFeeds.size) {
+        arcadeGrid.innerHTML = '<div class="card"><div class="meta">No active game camera feeds yet.</div></div>';
+        return;
+      }
+
+      arcadeFeeds.forEach((feed, id) => {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = `
+          <div class="meta"><strong>${feed.user || 'arcade-player'}</strong> · stream ${id}</div>
+          <img src="${feed.thumb || ''}" alt="${id}" />
+          <div class="status">
+            <span>${feed.caption || 'Gameplay stream active'}</span>
+            <span class="badge">LIVE</span>
+          </div>
+        `;
+        arcadeGrid.appendChild(card);
+      });
+    }
+
+    function connectArcadeWs() {
+      const ws = new WebSocket(wsUrl());
+
+      ws.addEventListener('message', (event) => {
+        let payload;
+        try {
+          payload = JSON.parse(event.data);
+        } catch {
+          return;
+        }
+
+        if (payload.type === 'live-peers' && Array.isArray(payload.peers)) {
+          payload.peers.forEach((peer) => {
+            const current = arcadeFeeds.get(peer.id) || {};
+            arcadeFeeds.set(peer.id, { ...current, user: peer.user, thumb: peer.thumb || current.thumb || '' });
+          });
+          const peerIds = new Set(payload.peers.map((peer) => peer.id));
+          [...arcadeFeeds.keys()].forEach((id) => {
+            if (!peerIds.has(id)) arcadeFeeds.delete(id);
+          });
+          renderArcadeFeeds();
+          return;
+        }
+
+        if (payload.type === 'thumb' && payload.id) {
+          const current = arcadeFeeds.get(payload.id) || {};
+          arcadeFeeds.set(payload.id, { ...current, thumb: payload.thumb || '' });
+          renderArcadeFeeds();
+          return;
+        }
+
+        if (payload.type === 'caption' && payload.id) {
+          const current = arcadeFeeds.get(payload.id) || {};
+          arcadeFeeds.set(payload.id, { ...current, caption: payload.text || '' });
+          renderArcadeFeeds();
+          return;
+        }
+
+        if (payload.type === 'bye' && payload.id) {
+          arcadeFeeds.delete(payload.id);
+          renderArcadeFeeds();
+        }
+      });
+
+      ws.addEventListener('close', () => {
+        setTimeout(connectArcadeWs, 1000);
+      });
+    }
+
     async function loadCameras() {
       const res = await fetch('/api/cameras');
       const data = await res.json();
@@ -52,6 +140,8 @@
         grid.appendChild(card);
       });
     }
+    connectArcadeWs();
+    renderArcadeFeeds();
     loadCameras();
     setInterval(loadCameras, 5000);
   </script>

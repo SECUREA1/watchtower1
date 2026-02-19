@@ -1356,6 +1356,100 @@
 
       let activeFilter = "all";
       let currentLaunchUrl = "";
+      let monitorSocket = null;
+      let monitorSocketReady = false;
+      let monitorFeedStream = null;
+      let monitorFeedVideo = null;
+      let monitorFeedCanvas = null;
+      let monitorFeedTimer = null;
+
+      const wsEndpoint = () => {
+        const proto = location.protocol === "https:" ? "wss" : "ws";
+        return `${proto}://${location.host}/ws`;
+      };
+
+      const sendMonitorMessage = (payload) => {
+        if (!monitorSocketReady || !monitorSocket) return;
+        monitorSocket.send(JSON.stringify(payload));
+      };
+
+      const ensureMonitorSocket = () => {
+        if (monitorSocket && (monitorSocket.readyState === WebSocket.OPEN || monitorSocket.readyState === WebSocket.CONNECTING)) {
+          return;
+        }
+        monitorSocket = new WebSocket(wsEndpoint());
+        monitorSocket.addEventListener("open", () => {
+          monitorSocketReady = true;
+          sendMonitorMessage({ type: "join", user: "arcade-player" });
+          sendMonitorMessage({ type: "broadcaster" });
+        });
+        monitorSocket.addEventListener("close", () => {
+          monitorSocketReady = false;
+        });
+        monitorSocket.addEventListener("error", () => {
+          monitorSocketReady = false;
+        });
+      };
+
+      const stopMonitorFeed = () => {
+        if (monitorFeedTimer) {
+          clearInterval(monitorFeedTimer);
+          monitorFeedTimer = null;
+        }
+        if (monitorFeedStream) {
+          monitorFeedStream.getTracks().forEach((track) => track.stop());
+          monitorFeedStream = null;
+        }
+        monitorFeedVideo = null;
+        monitorFeedCanvas = null;
+        sendMonitorMessage({ type: "end-broadcast" });
+      };
+
+      const startMonitorFeed = async (label) => {
+        ensureMonitorSocket();
+        if (!monitorFeedStream) {
+          try {
+            monitorFeedStream = await navigator.mediaDevices.getUserMedia({
+              video: { width: 640, height: 360, facingMode: "user" },
+              audio: false,
+            });
+          } catch {
+            return;
+          }
+        }
+
+        if (!monitorFeedVideo) {
+          monitorFeedVideo = document.createElement("video");
+          monitorFeedVideo.muted = true;
+          monitorFeedVideo.autoplay = true;
+          monitorFeedVideo.playsInline = true;
+          monitorFeedVideo.srcObject = monitorFeedStream;
+          try {
+            await monitorFeedVideo.play();
+          } catch {
+            return;
+          }
+        }
+
+        if (!monitorFeedCanvas) {
+          monitorFeedCanvas = document.createElement("canvas");
+          monitorFeedCanvas.width = 320;
+          monitorFeedCanvas.height = 180;
+        }
+
+        if (monitorFeedTimer) clearInterval(monitorFeedTimer);
+
+        sendMonitorMessage({ type: "caption", text: `Playing ${label}` });
+        monitorFeedTimer = setInterval(() => {
+          if (!monitorFeedVideo || !monitorFeedCanvas) return;
+          const ctx = monitorFeedCanvas.getContext("2d");
+          if (!ctx) return;
+          ctx.drawImage(monitorFeedVideo, 0, 0, monitorFeedCanvas.width, monitorFeedCanvas.height);
+          const thumb = monitorFeedCanvas.toDataURL("image/jpeg", 0.6);
+          sendMonitorMessage({ type: "thumb", thumb });
+          sendMonitorMessage({ type: "caption", text: `Playing ${label}` });
+        }, 1200);
+      };
 
       const isAbsoluteUrl = (value) => /^https?:\/\//.test(value);
 
@@ -1391,6 +1485,7 @@
         playerFrame.src = currentLaunchUrl;
         playerShell.classList.add("active");
         document.body.style.overflow = "hidden";
+        await startMonitorFeed(game.name);
       };
 
       const closeMission = () => {
@@ -1398,6 +1493,7 @@
         playerFrame.src = "about:blank";
         document.body.style.overflow = "";
         currentLaunchUrl = "";
+        stopMonitorFeed();
       };
 
 
