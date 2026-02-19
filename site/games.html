@@ -424,7 +424,7 @@
         <button class="menu-btn" id="back-to-hub" type="button">← Back to Arcade</button>
         <span class="label" id="player-label">Now Playing</span>
       </div>
-      <iframe id="player-frame" title="Watchtower gameplay frame" allow="camera; microphone; autoplay; fullscreen; display-capture; xr-spatial-tracking"></iframe>
+      <iframe id="player-frame" title="Watchtower gameplay frame" allow="camera; microphone; autoplay; fullscreen"></iframe>
     </section>
 
     <script>
@@ -1356,180 +1356,6 @@
 
       let activeFilter = "all";
       let currentLaunchUrl = "";
-      let monitorSocket = null;
-      let monitorSocketReady = false;
-      let monitorFeedCanvas = null;
-      let monitorFeedTimer = null;
-
-      const wsEndpoint = () => {
-        const proto = location.protocol === "https:" ? "wss" : "ws";
-        return `${proto}://${location.host}/ws`;
-      };
-
-      const sendMonitorMessage = (payload) => {
-        if (!monitorSocketReady || !monitorSocket) return;
-        monitorSocket.send(JSON.stringify(payload));
-      };
-
-      const ensureMonitorSocket = () => {
-        if (monitorSocket && (monitorSocket.readyState === WebSocket.OPEN || monitorSocket.readyState === WebSocket.CONNECTING)) {
-          return;
-        }
-        monitorSocket = new WebSocket(wsEndpoint());
-        monitorSocket.addEventListener("open", () => {
-          monitorSocketReady = true;
-          sendMonitorMessage({ type: "join", user: "arcade-player" });
-          sendMonitorMessage({ type: "broadcaster" });
-        });
-        monitorSocket.addEventListener("close", () => {
-          monitorSocketReady = false;
-        });
-        monitorSocket.addEventListener("error", () => {
-          monitorSocketReady = false;
-        });
-      };
-
-      const stopMonitorFeed = () => {
-        if (monitorFeedTimer) {
-          clearInterval(monitorFeedTimer);
-          monitorFeedTimer = null;
-        }
-        monitorFeedCanvas = null;
-        sendMonitorMessage({ type: "end-broadcast" });
-      };
-
-      const drawBroadcastCard = (label) => {
-        if (!monitorFeedCanvas) return;
-        const ctx = monitorFeedCanvas.getContext("2d");
-        if (!ctx) return;
-
-        const w = monitorFeedCanvas.width;
-        const h = monitorFeedCanvas.height;
-        const now = new Date();
-        const stamp = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-
-        const bg = ctx.createLinearGradient(0, 0, w, h);
-        bg.addColorStop(0, "#1f2937");
-        bg.addColorStop(1, "#0f172a");
-        ctx.fillStyle = bg;
-        ctx.fillRect(0, 0, w, h);
-
-        ctx.fillStyle = "#22d3ee";
-        ctx.fillRect(0, 0, w, 24);
-        ctx.fillStyle = "#082f49";
-        ctx.font = "bold 13px Inter, system-ui, sans-serif";
-        ctx.fillText("WATCHTOWER ARCADE LIVE", 10, 16);
-
-        ctx.fillStyle = "#f8fafc";
-        ctx.font = "600 18px Inter, system-ui, sans-serif";
-        ctx.fillText(label, 10, 80);
-        ctx.font = "500 14px Inter, system-ui, sans-serif";
-        ctx.fillStyle = "#cbd5e1";
-        ctx.fillText("Gameplay active on device", 10, 108);
-        ctx.fillText(`Updated ${stamp}`, 10, 134);
-      };
-
-      const drawLivePreview = (source, label) => {
-        if (!monitorFeedCanvas || !source) return false;
-        const ctx = monitorFeedCanvas.getContext("2d");
-        if (!ctx) return false;
-
-        const sourceWidth = source.videoWidth || source.width || source.clientWidth || 0;
-        const sourceHeight = source.videoHeight || source.height || source.clientHeight || 0;
-        if (!sourceWidth || !sourceHeight) return false;
-
-        const targetWidth = monitorFeedCanvas.width;
-        const targetHeight = monitorFeedCanvas.height;
-        ctx.fillStyle = "#020617";
-        ctx.fillRect(0, 0, targetWidth, targetHeight);
-
-        const sourceRatio = sourceWidth / sourceHeight;
-        const targetRatio = targetWidth / targetHeight;
-        let drawWidth = targetWidth;
-        let drawHeight = targetHeight;
-        let offsetX = 0;
-        let offsetY = 0;
-
-        if (sourceRatio > targetRatio) {
-          drawHeight = targetHeight;
-          drawWidth = Math.round(drawHeight * sourceRatio);
-          offsetX = Math.round((targetWidth - drawWidth) / 2);
-        } else {
-          drawWidth = targetWidth;
-          drawHeight = Math.round(drawWidth / sourceRatio);
-          offsetY = Math.round((targetHeight - drawHeight) / 2);
-        }
-
-        ctx.drawImage(source, offsetX, offsetY, drawWidth, drawHeight);
-
-        const stamp = new Date().toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        });
-        ctx.fillStyle = "rgba(2,6,23,0.68)";
-        ctx.fillRect(0, targetHeight - 30, targetWidth, 30);
-        ctx.fillStyle = "#f8fafc";
-        ctx.font = "600 12px Inter, system-ui, sans-serif";
-        ctx.fillText(`${label} • ${stamp}`, 8, targetHeight - 10);
-        return true;
-      };
-
-      const getLiveFrameSource = () => {
-        try {
-          const frameDoc = playerFrame.contentDocument;
-          if (!frameDoc) return null;
-
-          const canvases = [...frameDoc.querySelectorAll("canvas")].filter((canvas) => {
-            const w = canvas.width || canvas.clientWidth;
-            const h = canvas.height || canvas.clientHeight;
-            return w >= 160 && h >= 90;
-          });
-          if (canvases.length) {
-            canvases.sort((a, b) => (b.width * b.height) - (a.width * a.height));
-            return canvases[0];
-          }
-
-          const videos = [...frameDoc.querySelectorAll("video")].filter((video) => {
-            return video.readyState >= 2 && video.videoWidth >= 160 && video.videoHeight >= 90;
-          });
-          if (videos.length) {
-            videos.sort((a, b) => (b.videoWidth * b.videoHeight) - (a.videoWidth * a.videoHeight));
-            return videos[0];
-          }
-        } catch {
-          return null;
-        }
-        return null;
-      };
-
-      const publishMonitorFrame = (label) => {
-        if (!monitorFeedCanvas) return;
-        const source = getLiveFrameSource();
-        const drewLive = source ? drawLivePreview(source, label) : false;
-        if (!drewLive) drawBroadcastCard(label);
-        const thumb = monitorFeedCanvas.toDataURL("image/jpeg", 0.65);
-        sendMonitorMessage({ type: "thumb", thumb });
-        sendMonitorMessage({ type: "caption", text: `Playing ${label}` });
-      };
-
-      const startMonitorFeed = async (label) => {
-        ensureMonitorSocket();
-        if (!monitorFeedCanvas) {
-          monitorFeedCanvas = document.createElement("canvas");
-          monitorFeedCanvas.width = 320;
-          monitorFeedCanvas.height = 180;
-        }
-
-        if (monitorFeedTimer) clearInterval(monitorFeedTimer);
-
-        sendMonitorMessage({ type: "caption", text: `Playing ${label}` });
-        monitorFeedTimer = setInterval(() => {
-          publishMonitorFrame(label);
-        }, 900);
-
-        publishMonitorFrame(label);
-      };
 
       const isAbsoluteUrl = (value) => /^https?:\/\//.test(value);
 
@@ -1565,7 +1391,6 @@
         playerFrame.src = currentLaunchUrl;
         playerShell.classList.add("active");
         document.body.style.overflow = "hidden";
-        await startMonitorFeed(game.name);
       };
 
       const closeMission = () => {
@@ -1573,7 +1398,6 @@
         playerFrame.src = "about:blank";
         document.body.style.overflow = "";
         currentLaunchUrl = "";
-        stopMonitorFeed();
       };
 
 
