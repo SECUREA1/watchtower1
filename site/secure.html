@@ -1597,6 +1597,7 @@
       let camLatestLog = Array.from({ length: MAX_CAM_UI }, () => null);
       let camStreams = new Map();  // slotIdx -> MediaStream
       let camStates  = new Map();  // slotIdx -> state
+      let userInitiatedCameraStart = false;
       const cloudRelay = {
         enabled: true,
         inFlight: new Set(),
@@ -2905,10 +2906,14 @@
           const status = await navigator.permissions.query({ name: "camera" });
           const handleChange = ()=>{
             if(status.state === "granted"){
-              addCvLog("Camera permission granted. Auto-starting selected cameras.");
               setGlobalPerm(true, "Camera: Permission granted");
-              resetCameraRecovery(true);
-              startSelectedCameras(true);
+              if(isLikelyMobile() && !userInitiatedCameraStart){
+                addCvLog("Camera permission granted. Tap Start Cameras to begin stream on mobile.", "warn");
+              }else{
+                addCvLog("Camera permission granted. Auto-starting selected cameras.");
+                resetCameraRecovery(true);
+                startSelectedCameras(true);
+              }
             }else if(status.state === "denied"){
               setGlobalPerm(false, "Camera: Permission blocked");
             }
@@ -3058,6 +3063,9 @@
        * Camera start/stop
        ***********************/
       async function startSelectedCameras(applyOnly=false, initiatedByUser=false){
+        if(initiatedByUser){
+          userInitiatedCameraStart = true;
+        }
         const want = [];
         for(let i=0;i<MAX_CAM_UI;i++){
           const cb = el("camChk_"+i);
@@ -3150,15 +3158,19 @@
           addCvLog(`Starting Camera ${slotIdx}…`);
           const pick = (camBindings[slotIdx] || "__default__");
           const fps = Number(settings.fpsCap || 12);
+          const likelyMobile = isLikelyMobile();
+          const preferredFacing = settings.mobileFacing || "environment";
           const videoConstraints = {
-            width: {ideal: 1280},
-            height:{ideal: 720},
-            frameRate: { ideal: fps, max: fps },
+            width: { ideal: likelyMobile ? 960 : 1280 },
+            height:{ ideal: likelyMobile ? 540 : 720 },
           };
+          if(!likelyMobile){
+            videoConstraints.frameRate = { ideal: fps, max: fps };
+          }
           if(pick && pick !== "__default__" && pick !== "__none__"){
             videoConstraints.deviceId = { exact: pick };
-          }else if(settings.mobileFacing){
-            videoConstraints.facingMode = { ideal: settings.mobileFacing };
+          }else if(preferredFacing){
+            videoConstraints.facingMode = { ideal: preferredFacing };
           }
 
           const attempts = [{
@@ -3172,14 +3184,26 @@
               height: { ideal: 720 },
               frameRate: { ideal: fps, max: fps },
             };
-            if(settings.mobileFacing){
-              fallbackConstraints.facingMode = { ideal: settings.mobileFacing };
+            if(likelyMobile){
+              delete fallbackConstraints.frameRate;
+              fallbackConstraints.width = { ideal: 960 };
+              fallbackConstraints.height = { ideal: 540 };
+            }
+            if(preferredFacing){
+              fallbackConstraints.facingMode = { ideal: preferredFacing };
             }
             attempts.push({ constraints: fallbackConstraints, label: "default camera constraints" });
           }
 
+          if(likelyMobile && preferredFacing){
+            attempts.push({
+              constraints: { facingMode: { exact: preferredFacing } },
+              label: "exact facing-mode constraints"
+            });
+          }
+
           attempts.push({
-            constraints: settings.mobileFacing ? { facingMode: { ideal: settings.mobileFacing } } : true,
+            constraints: preferredFacing ? { facingMode: { ideal: preferredFacing } } : true,
             label: "relaxed facing-mode constraints"
           });
           attempts.push({ constraints: true, label: "browser default camera" });
