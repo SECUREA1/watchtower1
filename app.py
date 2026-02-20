@@ -14,6 +14,7 @@ from uuid import uuid4
 
 import requests
 import cv2
+import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
@@ -238,7 +239,67 @@ async def add_security_headers(request: Request, call_next):
             f"frame-ancestors {FRAME_ANCESTORS_POLICY}",
         ]
     )
+    response.headers["Permissions-Policy"] = "camera=(self), microphone=(self), geolocation=(), interest-cohort=()"
     return response
+
+
+_HOG_DETECTOR = cv2.HOGDescriptor()
+_HOG_DETECTOR.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+_FACE_CASCADE = cv2.CascadeClassifier(str(Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml"))
+
+
+def _run_server_detection(image_bytes: bytes) -> dict:
+    image_array = np.frombuffer(image_bytes, dtype=np.uint8)
+    frame = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+    if frame is None:
+        raise HTTPException(status_code=400, detail="Unable to decode image data.")
+
+    detections: List[dict] = []
+    image_height, image_width = frame.shape[:2]
+
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    if not _FACE_CASCADE.empty():
+        faces = _FACE_CASCADE.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+        for (x, y, w, h) in faces:
+            detections.append(
+                {
+                    "class": "face",
+                    "score": 0.75,
+                    "bbox": [int(x), int(y), int(w), int(h)],
+                }
+            )
+
+    resized = frame
+    scale = 1.0
+    long_side = max(image_width, image_height)
+    if long_side > 960:
+        scale = 960.0 / long_side
+        resized = cv2.resize(frame, (int(image_width * scale), int(image_height * scale)))
+
+    rects, weights = _HOG_DETECTOR.detectMultiScale(resized, winStride=(8, 8), padding=(8, 8), scale=1.05)
+    for (x, y, w, h), score in zip(rects, weights):
+        if float(score) < 0.35:
+            continue
+        detections.append(
+            {
+                "class": "person",
+                "score": min(0.99, max(0.35, float(score))),
+                "bbox": [
+                    int(x / scale),
+                    int(y / scale),
+                    int(w / scale),
+                    int(h / scale),
+                ],
+            }
+        )
+
+    return {
+        "ok": True,
+        "detections": detections,
+        "image_width": image_width,
+        "image_height": image_height,
+        "detector": "opencv-haar+hog",
+    }
 
 
 @app.on_event("startup")
@@ -606,6 +667,20 @@ async def upload_cloud_camera_frame(
         encoding="utf-8",
     )
     return JSONResponse({"ok": True, "camera_id": camera_id, "timestamp": ts, "frames": frames})
+
+
+@app.post("/detect")
+async def detect_objects(image: UploadFile = File(...)) -> JSONResponse:
+    content_type = (image.content_type or "").lower()
+    if content_type and not content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Expected an image upload.")
+    data = await image.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty image payload.")
+    if len(data) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Image too large for detection endpoint.")
+    result = _run_server_detection(data)
+    return JSONResponse(result)
 
 
 def build_image_path(face_id: str, content_type: str) -> Path:
