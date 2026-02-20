@@ -5461,7 +5461,65 @@
       }
 
       // ----------------------------
-      // 5) Wire buttons + auto-run
+      // 5) Live multicam broadcast over shared WS
+      // ----------------------------
+      const multicamCanvas = document.createElement("canvas");
+      const multicamCtx = multicamCanvas.getContext("2d", { alpha: false });
+      let multicamTick = null;
+
+      function socketReady() {
+        const ref = window.watchtowerWS?.wsRef?.();
+        return ref && ref.readyState === 1 ? ref : null;
+      }
+
+      function captureFrameFromSlot(slotIdx) {
+        const video = document.getElementById(`vid_${slotIdx}`);
+        if (!video || !video.videoWidth || !video.videoHeight) return null;
+
+        const maxWidth = 640;
+        const scale = Math.min(1, maxWidth / video.videoWidth);
+        const width = Math.max(160, Math.round(video.videoWidth * scale));
+        const height = Math.max(90, Math.round(video.videoHeight * scale));
+
+        if (multicamCanvas.width !== width || multicamCanvas.height !== height) {
+          multicamCanvas.width = width;
+          multicamCanvas.height = height;
+        }
+
+        multicamCtx.drawImage(video, 0, 0, width, height);
+        return multicamCanvas.toDataURL("image/jpeg", 0.62);
+      }
+
+      function broadcastMulticamFrames() {
+        const wsRef = socketReady();
+        if (!wsRef) return;
+
+        const activeVideos = Array.from(document.querySelectorAll('video[id^="vid_"]')).filter((node) => node && node.srcObject);
+        for (const video of activeVideos) {
+          const slotIdx = Number((video.id || "").replace("vid_", ""));
+          const frame = captureFrameFromSlot(slotIdx);
+          if (!frame) continue;
+
+          try {
+            wsRef.send(JSON.stringify({
+              type: "secure-multicam-frame",
+              cameraId: `camera-${slotIdx}`,
+              ts: Date.now(),
+              frame,
+            }));
+          } catch (_err) {
+            return;
+          }
+        }
+      }
+
+      function startSecureMulticamBroadcast() {
+        if (multicamTick) clearInterval(multicamTick);
+        multicamTick = setInterval(broadcastMulticamFrames, 900);
+      }
+
+      // ----------------------------
+      // 6) Wire buttons + auto-run
       // ----------------------------
       window.addEventListener("load", () => {
         ensureUI();
@@ -5469,8 +5527,8 @@
         $("rnConnectBtn")?.addEventListener("click", handleConnect);
         $("rnCommitAllBtn")?.addEventListener("click", handleCommitAll);
 
-        // auto-connect on load (safe)
-        setTimeout(handleConnect, 200);
+        // shared ws_client.js already manages the main WS connection
+        startSecureMulticamBroadcast();
       });
 
     })();

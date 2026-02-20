@@ -598,6 +598,22 @@ wss.on("connection", (ws) => {
         }
         return;
       }
+      case "secure-multicam-frame": {
+        if (typeof msg.frame !== "string" || msg.frame.length < 32) return;
+        const payload = {
+          type: "secure-multicam-frame",
+          id: ws.id,
+          user: ws.username || "secure-client",
+          cameraId: msg.cameraId || "camera",
+          ts: msg.ts || Date.now(),
+          frame: msg.frame,
+          meta: msg.meta || null,
+        };
+        for (const client of wss.clients) {
+          if (client.readyState === 1) client.send(JSON.stringify(payload));
+        }
+        return;
+      }
     }
     if (msg?.type !== "chat") return;
     // Allow larger uploads so mobile devices can share photos and videos
