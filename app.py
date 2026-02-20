@@ -215,12 +215,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+FRAME_ANCESTORS_POLICY = os.getenv("FRAME_ANCESTORS_POLICY", "*").strip() or "*"
+
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
+    # `X-Frame-Options` is intentionally omitted so cross-site iframe embeds
+    # can work consistently across browsers (including Firefox).
     response.headers["Referrer-Policy"] = "same-origin"
     # Secure UI loads ML runtimes + model artifacts from trusted CDNs.
     # Keep the policy strict while explicitly allowing those hosts.
@@ -232,7 +235,7 @@ async def add_security_headers(request: Request, call_next):
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
             "font-src 'self' https://fonts.gstatic.com data:",
             "connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com",
-            "frame-ancestors 'none'",
+            f"frame-ancestors {FRAME_ANCESTORS_POLICY}",
         ]
     )
     return response
