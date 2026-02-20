@@ -24,37 +24,72 @@
 
   <script src="/static/js/ws-config.js"></script>
   <script>
-    async function loadCameras() {
-      const res = await fetch('/api/cameras');
-      const data = await res.json();
-      if (!data.ok) {
-        document.getElementById('grid').innerHTML = `<div class="card">${data.error}</div>`;
-        return;
-      }
-      const grid = document.getElementById('grid');
-      grid.innerHTML = '';
-      data.cameras.forEach(cam => {
-        const card = document.createElement('div');
-        card.className = 'card';
-        const err = cam.stats?.last_error ? `<span class="error">${cam.stats.last_error}</span>` : '<span class="badge">OK</span>';
-        card.innerHTML = `
-          <div class="meta"><strong>${cam.id}</strong> · ${cam.type} · ${cam.resolution} @ ${cam.fps_target}fps</div>
-          <img src="/api/cameras/${cam.id}/mjpeg" alt="${cam.id}" />
-          <div class="status">
-            <span>fps: ${cam.stats.fps.toFixed(1)} frames: ${cam.stats.frames}</span>
-            ${err}
-          </div>
-        `;
-        grid.appendChild(card);
-      });
+    const $ = (id) => document.getElementById(id);
+
+    function normalizeHttpBase(value) {
+      const raw = (value || '').trim();
+      if (!raw) return '';
+      if (/^https?:\/\//i.test(raw)) return raw.replace(/\/+$/, '');
+      return `${location.protocol}//${raw.replace(/\/+$/, '')}`;
     }
+
+    function deriveApiBase() {
+      const params = new URLSearchParams(location.search);
+      const fromQuery = normalizeHttpBase(params.get('api'));
+      if (fromQuery) return fromQuery;
+
+      const fromStorage = normalizeHttpBase(localStorage.getItem('watchtower_api_base'));
+      if (fromStorage) return fromStorage;
+
+      if (window.WATCHTOWER_API_BASE) return normalizeHttpBase(window.WATCHTOWER_API_BASE);
+
+      return '';
+    }
+
+    const apiBase = deriveApiBase();
+    const apiPrefix = apiBase || '';
+
+    function apiUrl(path) {
+      return `${apiPrefix}${path}`;
+    }
+
+    async function loadCameras() {
+      try {
+        const res = await fetch(apiUrl('/api/cameras'));
+        const data = await res.json();
+        if (!data.ok) {
+          $('grid').innerHTML = `<div class="card">${data.error || 'Unable to load cameras'}</div>`;
+          return;
+        }
+
+        const grid = $('grid');
+        grid.innerHTML = '';
+        data.cameras.forEach(cam => {
+          const card = document.createElement('div');
+          card.className = 'card';
+          const err = cam.stats?.last_error ? `<span class="error">${cam.stats.last_error}</span>` : '<span class="badge">OK</span>';
+          card.innerHTML = `
+            <div class="meta"><strong>${cam.id}</strong> · ${cam.type} · ${cam.resolution} @ ${cam.fps_target}fps</div>
+            <img src="${apiUrl(`/api/cameras/${cam.id}/mjpeg`)}" alt="${cam.id}" />
+            <div class="status">
+              <span>fps: ${cam.stats.fps.toFixed(1)} frames: ${cam.stats.frames}</span>
+              ${err}
+            </div>
+          `;
+          grid.appendChild(card);
+        });
+      } catch (err) {
+        $('grid').innerHTML = `<div class="card">Camera API bridge error. Configure <code>?api=https://watchtower-api-host</code>.</div>`;
+      }
+    }
+
     loadCameras();
     setInterval(loadCameras, 5000);
 
     let ws;
     let wsTimer;
     let wsDelay = 1000;
-    const wsStateEl = document.getElementById('ws-state');
+    const wsStateEl = $('ws-state');
 
     function setWsState(text){
       if (wsStateEl) wsStateEl.textContent = `WS: ${text}`;
@@ -75,7 +110,7 @@
 
       ws.addEventListener('open', () => {
         wsDelay = 1000;
-        setWsState('live');
+        setWsState(`live · api ${apiBase || 'same-origin'}`);
         try { ws.send(JSON.stringify({ type: 'join', user: 'multi-camera' })); } catch (_err) {}
       });
       ws.addEventListener('close', () => {
