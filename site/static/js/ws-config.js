@@ -1,5 +1,5 @@
 (() => {
-  const CLOUD_WS = "wss://watchtower-kw2o.onrender.com/ws";
+  const CLOUD_WS = "wss://watchtower-3l5i.onrender.com/ws";
 
   const ensureWsPath = (value) => {
     const trimmed = value.replace(/\/+$/, "");
