@@ -1776,6 +1776,23 @@
       let selectedLog = null;
       let selectedLogRow = null;
 
+      function cameraStartBlockerMessage(){
+        if(!window.isSecureContext){
+          return "Camera access requires HTTPS (or localhost/127.0.0.1).";
+        }
+        try{
+          if(window.top !== window.self){
+            const policy = document.permissionsPolicy || document.featurePolicy;
+            if(policy && typeof policy.allowsFeature === "function" && !policy.allowsFeature("camera")){
+              return "Camera is blocked by iframe Permissions-Policy. Add allow='camera; microphone' on the iframe and permit it from the parent origin.";
+            }
+          }
+        }catch(_err){
+          return "Camera access is blocked by embed/frame restrictions.";
+        }
+        return "";
+      }
+
       /***********************
        * Boot UI
        ***********************/
@@ -1788,6 +1805,13 @@
       refreshTuneSuggestions();
       setLogViewMode(logViewMode, false);
       refreshAll();
+
+      const initialCameraBlocker = cameraStartBlockerMessage();
+      if(initialCameraBlocker){
+        setGlobalPerm(false, "Camera: Blocked by browser context");
+        setCvStatus(cvStatusCamera, "Camera: blocked by browser context");
+        addCvLog(initialCameraBlocker, "bad");
+      }
 
       // Try device list (labels may be blank until permission)
       ensureDevicesDiscoveredOnLoad();
@@ -3135,6 +3159,15 @@
 
       async function startCamera(slotIdx){
         try{
+          const blocker = cameraStartBlockerMessage();
+          if(blocker){
+            setCamStatus(slotIdx, false);
+            setGlobalPerm(false, "Camera: Blocked by browser context");
+            toast(blocker);
+            addCvLog(blocker, "bad");
+            return false;
+          }
+
           if(!navigator.mediaDevices?.getUserMedia){
             toast("Camera not supported in this browser.");
             setCamStatus(slotIdx, false);
