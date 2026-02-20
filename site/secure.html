@@ -3071,20 +3071,8 @@
           const cb = el("camChk_"+i);
           if(cb && cb.checked) want.push(i);
         }
-
-        if(want.length === 0){
-          want.push(0);
-          const defaultCb = el("camChk_0");
-          if(defaultCb) defaultCb.checked = true;
-          addCvLog("No camera slot selected. Defaulting to Camera 0.", "warn");
-          toast("No camera selected. Starting Camera 0.");
-        }
         settings.selectedSlots = want;
         saveSettings();
-
-        if(initiatedByUser){
-          await requestCameraPermissionFromGesture();
-        }
 
         if(isLikelyIOS() && want.length > 1){
           // iOS: limit to one active stream to avoid camera errors.
@@ -3126,24 +3114,6 @@
         updateStreamStatus();
       }
 
-      async function requestCameraPermissionFromGesture(){
-        if(!navigator.mediaDevices?.getUserMedia) return;
-        try{
-          // Avoid opening/closing a temporary stream before real startup.
-          // On mobile Safari this can intermittently lock the camera source.
-          addCvLog("Start Cameras tapped. Permission prompt will be handled by the selected stream.");
-          if(navigator.permissions?.query){
-            const status = await navigator.permissions.query({ name: "camera" });
-            if(status.state === "granted"){
-              setGlobalPerm(true, "Camera: Permission granted");
-            }
-          }
-          await enumerateVideoDevices({ force: false });
-        }catch(err){
-          addCvLog("Camera permission preflight failed: " + (err?.message || err), "warn");
-        }
-      }
-
       async function startCamera(slotIdx){
         try{
           if(!navigator.mediaDevices?.getUserMedia){
@@ -3158,74 +3128,18 @@
           addCvLog(`Starting Camera ${slotIdx}…`);
           const pick = (camBindings[slotIdx] || "__default__");
           const fps = Number(settings.fpsCap || 12);
-          const likelyMobile = isLikelyMobile();
-          const preferredFacing = settings.mobileFacing || "environment";
           const videoConstraints = {
-            width: { ideal: likelyMobile ? 960 : 1280 },
-            height:{ ideal: likelyMobile ? 540 : 720 },
+            width: {ideal: 1280},
+            height:{ideal: 720},
+            frameRate: { ideal: fps, max: fps },
           };
-          if(!likelyMobile){
-            videoConstraints.frameRate = { ideal: fps, max: fps };
-          }
           if(pick && pick !== "__default__" && pick !== "__none__"){
             videoConstraints.deviceId = { exact: pick };
-          }else if(preferredFacing){
-            videoConstraints.facingMode = { ideal: preferredFacing };
+          }else if(settings.mobileFacing){
+            videoConstraints.facingMode = { ideal: settings.mobileFacing };
           }
 
-          const attempts = [{
-            constraints: videoConstraints,
-            label: "selected constraints"
-          }];
-
-          if(videoConstraints.deviceId){
-            const fallbackConstraints = {
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
-              frameRate: { ideal: fps, max: fps },
-            };
-            if(likelyMobile){
-              delete fallbackConstraints.frameRate;
-              fallbackConstraints.width = { ideal: 960 };
-              fallbackConstraints.height = { ideal: 540 };
-            }
-            if(preferredFacing){
-              fallbackConstraints.facingMode = { ideal: preferredFacing };
-            }
-            attempts.push({ constraints: fallbackConstraints, label: "default camera constraints" });
-          }
-
-          if(likelyMobile && preferredFacing){
-            attempts.push({
-              constraints: { facingMode: { exact: preferredFacing } },
-              label: "exact facing-mode constraints"
-            });
-          }
-
-          attempts.push({
-            constraints: preferredFacing ? { facingMode: { ideal: preferredFacing } } : true,
-            label: "relaxed facing-mode constraints"
-          });
-          attempts.push({ constraints: true, label: "browser default camera" });
-
-          let stream = null;
-          let lastErr = null;
-          for(let i = 0; i < attempts.length; i++){
-            try{
-              stream = await navigator.mediaDevices.getUserMedia({ video: attempts[i].constraints, audio:false });
-              if(i > 0){
-                addCvLog(`Camera ${slotIdx} recovered using ${attempts[i].label}.`, "warn");
-              }
-              break;
-            }catch(err){
-              lastErr = err;
-              addCvLog(`Camera ${slotIdx} attempt ${i+1} failed (${attempts[i].label}): ${(err && err.message) || err}`, "warn");
-            }
-          }
-
-          if(!stream){
-            throw lastErr || new Error("Unable to initialize camera stream");
-          }
+          const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio:false });
 
           camStreams.set(slotIdx, stream);
           camStates.set(slotIdx, makeCamState(slotIdx));
