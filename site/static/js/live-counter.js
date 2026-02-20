@@ -164,7 +164,7 @@
   };
 
   const connect = () => {
-    const url = window.rednodeWsConfig?.resolveWsUrl?.() || "wss://watchtower-3l5i.onrender.com/ws";
+    const url = window.watchtowerWsConfig?.resolveWsUrl?.() || "wss://watchtower-3l5i.onrender.com/ws";
     try {
       ws = new WebSocket(url);
     } catch (e) {
