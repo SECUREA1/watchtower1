@@ -243,3 +243,80 @@ DATA_DIR/
 > **Important:** The API now defaults to `ALLOW_PUBLIC_INGEST=1` for frictionless demos. Set `ALLOW_PUBLIC_INGEST=0` and configure `ADMIN_TOKEN` in any production deployment.
 
 See [SECURITY_NOTES.md](SECURITY_NOTES.md) for detailed recommendations.
+
+
+## Render deployment (go-live checklist)
+
+This repo now ships a Render Blueprint (`render.yaml`) that defines **two Docker web services**:
+
+1. `watchtower-api` → FastAPI app from `Dockerfile.api`
+2. `watchtower-ws` → WebSocket relay from `ws-server/Dockerfile`
+
+### 1) Create services from Blueprint
+
+- In Render, use **New + → Blueprint** and select this repo.
+- Render will read `render.yaml` and create both services.
+
+### 2) Required environment variables in Render
+
+Set these in **watchtower-api** before going live:
+
+| Variable | Required | Example / Notes |
+| --- | --- | --- |
+| `ADMIN_TOKEN` | Yes (recommended) | Strong random token used by API auth when public ingest is disabled. |
+| `ALLOW_PUBLIC_INGEST` | Yes | Use `0` in production. |
+| `ALLOWED_ORIGINS` | Yes | Comma-separated list of full origins, e.g. `https://watchtower-api.onrender.com,https://watchtower-ws.onrender.com,https://yourdomain.com`. |
+| `WATCHTOWER_ACCESS_PASSWORD` | Yes | UI login password cookie gate. |
+| `WATCHTOWER_ACCESS_CODE` | Optional | Extra unlock code if used by your flow. |
+| `DATA_DIR` | Yes | Keep `/opt/watchtower/data` (matches disk mount). |
+| `STATIC_DIR` | Yes | Keep `/app` so root HTML files and `/site` are both served. |
+| `MAX_UPLOAD_BYTES` | Yes | Default `2097152` unless you intentionally increase limits. |
+| `LOG_LEVEL` | Optional | `INFO` recommended. |
+
+If GitHub sync is enabled, also set these in **watchtower-api**:
+
+| Variable | Required when `GITHUB_ENABLED=1` | Notes |
+| --- | --- | --- |
+| `GITHUB_ENABLED` | Yes | `1` to enable cloud commit flow. |
+| `GITHUB_OWNER` | Yes | GitHub org/user that owns destination repo. |
+| `GITHUB_REPO` | Yes | Destination repo name for ingested data. |
+| `GITHUB_BRANCH` | Yes | Usually `main`. |
+| `GITHUB_PR_FLOW` | Yes | `1` for PR workflow, `0` for direct commits. |
+| `GITHUB_TOKEN` | Yes | Render secret env var with repo write permissions. |
+
+Set these in **watchtower-ws**:
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `NODE_ENV` | Yes | `production`. |
+| `DB_PATH` | Yes | `/opt/watchtower/data/app.db` so websocket chat state survives restarts. |
+
+### 3) Render service settings
+
+- `watchtower-api`
+  - Runtime: Docker
+  - Dockerfile: `Dockerfile.api`
+  - Health check path: `/healthz`
+  - Persistent disk: mount `/opt/watchtower/data`, size `20GB`
+- `watchtower-ws`
+  - Runtime: Docker
+  - Dockerfile: `ws-server/Dockerfile`
+  - Health check path: `/healthz`
+  - Persistent disk: mount `/opt/watchtower/data`, size `2GB`
+
+### 4) Domain and CORS wiring
+
+- Add your production custom domain(s) in Render for the API and WS service.
+- Update `ALLOWED_ORIGINS` to include **every** origin that will call the API (Render domains + custom domains).
+- Redeploy `watchtower-api` after changing origins.
+
+### 5) Go-live validation
+
+After deploy:
+
+```bash
+curl https://<watchtower-api-domain>/healthz
+curl https://<watchtower-ws-domain>/healthz
+```
+
+Both should return success before enabling public traffic.

@@ -30,8 +30,9 @@ RUN npm ci --no-audit --no-fund
 # Copy source
 COPY . .
 
-# Ensure data dir exists and is writable by the non-root user
-RUN mkdir -p /opt/rednode/data && chown -R node:node /opt/rednode
+# Ensure data dir exists and is writable by the non-root user.
+# Keep this aligned with render.yaml DB_PATH (/opt/watchtower/data/app.db).
+RUN mkdir -p /opt/watchtower/data && chown -R node:node /opt/watchtower
 
 # Run as non-root user
 USER node

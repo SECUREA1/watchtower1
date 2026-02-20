@@ -115,7 +115,6 @@ const thumbnails = new Map();
 // track viewers per broadcaster
 const listeners = new Map(); // hostId -> Set of watcherIds
 const watching = new Map();  // watcherId -> Set of hostIds
-let guestApproved = null; // currently approved guest broadcaster
 
 function uid(){
   return Math.random().toString(36).slice(2,9);
@@ -163,7 +162,6 @@ wss.on("connection", (ws) => {
       for (const client of wss.clients) {
         if (client.readyState === 1) client.send(JSON.stringify({ type: "bye", id: ws.id }));
       }
-      if (guestApproved === ws.id || broadcasters.size <= 1) guestApproved = null;
       if(listeners.has(ws.id)){
         listeners.delete(ws.id);
         sendListenerCount(ws.id);
@@ -193,10 +191,6 @@ wss.on("connection", (ws) => {
     }
     switch (msg?.type) {
       case "broadcaster":
-        if (broadcasters.size > 0 && ws.id !== guestApproved) {
-          ws.send(JSON.stringify({ type: "join-denied" }));
-          return;
-        }
         broadcasters.set(ws.id, ws);
         broadcastUsers();
         return;
@@ -209,7 +203,6 @@ wss.on("connection", (ws) => {
           }
           broadcasters.delete(ws.id);
           thumbnails.delete(ws.id);
-          if (guestApproved === ws.id || broadcasters.size <= 1) guestApproved = null;
           if(listeners.has(ws.id)){
             listeners.delete(ws.id);
             sendListenerCount(ws.id);
@@ -218,10 +211,6 @@ wss.on("connection", (ws) => {
         }
         return;
       case "join-request": {
-        if (guestApproved) {
-          ws.send(JSON.stringify({ type: "join-denied" }));
-          return;
-        }
         const host = broadcasters.get(msg.id);
         if (host && host.readyState === 1) {
           host.send(
@@ -233,10 +222,8 @@ wss.on("connection", (ws) => {
         return;
       }
       case "approve-join": {
-        if (guestApproved) return;
         const guest = clients.get(msg.id);
         if (guest && broadcasters.has(ws.id)) {
-          guestApproved = msg.id;
           guest.send(JSON.stringify({ type: "join-approved" }));
         }
         return;
