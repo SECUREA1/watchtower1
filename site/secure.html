@@ -1079,7 +1079,7 @@
         <a href="/home.html">Overview</a>
         <a href="/secure.html" class="active">Secure</a>
         <a href="/dashboard.html">Automations</a>
-        <a href="/multi-camera">Devices</a>
+        <a href="/multi_camera.html">Devices</a>
         <a href="/marketplace.html">Integrations</a>
         <a href="/start.html">Get Started</a>
       </nav>
@@ -1597,6 +1597,12 @@
       let camLatestLog = Array.from({ length: MAX_CAM_UI }, () => null);
       let camStreams = new Map();  // slotIdx -> MediaStream
       let camStates  = new Map();  // slotIdx -> state
+      const cloudRelay = {
+        enabled: true,
+        inFlight: new Set(),
+        lastUploadAt: new Map(),
+        minIntervalMs: 2000,
+      };
       let devices = [];            // videoinput list
       const cameraRecovery = {
         inProgress: false,
@@ -3265,7 +3271,44 @@
             demoDraw: null,
           },
           lastUnknownAt: 0,
+          fps: 0,
         };
+      }
+
+      async function uploadCloudFrame(idx, video, fps=0){
+        if(!cloudRelay.enabled) return;
+        if(cloudRelay.inFlight.has(idx)) return;
+        const now = Date.now();
+        const last = cloudRelay.lastUploadAt.get(idx) || 0;
+        if(now - last < cloudRelay.minIntervalMs) return;
+        if(!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) return;
+
+        cloudRelay.inFlight.add(idx);
+        try{
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.min(video.videoWidth, 640);
+          canvas.height = Math.round(canvas.width * (video.videoHeight / video.videoWidth));
+          const g = canvas.getContext("2d", { alpha:false });
+          g.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+          const blob = await new Promise(resolve=>canvas.toBlob(resolve, "image/jpeg", 0.72));
+          if(!blob) return;
+          const fd = new FormData();
+          fd.append("camera_id", `secure-cam-${idx}`);
+          fd.append("source", "secure-ui");
+          fd.append("resolution", `${video.videoWidth}x${video.videoHeight}`);
+          fd.append("fps", String(fps || 0));
+          fd.append("frame", blob, `secure-cam-${idx}.jpg`);
+          const res = await fetch("/api/cloud/cameras/frame", { method:"POST", body: fd });
+          if(!res.ok){
+            throw new Error(`Upload failed (${res.status})`);
+          }
+          cloudRelay.lastUploadAt.set(idx, now);
+        }catch(err){
+          addCvLog(`Cloud relay failed for Camera ${idx}: ${(err && err.message) || err}`, "warn");
+        }finally{
+          cloudRelay.inFlight.delete(idx);
+        }
       }
 
       /***********************
@@ -3345,9 +3388,14 @@
           if(now2 - lastFpsStamp > 1000){
             const fps = Math.round((frames * 1000) / (now2 - lastFpsStamp));
             el("camFps_"+idx).textContent = fps + " fps";
+            const s = camStates.get(idx);
+            if(s) s.fps = fps;
             frames = 0;
             lastFpsStamp = now2;
           }
+
+          const s2 = camStates.get(idx);
+          uploadCloudFrame(idx, v, s2?.fps || 0);
 
           requestAnimationFrame(tick);
         };
@@ -5168,7 +5216,6 @@
 
     })();
   </script>
-  <script src="/static/js/ws-config.js"></script>
   <script src="ws_client.js"></script>
   <script type="module" src="client_storage.js"></script>
   <script>
@@ -5187,7 +5234,7 @@
         box.style.cssText = "padding:12px;border:1px solid #333;border-radius:8px;margin:12px 0;max-width:720px";
         box.innerHTML = `
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-            <input id="serverUrl" style="flex:1;min-width:260px" placeholder="https://watchtower-3l5i.onrender.com (blank = cloud)"/>
+            <input id="serverUrl" style="flex:1;min-width:260px" placeholder="https://api.rednode.ai (blank = same origin)"/>
             <input id="adminToken" style="flex:1;min-width:240px" placeholder="Admin token (required for commit)"/>
           </div>
           <label style="display:block;margin-top:8px">
@@ -5215,18 +5262,13 @@
       // ----------------------------
       function normalizeBase(input) {
         const v = (input || "").trim();
-        if (!v) {
-          const cloudWs = window.watchtowerWsConfig?.cloudWs || "wss://watchtower-3l5i.onrender.com/ws";
-          return cloudWs.replace(/^ws/i, "http").replace(/\/ws$/i, "");
-        }
+        if (!v) return location.origin;
         // allow http(s)://... or bare host:port
         if (v.startsWith("http://") || v.startsWith("https://")) return v.replace(/\/+$/, "");
         return `${location.protocol}//${v.replace(/\/+$/, "")}`;
       }
 
       function wsUrlFromBase(httpBase) {
-        const resolved = window.watchtowerWsConfig?.resolveWsUrl?.(httpBase);
-        if (resolved) return resolved;
         const u = new URL(httpBase);
         const wsProto = u.protocol === "https:" ? "wss:" : "ws:";
         return `${wsProto}//${u.host}/ws`;
@@ -5461,65 +5503,7 @@
       }
 
       // ----------------------------
-      // 5) Live multicam broadcast over shared WS
-      // ----------------------------
-      const multicamCanvas = document.createElement("canvas");
-      const multicamCtx = multicamCanvas.getContext("2d", { alpha: false });
-      let multicamTick = null;
-
-      function socketReady() {
-        const ref = window.watchtowerWS?.wsRef?.();
-        return ref && ref.readyState === 1 ? ref : null;
-      }
-
-      function captureFrameFromSlot(slotIdx) {
-        const video = document.getElementById(`vid_${slotIdx}`);
-        if (!video || !video.videoWidth || !video.videoHeight) return null;
-
-        const maxWidth = 640;
-        const scale = Math.min(1, maxWidth / video.videoWidth);
-        const width = Math.max(160, Math.round(video.videoWidth * scale));
-        const height = Math.max(90, Math.round(video.videoHeight * scale));
-
-        if (multicamCanvas.width !== width || multicamCanvas.height !== height) {
-          multicamCanvas.width = width;
-          multicamCanvas.height = height;
-        }
-
-        multicamCtx.drawImage(video, 0, 0, width, height);
-        return multicamCanvas.toDataURL("image/jpeg", 0.62);
-      }
-
-      function broadcastMulticamFrames() {
-        const wsRef = socketReady();
-        if (!wsRef) return;
-
-        const activeVideos = Array.from(document.querySelectorAll('video[id^="vid_"]')).filter((node) => node && node.srcObject);
-        for (const video of activeVideos) {
-          const slotIdx = Number((video.id || "").replace("vid_", ""));
-          const frame = captureFrameFromSlot(slotIdx);
-          if (!frame) continue;
-
-          try {
-            wsRef.send(JSON.stringify({
-              type: "secure-multicam-frame",
-              cameraId: `camera-${slotIdx}`,
-              ts: Date.now(),
-              frame,
-            }));
-          } catch (_err) {
-            return;
-          }
-        }
-      }
-
-      function startSecureMulticamBroadcast() {
-        if (multicamTick) clearInterval(multicamTick);
-        multicamTick = setInterval(broadcastMulticamFrames, 900);
-      }
-
-      // ----------------------------
-      // 6) Wire buttons + auto-run
+      // 5) Wire buttons + auto-run
       // ----------------------------
       window.addEventListener("load", () => {
         ensureUI();
@@ -5527,8 +5511,8 @@
         $("rnConnectBtn")?.addEventListener("click", handleConnect);
         $("rnCommitAllBtn")?.addEventListener("click", handleCommitAll);
 
-        // shared ws_client.js already manages the main WS connection
-        startSecureMulticamBroadcast();
+        // auto-connect on load (safe)
+        setTimeout(handleConnect, 200);
       });
 
     })();

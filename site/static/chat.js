@@ -1,18 +1,5 @@
 (function(){
   let chatSocket = null;
-
-  function resolveChatOrigin() {
-    const cloudBase = window.watchtowerWsConfig?.cloudHttpBase;
-    if (cloudBase) return cloudBase;
-    return `${location.protocol}//${location.host}`;
-  }
-
-  function connectChatSocket() {
-    return io(resolveChatOrigin(), {
-      transports: ['websocket'],
-      upgrade: false,
-    });
-  }
   function createBox(){
     const ctx = window.APP_CONTEXT || {};
     const box = document.createElement('div');
@@ -61,7 +48,7 @@
     usersBox.style.letterSpacing = '0.12em';
     usersBox.style.fontSize = '11px';
     const sendAllowed = !!ctx.username;
-    const socket = connectChatSocket();
+    const socket = io();
     chatSocket = socket;
     socket.on('connect', () => {
       socket.emit('get_chat_history');
