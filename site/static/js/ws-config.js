@@ -2,13 +2,6 @@
   const CLOUD_HTTP_BASE = "https://watchtower-3l5i.onrender.com";
   const CLOUD_WS = `${CLOUD_HTTP_BASE.replace(/^http/i, "ws")}/ws`;
 
-  const normalizeHttpBase = (value) => {
-    const raw = (value || "").trim();
-    if (!raw) return "";
-    if (/^https?:\/\//i.test(raw)) return raw.replace(/\/+$/, "");
-    return `${location.protocol}//${raw.replace(/^\/+/, "").replace(/\/+$/, "")}`;
-  };
-
   const normalizeWsUrl = (value) => {
     const raw = (value || "").trim();
     if (!raw) return CLOUD_WS;
@@ -33,13 +26,6 @@
     const wsFromQuery = params.get("ws");
     if (wsFromQuery) {
       const normalized = normalizeWsUrl(wsFromQuery);
-      try { localStorage.setItem("watchtower_ws_url", normalized); } catch (_) {}
-      return normalized;
-    }
-
-    const apiFromQuery = normalizeHttpBase(params.get("api"));
-    if (apiFromQuery) {
-      const normalized = normalizeWsUrl(apiFromQuery);
       try { localStorage.setItem("watchtower_ws_url", normalized); } catch (_) {}
       return normalized;
     }
