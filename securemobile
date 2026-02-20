@@ -245,6 +245,7 @@ function isLikelyIOS() {
          (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 }
 
+
 /* ---------- CV runtime (robust, mobile-safe) ---------- */
 let faceapi = null;
 let cocoModel = null;
@@ -548,13 +549,15 @@ async function startOneCamera(camId, { deviceId = "", facingMode = "" } = {}) {
 
   const fps = Number(UI.fpsCap.value) || 12;
 
+  const baseVideo = {
+    width:  { ideal: 1280 },
+    height: { ideal: 720 },
+    frameRate: { ideal: fps, max: fps },
+  };
+
   const constraints = {
     audio: false,
-    video: {
-      width:  { ideal: 1280 },
-      height: { ideal: 720 },
-      frameRate: { ideal: fps, max: fps },
-    }
+    video: { ...baseVideo }
   };
 
   // Priority: explicit deviceId -> facingMode (mobile) -> auto
@@ -565,7 +568,32 @@ async function startOneCamera(camId, { deviceId = "", facingMode = "" } = {}) {
   }
 
   cam.metaEl.textContent = "requesting…";
-  cam.stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+  // Mobile browsers can reject strict constraints, so we progressively relax.
+  const fallbackConstraints = [
+    constraints,
+    { audio: false, video: { ...baseVideo, facingMode: facingMode ? { ideal: facingMode } : undefined } },
+    { audio: false, video: true },
+  ].map((c) => {
+    if (c.video && typeof c.video === 'object' && c.video.facingMode === undefined) {
+      delete c.video.facingMode;
+    }
+    return c;
+  });
+
+  let lastError = null;
+  for (const c of fallbackConstraints) {
+    try {
+      cam.stream = await navigator.mediaDevices.getUserMedia(c);
+      break;
+    } catch (e) {
+      lastError = e;
+    }
+  }
+
+  if (!cam.stream) {
+    throw lastError || new Error("Unable to start camera stream.");
+  }
 
   cam.video.srcObject = cam.stream;
 
@@ -685,14 +713,18 @@ async function runInference(cam) {
 
 /* ---------- Start/Stop + AI toggle ---------- */
 let aiEnabled = false;
+let startInProgress = false;
 
 async function startAllCameras() {
+  if (startInProgress) return;
+  startInProgress = true;
+
   setPill("Starting…", "warn");
   setStatus("Requesting camera permissions…", "warn");
 
   addMsg("System", "Starting cameras. If you’re on iPhone and Camera #2 fails, that’s normal—iOS often allows only one active stream.");
 
-  // Start slot #1 using preferred facing (mobile) unless a device is explicitly selected
+  // Start slot #1 first inside the button gesture path for better iOS reliability.
   await populateDeviceSelects();
 
   const facing = UI.mobileFacing.value;
@@ -711,8 +743,14 @@ async function startAllCameras() {
     { id: "cam2", deviceId: cam2Sel || "", facingMode: "" }
   ];
 
+  if (isLikelyIOS() && !cam2Sel) {
+    // iOS commonly blocks a second concurrent stream; keep app stable by defaulting to one.
+    plan.splice(1, 1);
+    cameras.cam2.metaEl.textContent = "idle (iOS single-cam mode)";
+  }
+
   // If cam2 not chosen and multiple devices exist, pick a different one than cam1
-  if (!plan[1].deviceId && devices.length >= 2) {
+  if (plan[1] && !plan[1].deviceId && devices.length >= 2) {
     // Try not to duplicate cam1 selection
     const cam1Dev = plan[0].deviceId || "";
     let candidate = "";
@@ -724,17 +762,21 @@ async function startAllCameras() {
 
   // Start sequentially so mobile browsers don’t choke
   let started = 0;
-  for (const p of plan) {
-    try {
-      await startOneCamera(p.id, { deviceId: p.deviceId, facingMode: p.facingMode });
-      started++;
-      await sleep(200);
-      // After permission is granted, labels show up on iOS
-      await populateDeviceSelects();
-    } catch (e) {
-      cameras[p.id].metaEl.textContent = "failed";
-      addMsg("Camera Error (" + p.id + ")", (e && e.stack) ? e.stack : String(e));
+  try {
+    for (const p of plan) {
+      try {
+        await startOneCamera(p.id, { deviceId: p.deviceId, facingMode: p.facingMode });
+        started++;
+        await sleep(200);
+        // After permission is granted, labels show up on iOS
+        await populateDeviceSelects();
+      } catch (e) {
+        cameras[p.id].metaEl.textContent = "failed";
+        addMsg("Camera Error (" + p.id + ")", (e && e.stack) ? e.stack : String(e));
+      }
     }
+  } finally {
+    startInProgress = false;
   }
 
   if (started > 0) {
@@ -750,12 +792,15 @@ async function startAllCameras() {
 }
 
 UI.btnStart.addEventListener('click', async () => {
+  UI.btnStart.disabled = true;
   try {
     await startAllCameras();
   } catch (e) {
     setPill("Error", "bad");
     setStatus("Failed to start cameras. See chat.", "bad");
     addMsg("Start Error", (e && e.stack) ? e.stack : String(e));
+  } finally {
+    UI.btnStart.disabled = false;
   }
 });
 
@@ -768,12 +813,18 @@ UI.btnStop.addEventListener('click', () => {
 UI.btnToggleAI.addEventListener('click', async () => {
   aiEnabled = !aiEnabled;
 
+  const runningCount = CAM_SLOTS.reduce((count, slot) => count + (cameras[slot.id]?.running ? 1 : 0), 0);
+
   if (aiEnabled) {
     UI.btnToggleAI.textContent = "Disable Recognition";
     setPill("Loading AI…", "warn");
     setStatus("Loading AI models…", "warn");
 
     try {
+      if (runningCount === 0) {
+        addMsg("System", "No active camera stream. Starting cameras before enabling recognition.");
+        await startAllCameras();
+      }
       await ensureCVReadySafe();
       setPill("AI On", "good");
       setStatus("AI enabled (face detection + optional objects).", "good");
