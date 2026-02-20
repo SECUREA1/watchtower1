@@ -27,13 +27,29 @@
     }
   }
 
+  function appendWsPath(url) {
+    const trimmed = url.replace(/\/+$/, '');
+    return trimmed.toLowerCase().endsWith('/ws') ? trimmed : `${trimmed}/ws`;
+  }
+
   function buildWsUrl() {
-    const configuredResolver = window.watchtowerWsConfig?.resolveWsUrl;
-    if (typeof configuredResolver === 'function') {
-      const resolved = configuredResolver();
-      if (resolved) return resolved;
+    const overrideRaw = (getEl('serverUrl')?.value || '').trim();
+    const defaultProto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const defaultUrl = `${defaultProto}://${window.location.host}/ws`;
+
+    if (overrideRaw) {
+      if (/^wss?:\/\//i.test(overrideRaw)) {
+        return appendWsPath(overrideRaw);
+      }
+      if (/^https?:\/\//i.test(overrideRaw)) {
+        const proto = overrideRaw.toLowerCase().startsWith('https:') ? 'wss' : 'ws';
+        const trimmed = overrideRaw.replace(/\/+$/, '');
+        const hostAndPath = trimmed.replace(/^https?:\/\//i, '');
+        return appendWsPath(`${proto}://${hostAndPath}`);
+      }
     }
-    return 'wss://watchtower-3l5i.onrender.com/ws';
+
+    return defaultUrl;
   }
 
   function clearSocket() {
