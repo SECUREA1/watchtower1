@@ -120,6 +120,8 @@ const htmlAliases = new Map([
   ["/ar-dashboard", "RedNode Dashboard — Full Demo.html"],
   ["/rednode-dashboard", "RedNode Dashboard — Full Demo.html"],
   ["/rednode-dashboard-demo", "RedNode Dashboard — Full Demo.html"],
+  ["/multi-camera", path.join("site", "multi_camera.html")],
+  ["/multi-cam", path.join("site", "multi_camera.html")],
 ]);
 
 async function tryServeFile(res, relativePath, method) {
@@ -187,6 +189,12 @@ const server = http.createServer(async (req, res) => {
   }
 
   // Serve chat client for root requests
+  if ((req.method === "GET" || req.method === "HEAD") && urlPath === "/multi_camera.html") {
+    res.writeHead(302, { Location: "/multi-camera" });
+    res.end();
+    return;
+  }
+
   const isRootRequest = ["/", "/index.html", "/start", "/start.html"].includes(urlPath);
   if ((req.method === "GET" || req.method === "HEAD") && isRootRequest) {
     if (urlPath === "/" || urlPath === "/index.html") {
@@ -333,10 +341,21 @@ const thumbnails = new Map();
 // track viewers per broadcaster
 const listeners = new Map(); // hostId -> Set of watcherIds
 const watching = new Map();  // watcherId -> Set of hostIds
-let guestApproved = null; // currently approved guest broadcaster
+
+function jsonSafeSend(ws, payload) {
+  if (!ws || ws.readyState !== 1) return;
+  try {
+    ws.send(JSON.stringify(payload));
+  } catch {}
+}
 
 function uid(){
   return Math.random().toString(36).slice(2,9);
+}
+
+const HEARTBEAT_MS = 30_000;
+function heartbeat() {
+  this.isAlive = true;
 }
 
 function broadcastUsers() {
@@ -358,19 +377,43 @@ function broadcastUsers() {
 
 function sendListenerCount(id){
   const count = listeners.get(id)?.size || 0;
-  const payload = JSON.stringify({ type: "listeners", id, count });
+  const payload = { type: "listeners", id, count };
   for (const client of wss.clients) {
-    if (client.readyState === 1) client.send(payload);
+    jsonSafeSend(client, payload);
+  }
+}
+
+function livePeersPayload() {
+  const peers = [];
+  for (const [id, client] of clients.entries()) {
+    if (client.readyState !== 1 || !client.username) continue;
+    peers.push({
+      id,
+      user: client.username,
+      live: broadcasters.has(id),
+      listeners: listeners.get(id)?.size || 0,
+    });
+  }
+  return { type: "live-peers", peers };
+}
+
+function broadcastLivePeers() {
+  const payload = livePeersPayload();
+  for (const client of wss.clients) {
+    jsonSafeSend(client, payload);
   }
 }
 
 wss.on("connection", (ws) => {
+  ws.isAlive = true;
+  ws.on("pong", heartbeat);
   ws.id = uid();
   clients.set(ws.id, ws);
   ws.send(JSON.stringify({ type: "system", text: "Connected to RedNode Excavation WS" }));
   ws.send(JSON.stringify({ type: "history", messages: loadHistory() }));
   ws.send(JSON.stringify({ type: "id", id: ws.id }));
   broadcastUsers();
+  jsonSafeSend(ws, livePeersPayload());
   for(const [id, thumb] of thumbnails.entries()){
     ws.send(JSON.stringify({ type: "thumb", id, thumb }));
   }
@@ -381,7 +424,6 @@ wss.on("connection", (ws) => {
       for (const client of wss.clients) {
         if (client.readyState === 1) client.send(JSON.stringify({ type: "bye", id: ws.id }));
       }
-      if (guestApproved === ws.id || broadcasters.size <= 1) guestApproved = null;
       if(listeners.has(ws.id)){
         listeners.delete(ws.id);
         sendListenerCount(ws.id);
@@ -401,6 +443,7 @@ wss.on("connection", (ws) => {
       watching.delete(ws.id);
     }
     broadcastUsers();
+    broadcastLivePeers();
   });
   ws.on("message", async (raw) => {
     let msg; try { msg = JSON.parse(raw); } catch { return; }
@@ -411,12 +454,9 @@ wss.on("connection", (ws) => {
     }
     switch (msg?.type) {
       case "broadcaster":
-        if (broadcasters.size > 0 && ws.id !== guestApproved) {
-          ws.send(JSON.stringify({ type: "join-denied" }));
-          return;
-        }
         broadcasters.set(ws.id, ws);
         broadcastUsers();
+        broadcastLivePeers();
         return;
       case "end-broadcast":
         if (broadcasters.has(ws.id)) {
@@ -427,19 +467,15 @@ wss.on("connection", (ws) => {
           }
           broadcasters.delete(ws.id);
           thumbnails.delete(ws.id);
-          if (guestApproved === ws.id || broadcasters.size <= 1) guestApproved = null;
           if(listeners.has(ws.id)){
             listeners.delete(ws.id);
             sendListenerCount(ws.id);
           }
           broadcastUsers();
+          broadcastLivePeers();
         }
         return;
       case "join-request": {
-        if (guestApproved) {
-          ws.send(JSON.stringify({ type: "join-denied" }));
-          return;
-        }
         const host = broadcasters.get(msg.id);
         if (host && host.readyState === 1) {
           host.send(
@@ -451,10 +487,8 @@ wss.on("connection", (ws) => {
         return;
       }
       case "approve-join": {
-        if (guestApproved) return;
         const guest = clients.get(msg.id);
         if (guest && broadcasters.has(ws.id)) {
-          guestApproved = msg.id;
           guest.send(JSON.stringify({ type: "join-approved" }));
         }
         return;
@@ -473,6 +507,8 @@ wss.on("connection", (ws) => {
           if(!watching.has(ws.id)) watching.set(ws.id, new Set());
           watching.get(ws.id).add(msg.id);
           sendListenerCount(msg.id);
+        } else {
+          jsonSafeSend(ws, { type: "bye", id: msg.id });
         }
         return;
       }
@@ -497,6 +533,7 @@ wss.on("connection", (ws) => {
           for (const client of wss.clients) {
             if (client.readyState === 1) client.send(payload);
           }
+          broadcastLivePeers();
         }
         return;
       }
@@ -608,3 +645,18 @@ wss.on("connection", (ws) => {
 server.listen(PORT, "0.0.0.0", () =>
   console.log(`listening on ${PORT}`)
 );
+
+const heartbeatTimer = setInterval(() => {
+  for (const ws of wss.clients) {
+    if (ws.isAlive === false) {
+      try { ws.terminate(); } catch {}
+      continue;
+    }
+    ws.isAlive = false;
+    try { ws.ping(); } catch {}
+  }
+}, HEARTBEAT_MS);
+
+wss.on("close", () => {
+  clearInterval(heartbeatTimer);
+});

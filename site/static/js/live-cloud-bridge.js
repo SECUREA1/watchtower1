@@ -22,6 +22,8 @@
   };
 
   const wsUrl = () => {
+    const configured = window.watchtowerWsConfig?.resolveWsUrl?.();
+    if (configured) return configured;
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
     return `${protocol}//${location.host}/ws`;
   };
@@ -74,12 +76,6 @@
         msg = JSON.parse(event.data);
       } catch {
         return;
-      }
-
-      if (msg?.type === "live-peers" && state.isBroadcaster) {
-        for (const peer of msg.peers || []) {
-          if (peer?.id) send({ type: "watcher", id: peer.id });
-        }
       }
 
       if (msg?.type === "id") {
