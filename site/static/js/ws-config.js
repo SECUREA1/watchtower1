@@ -1,6 +1,6 @@
 (() => {
-  const CLOUD_HTTP_BASE = "https://watchtower-3l5i.onrender.com";
-  const CLOUD_WS = `${CLOUD_HTTP_BASE.replace(/^http/i, "ws")}/ws`;
+  const SAME_ORIGIN_HTTP_BASE = `${location.protocol}//${location.host}`;
+  const SAME_ORIGIN_WS = `${SAME_ORIGIN_HTTP_BASE.replace(/^http/i, "ws")}/ws`;
 
   const normalizeHttpBase = (value) => {
     const raw = (value || "").trim();
@@ -11,7 +11,7 @@
 
   const normalizeWsUrl = (value) => {
     const raw = (value || "").trim();
-    if (!raw) return CLOUD_WS;
+    if (!raw) return SAME_ORIGIN_WS;
 
     if (/^wss?:\/\//i.test(raw)) {
       return raw.toLowerCase().endsWith("/ws") ? raw : `${raw.replace(/\/+$/, "")}/ws`;
@@ -55,7 +55,7 @@
   };
 
   const defaultWsUrl = () => {
-    const resolved = resolveFromQueryOrStorage() || normalizeWsUrl(CLOUD_HTTP_BASE);
+    const resolved = resolveFromQueryOrStorage() || normalizeWsUrl(SAME_ORIGIN_HTTP_BASE);
     try {
       localStorage.setItem("watchtower_ws_url", resolved);
     } catch (_) {
@@ -70,8 +70,8 @@
   };
 
   const wsConfig = {
-    cloudHttpBase: CLOUD_HTTP_BASE,
-    cloudWs: CLOUD_WS,
+    cloudHttpBase: SAME_ORIGIN_HTTP_BASE,
+    cloudWs: SAME_ORIGIN_WS,
     normalizeWsUrl,
     defaultWsUrl,
     resolveWsUrl,

@@ -22,7 +22,9 @@
   };
 
   const wsUrl = () => {
-    return window.watchtowerWsConfig?.resolveWsUrl?.() || "wss://watchtower-3l5i.onrender.com/ws";
+    if (window.watchtowerWsConfig?.resolveWsUrl) return window.watchtowerWsConfig.resolveWsUrl();
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    return `${proto}://${location.host}/ws`;
   };
 
   const send = (payload) => {
