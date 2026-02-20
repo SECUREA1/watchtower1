@@ -28,7 +28,7 @@
   }
 
   function buildWsUrl() {
-    const configuredResolver = window.rednodeWsConfig?.resolveWsUrl;
+    const configuredResolver = window.watchtowerWsConfig?.resolveWsUrl;
     if (typeof configuredResolver === 'function') {
       const resolved = configuredResolver();
       if (resolved) return resolved;

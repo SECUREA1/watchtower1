@@ -1,48 +1,49 @@
 (() => {
-  const CLOUD_WS = "wss://watchtower-kw2o.onrender.com/ws";
+  const CLOUD_HTTP_BASE = "https://watchtower-3l5i.onrender.com";
+  const CLOUD_WS = `${CLOUD_HTTP_BASE.replace(/^http/i, "ws")}/ws`;
 
-  const ensureWsPath = (value) => {
-    const trimmed = value.replace(/\/+$/, "");
-    return trimmed.toLowerCase().endsWith("/ws") ? trimmed : `${trimmed}/ws`;
-  };
+  const normalizeWsUrl = (value) => {
+    const raw = (value || "").trim();
+    if (!raw) return CLOUD_WS;
 
-  const normalizeWsUrl = (input) => {
-    const raw = (input || "").trim();
-    if (!raw) return "";
     if (/^wss?:\/\//i.test(raw)) {
-      return ensureWsPath(raw);
+      return raw.toLowerCase().endsWith("/ws") ? raw : `${raw.replace(/\/+$/, "")}/ws`;
     }
+
     if (/^https?:\/\//i.test(raw)) {
-      const proto = raw.toLowerCase().startsWith("https:") ? "wss" : "ws";
-      const hostAndPath = raw.replace(/^https?:\/\//i, "");
-      return ensureWsPath(`${proto}://${hostAndPath}`);
+      const wsBase = raw.replace(/^http/i, "ws").replace(/\/+$/, "");
+      return wsBase.toLowerCase().endsWith("/ws") ? wsBase : `${wsBase}/ws`;
     }
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    return ensureWsPath(`${proto}://${raw}`);
+
+    const inferredProto = location.protocol === "https:" ? "wss" : "ws";
+    const normalizedHost = raw.replace(/^\/+/, "").replace(/\/+$/, "");
+    return `${inferredProto}://${normalizedHost}/ws`;
   };
 
   const defaultWsUrl = () => {
-    const stored = normalizeWsUrl(localStorage.getItem("rednode_ws_url"));
-    if (stored) return stored;
-
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    const sameOrigin = ensureWsPath(`${proto}://${location.host}`);
-    const host = location.hostname;
-
-    if (location.protocol === "file:") return CLOUD_WS;
-    if (host === "localhost" || host === "127.0.0.1" || host.endsWith(".local")) {
-      return sameOrigin;
+    const url = normalizeWsUrl(CLOUD_HTTP_BASE);
+    try {
+      localStorage.setItem("watchtower_ws_url", url);
+    } catch (_) {
+      // ignore persistence errors
     }
-    if (location.host === new URL(CLOUD_WS).host) return CLOUD_WS;
-    return CLOUD_WS;
+    return url;
   };
 
-  const resolveWsUrl = (override) => normalizeWsUrl(override) || defaultWsUrl();
+  const resolveWsUrl = (preferredBase) => {
+    if (preferredBase) return normalizeWsUrl(preferredBase);
+    return defaultWsUrl();
+  };
 
-  window.rednodeWsConfig = {
+  const wsConfig = {
+    cloudHttpBase: CLOUD_HTTP_BASE,
     cloudWs: CLOUD_WS,
     normalizeWsUrl,
     defaultWsUrl,
     resolveWsUrl,
   };
+
+  window.watchtowerWsConfig = wsConfig;
+  // Backward compatibility for pages still referencing the old RedNode name.
+  window.rednodeWsConfig = wsConfig;
 })();
