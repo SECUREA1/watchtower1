@@ -3121,16 +3121,18 @@
       async function requestCameraPermissionFromGesture(){
         if(!navigator.mediaDevices?.getUserMedia) return;
         try{
-          const primer = await navigator.mediaDevices.getUserMedia({ video:true, audio:false });
-          primer.getTracks().forEach(t => t.stop());
-          addCvLog("Camera permission prompt handled from Start Cameras tap.");
-          setGlobalPerm(true, "Camera: Permission granted");
+          // Avoid opening/closing a temporary stream before real startup.
+          // On mobile Safari this can intermittently lock the camera source.
+          addCvLog("Start Cameras tapped. Permission prompt will be handled by the selected stream.");
+          if(navigator.permissions?.query){
+            const status = await navigator.permissions.query({ name: "camera" });
+            if(status.state === "granted"){
+              setGlobalPerm(true, "Camera: Permission granted");
+            }
+          }
           await enumerateVideoDevices({ force: false });
         }catch(err){
-          addCvLog("Camera permission request failed: " + (err?.message || err), "bad");
-          setGlobalPerm(false, "Camera: Permission blocked");
-          toast("Camera permission was blocked or unavailable.");
-          throw err;
+          addCvLog("Camera permission preflight failed: " + (err?.message || err), "warn");
         }
       }
 
@@ -3159,13 +3161,12 @@
             videoConstraints.facingMode = { ideal: settings.mobileFacing };
           }
 
-          let stream;
-          try{
-            stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio:false });
-          }catch(primaryErr){
-            const canFallback = !!videoConstraints.deviceId;
-            if(!canFallback) throw primaryErr;
-            addCvLog(`Camera ${slotIdx} exact device failed; retrying with default mobile constraints.`, "warn");
+          const attempts = [{
+            constraints: videoConstraints,
+            label: "selected constraints"
+          }];
+
+          if(videoConstraints.deviceId){
             const fallbackConstraints = {
               width: { ideal: 1280 },
               height: { ideal: 720 },
@@ -3174,7 +3175,32 @@
             if(settings.mobileFacing){
               fallbackConstraints.facingMode = { ideal: settings.mobileFacing };
             }
-            stream = await navigator.mediaDevices.getUserMedia({ video: fallbackConstraints, audio:false });
+            attempts.push({ constraints: fallbackConstraints, label: "default camera constraints" });
+          }
+
+          attempts.push({
+            constraints: settings.mobileFacing ? { facingMode: { ideal: settings.mobileFacing } } : true,
+            label: "relaxed facing-mode constraints"
+          });
+          attempts.push({ constraints: true, label: "browser default camera" });
+
+          let stream = null;
+          let lastErr = null;
+          for(let i = 0; i < attempts.length; i++){
+            try{
+              stream = await navigator.mediaDevices.getUserMedia({ video: attempts[i].constraints, audio:false });
+              if(i > 0){
+                addCvLog(`Camera ${slotIdx} recovered using ${attempts[i].label}.`, "warn");
+              }
+              break;
+            }catch(err){
+              lastErr = err;
+              addCvLog(`Camera ${slotIdx} attempt ${i+1} failed (${attempts[i].label}): ${(err && err.message) || err}`, "warn");
+            }
+          }
+
+          if(!stream){
+            throw lastErr || new Error("Unable to initialize camera stream");
           }
 
           camStreams.set(slotIdx, stream);
