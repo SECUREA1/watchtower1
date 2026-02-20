@@ -1,5 +1,6 @@
 (() => {
   const CLOUD_WS = "wss://watchtower-3l5i.onrender.com/ws";
+  const LEGACY_CLOUD_HOSTS = new Set(["watchtower-kw2o.onrender.com"]);
 
   const ensureWsPath = (value) => {
     const trimmed = value.replace(/\/+$/, "");
@@ -21,9 +22,26 @@
     return ensureWsPath(`${proto}://${raw}`);
   };
 
+  const migrateLegacyWsUrl = (value) => {
+    const normalized = normalizeWsUrl(value);
+    if (!normalized) return "";
+    try {
+      const parsed = new URL(normalized);
+      if (!LEGACY_CLOUD_HOSTS.has(parsed.host)) return normalized;
+      return CLOUD_WS;
+    } catch (_) {
+      return normalized;
+    }
+  };
+
   const defaultWsUrl = () => {
-    const stored = normalizeWsUrl(localStorage.getItem("watchtower_ws_url"));
-    if (stored) return stored;
+    const stored = migrateLegacyWsUrl(localStorage.getItem("watchtower_ws_url"));
+    if (stored) {
+      if (stored === CLOUD_WS) {
+        localStorage.setItem("watchtower_ws_url", CLOUD_WS);
+      }
+      return stored;
+    }
 
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const sameOrigin = ensureWsPath(`${proto}://${location.host}`);
@@ -39,10 +57,14 @@
 
   const resolveWsUrl = (override) => normalizeWsUrl(override) || defaultWsUrl();
 
-  window.watchtowerWsConfig = {
+  const wsConfig = {
     cloudWs: CLOUD_WS,
     normalizeWsUrl,
     defaultWsUrl,
     resolveWsUrl,
   };
+
+  window.watchtowerWsConfig = wsConfig;
+  // Backward compatibility for pages still referencing the old RedNode name.
+  window.rednodeWsConfig = wsConfig;
 })();
