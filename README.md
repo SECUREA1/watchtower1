@@ -268,7 +268,7 @@ Set these in **watchtower-api** before going live:
 | `ALLOWED_ORIGINS` | Yes | Comma-separated list of full origins, e.g. `https://watchtower-api.onrender.com,https://watchtower-ws.onrender.com,https://yourdomain.com`. |
 | `WATCHTOWER_ACCESS_PASSWORD` | Yes | UI login password cookie gate. |
 | `WATCHTOWER_ACCESS_CODE` | Optional | Extra unlock code if used by your flow. |
-| `DATA_DIR` | Yes | Keep `/opt/watchtower/data` (matches disk mount). |
+| `DATA_DIR` | Yes | Keep `/opt/rednode/data` (matches disk mount). |
 | `STATIC_DIR` | Yes | Keep `/app` so root HTML files and `/site` are both served. |
 | `MAX_UPLOAD_BYTES` | Yes | Default `2097152` unless you intentionally increase limits. |
 | `LOG_LEVEL` | Optional | `INFO` recommended. |
@@ -289,7 +289,7 @@ Set these in **watchtower-ws**:
 | Variable | Required | Notes |
 | --- | --- | --- |
 | `NODE_ENV` | Yes | `production`. |
-| `DB_PATH` | Yes | `/opt/watchtower/data/app.db` so websocket chat state survives restarts. |
+| `DB_PATH` | Yes | `/opt/rednode/data/app.db` so websocket chat state survives restarts. |
 
 ### 3) Render service settings
 
@@ -297,12 +297,12 @@ Set these in **watchtower-ws**:
   - Runtime: Docker
   - Dockerfile: `Dockerfile.api`
   - Health check path: `/healthz`
-  - Persistent disk: mount `/opt/watchtower/data`, size `20GB`
+  - Persistent disk: mount `/opt/rednode/data`, size `20GB`
 - `watchtower-ws`
   - Runtime: Docker
   - Dockerfile: `ws-server/Dockerfile`
   - Health check path: `/healthz`
-  - Persistent disk: mount `/opt/watchtower/data`, size `2GB`
+  - Persistent disk: mount `/opt/rednode/data`, size `2GB`
 
 ### 4) Domain and CORS wiring
 
