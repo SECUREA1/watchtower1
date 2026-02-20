@@ -14,6 +14,7 @@ from uuid import uuid4
 
 import requests
 import cv2
+import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
@@ -111,24 +112,54 @@ try:
 except Exception as exc:
     logger.warning("Camera manager disabled: %s", exc)
 
+CLOUD_CAMERA_TTL_SECONDS = float(os.getenv("CLOUD_CAMERA_TTL_SECONDS", "30"))
+_cloud_camera_lock = threading.Lock()
+_cloud_cameras: Dict[str, dict] = {}
+
+
+def _cloud_camera_snapshot() -> Dict[str, dict]:
+    cutoff = time.time() - CLOUD_CAMERA_TTL_SECONDS
+    with _cloud_camera_lock:
+        stale_ids = [cam_id for cam_id, rec in _cloud_cameras.items() if rec.get("uploaded_at", 0) < cutoff]
+        for cam_id in stale_ids:
+            _cloud_cameras.pop(cam_id, None)
+        return {cam_id: dict(record) for cam_id, record in _cloud_cameras.items()}
+
+
+def _encode_as_jpeg(raw_bytes: bytes) -> bytes:
+    arr = np.frombuffer(raw_bytes, dtype=np.uint8)
+    frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if frame is None:
+        raise HTTPException(status_code=400, detail="Invalid image payload.")
+    ok, out = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to encode frame.")
+    return out.tobytes()
+
 
 def _frame_stream(camera_id: str):
     boundary = b"frame"
     while True:
-        if not camera_manager:
-            time.sleep(0.2)
+        frame_bytes = None
+
+        if camera_manager:
+            frame = camera_manager.latest_frame(camera_id)
+            if frame is not None:
+                ret, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                if ret:
+                    frame_bytes = buf.tobytes()
+
+        if frame_bytes is None:
+            cloud_record = _cloud_camera_snapshot().get(camera_id)
+            frame_bytes = cloud_record.get("frame_jpeg") if cloud_record else None
+
+        if frame_bytes is None:
+            time.sleep(0.05)
             continue
-        frame = camera_manager.latest_frame(camera_id)
-        if frame is None:
-            time.sleep(0.02)
-            continue
-        ret, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-        if not ret:
-            time.sleep(0.01)
-            continue
+
         yield (
             b"--" + boundary + b"\r\n"
-            b"Content-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
+            b"Content-Type: image/jpeg\r\n\r\n" + frame_bytes + b"\r\n"
         )
 
 # CORS
@@ -153,11 +184,11 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "same-origin"
     response.headers["Content-Security-Policy"] = (
-        "default-src 'self'; "
-        "img-src 'self' data: blob:; "
-        "script-src 'self'; "
-        "style-src 'self' 'unsafe-inline'; "
-        "connect-src 'self'; "
+        "default-src 'self';"
+        " img-src 'self' data: blob:;"
+        " script-src 'self';"
+        " style-src 'self' 'unsafe-inline';"
+        " connect-src 'self'"
     )
     return response
 
@@ -454,15 +485,68 @@ def alias_response(url_path: str) -> Optional[FileResponse]:
 
 @app.get("/api/cameras")
 def list_cameras() -> JSONResponse:
-    if not camera_manager:
-        return JSONResponse({"ok": False, "error": "camera manager not available"}, status_code=503)
-    return JSONResponse({"ok": True, "cameras": camera_manager.status()})
+    cameras = []
+    if camera_manager:
+        cameras.extend(camera_manager.status())
+
+    now = time.time()
+    for camera_id, cloud in _cloud_camera_snapshot().items():
+        cameras.append({
+            "id": camera_id,
+            "type": "cloud-relay",
+            "resolution": cloud.get("resolution") or "unknown",
+            "fps_target": float(cloud.get("fps") or 0),
+            "stats": {
+                "fps": float(cloud.get("fps") or 0),
+                "frames": int(cloud.get("frames") or 0),
+                "last_error": cloud.get("last_error"),
+            },
+            "cloud": {
+                "source": cloud.get("source") or "unknown",
+                "last_upload_age_s": max(0.0, now - float(cloud.get("uploaded_at") or now)),
+            },
+        })
+
+    return JSONResponse({"ok": True, "cameras": cameras})
+
+
+@app.post("/api/cloud/cameras/frame")
+async def ingest_cloud_camera_frame(
+    request: Request,
+    camera_id: str = Form(...),
+    frame: UploadFile = File(...),
+    source: str = Form("secure-ui"),
+    resolution: str = Form(""),
+    fps: float = Form(0),
+):
+    if not ALLOW_PUBLIC_INGEST:
+        require_admin(request)
+
+    content = await frame.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Missing frame data.")
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Frame too large.")
+
+    frame_jpeg = _encode_as_jpeg(content)
+    now = time.time()
+    with _cloud_camera_lock:
+        existing = _cloud_cameras.get(camera_id, {})
+        _cloud_cameras[camera_id] = {
+            "camera_id": camera_id,
+            "frame_jpeg": frame_jpeg,
+            "uploaded_at": now,
+            "source": source,
+            "resolution": resolution,
+            "fps": max(0.0, float(fps or 0)),
+            "frames": int(existing.get("frames", 0)) + 1,
+            "last_error": None,
+        }
+    return {"ok": True, "camera_id": camera_id}
 
 
 @app.get("/api/cameras/{camera_id}/mjpeg")
 def stream_camera(camera_id: str) -> StreamingResponse:
-    if not camera_manager:
-        raise HTTPException(status_code=503, detail="camera manager not available")
     return StreamingResponse(
         _frame_stream(camera_id),
         media_type="multipart/x-mixed-replace; boundary=frame",
