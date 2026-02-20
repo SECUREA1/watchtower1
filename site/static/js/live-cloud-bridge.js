@@ -22,10 +22,7 @@
   };
 
   const wsUrl = () => {
-    const configured = window.watchtowerWsConfig?.resolveWsUrl?.();
-    if (configured) return configured;
-    const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-    return `${protocol}//${location.host}/ws`;
+    return window.watchtowerWsConfig?.resolveWsUrl?.() || "wss://watchtower-3l5i.onrender.com/ws";
   };
 
   const send = (payload) => {

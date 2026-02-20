@@ -164,9 +164,7 @@
   };
 
   const connect = () => {
-    const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-    const fallback = `${protocol}//${location.host}/ws`;
-    const url = window.rednodeWsConfig?.resolveWsUrl?.() || fallback;
+    const url = window.rednodeWsConfig?.resolveWsUrl?.() || "wss://watchtower-3l5i.onrender.com/ws";
     try {
       ws = new WebSocket(url);
     } catch (e) {
