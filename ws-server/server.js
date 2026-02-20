@@ -137,7 +137,7 @@ async function tryServeFile(res, relativePath, method) {
       if (method === "GET") {
         let data = await readFile(normalized);
         if (ext === ".html") {
-          const injection = `\n<!-- Shared WS config + live presence counter -->\n<script src="/static/js/ws-config.js"></script>\n<script src="/static/js/live-counter.js"></script>\n`;
+          const injection = `\n<!-- Shared WS config + live presence counter -->\n<script src="/static/js/ws-config.js"></script>\n<script src="/static/js/live-counter.js"></script>\n<!-- Cloud live pairing bridge -->\n<script src="/static/js/live-cloud-bridge.js"></script>\n`;
           try {
             const text = data.toString();
             if (!text.includes("live-counter.js")) {

@@ -22,7 +22,7 @@
   };
 
   const defaultWsUrl = () => {
-    const stored = normalizeWsUrl(localStorage.getItem("rednode_ws_url"));
+    const stored = normalizeWsUrl(localStorage.getItem("watchtower_ws_url"));
     if (stored) return stored;
 
     const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -39,7 +39,7 @@
 
   const resolveWsUrl = (override) => normalizeWsUrl(override) || defaultWsUrl();
 
-  window.rednodeWsConfig = {
+  window.watchtowerWsConfig = {
     cloudWs: CLOUD_WS,
     normalizeWsUrl,
     defaultWsUrl,
