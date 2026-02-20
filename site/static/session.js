@@ -1,18 +1,5 @@
 (function(){
   const CHAIN_KEY = 'mixer_current_chain';
-
-  function resolveChatOrigin() {
-    const cloudBase = window.watchtowerWsConfig?.cloudHttpBase;
-    if (cloudBase) return cloudBase;
-    return `${location.protocol}//${location.host}`;
-  }
-
-  function connectPresenceSocket() {
-    return io(resolveChatOrigin(), {
-      transports: ['websocket'],
-      upgrade: false,
-    });
-  }
   const CURRENCY_KEY = 'mixer_current_currency';
   const WALLET_KEY = 'mixer_current_wallet';
   const USER_KEY   = 'mixer_username';
@@ -42,7 +29,7 @@
       });
       // keep socket connection alive for active user tracking
       sio.onload = () => {
-        const socket = connectPresenceSocket();
+        const socket = io();
         socket.on('connect', () => {
           socket.emit('user_ping');
           setInterval(() => socket.emit('user_ping'), 10000);
