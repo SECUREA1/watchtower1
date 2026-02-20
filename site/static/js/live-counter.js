@@ -164,7 +164,8 @@
   };
 
   const connect = () => {
-    const url = window.watchtowerWsConfig?.resolveWsUrl?.() || "wss://watchtower-3l5i.onrender.com/ws";
+    const fallbackProto = location.protocol === "https:" ? "wss" : "ws";
+    const url = window.watchtowerWsConfig?.resolveWsUrl?.() || `${fallbackProto}://${location.host}/ws`;
     try {
       ws = new WebSocket(url);
     } catch (e) {

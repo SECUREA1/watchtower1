@@ -174,20 +174,6 @@ const server = http.createServer(async (req, res) => {
 
   const urlPath = decodeURIComponent(req.url.split('?')[0]);
 
-  if (req.method === "POST" && urlPath === "/api/excavator") {
-    let body = "";
-    req.on("data", (chunk) => body += chunk);
-    req.on("end", () => {
-      try {
-        const { command } = JSON.parse(body);
-        console.log("Excavator command:", command);
-      } catch {}
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true }));
-    });
-    return;
-  }
-
   // Serve chat client for root requests
   if ((req.method === "GET" || req.method === "HEAD") && urlPath === "/multi_camera.html") {
     res.writeHead(302, { Location: "/multi-camera" });
