@@ -558,7 +558,7 @@ HTML_ALIASES = {
 }
 
 HOME_PATHS = {"/home", "/home.html"}
-SECURE_PATHS = {"/secure", "/secure/", "/secure.html"}
+SECURE_PATHS = {"/secure", "/secure/", "/secure.html", "/secure.htnl"}
 WATCHTOWER_PATHS = {"/watchtower", "/watchtower.html"}
 DASHBOARD_PATHS = {"/dashboard", "/dashboard.html", "/dashboard1", "/dashboard1.html"}
 CHAINES_PATHS = {

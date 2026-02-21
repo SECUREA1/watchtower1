@@ -3093,6 +3093,17 @@
         settings.selectedSlots = want;
         saveSettings();
 
+        if(want.length === 0){
+          want.push(0);
+          settings.selectedSlots = [0];
+          saveSettings();
+          const firstCam = el("camChk_0");
+          if(firstCam) firstCam.checked = true;
+          toast("No camera selected. Defaulting to Camera 0.");
+          setCvStatus(cvStatusCamera, "Camera: Defaulted to Camera 0");
+          addCvLog("Start requested with no selected slots; defaulting to Camera 0.", "warn");
+        }
+
         if(isLikelyIOS() && want.length > 1){
           // iOS: limit to one active stream to avoid camera errors.
           const chosen = want.includes(0) ? 0 : want[0];
@@ -3147,18 +3158,37 @@
           addCvLog(`Starting Camera ${slotIdx}…`);
           const pick = (camBindings[slotIdx] || "__default__");
           const fps = Number(settings.fpsCap || 12);
-          const videoConstraints = {
-            width: {ideal: 1280},
-            height:{ideal: 720},
+
+          const baseVideoConstraints = {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
             frameRate: { ideal: fps, max: fps },
           };
-          if(pick && pick !== "__default__" && pick !== "__none__"){
-            videoConstraints.deviceId = { exact: pick };
-          }else if(settings.mobileFacing){
-            videoConstraints.facingMode = { ideal: settings.mobileFacing };
-          }
 
-          const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio:false });
+          const constraintAttempts = [];
+          if(pick && pick !== "__default__" && pick !== "__none__"){
+            constraintAttempts.push({ ...baseVideoConstraints, deviceId: { exact: pick } });
+          }
+          if(settings.mobileFacing){
+            constraintAttempts.push({ ...baseVideoConstraints, facingMode: { ideal: settings.mobileFacing } });
+          }
+          constraintAttempts.push(baseVideoConstraints);
+
+          let stream = null;
+          let lastError = null;
+          for(const constraints of constraintAttempts){
+            try{
+              stream = await navigator.mediaDevices.getUserMedia({ video: constraints, audio:false });
+              break;
+            }catch(error){
+              lastError = error;
+              const reason = (error && error.name) || "UnknownError";
+              addCvLog(`Camera ${slotIdx} retrying after ${reason}…`, "warn");
+            }
+          }
+          if(!stream){
+            throw lastError || new Error("Unable to start camera stream");
+          }
 
           camStreams.set(slotIdx, stream);
           camStates.set(slotIdx, makeCamState(slotIdx));
