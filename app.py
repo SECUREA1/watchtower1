@@ -232,14 +232,17 @@ async def add_security_headers(request: Request, call_next):
         [
             "default-src 'self'",
             "img-src 'self' data: blob:",
-            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com",
+            "script-src 'self' 'unsafe-inline' blob: https://cdn.jsdelivr.net https://unpkg.com https://storage.googleapis.com",
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
             "font-src 'self' https://fonts.gstatic.com data:",
-            "connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com",
+            "connect-src 'self' blob: data: ws: wss: https://cdn.jsdelivr.net https://unpkg.com https://storage.googleapis.com https://tfhub.dev https://*.googleapis.com",
+            "worker-src 'self' blob:",
+            "media-src 'self' blob:",
             f"frame-ancestors {FRAME_ANCESTORS_POLICY}",
         ]
     )
-    response.headers["Permissions-Policy"] = "camera=(self), microphone=(self), geolocation=(), interest-cohort=()"
+    # Allow camera/mic for embedded secure pages too (mobile webviews / iframes).
+    response.headers["Permissions-Policy"] = "camera=*, microphone=*, geolocation=(), interest-cohort=()"
     return response
 
 
