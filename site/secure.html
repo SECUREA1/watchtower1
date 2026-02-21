@@ -1605,6 +1605,7 @@
         minIntervalMs: 2000,
       };
       let devices = [];            // videoinput list
+      let mobilePermissionPrimed = false;
       const cameraRecovery = {
         inProgress: false,
         retries: 0,
@@ -2275,6 +2276,7 @@
       });
 
       el("btnStart").addEventListener("click", async ()=>{
+        await primeMobileCameraPermission();
         await startSelectedCameras(false, true);
       });
 
@@ -2919,6 +2921,20 @@
         ensureSelectedSlotsWithinLimits();
       }
 
+      async function primeMobileCameraPermission(){
+        if(mobilePermissionPrimed || !isLikelyMobile()) return;
+        if(!navigator.mediaDevices?.getUserMedia) return;
+        try{
+          const warmup = await navigator.mediaDevices.getUserMedia({ video:true, audio:false });
+          warmup.getTracks().forEach(track => track.stop());
+          mobilePermissionPrimed = true;
+          setGlobalPerm(true, "Camera: Permission granted");
+          await enumerateVideoDevices({ force: false });
+        }catch(err){
+          addCvLog("Mobile camera permission not granted yet: " + (err?.message || err), "warn");
+        }
+      }
+
       async function watchCameraPermission(){
         if(!navigator.permissions?.query) return;
         try{
@@ -2984,7 +3000,7 @@
             </div>
 
             <div class="cam-body">
-              <video id="vid_${i}" playsinline muted autoplay></video>
+              <video id="vid_${i}" playsinline webkit-playsinline="true" muted autoplay></video>
               <canvas class="overlay" id="ov_${i}"></canvas>
             </div>
 
@@ -3164,6 +3180,10 @@
             height: { ideal: 720 },
             frameRate: { ideal: fps, max: fps },
           };
+          const mobileVideoConstraints = {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          };
 
           const constraintAttempts = [];
           if(pick && pick !== "__default__" && pick !== "__none__"){
@@ -3171,8 +3191,11 @@
           }
           if(settings.mobileFacing){
             constraintAttempts.push({ ...baseVideoConstraints, facingMode: { ideal: settings.mobileFacing } });
+            constraintAttempts.push({ ...mobileVideoConstraints, facingMode: settings.mobileFacing });
           }
           constraintAttempts.push(baseVideoConstraints);
+          constraintAttempts.push(mobileVideoConstraints);
+          constraintAttempts.push(true);
 
           let stream = null;
           let lastError = null;
@@ -3197,13 +3220,18 @@
           v.srcObject = stream;
           v.muted = true;
           v.setAttribute("autoplay", "");
+          v.setAttribute("muted", "true");
           v.setAttribute("playsinline", "");
           v.setAttribute("webkit-playsinline", "true");
+          v.disablePictureInPicture = true;
           // iOS: play must be triggered from the user gesture (Start Cameras button).
           try{
             await v.play();
           }catch(playErr){
             addCvLog("Camera stream ready; press Start Cameras if playback is blocked.", "warn");
+            v.onloadedmetadata = ()=>{
+              v.play().catch(()=>{});
+            };
           }
 
           // refresh devices to get labels after permission
