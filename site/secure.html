@@ -589,37 +589,7 @@
 
       const isLikelyMobile = () => isLikelyIOS() || /Android|Mobi/i.test(navigator.userAgent);
 
-      
-
-      const isSecureForCamera = () => {
-        // window.isSecureContext is true for HTTPS and also for localhost
-        if (window.isSecureContext) return true;
-        const h = location.hostname;
-        return h === "localhost" || h === "127.0.0.1";
-      };
-
-      const warnSecureContext = () => {
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          setPerm(false, "Camera: getUserMedia not supported in this browser.");
-          addLog("Camera blocked: this browser does not support getUserMedia().", "bad");
-          toast("Camera not supported in this browser.");
-          return false;
-        }
-        if (!isSecureForCamera()) {
-          const msg = "Camera: HTTPS required (secure context). Open this page via https:// (or localhost).";
-          setPerm(false, msg);
-          addLog(`Camera blocked: insecure context (${location.origin}). Use HTTPS/localhost for camera access.`, "bad");
-          try {
-            const u = new URL(location.href);
-            u.protocol = "https:";
-            addLog(`Try HTTPS: ${u.toString()}`, "info");
-          } catch (e) {}
-          toast("HTTPS required for camera access.");
-          return false;
-        }
-        return true;
-      };
-const CLIENT_ID_KEY = "rednode.clientId.v1";
+      const CLIENT_ID_KEY = "rednode.clientId.v1";
       const DEVICE_NAME_KEY = "rednode.deviceName.v1";
       function getOrCreateClientId(){
         let id = localStorage.getItem(CLIENT_ID_KEY);
@@ -867,6 +837,7 @@ const CLIENT_ID_KEY = "rednode.clientId.v1";
         // Populate binding selects
         refreshBindingSelects();
       }
+      buildFaceSlotSelect();
 
       function refreshBindingSelects(){
         for(let slot=0; slot<MAX_SLOTS; slot++){
@@ -1007,108 +978,120 @@ const CLIENT_ID_KEY = "rednode.clientId.v1";
         return base;
       }
 
-
       async function startSlot(slot){
-        stopSlot(slot);
-
-        // Mobile/desktop camera access requires a secure context.
-        if(!warnSecureContext()){
-          setSlotUi(slot, false, "Blocked");
-          setSlotNote(slot, "Camera requires HTTPS (secure context).");
-          scheduleRecovery(slot);
+        const bind = settings.camBindings[slot] || "__default__";
+        if(bind === "__none__"){
+          setSlotUi(slot, false, "Disabled");
+          setSlotNote(slot, "Binding: none");
           return false;
         }
 
-        setPerm(null, "Requesting camera permission…");
-
-        const pick = (settings.camBindings && settings.camBindings[String(slot)]) || "__default__";
-        const attempts = buildAttempts(pick);
-
-        setSlotUi(slot, null, "Starting…");
-        setSlotNote(slot, `Trying: ${describePick(pick)}`);
-
-        let stream = null;
-        try{
-          stream = await getUserMediaVideoFallback(attempts);
-          if(!stream) throw new Error("No stream returned");
-        }catch(e){
-          setPerm(false, `Camera: Blocked / failed. (${e?.name || "error"})`);
-          setSlotUi(slot, false, "Error");
-          setSlotNote(slot, (e?.message || String(e)));
-          addLog(`Slot ${slot} start error: ${e?.name || "Error"} ${e?.message || e}`, "bad");
-          scheduleRecovery(slot);
+        if(!navigator.mediaDevices?.getUserMedia){
+          toast("Camera not supported.");
+          addLog("Camera API not supported (navigator.mediaDevices.getUserMedia missing).", "bad");
+          setPerm(false, "Camera: Unsupported");
           return false;
         }
 
-        cameraState.set(slot, { stream, startedAt: Date.now(), lastUploadAt: 0, lastDetectAt: 0 });
-
-        const v = $(`vid_${slot}`);
-        const ov = $(`ov_${slot}`);
-
-        // Apply mobile-safe properties/attributes before play()
-        v.autoplay = true;
-        v.playsInline = true;
-        v.setAttribute("playsinline", "");
-        v.setAttribute("webkit-playsinline", "true");
-        v.controls = false;
-        v.muted = !!settings.muteVideo;
-        if(v.muted) v.setAttribute("muted", "");
-        else v.removeAttribute("muted");
-
-        v.srcObject = stream;
-
-        ov.style.display = settings.showOverlay ? "block" : "none";
-        resizeOverlayToVideo(v, ov);
-
-        // Keep overlay aligned after metadata arrives
-        v.addEventListener("loadedmetadata", () => resizeOverlayToVideo(v, ov), { once: true });
-
-        let played = true;
-        try{
-          await v.play();
-        }catch(e){
-          played = false;
-          addLog(`Slot ${slot} play() blocked: ${e?.name || "Error"} ${e?.message || e}`, "warn");
+        if(!window.isSecureContext){
+          addLog("Camera requires HTTPS (or localhost) on mobile browsers.", "warn");
         }
 
-        // If autoplay was blocked, allow tap-to-start (common on iOS/Android)
-        if(v.paused || !played){
-          setSlotUi(slot, true, "Tap to start");
-          setSlotNote(slot, "Autoplay blocked. Tap the video to start streaming.");
-          setPerm(null, "Camera: Tap video to start (autoplay blocked).");
+        setSlotUi(slot, false, "Requesting…");
+        setSlotNote(slot, "Starting…");
 
-          const resume = async (ev) => {
-            try{
-              ev?.preventDefault?.();
-              await v.play();
-              setSlotUi(slot, true, "On");
-              setSlotNote(slot, `On: ${describePick(pick)}`);
-              setPerm(true, "Camera: Streaming");
-            }catch(e){
-              addLog(`Slot ${slot} still blocked: ${e?.name || "Error"} ${e?.message || e}`, "bad");
-              setSlotNote(slot, "Still blocked — check iOS/Android permissions and HTTPS.");
-            }
+        const attempts = [];
+
+        // 1) explicit device binding first
+        if(bind && bind !== "__default__" && bind !== "__none__"){
+          attempts.push(buildVideoConstraints(slot, bind, true));
+          attempts.push(buildVideoConstraints(slot, bind, false));
+          // fallback: ideal deviceId instead of exact
+          attempts.push(Object.assign({}, buildVideoConstraints(slot, null, false), { deviceId: { ideal: bind } }));
+        }else if(isLikelyMobile()){
+          // 2) mobile facingMode chain
+          attempts.push(buildVideoConstraints(slot, null, true, "exact"));
+          attempts.push(buildVideoConstraints(slot, null, true, "ideal"));
+          attempts.push(buildVideoConstraints(slot, null, false, "ideal"));
+          // last resort
+          attempts.push(true);
+        }else{
+          // 3) desktop generic
+          attempts.push(buildVideoConstraints(slot, null, true));
+          attempts.push(buildVideoConstraints(slot, null, false));
+          attempts.push(true);
+        }
+
+        try{
+          const stream = await getUserMediaVideoFallback(attempts);
+
+          camStreams.set(slot, stream);
+          camStates.set(slot, {
+            slot,
+            lastDetectAt: 0,
+            detecting: false,
+            latest: null,
+            fps: { lastT: performance.now(), frames: 0, value: 0 },
+          });
+
+          const v = $("vid_" + slot);
+          v.srcObject = stream;
+          v.muted = !!settings.muteVideo;
+          v.setAttribute("autoplay","");
+          v.setAttribute("playsinline","");
+          v.setAttribute("webkit-playsinline","true");
+
+          try{ await v.play(); }
+          catch(e){
+            addLog(`Slot ${slot}: stream ready; playback may require another tap on iOS.`, "warn");
+          }
+
+          // Update permission status: if at least one slot started, we have permission
+          setPerm(true, "Camera: Permission granted");
+          setSlotUi(slot, true, "On");
+          setSlotNote(slot, "Streaming…");
+
+          // resize overlay when metadata arrives
+          v.onloadedmetadata = ()=>{
+            const ov = $("ov_" + slot);
+            resizeOverlayToVideo(v, ov);
           };
 
-          v.addEventListener("click", resume, { once: true });
-          v.addEventListener("touchend", resume, { once: true, passive: false });
-        }else{
-          setSlotUi(slot, true, "On");
-          setSlotNote(slot, `On: ${describePick(pick)}`);
-          setPerm(true, "Camera: Streaming");
+          // Refresh device labels now that permission granted
+          await enumerateVideoDevices(false);
+          refreshBindingSelects();
+
+          // Start loop
+          renderLoop(slot);
+
+          addLog(`Slot ${slot} started: ${cameraIdForSlot(slot)}`, "ok");
+          return true;
+        }catch(err){
+          const name = err?.name || "";
+          if(name === "NotAllowedError" || name === "SecurityError"){
+            setPerm(false, "Camera: Permission blocked");
+            toast("Camera permission blocked. Enable it in browser settings.");
+          }else if(name === "NotReadableError"){
+            setPerm(false, "Camera: In use/unavailable");
+            toast("Camera is busy. Close other apps/tabs using the camera.");
+          }else if(name === "OverconstrainedError"){
+            setPerm(false, "Camera: Constraints not supported");
+            toast("Camera constraints failed. Try another binding.");
+          }else{
+            setPerm(false, "Camera: Error");
+            toast("Unable to start camera.");
+          }
+          setSlotUi(slot, false, "Failed");
+          setSlotNote(slot, err?.message || "Error");
+          addLog(`Slot ${slot} failed: ${err?.message || err}`, "bad");
+
+          // Recovery: try again later for transient errors
+          scheduleRecovery(slot, err);
+          return false;
         }
-
-        runVision(slot);
-
-        // Refresh device labels now that permission is granted
-        enumerateVideoDevices(false).catch(()=>{});
-
-        addLog(`Slot ${slot} started (${describePick(pick)}).`, "ok");
-        return true;
       }
 
       async function startAll(){
-        if(!warnSecureContext()) return;
         addLog("Starting camera slots…", "info");
         let okCount = 0;
         for(let slot=0; slot<MAX_SLOTS; slot++){
@@ -1414,6 +1397,20 @@ const CLIENT_ID_KEY = "rednode.clientId.v1";
         }else{
           setStreamUi("warn", `Stream: Stale (last ${age.toFixed(1)}s ago)`);
         }
+
+        // Auto candidates
+        const paths = [
+          "/api/cloud/cameras/frame",
+          "/api/cameras/frame",
+          "/api/cameras/upload",
+          "/api/cameras/ingest",
+          "/api/cameras/push",
+          "/api/cameras/frame/upload",
+          "/api/cameras/" + encodeURIComponent(cameraId) + "/frame",
+          "/api/cameras/" + encodeURIComponent(cameraId) + "/upload",
+        ];
+        paths.forEach(p => candidates.push(`${base}${p}`));
+        return candidates;
       }
 
       setInterval(updateStreamStatus, 1000);

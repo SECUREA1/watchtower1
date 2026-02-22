@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>RedNode Excavation</title>
+    <title>Watchtower Chaines Live Chatroom</title>
     <link rel="icon" href="/static/watchtown-wood-logo.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -653,7 +653,7 @@
     <header>
       <div class="brand">
         <img src="/static/watchtown-wood-logo.svg" class="logo" alt="Watchtown wooden logo" />
-        <h1>RedNode Excavation</h1>
+        <h1>Watchtower Chaines Live Chatroom</h1>
       </div>
       <div class="status top">
         <button class="chip fun-btn" id="stream-code-btn" title="Copy stream code">
@@ -723,7 +723,7 @@
           <button id="logout-btn" class="btn ghost" style="padding:6px 10px" type="button">Logout</button>
         </span>
       </div>
-      <div class="legal">© <span id="year"></span> RedNode Excavation</div>
+      <div class="legal">© <span id="year"></span> Watchtower · Chaines Chatroom</div>
     </footer>
   </div>
 
@@ -736,19 +736,26 @@
   <section id="wallet-gate" class="auth" hidden aria-modal="true" role="dialog">
     <div class="card wallet-card">
       <h2>Connect Wallet &amp; Verify Access</h2>
-      <p>Secure the excavation site by proving ownership of the required Ethereum token.</p>
+      <p>Secure the upgraded Watchtower chatroom by proving ownership of the required Ethereum contract token or Cardano policy asset.</p>
       <div class="wallet-steps">
         <div class="wallet-step">
           <h3>Step 1 · Connect</h3>
-          <p>Choose the Ethereum wallet you want to use for RedNode.</p>
+          <p>Choose your verification network and connect MetaMask (Ethereum) or Lace (Cardano).</p>
+          <div class="inline-field">
+            <label for="wallet-network">Verification network</label>
+            <select id="wallet-network">
+              <option value="ethereum">Ethereum (MetaMask)</option>
+              <option value="cardano">Cardano (Lace)</option>
+            </select>
+          </div>
           <div class="wallet-actions">
             <button class="btn primary" id="connect-wallet" type="button">Connect Wallet</button>
             <span class="wallet-address" id="wallet-address">Not connected</span>
           </div>
         </div>
         <div class="wallet-step" id="token-step" hidden>
-          <h3>Step 2 · Verify token</h3>
-          <p>Confirm that the connected wallet holds the access token required to enter.</p>
+          <h3>Step 2 · Verify token or policy</h3>
+          <p>Confirm that the connected wallet holds the required Ethereum contract token or Cardano policy asset to enter Watchtower Chatroom.</p>
           <div class="inline-field">
             <label for="token-address">Token contract address</label>
             <input id="token-address" placeholder="0x..." autocomplete="off" />
@@ -773,10 +780,10 @@
         <span class="auth-logo"><img src="/static/watchtown-wood-logo.svg" alt="Watchtown wooden icon" loading="lazy" /></span>
         <div class="text">
           <span class="eyebrow">Operator access</span>
-          <h2>Welcome to RedNode Excavation</h2>
+          <h2>Welcome to Watchtower Chatroom</h2>
         </div>
       </div>
-      <p>Pick a username to join the chatroom.</p>
+      <p>Pick a username to join the upgraded, branded Chaines Watchtower chatroom.</p>
       <div class="fields">
         <input id="username" placeholder="Username (e.g., jodel)" maxlength="24" />
       </div>
@@ -789,7 +796,7 @@
       </div>
       <p style="margin-top:4px">Optional backend socket: <span class="muted-link" id="ws-edit">configure</span></p>
       <div id="ws-config" class="fields" style="display:none; margin-top:8px">
-        <input id="ws-url" placeholder="wss://exstream.onrender.com/ws (optional)" />
+        <input id="ws-url" placeholder="wss://watchtower-kw2o.onrender.com/ws (optional)" />
         <button class="btn ghost" id="save-ws" type="button">Save Socket URL</button>
       </div>
     </div>
@@ -842,6 +849,8 @@
     const tokenStep = el('#token-step');
     const tokenAddressInput = el('#token-address');
     const tokenMinInput = el('#token-min');
+    const walletNetworkSelect = el('#wallet-network');
+    const walletVerificationLabel = document.querySelector('label[for="token-address"]');
     const walletChip = el('#wallet-chip');
     const walletChipAddress = el('#wallet-chip-address');
     const walletSwitchBtn = el('#wallet-switch');
@@ -931,6 +940,24 @@
     });
 
     // --- Basic state ---
+    const CLOUD_WS = 'wss://watchtower-kw2o.onrender.com/ws';
+
+    function normalizeWS(input){
+      const raw = (input || '').trim();
+      if(!raw) return '';
+      const ensureWsPath = (value) => {
+        const trimmed = value.replace(/\/+$/, '');
+        return trimmed.toLowerCase().endsWith('/ws') ? trimmed : `${trimmed}/ws`;
+      };
+      if(/^wss?:\/\//i.test(raw)) return ensureWsPath(raw);
+      if(/^https?:\/\//i.test(raw)){
+        const proto = raw.toLowerCase().startsWith('https:') ? 'wss' : 'ws';
+        return ensureWsPath(`${proto}://${raw.replace(/^https?:\/\//i, '')}`);
+      }
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      return ensureWsPath(`${proto}://${raw}`);
+    }
+
     const store = {
       get user() {
         try { return localStorage.getItem('rednode_username') || ''; }
@@ -941,11 +968,27 @@
         catch {}
       },
       get wsURL() {
-        try { return localStorage.getItem('rednode_ws_url') || defaultWS(); }
+        try {
+          const saved = normalizeWS(localStorage.getItem('rednode_ws_url'));
+          if(saved){
+            const host = new URL(saved).hostname;
+            const onCloudHost = location.hostname === 'watchtower-kw2o.onrender.com';
+            const staleLocalHost = host === 'localhost' || host === '127.0.0.1' || host.endsWith('.local');
+            if(onCloudHost && staleLocalHost){
+              localStorage.removeItem('rednode_ws_url');
+            } else {
+              return saved;
+            }
+          }
+          return defaultWS();
+        }
         catch { return defaultWS(); }
       },
       set wsURL(v) {
-        try { v ? localStorage.setItem('rednode_ws_url', v) : localStorage.removeItem('rednode_ws_url'); }
+        try {
+          const normalized = normalizeWS(v);
+          normalized ? localStorage.setItem('rednode_ws_url', normalized) : localStorage.removeItem('rednode_ws_url');
+        }
         catch {}
       },
       get theme() {
@@ -1000,6 +1043,15 @@
           v ? localStorage.setItem('rednode_required_token', v) : localStorage.removeItem('rednode_required_token');
         } catch {}
       },
+      get walletNetwork() {
+        try { return localStorage.getItem('rednode_wallet_network') || 'ethereum'; }
+        catch { return 'ethereum'; }
+      },
+      set walletNetwork(v) {
+        try {
+          v ? localStorage.setItem('rednode_wallet_network', v) : localStorage.removeItem('rednode_wallet_network');
+        } catch {}
+      },
       pushMsg(m) {
         try {
           const items = JSON.parse(localStorage.getItem('rednode_messages') || '[]');
@@ -1019,6 +1071,7 @@
     const hasEthers = typeof window !== 'undefined' && typeof window.ethers !== 'undefined';
     const configuredTokenAddress = (document.body?.dataset?.tokenAddress || '').trim();
     const configuredTokenMinimum = (document.body?.dataset?.tokenMin || '').trim();
+    const configuredPolicyId = (document.body?.dataset?.policyId || '').trim();
 
     function normalizeAddress(addr) {
       if (!addr) return '';
@@ -1047,20 +1100,45 @@
       if (!walletChip) return;
       if (store.walletAddress && store.walletVerified) {
         walletChip.hidden = false;
-        if (walletChipAddress) walletChipAddress.textContent = formatAddress(store.walletAddress);
+        if (walletChipAddress) {
+          const badge = store.walletNetwork === 'cardano' ? 'ADA' : 'ETH';
+          walletChipAddress.textContent = `${badge} ${formatAddress(store.walletAddress)}`;
+        }
       } else {
         walletChip.hidden = true;
         if (walletChipAddress) walletChipAddress.textContent = '';
       }
     }
 
+    function getSelectedWalletNetwork() {
+      const selected = walletNetworkSelect?.value || store.walletNetwork || 'ethereum';
+      return selected === 'cardano' ? 'cardano' : 'ethereum';
+    }
+
+    function updateVerificationPrompts() {
+      const network = getSelectedWalletNetwork();
+      const isCardano = network === 'cardano';
+      if (walletVerificationLabel) {
+        walletVerificationLabel.textContent = isCardano ? 'Cardano policy ID' : 'Token contract address';
+      }
+      if (tokenAddressInput) {
+        tokenAddressInput.placeholder = isCardano ? 'policy id (56 hex chars)…' : '0x...';
+      }
+      if (verifyTokenBtn) {
+        verifyTokenBtn.textContent = isCardano ? 'Verify Policy' : 'Verify Token';
+      }
+    }
+
     function resetWalletGateUI() {
       if (!walletGate) return;
+      if (walletNetworkSelect) walletNetworkSelect.value = store.walletNetwork || 'ethereum';
+      updateVerificationPrompts();
       if (walletAddressLabel) walletAddressLabel.textContent = store.walletAddress || 'Not connected';
       if (tokenStep) tokenStep.hidden = !store.walletAddress;
       if (connectWalletBtn) connectWalletBtn.textContent = store.walletAddress ? 'Switch Wallet' : 'Connect Wallet';
       if (tokenAddressInput) {
         if (store.tokenAddress) tokenAddressInput.value = store.tokenAddress;
+        else if (store.walletNetwork === 'cardano' && configuredPolicyId && !tokenAddressInput.value) tokenAddressInput.value = configuredPolicyId;
         else if (configuredTokenAddress && !tokenAddressInput.value) tokenAddressInput.value = configuredTokenAddress;
       }
       if (tokenMinInput) {
@@ -1068,7 +1146,7 @@
         else if (!tokenMinInput.value) tokenMinInput.value = '1';
       }
       if (!store.walletAddress) setWalletStatus('Connect your wallet to continue.', 'notice');
-      else setWalletStatus('Verify your token to continue.', store.walletVerified ? 'success' : 'notice');
+      else setWalletStatus(store.walletNetwork === 'cardano' ? 'Verify your policy to continue.' : 'Verify your token to continue.', store.walletVerified ? 'success' : 'notice');
     }
 
     function openWalletGate() {
@@ -1106,21 +1184,39 @@
 
     async function connectWallet() {
       if (!connectWalletBtn) return;
-      if (!window.ethereum) {
-        setWalletStatus('No Ethereum wallet detected. Install MetaMask or a compatible wallet to continue.', 'error');
-        return;
-      }
+      const network = getSelectedWalletNetwork();
       const original = connectWalletBtn.textContent;
       connectWalletBtn.disabled = true;
       connectWalletBtn.textContent = 'Connecting…';
       try {
-        const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-        const selected = Array.isArray(accounts) && accounts.length ? normalizeAddress(accounts[0]) : '';
-        if (!selected) {
-          setWalletStatus('No wallet address was returned. Please try again.', 'error');
-          connectWalletBtn.textContent = original;
-          return;
+        let selected = '';
+        if (network === 'cardano') {
+          const lace = window.cardano?.lace;
+          if (!lace || typeof lace.enable !== 'function') {
+            setWalletStatus('Lace wallet not detected. Open Lace and try Cardano again.', 'error');
+            return;
+          }
+          const api = await lace.enable();
+          const used = await api.getUsedAddresses();
+          const changeAddr = await api.getChangeAddress();
+          selected = (Array.isArray(used) && used[0]) || changeAddr || '';
+          if (!selected) {
+            setWalletStatus('No Cardano address was returned by Lace.', 'error');
+            return;
+          }
+        } else {
+          if (!window.ethereum) {
+            setWalletStatus('No Ethereum wallet detected. Install MetaMask or a compatible wallet to continue.', 'error');
+            return;
+          }
+          const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+          selected = Array.isArray(accounts) && accounts.length ? normalizeAddress(accounts[0]) : '';
+          if (!selected) {
+            setWalletStatus('No wallet address was returned. Please try again.', 'error');
+            return;
+          }
         }
+        store.walletNetwork = network;
         store.walletAddress = selected;
         store.walletVerified = false;
         store.user = '';
@@ -1128,7 +1224,7 @@
         if (walletAddressLabel) walletAddressLabel.textContent = selected;
         if (tokenStep) tokenStep.hidden = false;
         connectWalletBtn.textContent = 'Switch Wallet';
-        setWalletStatus('Wallet connected. Verify your token to enter.', 'success');
+        setWalletStatus(network === 'cardano' ? 'Cardano wallet connected. Verify your policy to enter.' : 'Wallet connected. Verify your token to enter.', 'success');
       } catch (err) {
         connectWalletBtn.textContent = original;
         const rejected = err && (err.code === 4001 || err.code === 'ACTION_REJECTED');
@@ -1144,15 +1240,11 @@
         setWalletStatus('Connect a wallet before verifying tokens.', 'error');
         return;
       }
-      if (!hasEthers) {
-        setWalletStatus('Ethereum tools failed to load. Refresh and try again.', 'error');
-        return;
-      }
+      const network = store.walletNetwork || getSelectedWalletNetwork();
       const tokenInput = (tokenAddressInput?.value || '').trim();
       const minimumRaw = (tokenMinInput?.value || '1').trim();
-      const tokenAddr = normalizeAddress(tokenInput);
-      if (!tokenAddr) {
-        setWalletStatus('Enter a valid token contract address.', 'error');
+      if (network === 'ethereum' && !hasEthers) {
+        setWalletStatus('Ethereum tools failed to load. Refresh and try again.', 'error');
         return;
       }
       if (!minimumRaw || Number.isNaN(Number(minimumRaw)) || Number(minimumRaw) < 0) {
@@ -1162,8 +1254,40 @@
       const original = verifyTokenBtn.textContent;
       verifyTokenBtn.disabled = true;
       verifyTokenBtn.textContent = 'Verifying…';
-      setWalletStatus('Requesting token balance…', 'notice');
+      setWalletStatus(network === 'cardano' ? 'Checking policy in Lace UTXOs…' : 'Requesting token balance…', 'notice');
       try {
+        if (network === 'cardano') {
+          const policyId = tokenInput.toLowerCase();
+          if (!/^[0-9a-f]{56}$/.test(policyId)) {
+            setWalletStatus('Enter a valid Cardano policy ID (56 hex characters).', 'error');
+            return;
+          }
+          const lace = window.cardano?.lace;
+          if (!lace || typeof lace.enable !== 'function') {
+            setWalletStatus('Lace wallet not detected. Open Lace and reconnect.', 'error');
+            return;
+          }
+          const api = await lace.enable();
+          const utxos = await api.getUtxos();
+          const hasPolicy = Array.isArray(utxos) && utxos.some((u) => typeof u === 'string' && u.toLowerCase().includes(policyId));
+          if (hasPolicy) {
+            store.walletVerified = true;
+            store.tokenAddress = policyId;
+            if (tokenAddressInput) tokenAddressInput.value = policyId;
+            setWalletStatus('Cardano policy verified in connected Lace wallet. Welcome aboard!', 'success');
+            setTimeout(() => completeWalletGate(), 600);
+          } else {
+            setWalletStatus('Policy was not found in this Lace wallet UTXO set.', 'error');
+          }
+          return;
+        }
+
+        const tokenAddr = normalizeAddress(tokenInput);
+        if (!tokenAddr) {
+          setWalletStatus('Enter a valid token contract address.', 'error');
+          return;
+        }
+
         const provider = new window.ethers.BrowserProvider(window.ethereum);
         const abi = [
           'function balanceOf(address owner) view returns (uint256)',
@@ -1224,6 +1348,19 @@
         verifyAccessToken();
       });
     }
+    if (walletNetworkSelect) {
+      walletNetworkSelect.addEventListener('change', () => {
+        store.walletNetwork = getSelectedWalletNetwork();
+        store.walletAddress = '';
+        store.walletVerified = false;
+        store.tokenAddress = '';
+        if (walletAddressLabel) walletAddressLabel.textContent = 'Not connected';
+        if (tokenStep) tokenStep.hidden = true;
+        updateVerificationPrompts();
+        setWalletStatus(store.walletNetwork === 'cardano' ? 'Connect Lace to continue.' : 'Connect MetaMask to continue.', 'notice');
+      });
+    }
+
     if (walletSwitchBtn) {
       walletSwitchBtn.addEventListener('click', () => {
         store.walletVerified = false;
@@ -1235,6 +1372,9 @@
       });
     }
 
+    if (walletNetworkSelect) walletNetworkSelect.value = store.walletNetwork || 'ethereum';
+    updateVerificationPrompts();
+
     if (store.walletAddress) {
       if (walletAddressLabel) walletAddressLabel.textContent = store.walletAddress;
       if (tokenStep) tokenStep.hidden = !store.walletVerified;
@@ -1243,6 +1383,7 @@
 
     if (window.ethereum?.on) {
       window.ethereum.on('accountsChanged', (accounts) => {
+        if (store.walletNetwork === 'cardano') return;
         const next = Array.isArray(accounts) && accounts.length ? normalizeAddress(accounts[0]) : '';
         if (!next) {
           store.walletAddress = '';
@@ -1267,6 +1408,7 @@
         }
       });
       window.ethereum.on('chainChanged', () => {
+        if (store.walletNetwork === 'cardano') return;
         if (!store.walletAddress) return;
         if (!store.walletVerified) return;
         setWalletStatus('Network changed. Re-verify your token if access is restricted.', 'notice');
@@ -1535,10 +1677,14 @@
     }
 
     function defaultWS(){
-      // Always default to the public cloud WebSocket endpoint so the
-      // "Go Cloud" toggle reliably connects even when the client is
-      // served from a local file or dev server with no WS backend.
-      return 'wss://exstream.onrender.com/ws';
+      // Default to the deployed Watchtower socket, while keeping localhost
+      // when running in local dev.
+      const host = location.hostname;
+      if(host === 'localhost' || host === '127.0.0.1' || host.endsWith('.local')){
+        const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+        return `${proto}://${location.host}/ws`;
+      }
+      return CLOUD_WS;
     }
 
     function setStatus(mode){
