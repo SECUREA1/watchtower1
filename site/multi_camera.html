@@ -2,56 +2,196 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Watchtower Device Monitor</title>
   <style>
-    body { font-family: system-ui, sans-serif; background:#2b180d; color:#f6ead8; margin:0; padding:24px; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:#2b180d; color:#f6ead8; margin:0; padding:24px; }
     h1 { margin:0 0 12px; }
     .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:16px; }
     .card { background:#3f2616; border:1px solid #5b3a22; border-radius:12px; padding:12px; box-shadow: 0 18px 40px rgba(24,12,6,0.45); }
-    .meta { font-size:12px; color:#d2b28f; margin-bottom:8px; }
-    img { width:100%; border-radius:8px; background:#2f1b0f; }
-    .status { display:flex; justify-content:space-between; margin-top:8px; font-size:12px; }
-    .badge { padding:2px 6px; border-radius:999px; background:#4a2b18; color:#f6ead8; }
+    .meta { font-size:12px; color:#d2b28f; margin-bottom:8px; line-height:1.25; }
+    .errorBox { color:#e5a08a; margin: 0 0 12px; font-size:12px; display:none; }
+    img { width:100%; border-radius:8px; background:#2f1b0f; display:block; }
+    .status { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-top:8px; font-size:12px; color:#e7d3b8; }
+    .badge { padding:2px 8px; border-radius:999px; background:#4a2b18; color:#f6ead8; white-space:nowrap; }
+    .warnBadge { background:#6a431e; }
     .error { color:#e5a08a; }
+    .muted { color:#d2b28f; }
+    .small { font-size:11px; }
   </style>
 </head>
 <body>
   <h1>Watchtower Device Monitor</h1>
   <p class="meta">Live camera and sensor streams served from your Watchtower hub.</p>
+  <p id="error" class="errorBox"></p>
   <div id="grid" class="grid"></div>
 
   <script>
-    async function loadCameras() {
-      const res = await fetch('/api/cameras');
-      const data = await res.json();
-      if (!data.ok) {
-        document.getElementById('grid').innerHTML = `<div class="card">${data.error}</div>`;
+    const grid = document.getElementById('grid');
+    const errBox = document.getElementById('error');
+    const cards = new Map(); // camId -> {card, meta, img, left, right, streamUrl}
+
+    function setError(msg){
+      if(!msg){
+        errBox.textContent = '';
+        errBox.style.display = 'none';
         return;
       }
-      const grid = document.getElementById('grid');
-      grid.innerHTML = '';
-      data.cameras.forEach(cam => {
-        const card = document.createElement('div');
-        card.className = 'card';
-        const fps = Number(cam.stats?.fps || 0);
-        const frames = Number(cam.stats?.frames || 0);
-        const cloudAge = cam.cloud?.last_upload_age_s;
-        const freshness = typeof cloudAge === 'number'
-          ? ` · uploaded ${cloudAge.toFixed(1)}s ago`
-          : '';
-        const err = cam.stats?.last_error ? `<span class="error">${cam.stats.last_error}</span>` : '<span class="badge">LIVE</span>';
-        card.innerHTML = `
-          <div class="meta"><strong>${cam.id}</strong> · ${cam.type} · ${cam.resolution} @ ${cam.fps_target}fps${freshness}</div>
-          <img src="/api/cameras/${cam.id}/mjpeg" alt="${cam.id}" />
-          <div class="status">
-            <span>fps: ${fps.toFixed(1)} frames: ${frames}</span>
-            ${err}
-          </div>
-        `;
-        grid.appendChild(card);
-      });
+      errBox.textContent = msg;
+      errBox.style.display = 'block';
     }
+
+    function esc(s){
+      return String(s ?? '').replace(/[&<>"']/g, c => ({
+        '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+      }[c]));
+    }
+
+    function streamUrlFor(id){
+      // Keep the URL stable so MJPEG stays connected.
+      return `/api/cameras/${encodeURIComponent(id)}/mjpeg`;
+    }
+
+    function ensureCard(cam){
+      const id = String(cam.id ?? '');
+      let node = cards.get(id);
+      if(node) return node;
+
+      // Remove "empty" placeholder if present
+      const ph = grid.querySelector('[data-placeholder="1"]');
+      if(ph) ph.remove();
+
+      const card = document.createElement('div');
+      card.className = 'card';
+
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+
+      const img = document.createElement('img');
+      img.alt = id;
+      img.decoding = 'async';
+      img.loading = 'eager';
+
+      const status = document.createElement('div');
+      status.className = 'status';
+
+      const left = document.createElement('span');
+      left.className = 'small muted';
+
+      const right = document.createElement('span');
+
+      status.appendChild(left);
+      status.appendChild(right);
+
+      card.appendChild(meta);
+      card.appendChild(img);
+      card.appendChild(status);
+
+      const streamUrl = streamUrlFor(id);
+      img.src = streamUrl;
+
+      // If the MJPEG connection drops, try to reconnect with a cache-bust.
+      let reconnectTimer = null;
+      const scheduleReconnect = (delayMs = 1500) => {
+        if(reconnectTimer) return;
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null;
+          const busted = streamUrl + (streamUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
+          img.src = busted;
+        }, delayMs);
+      };
+
+      img.addEventListener('error', () => scheduleReconnect(1500));
+
+      node = { card, meta, img, left, right, streamUrl };
+      cards.set(id, node);
+      grid.appendChild(card);
+      return node;
+    }
+
+    function updateCard(node, cam){
+      const id = String(cam.id ?? '');
+      const type = cam.type ?? 'camera';
+      const resolution = cam.resolution ?? '';
+      const targetFps = cam.fps_target ?? '';
+      const fps = Number(cam.stats?.fps || 0);
+      const frames = Number(cam.stats?.frames || 0);
+
+      const cloudAge = cam.cloud?.last_upload_age_s;
+      const freshness = (typeof cloudAge === 'number')
+        ? ` · uploaded ${cloudAge.toFixed(1)}s ago`
+        : '';
+
+      node.meta.innerHTML =
+        `<strong>${esc(id)}</strong> · ${esc(type)}${resolution ? (' · ' + esc(resolution)) : ''}${targetFps ? (' @ ' + esc(targetFps) + 'fps') : ''}${freshness}`;
+
+      node.left.textContent = `fps: ${fps.toFixed(1)}  frames: ${frames}`;
+
+      // Status badge/error
+      if (cam.stats?.last_error) {
+        node.right.innerHTML = `<span class="error">${esc(cam.stats.last_error)}</span>`;
+      } else if (typeof cloudAge === 'number' && cloudAge > 10) {
+        node.right.innerHTML = `<span class="badge warnBadge">STALE</span>`;
+      } else {
+        node.right.innerHTML = `<span class="badge">LIVE</span>`;
+      }
+    }
+
+    function showPlaceholder(msg){
+      if(cards.size > 0) return;
+      grid.innerHTML = `<div class="card" data-placeholder="1">${esc(msg)}</div>`;
+    }
+
+    async function loadCameras(){
+      try{
+        const res = await fetch('/api/cameras', { cache: 'no-store' });
+        const data = await res.json();
+
+        if (!data.ok) {
+          setError(`Error: ${data.error || 'Unknown error'}`);
+          // Keep existing streams alive; don't teardown DOM.
+          return;
+        }
+
+        setError(null);
+
+        const cams = Array.isArray(data.cameras) ? data.cameras.slice() : [];
+        cams.sort((a,b) => String(a.id).localeCompare(String(b.id)));
+
+        const seen = new Set();
+
+        // Create/update (no DOM teardown, so MJPEG streams remain smooth)
+        for (const cam of cams) {
+          const id = String(cam.id ?? '');
+          if(!id) continue;
+          seen.add(id);
+
+          const node = ensureCard(cam);
+          updateCard(node, cam);
+        }
+
+        // Remove missing cameras
+        for (const [id, node] of Array.from(cards.entries())) {
+          if(!seen.has(id)) {
+            node.card.remove();
+            cards.delete(id);
+          }
+        }
+
+        if (cams.length === 0) {
+          // If the hub reports zero cameras, clear existing and show placeholder
+          for (const [id, node] of Array.from(cards.entries())) {
+            node.card.remove();
+            cards.delete(id);
+          }
+          showPlaceholder("No cameras are currently available.");
+        }
+      }catch(err){
+        setError(`Error loading cameras: ${err?.message || err}`);
+        // Keep existing streams alive on transient errors.
+      }
+    }
+
     loadCameras();
     setInterval(loadCameras, 5000);
   </script>
