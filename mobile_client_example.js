@@ -3,7 +3,7 @@
 
 const video = document.getElementById('video');
 const overlay = document.getElementById('overlay');
-const serverUrl = `${window.location.origin}/detect`;
+const serverUrl = 'http://localhost:8000/detect';
 
 const uploadFps = 2; // throttle uploads
 const retryDelayMs = 1000;
@@ -11,21 +11,10 @@ let lastUpload = 0;
 let inFlight = false;
 
 async function startCamera() {
-  if (!navigator.mediaDevices?.getUserMedia) {
-    throw new Error('Camera API unavailable. Use HTTPS (or localhost) in a supported browser.');
-  }
-
-  let stream;
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: 'environment' } },
-      audio: false,
-    });
-  } catch {
-    // Some devices/browsers reject facingMode; retry with plain video.
-    stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-  }
-
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: 'environment' },
+    audio: false,
+  });
   video.srcObject = stream;
   await video.play();
 }
@@ -70,7 +59,6 @@ function drawDetections(result) {
 
   overlay.width = width * dpr;
   overlay.height = height * dpr;
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, width, height);
 

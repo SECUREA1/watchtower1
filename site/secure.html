@@ -698,10 +698,9 @@
       .mobile-tabs{display:flex}
       .tab-pane{display:none}
       .tab-pane.active{display:block}
-      .mobile-log-tabs{display:none}
-      .mobile-log-tabs.visible{display:flex}
+      .mobile-log-tabs{display:flex}
       .mobile-log-pane{display:none}
-      .mobile-log-pane.log-active{display:block}
+      .mobile-log-pane.active{display:block}
       .storage-grid{grid-template-columns:1fr}
       .storage-mode-top{flex-direction:column; align-items:flex-start}
       .row, .controls-row{flex-direction:column; align-items:stretch}
@@ -1078,7 +1077,7 @@
 
       <nav class="nav" aria-label="Primary">
         <a href="/home.html">Overview</a>
-        <a href="/secure.html#controls" class="active">Secure</a>
+        <a href="/secure.html" class="active">Secure</a>
         <a href="/dashboard.html">Automations</a>
         <a href="/multi_camera.html">Devices</a>
         <a href="/marketplace.html">Integrations</a>
@@ -1412,7 +1411,7 @@
           <button class="mobile-log-tab" type="button" data-log-panel-button="logs">Interaction Logs</button>
         </div>
 
-        <section class="card tracked-panel tab-pane mobile-log-pane log-active" data-tab="logs" data-log-panel="tracked">
+        <section class="card tracked-panel tab-pane mobile-log-pane active" data-tab="logs" data-log-panel="tracked">
           <div class="card-h">
             <div>
               <div class="title"><span aria-hidden="true">📍</span> Tracked Objects</div>
@@ -1526,10 +1525,6 @@
       const isLikelyIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent)
         || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
       const isLikelyMobile = () => isLikelyIOS() || /Android|Mobi/i.test(navigator.userAgent);
-      const isLocalHostLike = () => {
-        const h = location.hostname;
-        return h === "localhost" || h === "127.0.0.1" || h === "::1";
-      };
 
       const defaultSettings = {
         demoMode: true,
@@ -1558,22 +1553,11 @@
         detectorMode: "tiny",
         trackedSort: "alpha",
         logSort: "newest",
-        apiServerBase: "",
-        wsServerBase: "",
-        relayServerBase: "",
-        relayUploadPath: "",
       };
 
       // Load settings (merge defaults)
       let settings = loadJSON(LS_KEYS.settings, defaultSettings);
       settings = Object.assign({}, defaultSettings, settings || {});
-      try{
-        const qp = new URLSearchParams(location.search);
-        const apiBaseQ = (qp.get("api_base") || window.WATCHTOWER_API_BASE || "").trim();
-        const wsBaseQ = (qp.get("ws_base") || window.WATCHTOWER_WS_BASE || "").trim();
-        if(apiBaseQ) settings.apiServerBase = apiBaseQ;
-        if(wsBaseQ) settings.wsServerBase = wsBaseQ;
-      }catch(_e){}
 
       // Persistent DBs
       let objectMemory = loadJSON(LS_KEYS.objectMemory, {});
@@ -1614,55 +1598,11 @@
       let camStreams = new Map();  // slotIdx -> MediaStream
       let camStates  = new Map();  // slotIdx -> state
       const cloudRelay = {
-        enabled: !isLikelyMobile(),
+        enabled: true,
         inFlight: new Set(),
         lastUploadAt: new Map(),
-        minIntervalMs: isLikelyMobile() ? 6000 : 2000,
-        failCount: new Map(),
-        maxFails: 3,
+        minIntervalMs: 2000,
       };
-      const STREAM_CLIENT_KEY = "watchtower.secure.streamClientId.v1";
-      function getOrCreateStreamClientId(){
-        let id = localStorage.getItem(STREAM_CLIENT_KEY);
-        if(!id){
-          id = (crypto?.randomUUID ? crypto.randomUUID() : `cid_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`);
-          localStorage.setItem(STREAM_CLIENT_KEY, id);
-        }
-        return id;
-      }
-      const streamClientId = getOrCreateStreamClientId();
-      const relayCandidates = ["/api/cloud/cameras/frame", "/api/cameras/frame", "/api/stream/frame"];
-      let relayEndpoint = "";
-
-      function getApiBase(){
-        const custom = (settings.apiServerBase || settings.relayServerBase || "").trim();
-        return custom ? custom.replace(/\/$/, "") : window.location.origin;
-      }
-
-      function getWsBase(){
-        const custom = (settings.wsServerBase || "").trim();
-        return custom ? custom.replace(/\/$/, "") : window.location.origin;
-      }
-
-      window.watchtowerSecureRuntime = {
-        getApiBase,
-        getWsBase,
-        isLikelyMobile,
-      };
-
-      function getRelayCameraId(slotIdx){
-        return `wt-${streamClientId.slice(0,8)}-secure-cam-${slotIdx}`;
-      }
-
-      async function resolveRelayEndpoint(){
-        if(relayEndpoint) return relayEndpoint;
-        if(settings.relayUploadPath && String(settings.relayUploadPath).trim()){
-          relayEndpoint = String(settings.relayUploadPath).trim();
-          return relayEndpoint;
-        }
-        relayEndpoint = relayCandidates[0];
-        return relayEndpoint;
-      }
       let devices = [];            // videoinput list
       const cameraRecovery = {
         inProgress: false,
@@ -1857,25 +1797,12 @@
       /***********************
        * Mobile tabs
        ***********************/
-      function normalizeMainTabHash(rawHash){
-        const cleaned = String(rawHash || "").replace(/^#/, "").trim().toLowerCase();
-        return ["controls", "camera", "logs"].includes(cleaned) ? cleaned : "controls";
-      }
-
-      function replaceMainTabHash(tabName){
-        if(!tabName || !history.replaceState) return;
-        const cleanHash = `#${tabName}`;
-        if(location.hash === cleanHash) return;
-        history.replaceState(null, "", cleanHash);
-      }
-
       function initMobileTabs(){
         const tabButtons = Array.from(document.querySelectorAll("[data-tab-button]"));
         const panes = Array.from(document.querySelectorAll(".tab-pane"));
-        const mobileLogTabs = document.querySelector(".mobile-log-tabs");
         if(tabButtons.length === 0 || panes.length === 0) return;
 
-        const setActiveTab = (tabName, { updateHash = true } = {})=>{
+        const setActiveTab = (tabName)=>{
           tabButtons.forEach(btn => {
             btn.classList.toggle("active", btn.dataset.tabButton === tabName);
           });
@@ -1884,13 +1811,6 @@
             const match = key.split(" ").includes(tabName);
             pane.classList.toggle("active", match);
           });
-
-          if(mobileLogTabs){
-            mobileLogTabs.classList.toggle("visible", tabName === "logs");
-          }
-          if(updateHash){
-            replaceMainTabHash(tabName);
-          }
         };
 
         tabButtons.forEach(btn => {
@@ -1899,7 +1819,7 @@
           });
         });
 
-        setActiveTab(normalizeMainTabHash(location.hash), { updateHash: false });
+        setActiveTab("controls");
       }
 
       function initMobileLogTabs(){
@@ -1912,7 +1832,7 @@
             btn.classList.toggle("active", btn.dataset.logPanelButton === panelName);
           });
           panes.forEach(pane => {
-            pane.classList.toggle("log-active", pane.dataset.logPanel === panelName);
+            pane.classList.toggle("active", pane.dataset.logPanel === panelName);
           });
         };
 
@@ -2959,19 +2879,7 @@
       }
 
       async function ensureDevicesDiscoveredOnLoad(){
-        if(!checkCameraSecurityContext()){
-          ensureSelectedSlotsWithinLimits();
-          return;
-        }
-
         await enumerateVideoDevices({ force: false });
-
-        if(isLikelyMobile()){
-          setGlobalPerm(false, "Camera: Tap Start Cameras to request permission");
-          addCvLog("Mobile detected: waiting for Start Cameras before requesting camera permission.", "info");
-          ensureSelectedSlotsWithinLimits();
-          return;
-        }
 
         if(!devices.length && navigator.mediaDevices?.getUserMedia){
           try{
@@ -2997,11 +2905,6 @@
           const status = await navigator.permissions.query({ name: "camera" });
           const handleChange = ()=>{
             if(status.state === "granted"){
-              if(isLikelyMobile()){
-                addCvLog("Camera permission granted. Tap Start Cameras to begin streaming.", "info");
-                setGlobalPerm(true, "Camera: Permission granted (tap Start Cameras)");
-                return;
-              }
               addCvLog("Camera permission granted. Auto-starting selected cameras.");
               setGlobalPerm(true, "Camera: Permission granted");
               resetCameraRecovery(true);
@@ -3121,17 +3024,6 @@
         updateCvSummary();
       }
 
-      function checkCameraSecurityContext(){
-        const secureOrigin = location.protocol === "https:" || isLocalHostLike() || !!window.isSecureContext;
-        if(secureOrigin) return true;
-        const msg = "Camera requires HTTPS on mobile browsers. Open this page over HTTPS (or localhost).";
-        setGlobalPerm(false, "Camera: Blocked by insecure origin");
-        setCvStatus(cvStatusCamera, "Camera: Blocked (HTTPS required)");
-        addCvLog(msg, "bad");
-        toast("Camera blocked: HTTPS is required for mobile camera access.");
-        return false;
-      }
-
       function addCvLog(message, kind="info"){
         if(!cvDebugLog) return;
         const line = document.createElement("div");
@@ -3216,11 +3108,6 @@
 
       async function startCamera(slotIdx){
         try{
-          if(!checkCameraSecurityContext()){
-            setCamStatus(slotIdx, false);
-            return false;
-          }
-
           if(!navigator.mediaDevices?.getUserMedia){
             toast("Camera not supported in this browser.");
             setCamStatus(slotIdx, false);
@@ -3244,23 +3131,7 @@
             videoConstraints.facingMode = { ideal: settings.mobileFacing };
           }
 
-          let stream = null;
-          const attempts = [
-            { video: videoConstraints, audio: false },
-            { video: { facingMode: settings.mobileFacing || "environment" }, audio: false },
-            { video: true, audio: false },
-          ];
-
-          let lastErr = null;
-          for(const req of attempts){
-            try{
-              stream = await navigator.mediaDevices.getUserMedia(req);
-              break;
-            }catch(e){
-              lastErr = e;
-            }
-          }
-          if(!stream) throw lastErr || new Error("Unable to open camera stream.");
+          const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio:false });
 
           camStreams.set(slotIdx, stream);
           camStates.set(slotIdx, makeCamState(slotIdx));
@@ -3270,7 +3141,6 @@
           v.muted = true;
           v.setAttribute("autoplay", "");
           v.setAttribute("playsinline", "");
-          v.setAttribute("webkit-playsinline", "");
           // iOS: play must be triggered from the user gesture (Start Cameras button).
           try{
             await v.play();
@@ -3423,45 +3293,19 @@
 
           const blob = await new Promise(resolve=>canvas.toBlob(resolve, "image/jpeg", 0.72));
           if(!blob) return;
-
-          const cameraId = getRelayCameraId(idx);
           const fd = new FormData();
-          fd.append("camera_id", cameraId);
+          fd.append("camera_id", `secure-cam-${idx}`);
           fd.append("source", "secure-ui");
           fd.append("resolution", `${video.videoWidth}x${video.videoHeight}`);
           fd.append("fps", String(fps || 0));
-          fd.append("client_id", streamClientId);
-          fd.append("frame", blob, `${cameraId}.jpg`);
-
-          const base = getApiBase();
-          const preferred = await resolveRelayEndpoint();
-          const paths = [preferred, ...relayCandidates.filter(p=>p!==preferred)];
-          let uploaded = false;
-
-          for(const path of paths){
-            try{
-              const res = await fetch(`${base}${path}`, { method:"POST", body: fd });
-              if(res.ok){
-                relayEndpoint = path;
-                cloudRelay.lastUploadAt.set(idx, now);
-                cloudRelay.failCount.set(idx, 0);
-                uploaded = true;
-                break;
-              }
-            }catch(_e){ }
+          fd.append("frame", blob, `secure-cam-${idx}.jpg`);
+          const res = await fetch("/api/cloud/cameras/frame", { method:"POST", body: fd });
+          if(!res.ok){
+            throw new Error(`Upload failed (${res.status})`);
           }
-
-          if(!uploaded){
-            throw new Error("Upload failed on all relay endpoints");
-          }
+          cloudRelay.lastUploadAt.set(idx, now);
         }catch(err){
-          const n = (cloudRelay.failCount.get(idx) || 0) + 1;
-          cloudRelay.failCount.set(idx, n);
           addCvLog(`Cloud relay failed for Camera ${idx}: ${(err && err.message) || err}`, "warn");
-          if(n >= cloudRelay.maxFails){
-            cloudRelay.enabled = false;
-            addCvLog("Cloud relay auto-disabled after repeated failures. Set API Server Base to your FastAPI origin, then re-enable.", "warn");
-          }
         }finally{
           cloudRelay.inFlight.delete(idx);
         }
@@ -5384,29 +5228,13 @@
       function ensureUI() {
         const need = ["serverUrl","adminToken","consentCheckbox","storageFeedback"];
         const missing = need.filter(id => !$(id));
-        if (!missing.length) {
-          if (!$("apiServerUrl")) {
-            const i = document.createElement("input");
-            i.id = "apiServerUrl";
-            i.type = "hidden";
-            document.body.appendChild(i);
-          }
-          if (!$("wsServerUrl")) {
-            const i = document.createElement("input");
-            i.id = "wsServerUrl";
-            i.type = "hidden";
-            document.body.appendChild(i);
-          }
-          return;
-        }
+        if (!missing.length) return;
 
         const box = document.createElement("div");
         box.style.cssText = "padding:12px;border:1px solid #333;border-radius:8px;margin:12px 0;max-width:720px";
         box.innerHTML = `
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-            <input id="apiServerUrl" style="flex:1;min-width:260px" placeholder="https://api.example.com (blank = same origin)"/>
-            <input id="wsServerUrl" style="flex:1;min-width:260px" placeholder="https://ws.example.com (blank = same origin)"/>
-            <input id="serverUrl" type="hidden"/>
+            <input id="serverUrl" style="flex:1;min-width:260px" placeholder="https://api.rednode.ai (blank = same origin)"/>
             <input id="adminToken" style="flex:1;min-width:240px" placeholder="Admin token (required for commit)"/>
           </div>
           <label style="display:block;margin-top:8px">
@@ -5440,50 +5268,10 @@
         return `${location.protocol}//${v.replace(/\/+$/, "")}`;
       }
 
-      function readSecureSettings() {
-        try {
-          const raw = localStorage.getItem("rednode.security.settings.v2");
-          return raw ? JSON.parse(raw) : {};
-        } catch (_e) {
-          return {};
-        }
-      }
-
-      function getWsBaseFromSettings() {
-        const runtimeBase = window.watchtowerSecureRuntime?.getWsBase?.();
-        if (runtimeBase) return normalizeBase(runtimeBase);
-        const settings = readSecureSettings();
-        return normalizeBase(settings.wsServerBase || "");
-      }
-
       function wsUrlFromBase(httpBase) {
         const u = new URL(httpBase);
         const wsProto = u.protocol === "https:" ? "wss:" : "ws:";
         return `${wsProto}//${u.host}/ws`;
-      }
-
-      function isLikelyMobileClient() {
-        return /iPad|iPhone|iPod|Android|Mobi/i.test(navigator.userAgent || "");
-      }
-
-      function getApiBase() {
-        return normalizeBase($("apiServerUrl")?.value || $("serverUrl")?.value);
-      }
-
-      function getWsBase() {
-        return normalizeBase($("wsServerUrl")?.value || $("serverUrl")?.value);
-      }
-
-      function loadServerBaseConfig() {
-        const qp = new URLSearchParams(location.search);
-        const apiBase = (qp.get("api_base") || window.WATCHTOWER_API_BASE || localStorage.getItem("watchtower.secure.apiServerBase") || "").trim();
-        const wsBase = (qp.get("ws_base") || window.WATCHTOWER_WS_BASE || localStorage.getItem("watchtower.secure.wsServerBase") || "").trim();
-
-        if($("apiServerUrl")) $("apiServerUrl").value = apiBase;
-        if($("wsServerUrl")) $("wsServerUrl").value = wsBase;
-        if($("serverUrl") && !$("serverUrl").value) {
-          $("serverUrl").value = apiBase || wsBase;
-        }
       }
 
       function authHeaders() {
@@ -5528,7 +5316,7 @@
             setWsState("WS: disconnected (reconnecting...)");
             reconnectTimer = setTimeout(() => {
               reconnectDelay = Math.min(MAX_DELAY, Math.floor(reconnectDelay * 1.8));
-              connectWs(getWsBase());
+              connectWs(base);
             }, reconnectDelay);
           });
 
@@ -5659,7 +5447,7 @@
 
       async function handleConnect() {
         ensureUI();
-        const base = getApiBase();
+        const base = normalizeBase($("serverUrl")?.value);
         setFeedback(`Checking server...\nBase: ${base}`);
 
         const h = await healthCheck(base);
@@ -5669,12 +5457,12 @@
         }
 
         setFeedback(`Server OK (${h.path}).\nConnecting WebSocket...`);
-        connectWs(getWsBase());
+        connectWs(base);
       }
 
       async function handleCommitAll() {
         ensureUI();
-        const base = getApiBase();
+        const base = normalizeBase($("serverUrl")?.value);
 
         if (!$("consentCheckbox")?.checked) {
           setFeedback("Consent checkbox not checked. Refusing to upload/commit.");
@@ -5723,14 +5511,8 @@
         $("rnConnectBtn")?.addEventListener("click", handleConnect);
         $("rnCommitAllBtn")?.addEventListener("click", handleCommitAll);
 
-        loadServerBaseConfig();
-
-        // auto-connect on desktop only; mobile should connect after user intent.
-        if (!isLikelyMobileClient()) {
-          setTimeout(handleConnect, 200);
-        } else {
-          setFeedback("Mobile mode: tap Connect after camera starts to avoid background reconnect pressure.");
-        }
+        // auto-connect on load (safe)
+        setTimeout(handleConnect, 200);
       });
 
     })();

@@ -14,7 +14,6 @@ from uuid import uuid4
 
 import requests
 import cv2
-import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
@@ -206,12 +205,7 @@ ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "")
 if ALLOWED_ORIGINS:
     allow_origins_list = [o.strip() for o in ALLOWED_ORIGINS.split(",") if o.strip()]
 else:
-    allow_origins_list = [
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-        "http://localhost:10000",
-        "http://127.0.0.1:10000",
-    ]
+    allow_origins_list = ["http://localhost:8000"]
 
 app.add_middleware(
     CORSMiddleware,
@@ -221,15 +215,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-FRAME_ANCESTORS_POLICY = os.getenv("FRAME_ANCESTORS_POLICY", "*").strip() or "*"
-
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
-    # `X-Frame-Options` is intentionally omitted so cross-site iframe embeds
-    # can work consistently across browsers (including Firefox).
+    response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "same-origin"
     # Secure UI loads ML runtimes + model artifacts from trusted CDNs.
     # Keep the policy strict while explicitly allowing those hosts.
@@ -237,77 +228,14 @@ async def add_security_headers(request: Request, call_next):
         [
             "default-src 'self'",
             "img-src 'self' data: blob:",
-            "script-src 'self' 'unsafe-inline' blob: https://cdn.jsdelivr.net https://unpkg.com https://storage.googleapis.com",
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com",
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
             "font-src 'self' https://fonts.gstatic.com data:",
-            "connect-src 'self' blob: data: ws: wss: https://cdn.jsdelivr.net https://unpkg.com https://storage.googleapis.com https://tfhub.dev https://*.googleapis.com",
-            "worker-src 'self' blob:",
-            "media-src 'self' blob:",
-            f"frame-ancestors {FRAME_ANCESTORS_POLICY}",
+            "connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com",
+            "frame-ancestors 'none'",
         ]
     )
-    # Allow camera/mic for embedded secure pages too (mobile webviews / iframes).
-    response.headers["Permissions-Policy"] = "camera=(self), microphone=(self), geolocation=()"
     return response
-
-
-_HOG_DETECTOR = cv2.HOGDescriptor()
-_HOG_DETECTOR.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
-_FACE_CASCADE = cv2.CascadeClassifier(str(Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml"))
-
-
-def _run_server_detection(image_bytes: bytes) -> dict:
-    image_array = np.frombuffer(image_bytes, dtype=np.uint8)
-    frame = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
-    if frame is None:
-        raise HTTPException(status_code=400, detail="Unable to decode image data.")
-
-    detections: List[dict] = []
-    image_height, image_width = frame.shape[:2]
-
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    if not _FACE_CASCADE.empty():
-        faces = _FACE_CASCADE.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
-        for (x, y, w, h) in faces:
-            detections.append(
-                {
-                    "class": "face",
-                    "score": 0.75,
-                    "bbox": [int(x), int(y), int(w), int(h)],
-                }
-            )
-
-    resized = frame
-    scale = 1.0
-    long_side = max(image_width, image_height)
-    if long_side > 960:
-        scale = 960.0 / long_side
-        resized = cv2.resize(frame, (int(image_width * scale), int(image_height * scale)))
-
-    rects, weights = _HOG_DETECTOR.detectMultiScale(resized, winStride=(8, 8), padding=(8, 8), scale=1.05)
-    for (x, y, w, h), score in zip(rects, weights):
-        if float(score) < 0.35:
-            continue
-        detections.append(
-            {
-                "class": "person",
-                "score": min(0.99, max(0.35, float(score))),
-                "bbox": [
-                    int(x / scale),
-                    int(y / scale),
-                    int(w / scale),
-                    int(h / scale),
-                ],
-            }
-        )
-
-    return {
-        "ok": True,
-        "detections": detections,
-        "image_width": image_width,
-        "image_height": image_height,
-        "detector": "opencv-haar+hog",
-    }
 
 
 @app.on_event("startup")
@@ -453,10 +381,8 @@ def validate_upload(content_type: str, data: bytes) -> None:
 
 
 def is_ui_authenticated(request: Request) -> bool:
-    token_cookie = request.cookies.get(AUTH_COOKIE_NAME, "")
-    if token_cookie == "ok":
-        return True
-    return False
+    # Login gateway removed: UI is always considered authenticated.
+    return True
 
 
 def _is_public_ui_path(path: str) -> bool:
@@ -566,7 +492,7 @@ HTML_ALIASES = {
 }
 
 HOME_PATHS = {"/home", "/home.html"}
-SECURE_PATHS = {"/secure", "/secure/", "/secure.html", "/secure.htnl"}
+SECURE_PATHS = {"/secure", "/secure/", "/secure.html"}
 WATCHTOWER_PATHS = {"/watchtower", "/watchtower.html"}
 DASHBOARD_PATHS = {"/dashboard", "/dashboard.html", "/dashboard1", "/dashboard1.html"}
 CHAINES_PATHS = {
@@ -675,20 +601,6 @@ async def upload_cloud_camera_frame(
         encoding="utf-8",
     )
     return JSONResponse({"ok": True, "camera_id": camera_id, "timestamp": ts, "frames": frames})
-
-
-@app.post("/detect")
-async def detect_objects(image: UploadFile = File(...)) -> JSONResponse:
-    content_type = (image.content_type or "").lower()
-    if content_type and not content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Expected an image upload.")
-    data = await image.read()
-    if not data:
-        raise HTTPException(status_code=400, detail="Empty image payload.")
-    if len(data) > 8 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Image too large for detection endpoint.")
-    result = _run_server_detection(data)
-    return JSONResponse(result)
 
 
 def build_image_path(face_id: str, content_type: str) -> Path:
@@ -1187,30 +1099,19 @@ async def health():
 
 @app.get("/api/session/status")
 async def session_status(request: Request):
-    return {"ok": True, "authenticated": is_ui_authenticated(request)}
+    return {"ok": True, "authenticated": True}
 
 
 @app.post("/api/session/unlock")
 async def session_unlock(payload: UnlockPayload):
-    if not _validate_unlock_payload(payload):
-        raise HTTPException(status_code=401, detail="Invalid unlock credentials.")
-    response = JSONResponse({"ok": True, "authenticated": True})
-    response.set_cookie(
-        AUTH_COOKIE_NAME,
-        "ok",
-        httponly=True,
-        samesite="lax",
-        secure=False,
-        path="/",
-    )
-    return response
+    # Login gateway removed: keep route for backwards compatibility.
+    return JSONResponse({"ok": True, "authenticated": True})
 
 
 @app.post("/api/session/logout")
 async def session_logout():
-    response = JSONResponse({"ok": True})
-    response.delete_cookie(AUTH_COOKIE_NAME)
-    return response
+    # Login gateway removed: no server-side session to clear.
+    return JSONResponse({"ok": True, "authenticated": True})
 
 # -------------------------------------------------------------------------
 # Optional static mount for site/static (improves performance for common assets)
