@@ -205,8 +205,8 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-    // Security page (handles /secure, /secure.html, and common /secure.htnl typo)
-  const securePaths = new Set(["/secure", "/secure/", "/secure.html", "/secure.htnl"]);
+    // Security page (handles both /secure and /secure.html)
+  const securePaths = new Set(["/secure", "/secure/", "/secure.html"]);
   if ((req.method === "GET" || req.method === "HEAD") && securePaths.has(urlPath)) {
     const served = await tryServeFile(res, "secure.html", req.method);
     if (!served) {
