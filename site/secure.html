@@ -1525,6 +1525,10 @@
       const isLikelyIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent)
         || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
       const isLikelyMobile = () => isLikelyIOS() || /Android|Mobi/i.test(navigator.userAgent);
+      const isLocalHostLike = () => {
+        const h = location.hostname;
+        return h === "localhost" || h === "127.0.0.1" || h === "::1";
+      };
 
       const defaultSettings = {
         demoMode: true,
@@ -2912,6 +2916,11 @@
       }
 
       async function ensureDevicesDiscoveredOnLoad(){
+        if(!checkCameraSecurityContext()){
+          ensureSelectedSlotsWithinLimits();
+          return;
+        }
+
         await enumerateVideoDevices({ force: false });
 
         if(!devices.length && navigator.mediaDevices?.getUserMedia){
@@ -3057,6 +3066,17 @@
         updateCvSummary();
       }
 
+      function checkCameraSecurityContext(){
+        const secureOrigin = !!window.isSecureContext || isLocalHostLike();
+        if(secureOrigin) return true;
+        const msg = "Camera is blocked on mobile unless this page is loaded from HTTPS (or localhost).";
+        setGlobalPerm(false, "Camera: Blocked by insecure origin");
+        setCvStatus(cvStatusCamera, "Camera: Blocked (HTTPS required)");
+        addCvLog(msg, "bad");
+        toast("Camera blocked: open this page over HTTPS.");
+        return false;
+      }
+
       function addCvLog(message, kind="info"){
         if(!cvDebugLog) return;
         const line = document.createElement("div");
@@ -3141,6 +3161,11 @@
 
       async function startCamera(slotIdx){
         try{
+          if(!checkCameraSecurityContext()){
+            setCamStatus(slotIdx, false);
+            return false;
+          }
+
           if(!navigator.mediaDevices?.getUserMedia){
             toast("Camera not supported in this browser.");
             setCamStatus(slotIdx, false);
@@ -3164,7 +3189,23 @@
             videoConstraints.facingMode = { ideal: settings.mobileFacing };
           }
 
-          const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio:false });
+          let stream = null;
+          const attempts = [
+            { video: videoConstraints, audio: false },
+            { video: { facingMode: settings.mobileFacing || "environment" }, audio: false },
+            { video: true, audio: false },
+          ];
+
+          let lastErr = null;
+          for(const req of attempts){
+            try{
+              stream = await navigator.mediaDevices.getUserMedia(req);
+              break;
+            }catch(e){
+              lastErr = e;
+            }
+          }
+          if(!stream) throw lastErr || new Error("Unable to open camera stream.");
 
           camStreams.set(slotIdx, stream);
           camStates.set(slotIdx, makeCamState(slotIdx));
@@ -3174,6 +3215,7 @@
           v.muted = true;
           v.setAttribute("autoplay", "");
           v.setAttribute("playsinline", "");
+          v.setAttribute("webkit-playsinline", "");
           // iOS: play must be triggered from the user gesture (Start Cameras button).
           try{
             await v.play();

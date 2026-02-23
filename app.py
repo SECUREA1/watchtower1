@@ -242,7 +242,7 @@ async def add_security_headers(request: Request, call_next):
         ]
     )
     # Allow camera/mic for embedded secure pages too (mobile webviews / iframes).
-    response.headers["Permissions-Policy"] = "camera=*, microphone=*, geolocation=(), interest-cohort=()"
+    response.headers["Permissions-Policy"] = "camera=(self), microphone=(self), geolocation=()"
     return response
 
 
