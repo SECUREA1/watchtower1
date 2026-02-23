@@ -206,7 +206,12 @@ ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "")
 if ALLOWED_ORIGINS:
     allow_origins_list = [o.strip() for o in ALLOWED_ORIGINS.split(",") if o.strip()]
 else:
-    allow_origins_list = ["http://localhost:8000"]
+    allow_origins_list = [
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://localhost:10000",
+        "http://127.0.0.1:10000",
+    ]
 
 app.add_middleware(
     CORSMiddleware,
