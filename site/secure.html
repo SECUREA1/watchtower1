@@ -1558,6 +1558,8 @@
         detectorMode: "tiny",
         trackedSort: "alpha",
         logSort: "newest",
+        wsServerBase: "",
+        apiServerBase: "",
         relayServerBase: "",
         relayUploadPath: "",
       };
@@ -1605,10 +1607,12 @@
       let camStreams = new Map();  // slotIdx -> MediaStream
       let camStates  = new Map();  // slotIdx -> state
       const cloudRelay = {
-        enabled: true,
+        enabled: !isLikelyMobile(),
         inFlight: new Set(),
         lastUploadAt: new Map(),
-        minIntervalMs: 2000,
+        minIntervalMs: isLikelyMobile() ? 6000 : 2000,
+        failCount: new Map(),
+        maxFails: 3,
       };
       const STREAM_CLIENT_KEY = "watchtower.secure.streamClientId.v1";
       function getOrCreateStreamClientId(){
@@ -1623,10 +1627,21 @@
       const relayCandidates = ["/api/cloud/cameras/frame", "/api/cameras/frame", "/api/stream/frame"];
       let relayEndpoint = "";
 
-      function getRelayBase(){
-        const custom = (settings.relayServerBase || "").trim();
+      function getApiBase(){
+        const custom = (settings.apiServerBase || settings.relayServerBase || "").trim();
         return custom ? custom.replace(/\/$/, "") : window.location.origin;
       }
+
+      function getWsBase(){
+        const custom = (settings.wsServerBase || "").trim();
+        return custom ? custom.replace(/\/$/, "") : window.location.origin;
+      }
+
+      window.watchtowerSecureRuntime = {
+        getApiBase,
+        getWsBase,
+        isLikelyMobile,
+      };
 
       function getRelayCameraId(slotIdx){
         return `wt-${streamClientId.slice(0,8)}-secure-cam-${slotIdx}`;
@@ -3411,7 +3426,7 @@
           fd.append("client_id", streamClientId);
           fd.append("frame", blob, `${cameraId}.jpg`);
 
-          const base = getRelayBase();
+          const base = getApiBase();
           const preferred = await resolveRelayEndpoint();
           const paths = [preferred, ...relayCandidates.filter(p=>p!==preferred)];
           let uploaded = false;
@@ -3422,6 +3437,7 @@
               if(res.ok){
                 relayEndpoint = path;
                 cloudRelay.lastUploadAt.set(idx, now);
+                cloudRelay.failCount.set(idx, 0);
                 uploaded = true;
                 break;
               }
@@ -3432,7 +3448,13 @@
             throw new Error("Upload failed on all relay endpoints");
           }
         }catch(err){
+          const failCount = (cloudRelay.failCount.get(idx) || 0) + 1;
+          cloudRelay.failCount.set(idx, failCount);
           addCvLog(`Cloud relay failed for Camera ${idx}: ${(err && err.message) || err}`, "warn");
+          if(failCount >= cloudRelay.maxFails){
+            cloudRelay.enabled = false;
+            addCvLog("Cloud relay auto-disabled after repeated failures. Set API Server Base to your FastAPI origin, then re-enable.", "warn");
+          }
         }finally{
           cloudRelay.inFlight.delete(idx);
         }
@@ -5395,6 +5417,22 @@
         return `${location.protocol}//${v.replace(/\/+$/, "")}`;
       }
 
+      function readSecureSettings() {
+        try {
+          const raw = localStorage.getItem("rednode.security.settings.v2");
+          return raw ? JSON.parse(raw) : {};
+        } catch (_e) {
+          return {};
+        }
+      }
+
+      function getWsBaseFromSettings() {
+        const runtimeBase = window.watchtowerSecureRuntime?.getWsBase?.();
+        if (runtimeBase) return normalizeBase(runtimeBase);
+        const settings = readSecureSettings();
+        return normalizeBase(settings.wsServerBase || "");
+      }
+
       function wsUrlFromBase(httpBase) {
         const u = new URL(httpBase);
         const wsProto = u.protocol === "https:" ? "wss:" : "ws:";
@@ -5574,7 +5612,8 @@
 
       async function handleConnect() {
         ensureUI();
-        const base = normalizeBase($("serverUrl")?.value);
+        const explicit = normalizeBase($("serverUrl")?.value);
+        const base = ($("serverUrl")?.value || "").trim() ? explicit : getWsBaseFromSettings();
         setFeedback(`Checking server...\nBase: ${base}`);
 
         const h = await healthCheck(base);
@@ -5638,8 +5677,12 @@
         $("rnConnectBtn")?.addEventListener("click", handleConnect);
         $("rnCommitAllBtn")?.addEventListener("click", handleCommitAll);
 
-        // auto-connect on load (safe)
-        setTimeout(handleConnect, 200);
+        const shouldAutoConnect = !window.watchtowerSecureRuntime?.isLikelyMobile?.();
+        if (shouldAutoConnect) {
+          setTimeout(handleConnect, 200);
+        } else {
+          setWsState("WS: idle (tap Connect on mobile)");
+        }
       });
 
     })();
