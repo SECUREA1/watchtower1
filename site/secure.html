@@ -698,9 +698,10 @@
       .mobile-tabs{display:flex}
       .tab-pane{display:none}
       .tab-pane.active{display:block}
-      .mobile-log-tabs{display:flex}
+      .mobile-log-tabs{display:none}
+      .mobile-log-tabs.visible{display:flex}
       .mobile-log-pane{display:none}
-      .mobile-log-pane.active{display:block}
+      .mobile-log-pane.log-active{display:block}
       .storage-grid{grid-template-columns:1fr}
       .storage-mode-top{flex-direction:column; align-items:flex-start}
       .row, .controls-row{flex-direction:column; align-items:stretch}
@@ -1077,7 +1078,7 @@
 
       <nav class="nav" aria-label="Primary">
         <a href="/home.html">Overview</a>
-        <a href="/secure.html" class="active">Secure</a>
+        <a href="/secure.html#controls" class="active">Secure</a>
         <a href="/dashboard.html">Automations</a>
         <a href="/multi_camera.html">Devices</a>
         <a href="/marketplace.html">Integrations</a>
@@ -1411,7 +1412,7 @@
           <button class="mobile-log-tab" type="button" data-log-panel-button="logs">Interaction Logs</button>
         </div>
 
-        <section class="card tracked-panel tab-pane mobile-log-pane active" data-tab="logs" data-log-panel="tracked">
+        <section class="card tracked-panel tab-pane mobile-log-pane log-active" data-tab="logs" data-log-panel="tracked">
           <div class="card-h">
             <div>
               <div class="title"><span aria-hidden="true">📍</span> Tracked Objects</div>
@@ -1834,12 +1835,25 @@
       /***********************
        * Mobile tabs
        ***********************/
+      function normalizeMainTabHash(rawHash){
+        const cleaned = String(rawHash || "").replace(/^#/, "").trim().toLowerCase();
+        return ["controls", "camera", "logs"].includes(cleaned) ? cleaned : "controls";
+      }
+
+      function replaceMainTabHash(tabName){
+        if(!tabName || !history.replaceState) return;
+        const cleanHash = `#${tabName}`;
+        if(location.hash === cleanHash) return;
+        history.replaceState(null, "", cleanHash);
+      }
+
       function initMobileTabs(){
         const tabButtons = Array.from(document.querySelectorAll("[data-tab-button]"));
         const panes = Array.from(document.querySelectorAll(".tab-pane"));
+        const mobileLogTabs = document.querySelector(".mobile-log-tabs");
         if(tabButtons.length === 0 || panes.length === 0) return;
 
-        const setActiveTab = (tabName)=>{
+        const setActiveTab = (tabName, { updateHash = true } = {})=>{
           tabButtons.forEach(btn => {
             btn.classList.toggle("active", btn.dataset.tabButton === tabName);
           });
@@ -1848,6 +1862,13 @@
             const match = key.split(" ").includes(tabName);
             pane.classList.toggle("active", match);
           });
+
+          if(mobileLogTabs){
+            mobileLogTabs.classList.toggle("visible", tabName === "logs");
+          }
+          if(updateHash){
+            replaceMainTabHash(tabName);
+          }
         };
 
         tabButtons.forEach(btn => {
@@ -1856,7 +1877,7 @@
           });
         });
 
-        setActiveTab("controls");
+        setActiveTab(normalizeMainTabHash(location.hash), { updateHash: false });
       }
 
       function initMobileLogTabs(){
@@ -1869,7 +1890,7 @@
             btn.classList.toggle("active", btn.dataset.logPanelButton === panelName);
           });
           panes.forEach(pane => {
-            pane.classList.toggle("active", pane.dataset.logPanel === panelName);
+            pane.classList.toggle("log-active", pane.dataset.logPanel === panelName);
           });
         };
 
@@ -2923,6 +2944,13 @@
 
         await enumerateVideoDevices({ force: false });
 
+        if(isLikelyMobile()){
+          setGlobalPerm(false, "Camera: Tap Start Cameras to request permission");
+          addCvLog("Mobile detected: waiting for Start Cameras before requesting camera permission.", "info");
+          ensureSelectedSlotsWithinLimits();
+          return;
+        }
+
         if(!devices.length && navigator.mediaDevices?.getUserMedia){
           try{
             const tmp = await navigator.mediaDevices.getUserMedia({ video:true, audio:false });
@@ -2947,6 +2975,11 @@
           const status = await navigator.permissions.query({ name: "camera" });
           const handleChange = ()=>{
             if(status.state === "granted"){
+              if(isLikelyMobile()){
+                addCvLog("Camera permission granted. Tap Start Cameras to begin streaming.", "info");
+                setGlobalPerm(true, "Camera: Permission granted (tap Start Cameras)");
+                return;
+              }
               addCvLog("Camera permission granted. Auto-starting selected cameras.");
               setGlobalPerm(true, "Camera: Permission granted");
               resetCameraRecovery(true);
@@ -3067,13 +3100,13 @@
       }
 
       function checkCameraSecurityContext(){
-        const secureOrigin = !!window.isSecureContext || isLocalHostLike();
+        const secureOrigin = location.protocol === "https:" || isLocalHostLike() || !!window.isSecureContext;
         if(secureOrigin) return true;
-        const msg = "Camera is blocked on mobile unless this page is loaded from HTTPS (or localhost).";
+        const msg = "Camera requires HTTPS on mobile browsers. Open this page over HTTPS (or localhost).";
         setGlobalPerm(false, "Camera: Blocked by insecure origin");
         setCvStatus(cvStatusCamera, "Camera: Blocked (HTTPS required)");
         addCvLog(msg, "bad");
-        toast("Camera blocked: open this page over HTTPS.");
+        toast("Camera blocked: HTTPS is required for mobile camera access.");
         return false;
       }
 
