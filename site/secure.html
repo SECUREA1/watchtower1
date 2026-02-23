@@ -1558,8 +1558,8 @@
         detectorMode: "tiny",
         trackedSort: "alpha",
         logSort: "newest",
-        wsServerBase: "",
         apiServerBase: "",
+        wsServerBase: "",
         relayServerBase: "",
         relayUploadPath: "",
       };
@@ -1567,6 +1567,13 @@
       // Load settings (merge defaults)
       let settings = loadJSON(LS_KEYS.settings, defaultSettings);
       settings = Object.assign({}, defaultSettings, settings || {});
+      try{
+        const qp = new URLSearchParams(location.search);
+        const apiBaseQ = (qp.get("api_base") || window.WATCHTOWER_API_BASE || "").trim();
+        const wsBaseQ = (qp.get("ws_base") || window.WATCHTOWER_WS_BASE || "").trim();
+        if(apiBaseQ) settings.apiServerBase = apiBaseQ;
+        if(wsBaseQ) settings.wsServerBase = wsBaseQ;
+      }catch(_e){}
 
       // Persistent DBs
       let objectMemory = loadJSON(LS_KEYS.objectMemory, {});
@@ -3448,10 +3455,10 @@
             throw new Error("Upload failed on all relay endpoints");
           }
         }catch(err){
-          const failCount = (cloudRelay.failCount.get(idx) || 0) + 1;
-          cloudRelay.failCount.set(idx, failCount);
+          const n = (cloudRelay.failCount.get(idx) || 0) + 1;
+          cloudRelay.failCount.set(idx, n);
           addCvLog(`Cloud relay failed for Camera ${idx}: ${(err && err.message) || err}`, "warn");
-          if(failCount >= cloudRelay.maxFails){
+          if(n >= cloudRelay.maxFails){
             cloudRelay.enabled = false;
             addCvLog("Cloud relay auto-disabled after repeated failures. Set API Server Base to your FastAPI origin, then re-enable.", "warn");
           }
@@ -5377,13 +5384,29 @@
       function ensureUI() {
         const need = ["serverUrl","adminToken","consentCheckbox","storageFeedback"];
         const missing = need.filter(id => !$(id));
-        if (!missing.length) return;
+        if (!missing.length) {
+          if (!$("apiServerUrl")) {
+            const i = document.createElement("input");
+            i.id = "apiServerUrl";
+            i.type = "hidden";
+            document.body.appendChild(i);
+          }
+          if (!$("wsServerUrl")) {
+            const i = document.createElement("input");
+            i.id = "wsServerUrl";
+            i.type = "hidden";
+            document.body.appendChild(i);
+          }
+          return;
+        }
 
         const box = document.createElement("div");
         box.style.cssText = "padding:12px;border:1px solid #333;border-radius:8px;margin:12px 0;max-width:720px";
         box.innerHTML = `
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-            <input id="serverUrl" style="flex:1;min-width:260px" placeholder="https://api.rednode.ai (blank = same origin)"/>
+            <input id="apiServerUrl" style="flex:1;min-width:260px" placeholder="https://api.example.com (blank = same origin)"/>
+            <input id="wsServerUrl" style="flex:1;min-width:260px" placeholder="https://ws.example.com (blank = same origin)"/>
+            <input id="serverUrl" type="hidden"/>
             <input id="adminToken" style="flex:1;min-width:240px" placeholder="Admin token (required for commit)"/>
           </div>
           <label style="display:block;margin-top:8px">
@@ -5439,6 +5462,30 @@
         return `${wsProto}//${u.host}/ws`;
       }
 
+      function isLikelyMobileClient() {
+        return /iPad|iPhone|iPod|Android|Mobi/i.test(navigator.userAgent || "");
+      }
+
+      function getApiBase() {
+        return normalizeBase($("apiServerUrl")?.value || $("serverUrl")?.value);
+      }
+
+      function getWsBase() {
+        return normalizeBase($("wsServerUrl")?.value || $("serverUrl")?.value);
+      }
+
+      function loadServerBaseConfig() {
+        const qp = new URLSearchParams(location.search);
+        const apiBase = (qp.get("api_base") || window.WATCHTOWER_API_BASE || localStorage.getItem("watchtower.secure.apiServerBase") || "").trim();
+        const wsBase = (qp.get("ws_base") || window.WATCHTOWER_WS_BASE || localStorage.getItem("watchtower.secure.wsServerBase") || "").trim();
+
+        if($("apiServerUrl")) $("apiServerUrl").value = apiBase;
+        if($("wsServerUrl")) $("wsServerUrl").value = wsBase;
+        if($("serverUrl") && !$("serverUrl").value) {
+          $("serverUrl").value = apiBase || wsBase;
+        }
+      }
+
       function authHeaders() {
         const tok = ($("adminToken")?.value || "").trim();
         return tok ? { "Authorization": `Bearer ${tok}` } : {};
@@ -5481,7 +5528,7 @@
             setWsState("WS: disconnected (reconnecting...)");
             reconnectTimer = setTimeout(() => {
               reconnectDelay = Math.min(MAX_DELAY, Math.floor(reconnectDelay * 1.8));
-              connectWs(base);
+              connectWs(getWsBase());
             }, reconnectDelay);
           });
 
@@ -5612,8 +5659,7 @@
 
       async function handleConnect() {
         ensureUI();
-        const explicit = normalizeBase($("serverUrl")?.value);
-        const base = ($("serverUrl")?.value || "").trim() ? explicit : getWsBaseFromSettings();
+        const base = getApiBase();
         setFeedback(`Checking server...\nBase: ${base}`);
 
         const h = await healthCheck(base);
@@ -5623,12 +5669,12 @@
         }
 
         setFeedback(`Server OK (${h.path}).\nConnecting WebSocket...`);
-        connectWs(base);
+        connectWs(getWsBase());
       }
 
       async function handleCommitAll() {
         ensureUI();
-        const base = normalizeBase($("serverUrl")?.value);
+        const base = getApiBase();
 
         if (!$("consentCheckbox")?.checked) {
           setFeedback("Consent checkbox not checked. Refusing to upload/commit.");
@@ -5677,11 +5723,13 @@
         $("rnConnectBtn")?.addEventListener("click", handleConnect);
         $("rnCommitAllBtn")?.addEventListener("click", handleCommitAll);
 
-        const shouldAutoConnect = !window.watchtowerSecureRuntime?.isLikelyMobile?.();
-        if (shouldAutoConnect) {
+        loadServerBaseConfig();
+
+        // auto-connect on desktop only; mobile should connect after user intent.
+        if (!isLikelyMobileClient()) {
           setTimeout(handleConnect, 200);
         } else {
-          setWsState("WS: idle (tap Connect on mobile)");
+          setFeedback("Mobile mode: tap Connect after camera starts to avoid background reconnect pressure.");
         }
       });
 
