@@ -217,6 +217,10 @@ app.add_middleware(
 )
 
 FRAME_ANCESTORS_POLICY = os.getenv("FRAME_ANCESTORS_POLICY", "*").strip() or "*"
+PERMISSIONS_POLICY = os.getenv(
+    "PERMISSIONS_POLICY",
+    "camera=(self), microphone=(self), fullscreen=(self)",
+).strip()
 
 
 @app.middleware("http")
@@ -226,6 +230,8 @@ async def add_security_headers(request: Request, call_next):
     # `X-Frame-Options` is intentionally omitted so cross-site iframe embeds
     # can work consistently across browsers (including Firefox).
     response.headers["Referrer-Policy"] = "same-origin"
+    if PERMISSIONS_POLICY:
+        response.headers["Permissions-Policy"] = PERMISSIONS_POLICY
     # Secure UI loads ML runtimes + model artifacts from trusted CDNs.
     # Keep the policy strict while explicitly allowing those hosts.
     response.headers["Content-Security-Policy"] = "; ".join(
