@@ -2255,7 +2255,7 @@
       });
 
       el("btnStart").addEventListener("click", async ()=>{
-        await startSelectedCameras(false);
+        await startSelectedCameras(false, true);
       });
 
       el("btnStop").addEventListener("click", ()=>{
@@ -3057,14 +3057,26 @@
       /***********************
        * Camera start/stop
        ***********************/
-      async function startSelectedCameras(applyOnly=false){
+      async function startSelectedCameras(applyOnly=false, initiatedByUser=false){
         const want = [];
         for(let i=0;i<MAX_CAM_UI;i++){
           const cb = el("camChk_"+i);
           if(cb && cb.checked) want.push(i);
         }
+
+        if(want.length === 0){
+          want.push(0);
+          const defaultCb = el("camChk_0");
+          if(defaultCb) defaultCb.checked = true;
+          addCvLog("No camera slot selected. Defaulting to Camera 0.", "warn");
+          toast("No camera selected. Starting Camera 0.");
+        }
         settings.selectedSlots = want;
         saveSettings();
+
+        if(initiatedByUser){
+          await requestCameraPermissionFromGesture();
+        }
 
         if(isLikelyIOS() && want.length > 1){
           // iOS: limit to one active stream to avoid camera errors.
@@ -3106,6 +3118,22 @@
         updateStreamStatus();
       }
 
+      async function requestCameraPermissionFromGesture(){
+        if(!navigator.mediaDevices?.getUserMedia) return;
+        try{
+          const primer = await navigator.mediaDevices.getUserMedia({ video:true, audio:false });
+          primer.getTracks().forEach(t => t.stop());
+          addCvLog("Camera permission prompt handled from Start Cameras tap.");
+          setGlobalPerm(true, "Camera: Permission granted");
+          await enumerateVideoDevices({ force: false });
+        }catch(err){
+          addCvLog("Camera permission request failed: " + (err?.message || err), "bad");
+          setGlobalPerm(false, "Camera: Permission blocked");
+          toast("Camera permission was blocked or unavailable.");
+          throw err;
+        }
+      }
+
       async function startCamera(slotIdx){
         try{
           if(!navigator.mediaDevices?.getUserMedia){
@@ -3131,7 +3159,23 @@
             videoConstraints.facingMode = { ideal: settings.mobileFacing };
           }
 
-          const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio:false });
+          let stream;
+          try{
+            stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio:false });
+          }catch(primaryErr){
+            const canFallback = !!videoConstraints.deviceId;
+            if(!canFallback) throw primaryErr;
+            addCvLog(`Camera ${slotIdx} exact device failed; retrying with default mobile constraints.`, "warn");
+            const fallbackConstraints = {
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+              frameRate: { ideal: fps, max: fps },
+            };
+            if(settings.mobileFacing){
+              fallbackConstraints.facingMode = { ideal: settings.mobileFacing };
+            }
+            stream = await navigator.mediaDevices.getUserMedia({ video: fallbackConstraints, audio:false });
+          }
 
           camStreams.set(slotIdx, stream);
           camStates.set(slotIdx, makeCamState(slotIdx));
@@ -3141,6 +3185,7 @@
           v.muted = true;
           v.setAttribute("autoplay", "");
           v.setAttribute("playsinline", "");
+          v.setAttribute("webkit-playsinline", "true");
           // iOS: play must be triggered from the user gesture (Start Cameras button).
           try{
             await v.play();
