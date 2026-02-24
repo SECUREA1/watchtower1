@@ -1991,9 +1991,178 @@
     (() => {
       const overlay = document.getElementById('startAccessOverlay');
       if (!overlay) return;
-      // Start page now loads directly without wallet/session gate.
-      document.body.classList.remove('start-locked');
-      overlay.classList.remove('active');
+
+      const storageKey = 'watchtower_start_access_v2';
+      const sessionKey = 'session_user';
+      const contracts = {
+        ethereum: ['0x9fC58b9F6f2dE0d35Ebd0A51Dca9d61B3f79a7C1','0x6A7D512Ea381Ba2F8b01f0b473f8BDF26d5D3A7D','0xEf74118D5fB730E9B2729c7303DC29980b4771f0'],
+        cardano: ['addr1qxpz7k8r3n2m0u6g6f4w0v3j5t8l8y8w7a9shm0k9n7m9h3l4kz4k8','addr1qx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5n4z9t3gn7j4s2hr6jhn2','d1ec168628a7cdbb92e8d92a184503223626188ddd2d34811b7f5816','1d31efec7180b3a934856868d548ba205f20b8d6173a26b23a1b74e0'],
+        guest: ['guest-access']
+      };
+
+      const row = document.getElementById('startChainRow');
+      const passInput = document.getElementById('startPassphrase');
+      const msg = document.getElementById('startAccessMsg');
+      let chain = 'ethereum';
+
+      const setLocked = (locked) => {
+        document.body.classList.toggle('start-locked', locked);
+        overlay.classList.toggle('active', locked);
+      };
+
+      const setChain = (next) => {
+        chain = next;
+        row.querySelectorAll('.start-chain-btn').forEach(btn => {
+          const active = btn.dataset.chain === next;
+          btn.classList.toggle('active', active);
+          btn.setAttribute('aria-checked', active ? 'true' : 'false');
+        });
+        passInput.disabled = chain !== 'guest';
+        passInput.placeholder = chain === 'guest' ? 'Enter boots' : 'Not required for wallet unlock';
+        if (chain !== 'guest') passInput.value = '';
+      };
+
+      const detectWallet = (selectedChain) => {
+        if (selectedChain === 'ethereum') return !!window.ethereum?.request && !!window.ethereum?.isMetaMask;
+        if (selectedChain === 'cardano') return !!window.cardano?.lace?.enable;
+        return selectedChain === 'guest';
+      };
+
+      const connectWallet = async (selectedChain) => {
+        if (selectedChain === 'ethereum') {
+          if (!window.ethereum?.request || !window.ethereum?.isMetaMask) throw new Error('MetaMask not detected.');
+          const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+          if (!accounts?.length) throw new Error('No Ethereum account returned from MetaMask.');
+          return accounts[0];
+        }
+        if (selectedChain === 'cardano') {
+          const provider = window.cardano?.lace;
+          if (!provider?.enable) throw new Error('Lace wallet not detected.');
+          const wallet = await provider.enable();
+          const used = wallet?.getUsedAddresses ? await wallet.getUsedAddresses() : [];
+          const first = Array.isArray(used) && used.length ? used[0] : '';
+          return first || 'cardano-wallet';
+        }
+        return 'guest-user';
+      };
+
+      const getSaved = () => {
+        try {
+          const parsed = JSON.parse(sessionStorage.getItem(storageKey) || '{}');
+          if (parsed?.exp && Number(parsed.exp) > Date.now()) return parsed;
+        } catch (err) {
+          console.warn('Invalid saved start auth state', err);
+        }
+        return null;
+      };
+
+      const unlock = async (meta = {}, credentials = {}) => {
+        const payload = {
+          chain,
+          contract: credentials.contract || '',
+          wallet: credentials.wallet || '',
+          passphrase: credentials.passphrase || '',
+          access_code: credentials.accessCode || credentials.passphrase || ''
+        };
+
+        const res = await fetch('/api/session/unlock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+          throw new Error('unlock_failed');
+        }
+
+        const exp = Date.now() + (12 * 60 * 60 * 1000);
+        sessionStorage.setItem(storageKey, JSON.stringify({ exp, ...meta }));
+        setLocked(false);
+      };
+
+      row?.addEventListener('click', (event) => {
+        const btn = event.target.closest('.start-chain-btn');
+        if (!btn) return;
+        setChain(btn.dataset.chain || 'ethereum');
+      });
+
+      document.getElementById('startUseSessionBtn')?.addEventListener('click', async () => {
+        msg.textContent = '';
+        const session = (() => {
+          try {
+            return JSON.parse(sessionStorage.getItem(sessionKey) || '{}');
+          } catch {
+            return {};
+          }
+        })();
+
+        try {
+          await unlock({ method: 'session', account: session?.username || 'watchtower-user' }, {
+            contract: (contracts[chain] || [])[0] || '',
+            wallet: session?.username || 'watchtower-user',
+            passphrase: chain === 'guest' ? 'boots' : 'wallet-verified',
+            accessCode: chain === 'guest' ? 'boots' : 'wallet-verified',
+          });
+        } catch (err) {
+          msg.textContent = 'Saved session failed server validation. Re-enter credentials.';
+        }
+      });
+
+      document.getElementById('startUnlockBtn')?.addEventListener('click', async () => {
+        msg.textContent = 'Validating secure access…';
+        const isGuest = chain === 'guest';
+        const phrase = passInput.value.trim();
+        const contract = (contracts[chain] || [])[0] || '';
+
+        if (isGuest && phrase.toLowerCase() !== 'boots') {
+          msg.textContent = 'Guest access code is invalid.';
+          return;
+        }
+
+        if (isGuest) {
+          try {
+            await unlock({ method: 'guest', chain: 'guest', contract, account: 'guest-user' }, {
+              contract,
+              wallet: 'guest-user',
+              passphrase: phrase,
+              accessCode: phrase,
+            });
+          } catch (err) {
+            msg.textContent = 'Guest unlock failed server validation.';
+          }
+          return;
+        }
+
+        if (!detectWallet(chain)) {
+          msg.textContent = chain === 'ethereum'
+            ? 'MetaMask is required for Ethereum unlock.'
+            : 'Lace wallet extension is required for Cardano unlock.';
+          return;
+        }
+
+        try {
+          const walletAccount = await connectWallet(chain);
+          await unlock({ method: 'wallet', chain, contract, account: `${walletAccount.slice(0,6)}...${walletAccount.slice(-4)}` }, {
+            contract,
+            wallet: walletAccount,
+            passphrase: 'wallet-verified',
+            accessCode: 'wallet-verified',
+          });
+        } catch (err) {
+          msg.textContent = err?.message || 'Wallet verification rejected by server gate.';
+        }
+      });
+
+      setChain(chain);
+      const saved = getSaved();
+      if (saved) {
+        fetch('/api/session/status')
+          .then((r) => r.ok ? r.json() : null)
+          .then((status) => setLocked(!(status && status.authenticated)))
+          .catch(() => setLocked(true));
+      } else {
+        setLocked(true);
+      }
     })();
 
 
