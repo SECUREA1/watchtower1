@@ -3,6 +3,7 @@ import base64
 import hashlib
 import json
 import logging
+import mimetypes
 import os
 import random
 import threading
@@ -96,6 +97,9 @@ UI_ALLOWED_CONTRACTS = {
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO), format="[%(levelname)s] %(message)s")
 logger = logging.getLogger("watchtower")
+
+# Ensure GLB assets are always served with the correct content type.
+mimetypes.add_type("model/gltf-binary", ".glb")
 
 app = FastAPI(title="Watchtower Storage API")
 
@@ -231,7 +235,8 @@ async def add_security_headers(request: Request, call_next):
             "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com",
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
             "font-src 'self' https://fonts.gstatic.com data:",
-            "connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com",
+            "connect-src 'self' https: blob: data:",
+            "media-src 'self' https: blob: data:",
             "frame-ancestors 'none'",
         ]
     )
@@ -520,7 +525,14 @@ def _resolve_path(relative: str) -> Optional[Path]:
 def serve_file(relative: str) -> Optional[FileResponse]:
     path = _resolve_path(relative)
     if path:
-        return FileResponse(str(path))
+        headers = {}
+        media_type, _ = mimetypes.guess_type(str(path))
+        if path.suffix.lower() == ".glb":
+            media_type = "model/gltf-binary"
+            headers["Access-Control-Allow-Origin"] = "*"
+            headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS"
+            headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+        return FileResponse(str(path), media_type=media_type, headers=headers)
     return None
 
 
