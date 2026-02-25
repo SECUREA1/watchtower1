@@ -96,6 +96,10 @@ const MIME_TYPES = {
   ".gif": "image/gif",
   ".vtt": "text/vtt",
   ".html": "text/html",
+  ".glb": "model/gltf-binary",
+  ".gltf": "model/gltf+json",
+  ".bin": "application/octet-stream",
+  ".usdz": "model/vnd.usdz+zip",
 };
 
 // Friendly route aliases for long filenames (request paths with or without trailing slash)
