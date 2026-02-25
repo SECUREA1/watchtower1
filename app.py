@@ -215,12 +215,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+FRAME_ANCESTORS_POLICY = os.getenv("FRAME_ANCESTORS_POLICY", "*").strip() or "*"
+
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
+    # `X-Frame-Options` is intentionally omitted so cross-site iframe embeds
+    # can work consistently across browsers (including Firefox).
     response.headers["Referrer-Policy"] = "same-origin"
     # Secure UI loads ML runtimes + model artifacts from trusted CDNs.
     # Keep the policy strict while explicitly allowing those hosts.
@@ -232,7 +235,7 @@ async def add_security_headers(request: Request, call_next):
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
             "font-src 'self' https://fonts.gstatic.com data:",
             "connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com",
-            "frame-ancestors 'none'",
+            f"frame-ancestors {FRAME_ANCESTORS_POLICY}",
         ]
     )
     return response
@@ -381,8 +384,10 @@ def validate_upload(content_type: str, data: bytes) -> None:
 
 
 def is_ui_authenticated(request: Request) -> bool:
-    # Login gateway removed: UI is always considered authenticated.
-    return True
+    token_cookie = request.cookies.get(AUTH_COOKIE_NAME, "")
+    if token_cookie == "ok":
+        return True
+    return False
 
 
 def _is_public_ui_path(path: str) -> bool:
@@ -1099,19 +1104,30 @@ async def health():
 
 @app.get("/api/session/status")
 async def session_status(request: Request):
-    return {"ok": True, "authenticated": True}
+    return {"ok": True, "authenticated": is_ui_authenticated(request)}
 
 
 @app.post("/api/session/unlock")
 async def session_unlock(payload: UnlockPayload):
-    # Login gateway removed: keep route for backwards compatibility.
-    return JSONResponse({"ok": True, "authenticated": True})
+    if not _validate_unlock_payload(payload):
+        raise HTTPException(status_code=401, detail="Invalid unlock credentials.")
+    response = JSONResponse({"ok": True, "authenticated": True})
+    response.set_cookie(
+        AUTH_COOKIE_NAME,
+        "ok",
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        path="/",
+    )
+    return response
 
 
 @app.post("/api/session/logout")
 async def session_logout():
-    # Login gateway removed: no server-side session to clear.
-    return JSONResponse({"ok": True, "authenticated": True})
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(AUTH_COOKIE_NAME)
+    return response
 
 # -------------------------------------------------------------------------
 # Optional static mount for site/static (improves performance for common assets)
