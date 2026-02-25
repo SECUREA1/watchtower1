@@ -2051,9 +2051,15 @@
         <div class="mint-ar-inputs">
           <select id="mintGlbSelect" aria-label="Choose Watchtower model">
             <option value="">Choose a Watchtower GLB model</option>
-            <option value="/2026-01-18.glb">2026-01-18.glb</option>
-            <option value="/2026-01-19.glb">2026-01-19.glb</option>
-            <option value="/Dark Musky Doge.glb">Dark Musky Doge.glb</option>
+            <option value="/2026-01-18.glb" data-usdz="/2026-01-18.usdz">2026-01-18.glb</option>
+            <option value="/2026-01-18%202.glb" data-usdz="/2026-01-18%202.usdz">2026-01-18 2.glb</option>
+            <option value="/2026-01-18%205.glb" data-usdz="/2026-01-18%205.usdz">2026-01-18 5.glb</option>
+            <option value="/2026-01-18%206.glb" data-usdz="/2026-01-18%206.usdz">2026-01-18 6.glb</option>
+            <option value="/2026-01-18%207.glb" data-usdz="/2026-01-18%207.usdz">2026-01-18 7.glb</option>
+            <option value="/2026-01-18%208.glb" data-usdz="/2026-01-18%208.usdz">2026-01-18 8.glb</option>
+            <option value="/2026-01-19.glb" data-usdz="/2026-01-19.usdz">2026-01-19.glb</option>
+            <option value="/Dark%20Musky%20Doge.glb" data-usdz="/Dark%20Musky%20Doge.usdz">Dark Musky Doge.glb</option>
+            <option value="/Dark%20Musky%20Doge%20(1).glb" data-usdz="/Dark%20Musky%20Doge%20(1).usdz">Dark Musky Doge (1).glb</option>
           </select>
           <input id="mintGlbUrl" type="text" placeholder="Or paste a .glb URL" autocomplete="off" />
           <input id="mintUsdzUrl" type="text" placeholder="Optional iOS .usdz URL" autocomplete="off" />
@@ -2072,10 +2078,20 @@
             ar-modes="webxr scene-viewer quick-look"
             ar-placement="floor"
             ar-scale="auto"
+            loading="eager"
+            interpolation-decay="80"
+            max-camera-orbit="auto 90deg auto"
+            min-camera-orbit="auto 0deg auto"
+            environment-image="neutral"
+            shadow-softness="0.95"
+            tone-mapping="aces"
+            exposure="1"
+            interaction-prompt="auto"
             shadow-intensity="1"
             reveal="manual"
           ></model-viewer>
           <p class="mint-ar-hint">Preview your NFT before minting. AR works on supported mobile devices and usually requires HTTPS.</p>
+          <p class="mint-ar-hint" id="mintArStatus" role="status" aria-live="polite"></p>
         </div>
       </div>
       <div class="mint-gate-actions">
@@ -2261,10 +2277,11 @@
       const mintGlbSelect = document.getElementById('mintGlbSelect');
       const mintGlbUrl = document.getElementById('mintGlbUrl');
       const mintUsdzUrl = document.getElementById('mintUsdzUrl');
+      const mintArStatus = document.getElementById('mintArStatus');
       const mintLoadModelBtn = document.getElementById('mintLoadModelBtn');
       const mintViewArBtn = document.getElementById('mintViewArBtn');
 
-      if (!mintModal || !openMintModalBtn || !closeMintModalBtn || !mintWalletInput || !mintTxInput || !confirmMintClaimBtn || !mintVerifyMsg || !openTerminalBtn || !mintStatus || !terminalFrame || !terminalPlaceholder || !mintModelViewer || !mintArStage || !mintGlbSelect || !mintGlbUrl || !mintUsdzUrl || !mintLoadModelBtn || !mintViewArBtn) return;
+      if (!mintModal || !openMintModalBtn || !closeMintModalBtn || !mintWalletInput || !mintTxInput || !confirmMintClaimBtn || !mintVerifyMsg || !openTerminalBtn || !mintStatus || !terminalFrame || !terminalPlaceholder || !mintModelViewer || !mintArStage || !mintGlbSelect || !mintGlbUrl || !mintUsdzUrl || !mintArStatus || !mintLoadModelBtn || !mintViewArBtn) return;
 
       const CONTRACT = '0xf48fa5f282a358d38c5af569efb7338e5fcb44f0';
       const TOKEN_ID = 214n;
@@ -2276,6 +2293,9 @@
       const isHash = (value) => /^0x[a-fA-F0-9]{64}$/.test(value || '');
       const topicAddress = (address) => `0x${'0'.repeat(24)}${normalizeHex(address).slice(2)}`;
       const parseUint = (hexValue) => BigInt(hexValue || '0x0');
+      const toUsdzCandidate = (url) => (url || '').replace(/\.glb(\?.*)?$/i, '.usdz$1');
+
+      let previewModelReady = false;
 
       const rpcRequest = async (method, params) => {
         const response = await fetch(POLYGON_RPC, {
@@ -2323,46 +2343,96 @@
         }
       };
 
-      mintGlbSelect.addEventListener('change', () => {
-        if (mintGlbSelect.value) mintGlbUrl.value = mintGlbSelect.value;
+      mintModelViewer.addEventListener('load', () => {
+        previewModelReady = true;
+        mintArStatus.textContent = 'Model loaded with full detail. You can rotate, zoom, or open AR.';
       });
 
-      const loadPreviewModel = ({ announce = true } = {}) => {
+      mintModelViewer.addEventListener('error', () => {
+        previewModelReady = false;
+        mintArStatus.textContent = 'Model failed to load. Verify the GLB/USDZ links and try again.';
+      });
+
+      mintModelViewer.addEventListener('ar-status', (event) => {
+        const status = event?.detail?.status;
+        if (status === 'failed') {
+          mintArStatus.textContent = 'AR launch failed. Use HTTPS on a supported mobile browser and provide a valid USDZ for iOS.';
+        } else if (status === 'session-started') {
+          mintArStatus.textContent = 'AR session started.';
+        } else if (status === 'not-presenting') {
+          mintArStatus.textContent = 'Returned from AR preview.';
+        }
+      });
+
+      mintGlbSelect.addEventListener('change', () => {
+        if (mintGlbSelect.value) mintGlbUrl.value = mintGlbSelect.value;
+        const selectedUsdz = mintGlbSelect.selectedOptions?.[0]?.dataset?.usdz || toUsdzCandidate(mintGlbSelect.value);
+        mintUsdzUrl.value = selectedUsdz || '';
+      });
+
+      const loadPreviewModel = async ({ announce = true } = {}) => {
         const fallbackOption = Array.from(mintGlbSelect.options).find((option) => option.value);
         const glbSrc = mintGlbUrl.value.trim() || mintGlbSelect.value || fallbackOption?.value || '';
         if (!glbSrc) {
           mintVerifyMsg.textContent = 'Choose a model or paste a .glb URL to preview the NFT.';
+          mintArStatus.textContent = 'No GLB model selected yet.';
           return false;
         }
 
+        const encodedGlbSrc = encodeURI(glbSrc);
+        const selectedUsdz = mintGlbSelect.selectedOptions?.[0]?.dataset?.usdz || toUsdzCandidate(encodedGlbSrc);
+        const usdzSrc = mintUsdzUrl.value.trim() || selectedUsdz;
+
         if (!mintGlbUrl.value.trim()) {
-          mintGlbUrl.value = glbSrc;
+          mintGlbUrl.value = encodedGlbSrc;
         }
         if (!mintGlbSelect.value && fallbackOption) {
           mintGlbSelect.value = fallbackOption.value;
         }
 
-        mintModelViewer.setAttribute('src', glbSrc);
-        const usdzSrc = mintUsdzUrl.value.trim();
+        previewModelReady = false;
+        mintArStatus.textContent = 'Loading model preview...';
+        mintModelViewer.setAttribute('src', encodedGlbSrc);
         if (usdzSrc) mintModelViewer.setAttribute('ios-src', usdzSrc);
         else mintModelViewer.removeAttribute('ios-src');
+        if (!mintUsdzUrl.value.trim() && usdzSrc) {
+          mintUsdzUrl.value = usdzSrc;
+        }
 
         mintArStage.hidden = false;
         mintModelViewer.dismissPoster();
         mintViewArBtn.disabled = false;
+
+        try {
+          await mintModelViewer.updateComplete;
+        } catch (err) {
+          console.warn('model-viewer update did not complete', err);
+        }
+
         if (announce) {
           mintVerifyMsg.textContent = 'NFT model loaded. You can preview in AR or continue mint verification.';
         }
         return true;
       };
 
-      mintLoadModelBtn.addEventListener('click', () => {
-        loadPreviewModel({ announce: true });
+      mintLoadModelBtn.addEventListener('click', async () => {
+        await loadPreviewModel({ announce: true });
       });
 
-      mintViewArBtn.addEventListener('click', () => {
-        if (loadPreviewModel({ announce: false })) {
-          mintModelViewer.activateAR();
+      mintViewArBtn.addEventListener('click', async () => {
+        const loaded = await loadPreviewModel({ announce: false });
+        if (!loaded) return;
+
+        if (!previewModelReady) {
+          mintArStatus.textContent = 'Model is still loading. Please wait a moment and tap AR again.';
+          return;
+        }
+
+        try {
+          await mintModelViewer.activateAR();
+        } catch (err) {
+          mintArStatus.textContent = 'Unable to open AR in this browser. Try Chrome/Android or Safari/iOS with a valid USDZ.';
+          console.warn('AR activation failed', err);
         }
       });
 
