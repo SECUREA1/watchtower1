@@ -227,17 +227,22 @@ async def add_security_headers(request: Request, call_next):
     # Allow same-origin embedding so the Arcade hub can launch local games in an iframe.
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["Referrer-Policy"] = "same-origin"
-    # Secure UI loads ML runtimes + model artifacts from trusted CDNs.
-    # Keep the policy strict while explicitly allowing those hosts.
+    # The Arcade hosts many independently-authored game pages that load ML engines,
+    # 3D runtimes, workers, and media from different CDNs. A narrow CSP can
+    # accidentally block camera/game startup scripts and look like the app is
+    # "locked". Keep strong defaults (self + same-origin framing) but allow HTTPS
+    # runtime dependencies so gameplay can initialize consistently.
     response.headers["Content-Security-Policy"] = "; ".join(
         [
             "default-src 'self'",
-            "img-src 'self' data: blob:",
-            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com",
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-            "font-src 'self' https://fonts.gstatic.com data:",
+            "img-src 'self' https: data: blob:",
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https: blob: data:",
+            "style-src 'self' 'unsafe-inline' https: data:",
+            "font-src 'self' https: data:",
             "connect-src 'self' https: blob: data:",
             "media-src 'self' https: blob: data:",
+            "worker-src 'self' blob: data:",
+            "frame-src 'self' https: blob: data:",
             "frame-ancestors 'self'",
         ]
     )
