@@ -224,7 +224,8 @@ app.add_middleware(
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
+    # Allow same-origin embedding so the Arcade hub can launch local games in an iframe.
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["Referrer-Policy"] = "same-origin"
     # Secure UI loads ML runtimes + model artifacts from trusted CDNs.
     # Keep the policy strict while explicitly allowing those hosts.
@@ -237,7 +238,7 @@ async def add_security_headers(request: Request, call_next):
             "font-src 'self' https://fonts.gstatic.com data:",
             "connect-src 'self' https: blob: data:",
             "media-src 'self' https: blob: data:",
-            "frame-ancestors 'none'",
+            "frame-ancestors 'self'",
         ]
     )
     return response
