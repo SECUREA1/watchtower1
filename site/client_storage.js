@@ -402,22 +402,30 @@ async function handleSaveLogs() {
     captured_at: nowIso(),
   };
 
-  const response = await fetch(`${serverUrl}/api/logs/add`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(authHeader ? { Authorization: authHeader } : {}),
-    },
-    body: JSON.stringify(payload),
-  });
+  try {
+    const response = await fetch(`${serverUrl}/api/logs/add`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authHeader ? { Authorization: authHeader } : {}),
+      },
+      body: JSON.stringify(payload),
+    });
 
-  if (!response.ok) {
-    const detail = await response.text();
-    alert(`Log upload failed (${response.status}): ${detail}`);
-    return;
+    if (!response.ok) {
+      const detail = await response.text();
+      alert(`Log upload failed (${response.status}): ${detail}`);
+      return;
+    }
+
+    const result = await response.json();
+    const savedImages = Number(result.saved_images || 0);
+    setStorageFeedback(`Logs uploaded (${result.count || logs.length}). Saved ${savedImages} image(s).`, 'good');
+    alert(`Logs uploaded successfully. Saved ${savedImages} image(s).`);
+  } catch (error) {
+    setStorageFeedback(`Log upload failed: ${error.message}`, 'warn');
+    alert(`Log upload failed: ${error.message}`);
   }
-
-  alert('Logs uploaded successfully.');
 }
 
 export async function syncLocalToServer({ silent = false } = {}) {
