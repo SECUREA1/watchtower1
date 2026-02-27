@@ -32,6 +32,7 @@ IMAGES_DIR = FACES_DIR / "images"
 META_DIR = FACES_DIR / "meta"
 INDEX_PATH = FACES_DIR / "index.json"
 LOGS_DIR = DATA_DIR / "logs"
+LOG_IMAGES_DIR = DATA_DIR / "log_images"
 PENDING_DIR = DATA_DIR / "pending_commits"
 CLOUD_CAMERAS_DIR = DATA_DIR / "cloud_cameras"
 
@@ -305,11 +306,13 @@ def ensure_dirs() -> None:
     IMAGES_DIR.mkdir(parents=True, exist_ok=True)
     META_DIR.mkdir(parents=True, exist_ok=True)
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    LOG_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
     PENDING_DIR.mkdir(parents=True, exist_ok=True)
     try:
         IMAGES_DIR.chmod(0o700)
         META_DIR.chmod(0o700)
         LOGS_DIR.chmod(0o700)
+        LOG_IMAGES_DIR.chmod(0o700)
         PENDING_DIR.chmod(0o700)
     except PermissionError:
         pass
@@ -351,6 +354,52 @@ def b64_encode_bytes(data: bytes) -> str:
 
 def b64_decode_bytes(data: str) -> bytes:
     return base64.b64decode(data.encode("utf-8"))
+
+
+def decode_data_url_image(data_url: str) -> tuple[bytes, str]:
+    if not data_url or not isinstance(data_url, str):
+        raise ValueError("No data URL provided")
+    if not data_url.startswith("data:"):
+        raise ValueError("Unsupported image payload")
+    header, _, encoded = data_url.partition(",")
+    if not header or not encoded or ";base64" not in header:
+        raise ValueError("Malformed data URL")
+    mime_type = header[5:].split(";", 1)[0].lower() or "image/jpeg"
+    ext = {
+        "image/jpeg": "jpg",
+        "image/jpg": "jpg",
+        "image/png": "png",
+        "image/webp": "webp",
+    }.get(mime_type)
+    if not ext:
+        raise ValueError(f"Unsupported image mime type: {mime_type}")
+    return base64.b64decode(encoded), ext
+
+
+def persist_log_image(entry: dict, date_key: str) -> Optional[str]:
+    image_value = None
+    for key in ("imgDataUrl", "image", "image_data_url", "snapshot"):
+        value = entry.get(key)
+        if isinstance(value, str) and value.startswith("data:image/"):
+            image_value = value
+            break
+    if not image_value:
+        return None
+
+    image_bytes, ext = decode_data_url_image(image_value)
+    if len(image_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Log image exceeds size limit.")
+
+    date_dir = LOG_IMAGES_DIR / date_key
+    date_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{int(time.time() * 1000)}-{uuid4().hex[:8]}.{ext}"
+    image_path = date_dir / filename
+    image_path.write_bytes(image_bytes)
+    try:
+        image_path.chmod(0o600)
+    except PermissionError:
+        pass
+    return str(image_path.relative_to(DATA_DIR))
 
 # -------------------------------------------------------------------------
 # Auth & validation helpers
@@ -1099,12 +1148,30 @@ async def add_logs(payload: LogsPayload, request: Request):
     ensure_dirs()
     date_key = datetime.utcnow().strftime("%Y-%m-%d")
     log_path = LOGS_DIR / f"{date_key}.jsonl"
+    saved_images = 0
     with log_path.open("a", encoding="utf-8") as handle:
         for entry in payload.logs:
-            entry["source_device_id"] = payload.source_device_id
-            entry["captured_at"] = payload.captured_at or datetime.utcnow().isoformat()
-            handle.write(json.dumps(entry) + "\n")
-    return {"ok": True, "count": len(payload.logs), "path": str(log_path.relative_to(DATA_DIR))}
+            normalized = dict(entry)
+            normalized["source_device_id"] = payload.source_device_id
+            normalized["captured_at"] = payload.captured_at or datetime.utcnow().isoformat()
+            try:
+                image_path = persist_log_image(normalized, date_key)
+            except ValueError as exc:
+                logger.warning("Skipping invalid log image payload: %s", exc)
+                image_path = None
+            if image_path:
+                normalized["image_path"] = image_path
+                saved_images += 1
+            for field in ("imgDataUrl", "image", "image_data_url", "snapshot"):
+                if field in normalized:
+                    normalized.pop(field, None)
+            handle.write(json.dumps(normalized) + "\n")
+    return {
+        "ok": True,
+        "count": len(payload.logs),
+        "saved_images": saved_images,
+        "path": str(log_path.relative_to(DATA_DIR)),
+    }
 
 @app.get("/healthz")
 async def healthz():
