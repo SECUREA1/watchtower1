@@ -1543,7 +1543,7 @@
         movePxThreshold: 25,
         moveLogCooldownMs: 1500,
         trackForgetMs: 2200,
-        unknownFaceMinIntervalMs: 4500,
+        unknownFaceMinIntervalMs: 1500,
         maxUnknownQueue: 12,
         faceInputSize: isLikelyMobile() ? 224 : 416,
 
@@ -3681,7 +3681,6 @@
 
         for(const person of (people || [])){
           const name = person.name || "Unknown";
-          if(name === "Unknown") continue;
 
           const prev = tracks.get(name);
           if(prev){
@@ -4062,7 +4061,7 @@
       }
 
       function recordPersonEvent(personName, status, box, score=null, cam=null, opts={}){
-        if(!personName || personName === "Unknown") return;
+        if(!personName) return;
         const evt = {
           time: Date.now(),
           box,
@@ -4151,12 +4150,11 @@
 
         // cooldown per camera
         if((ts - state.lastUnknownAt) < settings.unknownFaceMinIntervalMs) return;
-        if(unknownFacesQueue.length >= settings.maxUnknownQueue) return;
 
-        // de-dupe using descriptor distance
-        if(!face.descriptor) return;
-        for(const u of unknownFacesQueue){
-          if(u && Array.isArray(u.descriptor) && face.descriptor){
+        // de-dupe using descriptor distance (when available)
+        if(face.descriptor){
+          for(const u of unknownFacesQueue){
+            if(!(u && Array.isArray(u.descriptor))) continue;
             const d = euclid(face.descriptor, u.descriptor);
             if(d < 0.42) return;
           }
@@ -4165,11 +4163,19 @@
         const crop = cropFromVideo(video, face.box, 256, 256, 0.20);
         if(!crop) return;
 
+        if(unknownFacesQueue.length >= settings.maxUnknownQueue){
+          unknownFacesQueue.shift();
+        }
+
         unknownFacesQueue.push({
           capturedAt: Date.now(),
           camIdx,
           imgDataUrl: crop,
           descriptor: face.descriptor
+        });
+
+        recordPersonEvent("Unknown", "Seen", face.box, null, camIdx, {
+          imgDataUrl: crop,
         });
 
         state.lastUnknownAt = ts;
