@@ -605,6 +605,14 @@
       display:none;
     }
     .selected-preview.has-image img{display:block}
+    .selected-preview video{
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      display:none;
+      background:#000;
+    }
+    .selected-preview.has-video video{display:block}
     .selected-placeholder{
       font-size:11px;
       color:var(--muted2);
@@ -1379,6 +1387,7 @@
                 <div class="selected-layout">
                   <div class="selected-preview" id="selectedPreview">
                     <img id="selectedPreviewImg" alt="Selected log preview" />
+                    <video id="selectedPreviewVideo" controls preload="metadata" playsinline></video>
                     <div class="selected-placeholder" id="selectedPlaceholder">No preview available</div>
                   </div>
                   <div class="selected-meta" id="selectedMeta">
@@ -1446,7 +1455,7 @@
           <div class="card-h">
             <div>
               <div class="title" id="logTitle"><span aria-hidden="true">🧾</span> Object Interaction Logs</div>
-              <div class="subtitle" id="logSubtitle">Time • Object • Event • Person • Held Duration • Details</div>
+              <div class="subtitle" id="logSubtitle">Time • Object • Event • Person • Held Duration • Details (incl. 4s motion clips)</div>
             </div>
             <div class="row">
               <div class="log-toggle" role="group" aria-label="Log view mode">
@@ -1520,6 +1529,7 @@
         trackCounter:  "rednode.security.trackCounter.v1",
         camBindings:   "rednode.security.camBindings.v1",
         tunedAlert:    "rednode.security.tunedAlert.v1",
+        motionClips:   "rednode.security.motionClips.v1",
       };
 
       const isLikelyIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent)
@@ -1571,6 +1581,8 @@
       if(!Array.isArray(unknownFacesQueue)) unknownFacesQueue = [];
 
       let camBindings = loadJSON(LS_KEYS.camBindings, {});
+      let motionClips = loadJSON(LS_KEYS.motionClips, {});
+      if(!motionClips || typeof motionClips !== "object") motionClips = {};
       let trackedObjects = new Set(Object.keys(objectMemory));
 
       const tunedAlertDefaults = {
@@ -1621,6 +1633,12 @@
       // Demo-only labels (kept)
       const DEMO_CLASSES = ["person","backpack","bottle","laptop","cell phone","book","chair","knife","cup","handbag","keyboard","remote"];
       const DEMO_PEOPLE  = ["Unknown","Ava","Noah","Mia","Liam","Zoe","Ethan","Ivy","Kai","Nina"];
+      const VEHICLE_CLASSES = new Set(["car","truck","bus","motorcycle","bicycle","vehicle"]);
+      const CLIP_PRE_MS = 2000;
+      const CLIP_POST_MS = 2000;
+      const CLIP_TIMESLICE_MS = 250;
+      const CLIP_MAX_PER_CAMERA = 24;
+      const CLIP_EVENT_COOLDOWN_MS = 8000;
       const lastEventByLabel = new Map();
 
       // Global track id (persists)
@@ -1742,6 +1760,7 @@
       const faceName = el("faceName");
       const selectedPreview = el("selectedPreview");
       const selectedPreviewImg = el("selectedPreviewImg");
+      const selectedPreviewVideo = el("selectedPreviewVideo");
       const selectedPlaceholder = el("selectedPlaceholder");
       const selectedMeta = el("selectedMeta");
       const selectedLabelInput = el("selectedLabelInput");
@@ -1855,6 +1874,13 @@
         return evt.imgDataUrl || evt.image || null;
       }
 
+      function getEventClip(evt){
+        if(!evt) return null;
+        if(evt.clipDataUrl) return evt.clipDataUrl;
+        if(evt.clipId && motionClips[evt.clipId]) return motionClips[evt.clipId].dataUrl || null;
+        return null;
+      }
+
       function setSelectedDetails(payload){
         selectedLog = payload;
         if(!selectedLogType || !selectedMeta || !selectedLabelInput) return;
@@ -1867,9 +1893,14 @@
             existingObjectSelect.disabled = true;
           }
           if(selectedPreview){
-            selectedPreview.classList.remove("has-image");
+            selectedPreview.classList.remove("has-image", "has-video");
           }
           if(selectedPreviewImg) selectedPreviewImg.src = "";
+          if(selectedPreviewVideo){
+            selectedPreviewVideo.pause();
+            selectedPreviewVideo.removeAttribute("src");
+            selectedPreviewVideo.load();
+          }
           if(selectedPlaceholder) selectedPlaceholder.style.display = "block";
           return;
         }
@@ -1891,6 +1922,7 @@
           lines.push(formatMetaLine("Event", payload.evt ? payload.evt.status : "—"));
           lines.push(formatMetaLine("Camera", payload.evt && payload.evt.cam != null ? payload.evt.cam : "—"));
           lines.push(formatMetaLine("Confidence", payload.evt && payload.evt.score != null ? Math.round(payload.evt.score * 100) + "%" : "—"));
+          lines.push(formatMetaLine("Motion Clip", getEventClip(payload.evt) ? "4-second clip available" : "Pending / unavailable"));
           if(payload.evt && payload.evt.box){
             lines.push(formatMetaLine("XYZ", formatXYZ(payload.evt.box)));
           }
@@ -1908,6 +1940,7 @@
           lines.push(formatMetaLine("Event", payload.evt ? payload.evt.status : "—"));
           lines.push(formatMetaLine("Person", payload.evt ? (payload.evt.person || "No one") : "—"));
           lines.push(formatMetaLine("Confidence", payload.evt && payload.evt.score != null ? Math.round(payload.evt.score * 100) + "%" : "—"));
+          lines.push(formatMetaLine("Motion Clip", getEventClip(payload.evt) ? "4-second clip available" : "Pending / unavailable"));
           if(payload.evt && payload.evt.box){
             const b = payload.evt.box;
             lines.push(formatMetaLine("BBox", `x=${round2(b.x)} y=${round2(b.y)} w=${round2(b.w)} h=${round2(b.h)}`));
@@ -1923,10 +1956,22 @@
 
         selectedMeta.innerHTML = lines.join("");
         if(selectedPreview){
+          const clipUrl = payload.clipDataUrl || getEventClip(payload.evt);
           const hasImage = !!payload.imgDataUrl;
+          const hasVideo = !!clipUrl;
           selectedPreview.classList.toggle("has-image", hasImage);
+          selectedPreview.classList.toggle("has-video", hasVideo);
           if(selectedPreviewImg) selectedPreviewImg.src = hasImage ? payload.imgDataUrl : "";
-          if(selectedPlaceholder) selectedPlaceholder.style.display = hasImage ? "none" : "block";
+          if(selectedPreviewVideo){
+            if(hasVideo){
+              selectedPreviewVideo.src = clipUrl;
+            }else{
+              selectedPreviewVideo.pause();
+              selectedPreviewVideo.removeAttribute("src");
+              selectedPreviewVideo.load();
+            }
+          }
+          if(selectedPlaceholder) selectedPlaceholder.style.display = (hasImage || hasVideo) ? "none" : "block";
         }
       }
 
@@ -2279,6 +2324,7 @@
           customLabels,
           knownFaces,
           unknownFacesQueue,
+          motionClips,
           camBindings,
         };
         downloadJSON(payload, "rednode_security_logs.json");
@@ -2292,6 +2338,7 @@
         customLabels = {};
         knownFaces = {};
         unknownFacesQueue = [];
+        motionClips = {};
         trackedObjects = new Set();
         lastEventByLabel.clear();
 
@@ -3136,6 +3183,7 @@
 
           camStreams.set(slotIdx, stream);
           camStates.set(slotIdx, makeCamState(slotIdx));
+          startClipRecorder(slotIdx, stream);
 
           const v = el("vid_"+slotIdx);
           v.srcObject = stream;
@@ -3178,6 +3226,8 @@
           stream.getTracks().forEach(t=>t.stop());
         }
         camStreams.delete(idx);
+        const state = camStates.get(idx);
+        stopClipRecorder(state);
         camStates.delete(idx);
 
         const v = el("vid_"+idx);
@@ -3273,7 +3323,100 @@
           },
           lastUnknownAt: 0,
           fps: 0,
+          clipChunks: [],
+          clipRecorder: null,
+          clipRequests: [],
+          clipLastTriggerAt: 0,
         };
+      }
+
+      function startClipRecorder(slotIdx, stream){
+        const state = camStates.get(slotIdx);
+        if(!state || !stream || typeof MediaRecorder === "undefined") return;
+        const mimeCandidates = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
+        const mimeType = mimeCandidates.find(m => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || "";
+        try{
+          const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+          recorder.ondataavailable = (event)=>{
+            if(!event.data || !event.data.size) return;
+            const ts = Date.now();
+            state.clipChunks.push({ ts, blob: event.data });
+            const minTs = ts - CLIP_PRE_MS - 800;
+            state.clipChunks = state.clipChunks.filter(ch => ch && ch.ts >= minTs);
+            processClipRequests(state, ts, recorder.mimeType || mimeType || "video/webm");
+          };
+          recorder.start(CLIP_TIMESLICE_MS);
+          state.clipRecorder = recorder;
+        }catch(err){
+          addCvLog(`Clip recorder unavailable on Camera ${slotIdx}: ${(err && err.message) || err}`, "warn");
+        }
+      }
+
+      function stopClipRecorder(state){
+        if(!state || !state.clipRecorder) return;
+        try{ state.clipRecorder.stop(); }catch(_e){}
+        state.clipRecorder = null;
+        state.clipChunks = [];
+        state.clipRequests = [];
+      }
+
+      function queueMotionClip(camIdx, attachToEvent){
+        const state = camStates.get(camIdx);
+        if(!state || !state.clipRecorder || state.clipRecorder.state !== "recording") return;
+        const now = Date.now();
+        if((now - (state.clipLastTriggerAt || 0)) < CLIP_EVENT_COOLDOWN_MS) return;
+        state.clipLastTriggerAt = now;
+        state.clipRequests.push({
+          requestAt: now,
+          readyAt: now + CLIP_POST_MS,
+          attachToEvent,
+        });
+      }
+
+      async function processClipRequests(state, ts, mimeType){
+        if(!state || !state.clipRequests || state.clipRequests.length === 0) return;
+        const ready = state.clipRequests.filter(req => ts >= req.readyAt);
+        if(ready.length === 0) return;
+        state.clipRequests = state.clipRequests.filter(req => ts < req.readyAt);
+
+        for(const req of ready){
+          const startAt = req.requestAt - CLIP_PRE_MS;
+          const endAt = req.requestAt + CLIP_POST_MS;
+          const chunks = state.clipChunks.filter(ch => ch && ch.ts >= startAt && ch.ts <= endAt);
+          if(!chunks.length) continue;
+          const blob = new Blob(chunks.map(ch => ch.blob), { type: mimeType || "video/webm" });
+          let dataUrl = null;
+          try{ dataUrl = await blobToDataURL(blob); }catch(_err){ dataUrl = null; }
+          if(!dataUrl) continue;
+          const clipId = `clip_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+          motionClips[clipId] = {
+            id: clipId,
+            cam: state.camIdx,
+            createdAt: Date.now(),
+            mimeType: blob.type || mimeType || "video/webm",
+            dataUrl,
+          };
+          trimMotionClips(state.camIdx);
+          if(typeof req.attachToEvent === "function"){
+            req.attachToEvent({ clipId, clipDataUrl: dataUrl, clipMimeType: motionClips[clipId].mimeType });
+          }
+          scheduleSaveAll();
+        }
+      }
+
+      function trimMotionClips(camIdx){
+        const items = Object.values(motionClips || {}).filter(item => item && item.cam === camIdx);
+        if(items.length <= CLIP_MAX_PER_CAMERA) return;
+        items.sort((a,b)=> (a.createdAt || 0) - (b.createdAt || 0));
+        for(const item of items.slice(0, items.length - CLIP_MAX_PER_CAMERA)){
+          if(item && item.id) delete motionClips[item.id];
+        }
+      }
+
+      function isVehicleLabel(label){
+        if(!label) return false;
+        const base = String(label).split("#")[0].trim().toLowerCase();
+        return VEHICLE_CLASSES.has(base);
       }
 
       async function uploadCloudFrame(idx, video, fps=0){
@@ -4037,6 +4180,7 @@
 
       function recordEvent(label, status, box, person=null, held_duration=null, score=null, cam=null, opts={}){
         const evt = {
+          id: `evt_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
           time: Date.now(),
           box,
           status,
@@ -4045,12 +4189,27 @@
           score,
           cam,
           imgDataUrl: opts.imgDataUrl || null,
+          clipId: null,
+          clipDataUrl: null,
+          clipMimeType: null,
           sourceLabel: opts.sourceLabel || null
         };
 
         if(!objectMemory[label]) objectMemory[label] = [];
         objectMemory[label].push(evt);
         trackedObjects.add(label);
+
+        if(cam != null && isVehicleLabel(label)){
+          queueMotionClip(cam, ({ clipId, clipDataUrl, clipMimeType })=>{
+            evt.clipId = clipId;
+            evt.clipDataUrl = clipDataUrl;
+            evt.clipMimeType = clipMimeType;
+            if(selectedLog && selectedLog.evt === evt){
+              setSelectedDetails(Object.assign({}, selectedLog, { evt, clipDataUrl }));
+            }
+            renderLogTable();
+          });
+        }
 
         scheduleSaveAll();
         appendLogRow(label, evt);
@@ -4063,6 +4222,7 @@
       function recordPersonEvent(personName, status, box, score=null, cam=null, opts={}){
         if(!personName) return;
         const evt = {
+          id: `pevt_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
           time: Date.now(),
           box,
           status,
@@ -4070,11 +4230,27 @@
           score,
           cam,
           imgDataUrl: opts.imgDataUrl || null,
+          clipId: null,
+          clipDataUrl: null,
+          clipMimeType: null,
         };
 
         if(!peopleMovementMemory[personName]) peopleMovementMemory[personName] = [];
         peopleMovementMemory[personName].push(evt);
         evaluateTunedAlertFromPerson(personName, evt);
+
+        if(cam != null && (status === "Live" || status === "Seen")){
+          queueMotionClip(cam, ({ clipId, clipDataUrl, clipMimeType })=>{
+            evt.clipId = clipId;
+            evt.clipDataUrl = clipDataUrl;
+            evt.clipMimeType = clipMimeType;
+            if(selectedLog && selectedLog.evt === evt){
+              setSelectedDetails(Object.assign({}, selectedLog, { evt, clipDataUrl }));
+            }
+            renderLogTable();
+            renderTracked();
+          });
+        }
 
         scheduleSaveAll();
         if(logViewMode === "people" || logSearch.value.trim()){
@@ -4329,7 +4505,8 @@
         const cam = (evt.cam == null) ? "-" : evt.cam;
         const score = (evt.score == null) ? "-" : (Math.round(evt.score*100) + "%");
         const source = evt.sourceLabel ? ` source=${getDisplayName(evt.sourceLabel)}` : "";
-        return `cam=${cam} score=${score} box=${JSON.stringify({x:round2(b.x),y:round2(b.y),w:round2(b.w),h:round2(b.h)})}${source}`;
+        const clip = (evt.clipId || evt.clipDataUrl) ? " clip=4s" : "";
+        return `cam=${cam} score=${score} box=${JSON.stringify({x:round2(b.x),y:round2(b.y),w:round2(b.w),h:round2(b.h)})}${source}${clip}`;
       }
 
       function appendLogRow(label, evt){
@@ -5017,6 +5194,7 @@
         saveJSON(LS_KEYS.settings, settings);
         saveJSON(LS_KEYS.camBindings, camBindings);
         saveJSON(LS_KEYS.tunedAlert, tunedAlertConfig);
+        saveJSON(LS_KEYS.motionClips, motionClips);
         trackedObjects = new Set(Object.keys(objectMemory));
       }
 
@@ -5113,6 +5291,15 @@
         ctx.arcTo(x, y+h, x, y, rr);
         ctx.arcTo(x, y, x+w, y, rr);
         ctx.closePath();
+      }
+
+      function blobToDataURL(blob){
+        return new Promise((resolve, reject)=>{
+          const reader = new FileReader();
+          reader.onload = ()=>resolve(reader.result);
+          reader.onerror = ()=>reject(reader.error || new Error("FileReader failed"));
+          reader.readAsDataURL(blob);
+        });
       }
 
       function escapeHtml(s){
