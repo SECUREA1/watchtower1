@@ -15,7 +15,7 @@ from uuid import uuid4
 
 import requests
 import cv2
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, Response
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -597,6 +597,115 @@ def alias_response(url_path: str) -> Optional[FileResponse]:
     if not target:
         return None
     return serve_file(target)
+
+
+# -------------------------------------------------------------------------
+# Multi-camera page realtime presence + chat
+# -------------------------------------------------------------------------
+multi_camera_clients: Dict[str, Dict[str, object]] = {}
+multi_camera_lock = threading.Lock()
+
+
+def _multi_camera_snapshot() -> List[dict]:
+    with multi_camera_lock:
+        return [
+            {
+                "id": client_id,
+                "name": str(data.get("name") or "viewer"),
+                "joined_at": float(data.get("joined_at") or time.time()),
+            }
+            for client_id, data in multi_camera_clients.items()
+        ]
+
+
+async def _broadcast_multi_camera_event(event: dict) -> None:
+    stale_ids: List[str] = []
+    with multi_camera_lock:
+        items = list(multi_camera_clients.items())
+    for client_id, data in items:
+        ws = data.get("ws")
+        if not ws:
+            stale_ids.append(client_id)
+            continue
+        try:
+            await ws.send_json(event)
+        except Exception:
+            stale_ids.append(client_id)
+    if stale_ids:
+        with multi_camera_lock:
+            for client_id in stale_ids:
+                multi_camera_clients.pop(client_id, None)
+
+
+@app.websocket("/ws/multi-camera")
+async def multi_camera_ws(websocket: WebSocket) -> None:
+    await websocket.accept()
+    client_id = uuid4().hex
+    raw_name = websocket.query_params.get("name", "")
+    name = "".join(ch for ch in raw_name if ch.isalnum() or ch in "-_ ").strip()[:32] or "viewer"
+    joined_at = time.time()
+
+    with multi_camera_lock:
+        multi_camera_clients[client_id] = {"ws": websocket, "name": name, "joined_at": joined_at}
+
+    users = _multi_camera_snapshot()
+    await websocket.send_json({"type": "welcome", "id": client_id, "users": users, "count": len(users)})
+    await _broadcast_multi_camera_event({"type": "presence", "users": users, "count": len(users)})
+    await _broadcast_multi_camera_event({"type": "message", "system": True, "text": f"{name} joined multi-camera.", "ts": time.time()})
+
+    try:
+        while True:
+            payload = await websocket.receive_json()
+            msg_type = payload.get("type")
+
+            if msg_type == "rename":
+                proposed = str(payload.get("name") or "")
+                cleaned = "".join(ch for ch in proposed if ch.isalnum() or ch in "-_ ").strip()[:32]
+                if cleaned:
+                    with multi_camera_lock:
+                        if client_id in multi_camera_clients:
+                            multi_camera_clients[client_id]["name"] = cleaned
+                    users = _multi_camera_snapshot()
+                    await _broadcast_multi_camera_event({"type": "presence", "users": users, "count": len(users)})
+                continue
+
+            if msg_type != "message":
+                continue
+
+            text = str(payload.get("text") or "").strip()
+            if not text:
+                continue
+            if len(text) > 500:
+                text = text[:500]
+
+            with multi_camera_lock:
+                current_name = str(multi_camera_clients.get(client_id, {}).get("name") or name)
+
+            await _broadcast_multi_camera_event(
+                {
+                    "type": "message",
+                    "id": client_id,
+                    "name": current_name,
+                    "text": text,
+                    "ts": time.time(),
+                }
+            )
+    except WebSocketDisconnect:
+        pass
+    finally:
+        with multi_camera_lock:
+            client = multi_camera_clients.pop(client_id, None)
+        if client:
+            users = _multi_camera_snapshot()
+            await _broadcast_multi_camera_event({"type": "presence", "users": users, "count": len(users)})
+            await _broadcast_multi_camera_event(
+                {
+                    "type": "message",
+                    "system": True,
+                    "text": f"{client.get('name', 'viewer')} left multi-camera.",
+                    "ts": time.time(),
+                }
+            )
 
 
 @app.get("/api/cameras")

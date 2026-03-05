@@ -7,6 +7,7 @@
   <style>
     body { font-family: system-ui, sans-serif; background:#2b180d; color:#f6ead8; margin:0; padding:24px; }
     h1 { margin:0 0 12px; }
+    .layout { display:grid; grid-template-columns: 2fr minmax(300px, 1fr); gap:16px; align-items:start; }
     .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:16px; }
     .card { background:#3f2616; border:1px solid #5b3a22; border-radius:12px; padding:12px; box-shadow: 0 18px 40px rgba(24,12,6,0.45); }
     .meta { font-size:12px; color:#d2b28f; margin-bottom:8px; }
@@ -14,23 +15,124 @@
     .status { display:flex; justify-content:space-between; margin-top:8px; font-size:12px; }
     .badge { padding:2px 6px; border-radius:999px; background:#4a2b18; color:#f6ead8; }
     .error { color:#e5a08a; }
+
+    .presence-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+    .presence-count { font-size:13px; color:#f9cc98; }
+    .viewer-list { list-style:none; margin:0; padding:0; max-height:140px; overflow:auto; border:1px solid #5b3a22; border-radius:8px; }
+    .viewer-list li { padding:6px 8px; border-bottom:1px solid #5b3a22; font-size:13px; }
+    .viewer-list li:last-child { border-bottom:none; }
+
+    .chat-box { margin-top:12px; border:1px solid #5b3a22; border-radius:10px; overflow:hidden; display:flex; flex-direction:column; min-height:280px; }
+    .chat-log { margin:0; padding:10px; list-style:none; max-height:280px; overflow:auto; display:flex; flex-direction:column; gap:8px; background:#2f1b0f; }
+    .chat-log li { font-size:13px; line-height:1.3; }
+    .chat-log .name { color:#ffd7aa; font-weight:700; }
+    .chat-log .system { color:#caa07f; font-style:italic; }
+    .chat-form { display:flex; gap:8px; padding:10px; background:#3f2616; border-top:1px solid #5b3a22; }
+    .chat-form input { flex:1; border-radius:8px; border:1px solid #6e452a; background:#2b180d; color:#f6ead8; padding:8px; }
+    .chat-form button { border:1px solid #6e452a; border-radius:8px; background:#5b3a22; color:#f6ead8; padding:8px 10px; cursor:pointer; }
+
+    @media (max-width: 960px) {
+      .layout { grid-template-columns:1fr; }
+    }
   </style>
 </head>
 <body>
   <h1>Watchtower Device Monitor</h1>
   <p class="meta">Live camera and sensor streams served from your Watchtower hub.</p>
-  <div id="grid" class="grid"></div>
+
+  <section class="layout">
+    <div id="grid" class="grid"></div>
+
+    <aside class="card">
+      <div class="presence-head">
+        <strong>Device viewers</strong>
+        <span class="presence-count"><span id="viewer-count">0</span> online</span>
+      </div>
+      <ul id="viewer-list" class="viewer-list"></ul>
+
+      <div class="chat-box">
+        <ul id="chat-log" class="chat-log"></ul>
+        <form id="chat-form" class="chat-form" autocomplete="off">
+          <input id="chat-input" maxlength="500" placeholder="Message viewers on this page" />
+          <button type="submit">Send</button>
+        </form>
+      </div>
+    </aside>
+  </section>
 
   <script>
+    const gridEl = document.getElementById('grid');
+    const viewerCountEl = document.getElementById('viewer-count');
+    const viewerListEl = document.getElementById('viewer-list');
+    const chatLogEl = document.getElementById('chat-log');
+    const chatForm = document.getElementById('chat-form');
+    const chatInput = document.getElementById('chat-input');
+
+    const viewerName = localStorage.getItem('watchtower_multi_camera_name')
+      || (`viewer-${Math.floor(Math.random() * 9000) + 1000}`);
+    localStorage.setItem('watchtower_multi_camera_name', viewerName);
+
+    let ws;
+
+    function appendChatLine(payload) {
+      const item = document.createElement('li');
+      if (payload.system) {
+        item.className = 'system';
+        item.textContent = payload.text;
+      } else {
+        item.innerHTML = `<span class="name">${payload.name || 'viewer'}:</span> ${payload.text}`;
+      }
+      chatLogEl.appendChild(item);
+      chatLogEl.scrollTop = chatLogEl.scrollHeight;
+      if (chatLogEl.children.length > 200) chatLogEl.firstChild.remove();
+    }
+
+    function updatePresence(users) {
+      viewerCountEl.textContent = users.length;
+      viewerListEl.innerHTML = '';
+      users.forEach((user) => {
+        const li = document.createElement('li');
+        li.textContent = user.name || 'viewer';
+        viewerListEl.appendChild(li);
+      });
+    }
+
+    function connectChatServer() {
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const url = `${proto}//${window.location.host}/ws/multi-camera?name=${encodeURIComponent(viewerName)}`;
+      ws = new WebSocket(url);
+
+      ws.addEventListener('message', (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'welcome' || data.type === 'presence') updatePresence(data.users || []);
+          if (data.type === 'message') appendChatLine(data);
+        } catch (_) {
+          // ignore malformed payloads
+        }
+      });
+
+      ws.addEventListener('close', () => {
+        setTimeout(connectChatServer, 1500);
+      });
+    }
+
+    chatForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const text = chatInput.value.trim();
+      if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({ type: 'message', text }));
+      chatInput.value = '';
+    });
+
     async function loadCameras() {
       const res = await fetch('/api/cameras');
       const data = await res.json();
       if (!data.ok) {
-        document.getElementById('grid').innerHTML = `<div class="card">${data.error}</div>`;
+        gridEl.innerHTML = `<div class="card">${data.error}</div>`;
         return;
       }
-      const grid = document.getElementById('grid');
-      grid.innerHTML = '';
+      gridEl.innerHTML = '';
       data.cameras.forEach(cam => {
         const card = document.createElement('div');
         card.className = 'card';
@@ -49,9 +151,11 @@
             ${err}
           </div>
         `;
-        grid.appendChild(card);
+        gridEl.appendChild(card);
       });
     }
+
+    connectChatServer();
     loadCameras();
     setInterval(loadCameras, 5000);
   </script>
