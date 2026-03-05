@@ -60,7 +60,28 @@
   <section id="feed" class="hidden">
     <h1>Watchtower Device Monitor</h1>
     <p class="meta">Live camera and sensor streams served from your Watchtower hub.</p>
-    <div id="grid" class="grid"></div>
+    <div class="layout">
+      <div id="grid" class="grid"></div>
+      <aside class="card" aria-label="Live chat">
+        <div class="status">
+          <strong>Ops Chat</strong>
+          <span id="presence-count" class="badge">0 online</span>
+        </div>
+        <div id="presence-list" class="meta">No active users.</div>
+        <div id="chat-log" style="height:320px; overflow:auto; margin:10px 0; display:grid; gap:6px;"></div>
+        <form id="chat-form" class="auth-form" style="gap:8px;">
+          <label>
+            Display name
+            <input id="display-name" maxlength="32" />
+          </label>
+          <label>
+            Message
+            <input id="chat-input" maxlength="500" placeholder="Type an update and hit Enter" required />
+          </label>
+          <button class="btn" type="submit">Send</button>
+        </form>
+      </aside>
+    </div>
   </section>
 
   <script>
@@ -72,11 +93,65 @@
     const feedSection = document.getElementById('feed');
     const authForm = document.getElementById('auth-form');
     const authError = document.getElementById('auth-error');
+    const gridEl = document.getElementById('grid');
+    const presenceCountEl = document.getElementById('presence-count');
+    const presenceListEl = document.getElementById('presence-list');
+    const chatLogEl = document.getElementById('chat-log');
+    const chatFormEl = document.getElementById('chat-form');
+    const chatInputEl = document.getElementById('chat-input');
+    const displayNameEl = document.getElementById('display-name');
+    let chatSocket = null;
+    let activeName = `viewer-${Math.floor(Math.random() * 900 + 100)}`;
+
+    function addChatLine(text, isSystem = false) {
+      const line = document.createElement('div');
+      line.className = 'meta';
+      line.style.margin = '0';
+      line.style.color = isSystem ? '#e5a08a' : '#f6ead8';
+      line.textContent = text;
+      chatLogEl.appendChild(line);
+      chatLogEl.scrollTop = chatLogEl.scrollHeight;
+    }
+
+    function connectChat() {
+      if (chatSocket && (chatSocket.readyState === WebSocket.OPEN || chatSocket.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
+      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+      chatSocket = new WebSocket(`${protocol}://${window.location.host}/ws/multi-camera?name=${encodeURIComponent(activeName)}`);
+
+      chatSocket.addEventListener('open', () => {
+        addChatLine('Connected to multi-camera chat.', true);
+      });
+
+      chatSocket.addEventListener('message', (event) => {
+        const payload = JSON.parse(event.data || '{}');
+        if (payload.type === 'presence') {
+          const users = Array.isArray(payload.users) ? payload.users : [];
+          presenceCountEl.textContent = `${payload.count || users.length} online`;
+          presenceListEl.textContent = users.length ? users.map(u => u.name || 'viewer').join(', ') : 'No active users.';
+          return;
+        }
+        if (payload.type === 'message') {
+          if (payload.system) {
+            addChatLine(`[system] ${payload.text || ''}`, true);
+            return;
+          }
+          addChatLine(`${payload.name || 'viewer'}: ${payload.text || ''}`);
+        }
+      });
+
+      chatSocket.addEventListener('close', () => {
+        addChatLine('Chat disconnected. Reconnecting…', true);
+        setTimeout(connectChat, 1200);
+      });
+    }
 
     function showFeed() {
       authSection.classList.add('hidden');
       feedSection.classList.remove('hidden');
       loadCameras();
+      connectChat();
     }
 
     function isAuthenticated() {
@@ -124,6 +199,24 @@
         return;
       }
       authError.textContent = 'Invalid username or password.';
+    });
+
+    chatFormEl.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const nextName = (displayNameEl.value || '').trim().slice(0, 32);
+      if (nextName && nextName !== activeName) {
+        activeName = nextName;
+        if (chatSocket && chatSocket.readyState === WebSocket.OPEN) {
+          chatSocket.send(JSON.stringify({ type: 'rename', name: activeName }));
+        }
+      }
+
+      const text = (chatInputEl.value || '').trim();
+      if (!text || !chatSocket || chatSocket.readyState !== WebSocket.OPEN) {
+        return;
+      }
+      chatSocket.send(JSON.stringify({ type: 'message', text }));
+      chatInputEl.value = '';
     });
 
     if (isAuthenticated()) {
