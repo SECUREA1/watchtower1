@@ -1974,11 +1974,43 @@
         return evt.imgDataUrl || evt.image || null;
       }
 
-      function getEventClip(evt){
+      function getEventClipInfo(evt){
         if(!evt) return null;
-        if(evt.clipDataUrl) return evt.clipDataUrl;
-        if(evt.clipId && motionClips[evt.clipId]) return motionClips[evt.clipId].dataUrl || null;
+        if(evt.clipDataUrl){
+          return {
+            url: evt.clipDataUrl,
+            mimeType: evt.clipMimeType || null,
+          };
+        }
+        if(evt.clipId && motionClips[evt.clipId]){
+          const clip = motionClips[evt.clipId];
+          return {
+            url: clip.dataUrl || null,
+            mimeType: clip.mimeType || null,
+          };
+        }
         return null;
+      }
+
+      function getEventClip(evt){
+        const clip = getEventClipInfo(evt);
+        return clip ? clip.url : null;
+      }
+
+      function applyVideoSource(videoEl, clipUrl, clipMimeType=null){
+        if(!videoEl) return;
+        videoEl.pause();
+        while(videoEl.firstChild) videoEl.removeChild(videoEl.firstChild);
+        if(!clipUrl){
+          videoEl.removeAttribute("src");
+          videoEl.load();
+          return;
+        }
+        const source = document.createElement("source");
+        source.src = clipUrl;
+        if(clipMimeType) source.type = clipMimeType;
+        videoEl.appendChild(source);
+        videoEl.load();
       }
 
       function setSelectedDetails(payload){
@@ -2065,11 +2097,10 @@
           if(selectedPreviewImg) selectedPreviewImg.src = hasImage ? payload.imgDataUrl : "";
           if(selectedPreviewVideo){
             if(hasVideo){
-              selectedPreviewVideo.src = clipUrl;
+              const clipMimeType = payload.clipMimeType || payload.evt?.clipMimeType || getEventClipInfo(payload.evt)?.mimeType;
+              applyVideoSource(selectedPreviewVideo, clipUrl, clipMimeType);
             }else{
-              selectedPreviewVideo.pause();
-              selectedPreviewVideo.removeAttribute("src");
-              selectedPreviewVideo.load();
+              applyVideoSource(selectedPreviewVideo, null);
             }
           }
           if(selectedPlaceholder) selectedPlaceholder.style.display = (hasImage || hasVideo) ? "none" : "block";
@@ -2207,10 +2238,11 @@
         return clips.slice(0, 30);
       }
 
-      function openClipVideo(clipUrl, title="Secure Video Clip"){
+      function openClipVideo(clipUrl, title="Secure Video Clip", clipMimeType=null){
         if(!clipUrl) return;
         const w = window.open("", "_blank", "width=1100,height=760");
         if(!w){ toast("Video window blocked by browser."); return; }
+        const sourceType = clipMimeType ? ` type="${escapeHtml(clipMimeType)}"` : "";
         w.document.write(`
           <title>${escapeHtml(title)}</title>
           <style>
@@ -2221,7 +2253,9 @@
           </style>
           <div class="wrap">
             <div class="meta">${escapeHtml(title)}</div>
-            <video controls autoplay playsinline src="${clipUrl}"></video>
+            <video controls autoplay playsinline>
+              <source src="${clipUrl}"${sourceType} />
+            </video>
           </div>
         `);
       }
@@ -2239,20 +2273,24 @@
           const card = document.createElement("div");
           card.className = "clip-card";
           const typeLabel = item.type.charAt(0).toUpperCase() + item.type.slice(1);
+          const clipInfo = getEventClipInfo(item.evt) || { url: item.clipUrl, mimeType: item.evt?.clipMimeType || null };
           card.innerHTML = `
             <div class="small"><b>${escapeHtml(typeLabel)}</b> • ${escapeHtml(item.label)}</div>
             <div class="small">${escapeHtml(item.evt.status || "Detected")} • ${fmtTime(item.evt.time)}</div>
-            <video controls preload="metadata" playsinline src="${item.clipUrl}"></video>
+            <video controls preload="metadata" playsinline></video>
             <div class="clip-card-actions"><button type="button" class="ghost mini">⛶ Full Video</button></div>
           `;
-          card.querySelector("button")?.addEventListener("click", ()=>openClipVideo(item.clipUrl, `${typeLabel}: ${item.label}`));
+          const videoEl = card.querySelector("video");
+          applyVideoSource(videoEl, clipInfo.url, clipInfo.mimeType);
+          card.querySelector("button")?.addEventListener("click", ()=>openClipVideo(clipInfo.url, `${typeLabel}: ${item.label}`, clipInfo.mimeType));
           card.addEventListener("click", (event)=>{
             if(event.target.closest("button")) return;
             setSelectedDetails({
               type: item.type,
               label: item.key || item.label,
               evt: item.evt,
-              clipDataUrl: item.clipUrl,
+              clipDataUrl: clipInfo.url,
+              clipMimeType: clipInfo.mimeType,
               imgDataUrl: getEventPreview(item.evt)
             });
           });
@@ -2272,13 +2310,16 @@
           const card = document.createElement("div");
           card.className = "clip-card";
           const typeLabel = item.type.charAt(0).toUpperCase() + item.type.slice(1);
+          const clipInfo = getEventClipInfo(item.evt) || { url: item.clipUrl, mimeType: item.evt?.clipMimeType || null };
           card.innerHTML = `
             <div class="small"><b>${escapeHtml(typeLabel)}</b> • ${escapeHtml(item.label)}</div>
             <div class="small">${escapeHtml(item.evt.status || "Detected")} • ${fmtTime(item.evt.time)}</div>
-            <video controls preload="metadata" playsinline src="${item.clipUrl}"></video>
+            <video controls preload="metadata" playsinline></video>
             <div class="clip-card-actions"><button type="button" class="ghost mini">⛶ Full Video</button></div>
           `;
-          card.querySelector("button")?.addEventListener("click", ()=>openClipVideo(item.clipUrl, `${typeLabel}: ${item.label}`));
+          const videoEl = card.querySelector("video");
+          applyVideoSource(videoEl, clipInfo.url, clipInfo.mimeType);
+          card.querySelector("button")?.addEventListener("click", ()=>openClipVideo(clipInfo.url, `${typeLabel}: ${item.label}`, clipInfo.mimeType));
           targetEl.appendChild(card);
         }
       }
