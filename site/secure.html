@@ -1679,7 +1679,14 @@
       // Demo-only labels (kept)
       const DEMO_CLASSES = ["person","backpack","bottle","laptop","cell phone","book","chair","knife","cup","handbag","keyboard","remote"];
       const DEMO_PEOPLE  = ["Unknown","Ava","Noah","Mia","Liam","Zoe","Ethan","Ivy","Kai","Nina"];
-      const VEHICLE_CLASSES = new Set(["car","truck","bus","motorcycle","bicycle","vehicle"]);
+      const VEHICLE_CLASSES = new Set([
+        "car","truck","bus","motorcycle","bicycle","vehicle","van","suv","pickup",
+        "semi","tractor","trailer","delivery van","forklift","excavator","bulldozer"
+      ]);
+      const VEHICLE_KEYWORDS = [
+        "car","truck","bus","van","suv","pickup","vehicle","motorcycle","bike",
+        "tractor","trailer","semi","lorry","forklift","excavator","bulldozer"
+      ];
       const CLIP_PRE_MS = 2000;
       const CLIP_POST_MS = 2000;
       const CLIP_TIMESLICE_MS = 250;
@@ -1962,6 +1969,48 @@
         return "video/webm";
       }
 
+      function ensureClipPoster(video, clipUrl, fallbackImage=""){
+        if(!video || !clipUrl) return;
+        if(video.dataset.posterReady === "1") return;
+        video.dataset.posterReady = "1";
+        if(fallbackImage) video.poster = fallbackImage;
+
+        const probe = document.createElement("video");
+        probe.preload = "metadata";
+        probe.muted = true;
+        probe.playsInline = true;
+        probe.src = clipUrl;
+
+        const cleanup = ()=>{
+          probe.pause();
+          probe.removeAttribute("src");
+          probe.load();
+        };
+
+        probe.addEventListener("loadedmetadata", ()=>{
+          const duration = Number(probe.duration) || 0;
+          const target = Math.min(Math.max(0.05, duration * 0.5), 2);
+          if(duration && Number.isFinite(duration)){
+            try{ probe.currentTime = target; }catch(_err){/* no-op */}
+          }
+        }, { once:true });
+
+        probe.addEventListener("seeked", ()=>{
+          try{
+            const canvas = document.createElement("canvas");
+            canvas.width = Math.max(1, probe.videoWidth || 0);
+            canvas.height = Math.max(1, probe.videoHeight || 0);
+            const ctx = canvas.getContext("2d", { alpha:false });
+            if(!ctx || !canvas.width || !canvas.height) return;
+            ctx.drawImage(probe, 0, 0, canvas.width, canvas.height);
+            video.poster = canvas.toDataURL("image/jpeg", 0.82);
+          }catch(_err){/* no-op */}
+          cleanup();
+        }, { once:true });
+
+        probe.addEventListener("error", ()=>cleanup(), { once:true });
+      }
+
       function parseMimeFromDataUrl(dataUrl){
         const raw = String(dataUrl || "").trim();
         if(!raw.startsWith("data:")) return "";
@@ -2088,11 +2137,14 @@
               selectedPreviewVideo.innerHTML = "";
               selectedPreviewVideo.appendChild(source);
               selectedPreviewVideo.load();
+              ensureClipPoster(selectedPreviewVideo, clipUrl, payload.imgDataUrl || "");
             }else{
               selectedPreviewVideo.pause();
               selectedPreviewVideo.innerHTML = "";
               selectedPreviewVideo.removeAttribute("src");
               selectedPreviewVideo.load();
+              selectedPreviewVideo.removeAttribute("poster");
+              selectedPreviewVideo.dataset.posterReady = "";
             }
           }
           if(selectedPlaceholder) selectedPlaceholder.style.display = (hasImage || hasVideo) ? "none" : "block";
@@ -3562,7 +3614,8 @@
       function isVehicleLabel(label){
         if(!label) return false;
         const base = String(label).split("#")[0].trim().toLowerCase();
-        return VEHICLE_CLASSES.has(base);
+        if(VEHICLE_CLASSES.has(base)) return true;
+        return VEHICLE_KEYWORDS.some(keyword => base.includes(keyword));
       }
 
       async function uploadCloudFrame(idx, video, fps=0){
@@ -4760,6 +4813,7 @@
           source.type = getEventClipMimeType(row.evt);
           video.appendChild(source);
           video.load();
+          ensureClipPoster(video, clipUrl, getEventPreview(row.evt) || "");
           div.appendChild(video);
           clipsList.appendChild(div);
         }
