@@ -1447,6 +1447,10 @@
                   <input id="selectedLabelInput" type="text" placeholder="Rename annotation" />
                 </div>
                 <div>
+                  <label class="small" for="selectedDescriptionInput">Video description</label>
+                  <textarea id="selectedDescriptionInput" placeholder="Add clip notes for this event (e.g., Unknown face at front door)"></textarea>
+                </div>
+                <div>
                   <label class="small" for="existingObjectSelect">Save into existing object</label>
                   <select id="existingObjectSelect" disabled></select>
                 </div>
@@ -1860,6 +1864,7 @@
       const logsTableWrap = el("logsTableWrap");
       const logsVideoTiles = el("logsVideoTiles");
       const selectedLabelInput = el("selectedLabelInput");
+      const selectedDescriptionInput = el("selectedDescriptionInput");
       const selectedLogType = el("selectedLogType");
       const btnSelectedSaveLabel = el("btnSelectedSaveLabel");
       const btnSelectedReject = el("btnSelectedReject");
@@ -2008,19 +2013,20 @@
         }
         const source = document.createElement("source");
         source.src = clipUrl;
-        if(clipMimeType) source.type = clipMimeType;
+        if(clipMimeType && !String(clipUrl || "").startsWith("data:")) source.type = clipMimeType;
         videoEl.appendChild(source);
         videoEl.load();
       }
 
       function setSelectedDetails(payload){
         selectedLog = payload;
-        if(!selectedLogType || !selectedMeta || !selectedLabelInput) return;
+        if(!selectedLogType || !selectedMeta || !selectedLabelInput || !selectedDescriptionInput) return;
 
         if(!payload){
           selectedLogType.textContent = "No selection";
           selectedMeta.textContent = "Select a log row, tracked object, or unknown face to view details.";
           selectedLabelInput.value = "";
+          selectedDescriptionInput.value = "";
           if(existingObjectSelect){
             existingObjectSelect.disabled = true;
           }
@@ -2045,6 +2051,7 @@
           lines.push(formatMetaLine("Captured", captured));
           lines.push(formatMetaLine("Camera", payload.camIdx != null ? payload.camIdx : "—"));
           selectedLabelInput.value = "";
+          selectedDescriptionInput.value = "";
           if(existingObjectSelect){
             existingObjectSelect.disabled = true;
           }
@@ -2056,13 +2063,20 @@
           lines.push(formatMetaLine("Camera", payload.evt && payload.evt.cam != null ? payload.evt.cam : "—"));
           lines.push(formatMetaLine("Confidence", payload.evt && payload.evt.score != null ? Math.round(payload.evt.score * 100) + "%" : "—"));
           lines.push(formatMetaLine("Motion Clip", getEventClip(payload.evt) ? "4-second clip available" : "Pending / unavailable"));
+          if(payload.evt && payload.evt.customClipLabel){
+            lines.push(formatMetaLine("Clip Label", payload.evt.customClipLabel));
+          }
+          if(payload.evt && payload.evt.clipDescription){
+            lines.push(formatMetaLine("Clip Description", payload.evt.clipDescription));
+          }
           if(payload.evt && payload.evt.box){
             lines.push(formatMetaLine("XYZ", formatXYZ(payload.evt.box)));
           }
           if(payload.evt && payload.evt.objectLabel){
             lines.push(formatMetaLine("Object", getDisplayName(payload.evt.objectLabel)));
           }
-          selectedLabelInput.value = payload.label || "";
+          selectedLabelInput.value = payload.evt?.customClipLabel || payload.label || "";
+          selectedDescriptionInput.value = payload.evt?.clipDescription || "";
           if(existingObjectSelect){
             existingObjectSelect.disabled = true;
           }
@@ -2078,7 +2092,8 @@
             const b = payload.evt.box;
             lines.push(formatMetaLine("BBox", `x=${round2(b.x)} y=${round2(b.y)} w=${round2(b.w)} h=${round2(b.h)}`));
           }
-          selectedLabelInput.value = customLabels[payload.label] || getDisplayName(payload.label || "");
+          selectedLabelInput.value = payload.evt?.customClipLabel || customLabels[payload.label] || getDisplayName(payload.label || "");
+          selectedDescriptionInput.value = payload.evt?.clipDescription || "";
           if(existingObjectSelect){
             existingObjectSelect.disabled = false;
             if(payload.label){
@@ -2274,15 +2289,18 @@
           card.className = "clip-card";
           const typeLabel = item.type.charAt(0).toUpperCase() + item.type.slice(1);
           const clipInfo = getEventClipInfo(item.evt) || { url: item.clipUrl, mimeType: item.evt?.clipMimeType || null };
+          const clipLabel = item.evt?.customClipLabel || item.label;
+          const clipDescription = item.evt?.clipDescription || "";
           card.innerHTML = `
-            <div class="small"><b>${escapeHtml(typeLabel)}</b> • ${escapeHtml(item.label)}</div>
+            <div class="small"><b>${escapeHtml(typeLabel)}</b> • ${escapeHtml(clipLabel)}</div>
             <div class="small">${escapeHtml(item.evt.status || "Detected")} • ${fmtTime(item.evt.time)}</div>
+            ${clipDescription ? `<div class="small">${escapeHtml(clipDescription)}</div>` : ""}
             <video controls preload="metadata" playsinline></video>
             <div class="clip-card-actions"><button type="button" class="ghost mini">⛶ Full Video</button></div>
           `;
           const videoEl = card.querySelector("video");
           applyVideoSource(videoEl, clipInfo.url, clipInfo.mimeType);
-          card.querySelector("button")?.addEventListener("click", ()=>openClipVideo(clipInfo.url, `${typeLabel}: ${item.label}`, clipInfo.mimeType));
+          card.querySelector("button")?.addEventListener("click", ()=>openClipVideo(clipInfo.url, `${typeLabel}: ${clipLabel}`, clipInfo.mimeType));
           card.addEventListener("click", (event)=>{
             if(event.target.closest("button")) return;
             setSelectedDetails({
@@ -2311,15 +2329,18 @@
           card.className = "clip-card";
           const typeLabel = item.type.charAt(0).toUpperCase() + item.type.slice(1);
           const clipInfo = getEventClipInfo(item.evt) || { url: item.clipUrl, mimeType: item.evt?.clipMimeType || null };
+          const clipLabel = item.evt?.customClipLabel || item.label;
+          const clipDescription = item.evt?.clipDescription || "";
           card.innerHTML = `
-            <div class="small"><b>${escapeHtml(typeLabel)}</b> • ${escapeHtml(item.label)}</div>
+            <div class="small"><b>${escapeHtml(typeLabel)}</b> • ${escapeHtml(clipLabel)}</div>
             <div class="small">${escapeHtml(item.evt.status || "Detected")} • ${fmtTime(item.evt.time)}</div>
+            ${clipDescription ? `<div class="small">${escapeHtml(clipDescription)}</div>` : ""}
             <video controls preload="metadata" playsinline></video>
             <div class="clip-card-actions"><button type="button" class="ghost mini">⛶ Full Video</button></div>
           `;
           const videoEl = card.querySelector("video");
           applyVideoSource(videoEl, clipInfo.url, clipInfo.mimeType);
-          card.querySelector("button")?.addEventListener("click", ()=>openClipVideo(clipInfo.url, `${typeLabel}: ${item.label}`, clipInfo.mimeType));
+          card.querySelector("button")?.addEventListener("click", ()=>openClipVideo(clipInfo.url, `${typeLabel}: ${clipLabel}`, clipInfo.mimeType));
           targetEl.appendChild(card);
         }
       }
@@ -2786,7 +2807,19 @@
             return;
           }
 
-          if(!selectedLog.label){ toast("Select a valid log item."); return; }
+          const descriptionValue = selectedDescriptionInput.value.trim();
+          if(selectedLog.evt){
+            selectedLog.evt.customClipLabel = value;
+            selectedLog.evt.clipDescription = descriptionValue || null;
+          }
+
+          if(!selectedLog.label){
+            scheduleSaveAll();
+            refreshAll();
+            toast("Video label and description saved.");
+            return;
+          }
+
           customLabels[selectedLog.label] = value;
           scheduleSaveAll();
           refreshAll();
@@ -3605,7 +3638,7 @@
       function startClipRecorder(slotIdx, stream){
         const state = camStates.get(slotIdx);
         if(!state || !stream || typeof MediaRecorder === "undefined") return;
-        const mimeCandidates = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
+        const mimeCandidates = ["video/mp4;codecs=h264,aac", "video/mp4", "video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
         const mimeType = mimeCandidates.find(m => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || "";
         try{
           const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
@@ -3654,9 +3687,12 @@
         for(const req of ready){
           const startAt = req.requestAt - CLIP_PRE_MS;
           const endAt = req.requestAt + CLIP_POST_MS;
-          const chunks = state.clipChunks.filter(ch => ch && ch.ts >= startAt && ch.ts <= endAt);
+          const chunks = state.clipChunks.filter(ch => ch && ch.ts <= endAt);
           if(!chunks.length) continue;
-          const blob = new Blob(chunks.map(ch => ch.blob), { type: mimeType || "video/webm" });
+          const orderedChunks = chunks.sort((a,b)=> (a.ts || 0) - (b.ts || 0));
+          const firstType = orderedChunks.find(ch => ch.blob && ch.blob.type)?.blob?.type || "";
+          const finalMimeType = firstType || mimeType || "video/webm";
+          const blob = new Blob(orderedChunks.map(ch => ch.blob), { type: finalMimeType });
           let dataUrl = null;
           try{ dataUrl = await blobToDataURL(blob); }catch(_err){ dataUrl = null; }
           if(!dataUrl) continue;
@@ -4418,7 +4454,11 @@
           if(personXyzEl) personXyzEl.textContent = "—";
         }else{
           personEl.textContent = "No one";
-          if(personXyzEl) personXyzEl.textContent = "—";0
+          if(personXyzEl) personXyzEl.textContent = "—";
+        }
+      }
+
+      function recordPersonEvent(personName, status, box, score=null, cam=null, opts={}){
         const evt = {
           id: `pevt_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
           time: Date.now(),
@@ -4427,10 +4467,14 @@
           person: personName,
           score,
           cam,
+          objectLabel: opts.objectLabel || null,
+          held_duration: opts.held_duration != null ? opts.held_duration : null,
           imgDataUrl: opts.imgDataUrl || null,
           clipId: null,
           clipDataUrl: null,
           clipMimeType: null,
+          customClipLabel: opts.customClipLabel || null,
+          clipDescription: opts.clipDescription || null,
         };
 
         if(!peopleMovementMemory[personName]) peopleMovementMemory[personName] = [];
@@ -4453,6 +4497,51 @@
 
         scheduleSaveAll();
         if(logViewMode === "people" || logSearch.value.trim()){
+          renderLogTable();
+        }
+        renderTracked();
+        renderClipWindow();
+      }
+
+      function recordEvent(label, status, box, person=null, held_duration=null, score=null, cam=null, opts={}){
+        const evt = {
+          id: `evt_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+          time: Date.now(),
+          box,
+          status,
+          person,
+          held_duration,
+          score,
+          cam,
+          imgDataUrl: opts.imgDataUrl || null,
+          clipId: null,
+          clipDataUrl: null,
+          clipMimeType: null,
+          customClipLabel: opts.customClipLabel || null,
+          clipDescription: opts.clipDescription || null,
+        };
+
+        if(!objectMemory[label]) objectMemory[label] = [];
+        objectMemory[label].push(evt);
+        evaluateTunedAlertForObject(label, evt);
+
+        if(cam != null){
+          queueMotionClip(cam, ({ clipId, clipDataUrl, clipMimeType })=>{
+            evt.clipId = clipId;
+            evt.clipDataUrl = clipDataUrl;
+            evt.clipMimeType = clipMimeType;
+            if(selectedLog && selectedLog.evt === evt){
+              setSelectedDetails(Object.assign({}, selectedLog, { evt, clipDataUrl }));
+            }
+            renderLogTable();
+            renderTracked();
+            renderClipWindow();
+          });
+        }
+
+        updateCameraLog(cam, label, evt);
+        scheduleSaveAll();
+        if(logViewMode === "objects" || logSearch.value.trim()){
           renderLogTable();
         }
         renderTracked();
