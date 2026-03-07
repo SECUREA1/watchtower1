@@ -1938,8 +1938,41 @@
         const raw = evt.clipMimeType
           || (evt.clipId && motionClips[evt.clipId] ? motionClips[evt.clipId].mimeType : "")
           || "";
-        const base = String(raw).split(";", 1)[0].trim().toLowerCase();
-        return base === "video/mp4" ? "video/mp4" : "video/webm";
+        const mime = String(raw).trim().toLowerCase();
+        if(!mime) return "video/webm";
+        if(isMimePlayable(mime)) return mime;
+        const base = mime.split(";", 1)[0].trim();
+        if(isMimePlayable(base)) return base;
+        return "video/webm";
+      }
+
+      function isMimePlayable(mime){
+        const type = String(mime || "").trim();
+        if(!type) return false;
+        const probe = document.createElement("video");
+        if(!probe || typeof probe.canPlayType !== "function") return false;
+        return !!probe.canPlayType(type);
+      }
+
+      function pickClipMimeType(){
+        if(typeof MediaRecorder === "undefined") return "";
+        const candidates = [
+          // Prefer broadly playable encodings first (Firefox + Chromium).
+          "video/webm;codecs=vp8,opus",
+          "video/webm;codecs=vp9,opus",
+          "video/webm;codecs=vp8",
+          "video/webm;codecs=vp9",
+          "video/webm",
+          // Last resort for engines that only offer MP4 recording.
+          "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+          "video/mp4"
+        ];
+        for(const mime of candidates){
+          if(!MediaRecorder.isTypeSupported || !MediaRecorder.isTypeSupported(mime)) continue;
+          if(!isMimePlayable(mime) && !isMimePlayable(mime.split(";", 1)[0])) continue;
+          return mime;
+        }
+        return "";
       }
 
       function setSelectedDetails(payload){
@@ -3408,8 +3441,7 @@
       function startClipRecorder(slotIdx, stream){
         const state = camStates.get(slotIdx);
         if(!state || !stream || typeof MediaRecorder === "undefined") return;
-        const mimeCandidates = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
-        const mimeType = mimeCandidates.find(m => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || "";
+        const mimeType = pickClipMimeType();
         try{
           const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
           recorder.ondataavailable = (event)=>{
@@ -3418,7 +3450,7 @@
             state.clipChunks.push({ ts, blob: event.data });
             const minTs = ts - CLIP_PRE_MS - 800;
             state.clipChunks = state.clipChunks.filter(ch => ch && ch.ts >= minTs);
-            processClipRequests(state, ts, recorder.mimeType || mimeType || "video/webm");
+            processClipRequests(state, ts, event.data.type || recorder.mimeType || mimeType || "video/webm");
           };
           recorder.start(CLIP_TIMESLICE_MS);
           state.clipRecorder = recorder;
