@@ -649,6 +649,30 @@
     .log-selected{
       background:rgba(255,59,48,.12);
     }
+    .clips-window{
+      display:grid;
+      gap:10px;
+    }
+    .clips-list{
+      display:grid;
+      gap:8px;
+      max-height:420px;
+      overflow:auto;
+    }
+    .clip-item{
+      border:1px solid rgba(255,255,255,.1);
+      border-radius:12px;
+      padding:10px;
+      background:rgba(0,0,0,.2);
+      display:grid;
+      gap:8px;
+    }
+    .clip-item video{
+      width:100%;
+      border-radius:10px;
+      border:1px solid rgba(255,255,255,.12);
+      background:#000;
+    }
 
     details.accordion{
       border:1px solid rgba(255,255,255,.08);
@@ -686,13 +710,15 @@
         grid-template-areas:
           "camera camera"
           "labeling labeling"
-          "logs tracked";
+          "logs tracked"
+          "clips clips";
         align-content:start;
       }
       .camera-panel{grid-area:camera}
       .logs-panel{grid-area:logs}
       .labeling-panel{grid-area:labeling}
       .tracked-panel{grid-area:tracked}
+      .clips-panel{grid-area:clips}
       .labeling-grid{
         grid-template-columns: repeat(2, minmax(0,1fr));
       }
@@ -1440,6 +1466,7 @@
         <div class="mobile-log-tabs" role="tablist" aria-label="Log panels">
           <button class="mobile-log-tab active" type="button" data-log-panel-button="tracked">Tracked Objects</button>
           <button class="mobile-log-tab" type="button" data-log-panel-button="logs">Interaction Logs</button>
+          <button class="mobile-log-tab" type="button" data-log-panel-button="clips">Video Clips</button>
         </div>
 
         <section class="card tracked-panel tab-pane mobile-log-pane active" data-tab="logs" data-log-panel="tracked">
@@ -1533,6 +1560,23 @@
             </div>
           </div>
         </section>
+
+        <section class="card clips-panel tab-pane mobile-log-pane" data-tab="logs" data-log-panel="clips">
+          <div class="card-h">
+            <div>
+              <div class="title"><span aria-hidden="true">🎬</span> Person &amp; Vehicle Video Clips</div>
+              <div class="subtitle">Local clips include 2s pre-motion + 2s post-motion context.</div>
+            </div>
+            <div class="log-toggle" role="group" aria-label="Clip view mode">
+              <button class="log-toggle-btn active" type="button" data-clips-view="objects">Vehicles</button>
+              <button class="log-toggle-btn" type="button" data-clips-view="people">People</button>
+            </div>
+          </div>
+          <div class="card-b clips-window">
+            <div class="small">Playable clips are loaded from browser local storage.</div>
+            <div class="clips-list" id="clipsList"></div>
+          </div>
+        </section>
       </div>
     </div>
 
@@ -1582,6 +1626,7 @@
         minimizeDetails: true,
         selectedSlots: [0],
         logViewMode: "objects",
+        clipViewMode: "objects",
 
         // Live CV tuning
         detectionIntervalMs: isLikelyMobile() ? 450 : 300,
@@ -1669,6 +1714,7 @@
       let recognitionMode = !!settings.recognitionMode;
       let demoMode = !!settings.demoMode;
       let logViewMode = settings.logViewMode || "objects";
+      let clipViewMode = settings.clipViewMode || "objects";
 
       // Demo-only labels (kept)
       const DEMO_CLASSES = ["person","backpack","bottle","laptop","cell phone","book","chair","knife","cup","handbag","keyboard","remote"];
@@ -1679,7 +1725,8 @@
       const CLIP_TIMESLICE_MS = 250;
       const CLIP_MAX_PER_CAMERA = 24;
       const CLIP_EVENT_COOLDOWN_MS = 8000;
-      const IDLE_SCREEN_MOTION_RATIO = 0.20;
+      const IDLE_SCREEN_FRACTION = 0.20;
+      const IDLE_LOG_COOLDOWN_MS = 2400;
       const lastEventByLabel = new Map();
 
       // Global track id (persists)
@@ -1821,8 +1868,11 @@
       const btnSelectedSaveExisting = el("btnSelectedSaveExisting");
       const btnSelectedCopy = el("btnSelectedCopy");
       const logToggleButtons = Array.from(document.querySelectorAll(".log-toggle-btn"));
+      const clipViewButtons = Array.from(document.querySelectorAll("[data-clips-view]"));
+      const clipsList = el("clipsList");
       const mobileLogTrackedBtn = document.querySelector("[data-log-panel-button=\"tracked\"]");
       const mobileLogLogsBtn = document.querySelector("[data-log-panel-button=\"logs\"]");
+      const mobileLogClipsBtn = document.querySelector("[data-log-panel-button=\"clips\"]");
       const tuneEnable = el("tuneEnable");
       const tuneCondition = el("tuneCondition");
       const tuneSeconds = el("tuneSeconds");
@@ -1854,6 +1904,7 @@
       applyTuneConfigToUI();
       refreshTuneSuggestions();
       setLogViewMode(logViewMode, false);
+      setClipViewMode(clipViewMode, false);
       refreshAll();
 
       // Try device list (labels may be blank until permission)
@@ -2566,9 +2617,17 @@
       }
 
       logToggleButtons.forEach(btn => {
+        if(!btn.dataset.logView) return;
         btn.addEventListener("click", ()=>{
           const mode = btn.dataset.logView;
           if(mode) setLogViewMode(mode, true);
+        });
+      });
+
+      clipViewButtons.forEach(btn => {
+        btn.addEventListener("click", ()=>{
+          const mode = btn.dataset.clipsView;
+          if(mode) setClipViewMode(mode, true);
         });
       });
 
@@ -3945,7 +4004,8 @@
 
       function updateTrackEvents(track, prevBox, people, ts, video){
         const personNow = associatePerson(track.box, people);
-        const moved = hasMeaningfulMotion(prevBox, track.box, video?.videoWidth, video?.videoHeight);
+        const moved = centerDistancePx(prevBox, track.box) >= settings.movePxThreshold;
+        const movedMajor = hasMajorScreenMotion(prevBox, track.box, video?.videoWidth || 1, video?.videoHeight || 1);
 
         // not-held -> held
         if(personNow && !track.isHeld){
@@ -3987,7 +4047,10 @@
           recordEvent(track.key, evt, track.box, personNow || track.lastPerson, heldSec, track.score, track.camIdx, {
             imgDataUrl: captureEventImage(video, track.box)
           });
-        }else if(!moved && canLogMove){
+          return;
+        }
+
+        if(isVehicleLabel(track.key) && !movedMajor && (ts - track.lastLogAt) >= IDLE_LOG_COOLDOWN_MS){
           track.status = "Idle";
           track.lastLogAt = ts;
           recordEvent(track.key, "Idle", track.box, personNow || track.lastPerson, null, track.score, track.camIdx, {
@@ -3996,7 +4059,7 @@
         }
       }
 
-      function updatePeopleTracks(state, people, ts, video){
+      function updatePeopleTracks(state, people, ts, frameW=1, frameH=1){
         if(!state || !state.personTracks) return;
         const tracks = state.personTracks;
 
@@ -4005,7 +4068,8 @@
 
           const prev = tracks.get(name);
           if(prev){
-            const moved = hasMeaningfulMotion(prev.box, person.box, video?.videoWidth, video?.videoHeight);
+            const moved = centerDistancePx(prev.box, person.box) >= settings.movePxThreshold;
+            const movedMajor = hasMajorScreenMotion(prev.box, person.box, frameW, frameH);
             const canLogMove = (ts - prev.lastLogAt) >= settings.moveLogCooldownMs;
             prev.box = person.box;
             prev.lastSeen = ts;
@@ -4033,12 +4097,20 @@
         }
       }
 
-      function hasMeaningfulMotion(prevBox, currBox, width=0, height=0){
-        const distancePx = centerDistancePx(prevBox, currBox);
-        const diag = Math.hypot(Number(width) || 0, Number(height) || 0);
-        const ratioThreshold = diag > 0 ? (diag * IDLE_SCREEN_MOTION_RATIO) : 0;
-        const thresholdPx = Math.max(settings.movePxThreshold || 0, ratioThreshold);
-        return distancePx >= thresholdPx;
+      function hasMajorScreenMotion(prevBox, nextBox, frameW=1, frameH=1){
+        if(!prevBox || !nextBox) return true;
+        const width = Math.max(1, frameW || 1);
+        const height = Math.max(1, frameH || 1);
+        const prevCx = prevBox.x + prevBox.w/2;
+        const prevCy = prevBox.y + prevBox.h/2;
+        const nextCx = nextBox.x + nextBox.w/2;
+        const nextCy = nextBox.y + nextBox.h/2;
+        const dx = Math.abs(nextCx - prevCx) / width;
+        const dy = Math.abs(nextCy - prevCy) / height;
+        const prevArea = Math.max(1, prevBox.w * prevBox.h);
+        const nextArea = Math.max(1, nextBox.w * nextBox.h);
+        const dz = Math.abs(nextArea - prevArea) / prevArea;
+        return dx > IDLE_SCREEN_FRACTION || dy > IDLE_SCREEN_FRACTION || dz > IDLE_SCREEN_FRACTION;
       }
 
       function associatePerson(objBox, people){
@@ -4305,113 +4377,7 @@
           if(personXyzEl) personXyzEl.textContent = "—";
         }else{
           personEl.textContent = "No one";
-          if(personXyzEl) personXyzEl.textContent = "—";
-        }
-      }
-
-      function updateCameraLiveLogFromDemo(camIdx, draw){
-        if(camIdx == null || Number.isNaN(camIdx) || !draw) return;
-        const itemEl = el(`camLogItem_${camIdx}`);
-        const itemXyzEl = el(`camLogItemXYZ_${camIdx}`);
-        const personEl = el(`camLogPerson_${camIdx}`);
-        const personXyzEl = el(`camLogPersonXYZ_${camIdx}`);
-        if(!itemEl || !personEl) return;
-
-        const boxes = draw.boxes || [];
-        const bestItem = pickLargest(boxes.filter(b=>b.type === "object"), (b)=>b);
-        const bestPerson = pickLargest(boxes.filter(b=>b.type === "person"), (b)=>b);
-
-        if(bestItem){
-          itemEl.textContent = getDisplayName(bestItem.cls || "—");
-          if(itemXyzEl) itemXyzEl.textContent = formatXYZ(bestItem);
-        }else{
-          itemEl.textContent = "—";
-          if(itemXyzEl) itemXyzEl.textContent = "—";
-        }
-
-        if(bestPerson){
-          personEl.textContent = bestPerson.personName || "Unknown";
-          if(personXyzEl) personXyzEl.textContent = formatXYZ(bestPerson);
-        }else if(bestItem && bestItem.personName){
-          personEl.textContent = bestItem.personName;
-          if(personXyzEl) personXyzEl.textContent = "—";
-        }else{
-          personEl.textContent = "No one";
-          if(personXyzEl) personXyzEl.textContent = "—";
-        }
-      }
-
-      function refreshCameraLogs(){
-        camLatestLog = Array.from({ length: MAX_CAM_UI }, () => null);
-        for(let i=0;i<MAX_CAM_UI;i++){
-          resetCameraLog(i);
-        }
-
-        for(const [label, events] of Object.entries(objectMemory)){
-          for(const evt of (events || [])){
-            if(!evt || evt.cam == null) continue;
-            const idx = evt.cam;
-            if(idx < 0 || idx >= MAX_CAM_UI) continue;
-            const prev = camLatestLog[idx];
-            if(!prev || (evt.time || 0) > (prev.evt?.time || 0)){
-              camLatestLog[idx] = { label, evt };
-            }
-          }
-        }
-
-        for(let i=0;i<MAX_CAM_UI;i++){
-          const entry = camLatestLog[i];
-          if(entry){
-            updateCameraLog(i, entry.label, entry.evt);
-          }
-        }
-      }
-
-      function recordEvent(label, status, box, person=null, held_duration=null, score=null, cam=null, opts={}){
-        const evt = {
-          id: `evt_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
-          time: Date.now(),
-          box,
-          status,
-          person,
-          held_duration,
-          score,
-          cam,
-          imgDataUrl: opts.imgDataUrl || null,
-          clipId: null,
-          clipDataUrl: null,
-          clipMimeType: null,
-          sourceLabel: opts.sourceLabel || null
-        };
-
-        if(!objectMemory[label]) objectMemory[label] = [];
-        objectMemory[label].push(evt);
-        trackedObjects.add(label);
-
-        if(cam != null && isVehicleLabel(label)){
-          queueMotionClip(cam, ({ clipId, clipDataUrl, clipMimeType })=>{
-            evt.clipId = clipId;
-            evt.clipDataUrl = clipDataUrl;
-            evt.clipMimeType = clipMimeType;
-            if(selectedLog && selectedLog.evt === evt){
-              setSelectedDetails(Object.assign({}, selectedLog, { evt, clipDataUrl }));
-            }
-            renderLogTable();
-            renderClipWindows();
-          });
-        }
-
-        scheduleSaveAll();
-        appendLogRow(label, evt);
-        renderTracked();
-        updateObjectDropdown();
-        updateCameraLog(cam, label, evt);
-        evaluateTunedAlertForObject(label, evt);
-        renderClipWindows();
-      }
-
-      function recordPersonEvent(personName, status, box, score=null, cam=null, opts={}){
-        if(!personName) return;
+          if(personXyzEl) personXyzEl.textContent = "—";0
         const evt = {
           id: `pevt_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
           time: Date.now(),
@@ -4430,7 +4396,7 @@
         peopleMovementMemory[personName].push(evt);
         evaluateTunedAlertFromPerson(personName, evt);
 
-        if(cam != null && ["Live","Seen","Moved","Idle"].includes(status)){
+        if(cam != null && (status === "Live" || status === "Seen" || status === "Moved" || status === "Idle")){
           queueMotionClip(cam, ({ clipId, clipDataUrl, clipMimeType })=>{
             evt.clipId = clipId;
             evt.clipDataUrl = clipDataUrl;
@@ -4440,7 +4406,7 @@
             }
             renderLogTable();
             renderTracked();
-            renderClipWindows();
+            renderClipWindow();
           });
         }
 
@@ -4449,7 +4415,7 @@
           renderLogTable();
         }
         renderTracked();
-        renderClipWindows();
+        renderClipWindow();
       }
 
       /***********************
@@ -4681,6 +4647,11 @@
             ? "Video Logs"
             : "Interaction Logs";
         }
+        if(mobileLogClipsBtn){
+          mobileLogClipsBtn.textContent = logViewMode === "people"
+            ? "People Clips"
+            : "Vehicle Clips";
+        }
         if(trackedSubtitle){
           trackedSubtitle.textContent = logViewMode === "videos"
             ? "Video clips from local secure storage"
@@ -4708,7 +4679,78 @@
 
         renderLogTable();
         renderTracked();
-        renderClipWindows();
+        renderClipWindow();
+      }
+
+      function setClipViewMode(mode, persist=true){
+        clipViewMode = (mode === "people") ? "people" : "objects";
+        if(persist){
+          settings.clipViewMode = clipViewMode;
+          saveSettings();
+        }
+        clipViewButtons.forEach(btn => {
+          btn.classList.toggle("active", btn.dataset.clipsView === clipViewMode);
+        });
+        renderClipWindow();
+      }
+
+      function collectClipEntries(){
+        const rows = [];
+        if(clipViewMode === "people"){
+          for(const [personName, events] of Object.entries(peopleMovementMemory || {})){
+            for(const evt of (events || [])){
+              if(!(evt.clipId || evt.clipDataUrl)) continue;
+              rows.push({
+                key: personName,
+                title: personName,
+                evt,
+                kind: "person"
+              });
+            }
+          }
+        }else{
+          for(const [label, events] of Object.entries(objectMemory || {})){
+            if(!isVehicleLabel(label)) continue;
+            for(const evt of (events || [])){
+              if(!(evt.clipId || evt.clipDataUrl)) continue;
+              rows.push({
+                key: label,
+                title: getDisplayName(label),
+                evt,
+                kind: "vehicle"
+              });
+            }
+          }
+        }
+        rows.sort((a,b)=> (b.evt?.time || 0) - (a.evt?.time || 0));
+        return rows.slice(0, 36);
+      }
+
+      function renderClipWindow(){
+        if(!clipsList) return;
+        const rows = collectClipEntries();
+        clipsList.innerHTML = "";
+        if(rows.length === 0){
+          clipsList.innerHTML = `<div class="item"><span class="small">No ${clipViewMode === "people" ? "person" : "vehicle"} clips yet.</span></div>`;
+          return;
+        }
+        for(const row of rows){
+          const clipUrl = getEventClip(row.evt);
+          if(!clipUrl) continue;
+          const div = document.createElement("div");
+          div.className = "clip-item";
+          div.innerHTML = `
+            <div style="font-weight:700">${escapeHtml(row.title)}</div>
+            <div class="small">${escapeHtml(row.evt.status || "Seen")} • ${fmtTime(row.evt.time)} • cam ${row.evt.cam ?? "-"}</div>
+          `;
+          const video = document.createElement("video");
+          video.controls = true;
+          video.preload = "metadata";
+          video.playsInline = true;
+          video.src = clipUrl;
+          div.appendChild(video);
+          clipsList.appendChild(div);
+        }
       }
 
       function buildDetailsString(evt){
