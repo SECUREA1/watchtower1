@@ -1675,6 +1675,7 @@
       let demoMode = !!settings.demoMode;
       let logViewMode = settings.logViewMode || "objects";
       let clipViewMode = settings.clipViewMode || "objects";
+      const clipPlaybackUrls = new Map();
 
       // Demo-only labels (kept)
       const DEMO_CLASSES = ["person","backpack","bottle","laptop","cell phone","book","chair","knife","cup","handbag","keyboard","remote"];
@@ -1935,20 +1936,53 @@
 
       function getEventClip(evt){
         if(!evt) return null;
-        if(evt.clipDataUrl) return evt.clipDataUrl;
+        if(evt.clipDataUrl) return getPlayableClipUrl(evt.clipDataUrl, evt.clipId || "");
         if(evt.clipBase64){
           const mime = getEventClipMimeType(evt);
-          return `data:${mime};base64,${evt.clipBase64}`;
+          return getPlayableClipUrl(`data:${mime};base64,${evt.clipBase64}`, evt.clipId || "");
         }
         if(evt.clipId && motionClips[evt.clipId]){
           const clip = motionClips[evt.clipId];
-          if(clip.dataUrl) return clip.dataUrl;
+          if(clip.dataUrl) return getPlayableClipUrl(clip.dataUrl, evt.clipId);
           if(clip.base64){
             const mime = (clip.mimeType && String(clip.mimeType).trim()) || "video/webm";
-            return `data:${mime};base64,${clip.base64}`;
+            return getPlayableClipUrl(`data:${mime};base64,${clip.base64}`, evt.clipId);
           }
         }
         return null;
+      }
+
+      function getPlayableClipUrl(rawUrl, key=""){
+        const source = String(rawUrl || "").trim();
+        if(!source) return null;
+        if(!source.startsWith("data:")) return source;
+        const cacheKey = key || source;
+        if(clipPlaybackUrls.has(cacheKey)) return clipPlaybackUrls.get(cacheKey);
+        try{
+          const blob = dataUrlToBlob(source);
+          if(!blob || !blob.size) return source;
+          const objectUrl = URL.createObjectURL(blob);
+          clipPlaybackUrls.set(cacheKey, objectUrl);
+          return objectUrl;
+        }catch(_err){
+          return source;
+        }
+      }
+
+      function dataUrlToBlob(dataUrl){
+        const raw = String(dataUrl || "");
+        const commaIdx = raw.indexOf(",");
+        if(!raw.startsWith("data:") || commaIdx < 0) return null;
+        const meta = raw.slice(5, commaIdx);
+        const payload = raw.slice(commaIdx + 1);
+        const isBase64 = /;base64/i.test(meta);
+        const mime = (meta.split(";", 1)[0] || "application/octet-stream").trim() || "application/octet-stream";
+        const binary = isBase64 ? atob(payload) : decodeURIComponent(payload);
+        const bytes = new Uint8Array(binary.length);
+        for(let i = 0; i < binary.length; i += 1){
+          bytes[i] = binary.charCodeAt(i);
+        }
+        return new Blob([bytes], { type: mime });
       }
 
       function getEventClipMimeType(evt){
@@ -2131,11 +2165,8 @@
           if(selectedPreviewImg) selectedPreviewImg.src = hasImage ? payload.imgDataUrl : "";
           if(selectedPreviewVideo){
             if(hasVideo){
-              const source = document.createElement("source");
-              source.src = clipUrl;
-              source.type = getEventClipMimeType(payload.evt);
               selectedPreviewVideo.innerHTML = "";
-              selectedPreviewVideo.appendChild(source);
+              selectedPreviewVideo.src = clipUrl;
               selectedPreviewVideo.load();
               ensureClipPoster(selectedPreviewVideo, clipUrl, payload.imgDataUrl || "");
             }else{
@@ -4808,16 +4839,20 @@
           video.controls = true;
           video.preload = "metadata";
           video.playsInline = true;
-          const source = document.createElement("source");
-          source.src = clipUrl;
-          source.type = getEventClipMimeType(row.evt);
-          video.appendChild(source);
+          video.src = clipUrl;
           video.load();
           ensureClipPoster(video, clipUrl, getEventPreview(row.evt) || "");
           div.appendChild(video);
           clipsList.appendChild(div);
         }
       }
+
+      window.addEventListener("beforeunload", ()=>{
+        clipPlaybackUrls.forEach((url)=>{
+          try{ URL.revokeObjectURL(url); }catch(_err){/* no-op */}
+        });
+        clipPlaybackUrls.clear();
+      });
 
       function buildDetailsString(evt){
         const b = evt.box || {};
