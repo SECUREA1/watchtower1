@@ -181,28 +181,6 @@
       justify-self:flex-start;
       align-self:center;
     }
-    .split-with-clips{
-      display:grid;
-      grid-template-columns:minmax(0,1fr) minmax(280px, 0.48fr);
-      gap:12px;
-      align-items:start;
-    }
-    .clips-window{
-      border:1px solid var(--border);
-      border-radius:14px;
-      background:rgba(0,0,0,.2);
-      padding:10px;
-      display:grid;
-      gap:10px;
-      max-height:480px;
-      overflow:auto;
-    }
-    .clip-card{border:1px solid rgba(255,255,255,.14);border-radius:12px;padding:8px;background:rgba(255,255,255,.03)}
-    .clip-card video{width:100%;border-radius:10px;background:#000}
-    .video-tile-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
-    .clip-card-actions{display:flex;justify-content:flex-end;margin-top:8px}
-    .clip-window-toggle{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid rgba(255,255,255,.12);border-radius:999px;background:rgba(255,255,255,.04);font-size:12px;color:var(--muted)}
-    @media (max-width:1100px){.split-with-clips{grid-template-columns:1fr}}
     .storage-pill{
       display:inline-flex; align-items:center; gap:8px;
       padding:6px 10px; border-radius:999px;
@@ -1479,7 +1457,6 @@
               <div class="log-toggle" role="group" aria-label="Tracked log mode">
                 <button class="log-toggle-btn" type="button" data-log-view="objects">Objects</button>
                 <button class="log-toggle-btn" type="button" data-log-view="people">People</button>
-                <button class="log-toggle-btn" type="button" data-log-view="videos">Videos</button>
               </div>
               <div class="tracked-controls">
                 <select id="trackedSort" aria-label="Tracked sort order">
@@ -1494,17 +1471,10 @@
                 <button id="btnTrackedSearch" class="ghost" type="button">🔎 Search</button>
               </div>
               <button id="btnRefreshTracked" class="ghost" type="button">↻ Refresh</button>
-              <label class="clip-window-toggle"><input id="toggleClipWindowTracked" type="checkbox" checked /> Video clips</label>
             </div>
           </div>
           <div class="card-b">
-            <div class="split-with-clips">
-              <div class="list" id="trackedList"></div>
-              <aside class="clips-window" id="trackedClipWindow">
-                <div class="small"><b>🎞️ Person &amp; Vehicle Clips</b></div>
-                <div class="small" id="trackedClipWindowBody">No clips yet.</div>
-              </aside>
-            </div>
+            <div class="list" id="trackedList"></div>
           </div>
         </section>
 
@@ -1518,7 +1488,6 @@
               <div class="log-toggle" role="group" aria-label="Log view mode">
                 <button class="log-toggle-btn" type="button" data-log-view="objects">Objects</button>
                 <button class="log-toggle-btn" type="button" data-log-view="people">People</button>
-                <button class="log-toggle-btn" type="button" data-log-view="videos">Videos</button>
               </div>
               <div class="tracked-controls">
                 <select id="logSort" aria-label="Log sort order">
@@ -1532,31 +1501,23 @@
                 <input id="logSearch" type="text" placeholder="Search logs (object, person, event…)" aria-label="Search log list" />
                 <button id="btnLogSearch" class="ghost" type="button">🔎 Search</button>
               </div>
-              <label class="clip-window-toggle"><input id="toggleClipWindowLogs" type="checkbox" checked /> Video clips</label>
             </div>
           </div>
           <div class="card-b">
-            <div class="split-with-clips">
-              <div class="table-wrap" id="logsTableWrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th style="min-width:160px">Time</th>
-                      <th id="logHeaderPrimary" style="min-width:140px">Object</th>
-                      <th style="min-width:120px">Event</th>
-                      <th id="logHeaderSecondary" style="min-width:140px">Person</th>
-                      <th style="min-width:120px">Held</th>
-                      <th>Details</th>
-                    </tr>
-                  </thead>
-                  <tbody id="logBody"></tbody>
-                </table>
-              </div>
-              <div class="list video-tile-grid" id="logsVideoTiles" hidden></div>
-              <aside class="clips-window" id="logClipWindow">
-                <div class="small"><b>🎞️ Person &amp; Vehicle Clips</b></div>
-                <div class="small" id="logClipWindowBody">No clips yet.</div>
-              </aside>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th style="min-width:160px">Time</th>
+                    <th id="logHeaderPrimary" style="min-width:140px">Object</th>
+                    <th style="min-width:120px">Event</th>
+                    <th id="logHeaderSecondary" style="min-width:140px">Person</th>
+                    <th style="min-width:120px">Held</th>
+                    <th>Details</th>
+                  </tr>
+                </thead>
+                <tbody id="logBody"></tbody>
+              </table>
             </div>
           </div>
         </section>
@@ -1647,7 +1608,6 @@
         detectorMode: "tiny",
         trackedSort: "alpha",
         logSort: "newest",
-        showClipWindow: true,
       };
 
       // Load settings (merge defaults)
@@ -1669,52 +1629,6 @@
       let motionClips = loadJSON(LS_KEYS.motionClips, {});
       if(!motionClips || typeof motionClips !== "object") motionClips = {};
       let trackedObjects = new Set(Object.keys(objectMemory));
-
-      function inferClipMimeType(dataUrl){
-        if(typeof dataUrl !== "string") return "video/webm";
-        const m = /^data:([^;,]+)[;,]/i.exec(dataUrl);
-        return (m && m[1]) ? m[1] : "video/webm";
-      }
-
-      function ensureClipStored(evt){
-        if(!evt) return null;
-        if(evt.clipId && motionClips[evt.clipId]?.dataUrl){
-          evt.clipDataUrl = null;
-          return evt.clipId;
-        }
-        if(typeof evt.clipDataUrl !== "string" || !evt.clipDataUrl.startsWith("data:video")) return null;
-        const clipId = `clip_${evt.time || Date.now()}_${Math.random().toString(36).slice(2,8)}`;
-        motionClips[clipId] = {
-          id: clipId,
-          cam: evt.cam ?? null,
-          createdAt: evt.time || Date.now(),
-          mimeType: evt.clipMimeType || inferClipMimeType(evt.clipDataUrl),
-          dataUrl: evt.clipDataUrl,
-        };
-        evt.clipId = clipId;
-        evt.clipMimeType = motionClips[clipId].mimeType;
-        evt.clipDataUrl = null;
-        return clipId;
-      }
-
-      function normalizeClipReferences(){
-        const validClipIds = new Set(Object.keys(motionClips || {}));
-        const pruneRefs = (evt)=>{
-          if(!evt) return;
-          const storedClipId = ensureClipStored(evt);
-          if(storedClipId) validClipIds.add(storedClipId);
-          if(evt.clipId && !validClipIds.has(evt.clipId)) evt.clipId = null;
-        };
-
-        for(const events of Object.values(objectMemory || {})){
-          for(const evt of (events || [])) pruneRefs(evt);
-        }
-        for(const events of Object.values(peopleMovementMemory || {})){
-          for(const evt of (events || [])) pruneRefs(evt);
-        }
-      }
-
-      normalizeClipReferences();
 
       const tunedAlertDefaults = {
         enabled: false,
@@ -1897,14 +1811,6 @@
       const selectedPreviewVideo = el("selectedPreviewVideo");
       const selectedPlaceholder = el("selectedPlaceholder");
       const selectedMeta = el("selectedMeta");
-      const toggleClipWindowTracked = el("toggleClipWindowTracked");
-      const toggleClipWindowLogs = el("toggleClipWindowLogs");
-      const trackedClipWindow = el("trackedClipWindow");
-      const trackedClipWindowBody = el("trackedClipWindowBody");
-      const logClipWindow = el("logClipWindow");
-      const logClipWindowBody = el("logClipWindowBody");
-      const logsTableWrap = el("logsTableWrap");
-      const logsVideoTiles = el("logsVideoTiles");
       const selectedLabelInput = el("selectedLabelInput");
       const selectedLogType = el("selectedLogType");
       const btnSelectedSaveLabel = el("btnSelectedSaveLabel");
@@ -2020,43 +1926,11 @@
         return evt.imgDataUrl || evt.image || null;
       }
 
-      function getEventClipInfo(evt){
-        if(!evt) return null;
-        if(evt.clipDataUrl){
-          return {
-            url: evt.clipDataUrl,
-            mimeType: evt.clipMimeType || null,
-          };
-        }
-        if(evt.clipId && motionClips[evt.clipId]){
-          const clip = motionClips[evt.clipId];
-          return {
-            url: clip.dataUrl || null,
-            mimeType: clip.mimeType || null,
-          };
-        }
-        return null;
-      }
-
       function getEventClip(evt){
-        const clip = getEventClipInfo(evt);
-        return clip ? clip.url : null;
-      }
-
-      function applyVideoSource(videoEl, clipUrl, clipMimeType=null){
-        if(!videoEl) return;
-        videoEl.pause();
-        while(videoEl.firstChild) videoEl.removeChild(videoEl.firstChild);
-        if(!clipUrl){
-          videoEl.removeAttribute("src");
-          videoEl.load();
-          return;
-        }
-        const source = document.createElement("source");
-        source.src = clipUrl;
-        if(clipMimeType) source.type = clipMimeType;
-        videoEl.appendChild(source);
-        videoEl.load();
+        if(!evt) return null;
+        if(evt.clipDataUrl) return evt.clipDataUrl;
+        if(evt.clipId && motionClips[evt.clipId]) return motionClips[evt.clipId].dataUrl || null;
+        return null;
       }
 
       function setSelectedDetails(payload){
@@ -2080,7 +1954,6 @@
             selectedPreviewVideo.load();
           }
           if(selectedPlaceholder) selectedPlaceholder.style.display = "block";
-          renderClipWindows();
           return;
         }
 
@@ -2143,10 +2016,11 @@
           if(selectedPreviewImg) selectedPreviewImg.src = hasImage ? payload.imgDataUrl : "";
           if(selectedPreviewVideo){
             if(hasVideo){
-              const clipMimeType = payload.clipMimeType || payload.evt?.clipMimeType || getEventClipInfo(payload.evt)?.mimeType;
-              applyVideoSource(selectedPreviewVideo, clipUrl, clipMimeType);
+              selectedPreviewVideo.src = clipUrl;
             }else{
-              applyVideoSource(selectedPreviewVideo, null);
+              selectedPreviewVideo.pause();
+              selectedPreviewVideo.removeAttribute("src");
+              selectedPreviewVideo.load();
             }
           }
           if(selectedPlaceholder) selectedPlaceholder.style.display = (hasImage || hasVideo) ? "none" : "block";
@@ -2256,129 +2130,6 @@
         fillDataList(tuneHeldSuggestions, names);
       }
 
-      function setClipWindowVisibility(show){
-        settings.showClipWindow = !!show;
-        if(toggleClipWindowTracked) toggleClipWindowTracked.checked = !!show;
-        if(toggleClipWindowLogs) toggleClipWindowLogs.checked = !!show;
-        if(trackedClipWindow) trackedClipWindow.hidden = !show;
-        if(logClipWindow) logClipWindow.hidden = !show;
-      }
-
-      function collectClipEntries(){
-        const clips = [];
-        for(const [personName, events] of Object.entries(peopleMovementMemory || {})){
-          for(const evt of (events || [])){
-            const clipUrl = getEventClip(evt);
-            if(!clipUrl) continue;
-            clips.push({ type: "person", label: personName, evt, clipUrl, key: evt.objectLabel || null });
-          }
-        }
-        for(const [label, events] of Object.entries(objectMemory || {})){
-          for(const evt of (events || [])){
-            const clipUrl = getEventClip(evt);
-            if(!clipUrl) continue;
-            clips.push({ type: isVehicleLabel(label) ? "vehicle" : "object", label: getDisplayName(label), evt, clipUrl, key: label });
-          }
-        }
-        clips.sort((a,b)=> (b.evt?.time || 0) - (a.evt?.time || 0));
-        return clips.slice(0, 30);
-      }
-
-      function openClipVideo(clipUrl, title="Secure Video Clip", clipMimeType=null){
-        if(!clipUrl) return;
-        const w = window.open("", "_blank", "width=1100,height=760");
-        if(!w){ toast("Video window blocked by browser."); return; }
-        const sourceType = clipMimeType ? ` type="${escapeHtml(clipMimeType)}"` : "";
-        w.document.write(`
-          <title>${escapeHtml(title)}</title>
-          <style>
-            body{margin:0;background:#000;display:grid;place-items:center;height:100vh;font-family:ui-sans-serif,system-ui,sans-serif}
-            .wrap{width:min(96vw,1200px);display:grid;gap:8px}
-            .meta{color:#cdd6f4;font-size:14px;text-align:center}
-            video{width:100%;max-height:88vh;background:#000;border-radius:12px}
-          </style>
-          <div class="wrap">
-            <div class="meta">${escapeHtml(title)}</div>
-            <video controls autoplay playsinline>
-              <source src="${clipUrl}"${sourceType} />
-            </video>
-          </div>
-        `);
-      }
-
-      function renderVideoTiles(targetEl){
-        if(!targetEl) return;
-        const clips = collectClipEntries();
-        targetEl.innerHTML = "";
-        if(clips.length === 0){
-          targetEl.innerHTML = `<div class="item"><span class="small">No video clips in local storage yet.</span></div>`;
-          return;
-        }
-
-        for(const item of clips){
-          const card = document.createElement("div");
-          card.className = "clip-card";
-          const typeLabel = item.type.charAt(0).toUpperCase() + item.type.slice(1);
-          const clipInfo = getEventClipInfo(item.evt) || { url: item.clipUrl, mimeType: item.evt?.clipMimeType || null };
-          card.innerHTML = `
-            <div class="small"><b>${escapeHtml(typeLabel)}</b> • ${escapeHtml(item.label)}</div>
-            <div class="small">${escapeHtml(item.evt.status || "Detected")} • ${fmtTime(item.evt.time)}</div>
-            <video controls preload="metadata" playsinline></video>
-            <div class="clip-card-actions"><button type="button" class="ghost mini">⛶ Full Video</button></div>
-          `;
-          const videoEl = card.querySelector("video");
-          const previewUrl = getEventPreview(item.evt);
-          if(previewUrl) videoEl.poster = previewUrl;
-          applyVideoSource(videoEl, clipInfo.url, clipInfo.mimeType);
-          card.querySelector("button")?.addEventListener("click", ()=>openClipVideo(clipInfo.url, `${typeLabel}: ${item.label}`, clipInfo.mimeType));
-          card.addEventListener("click", (event)=>{
-            if(event.target.closest("button")) return;
-            setSelectedDetails({
-              type: item.type,
-              label: item.key || item.label,
-              evt: item.evt,
-              clipDataUrl: clipInfo.url,
-              clipMimeType: clipInfo.mimeType,
-              imgDataUrl: getEventPreview(item.evt)
-            });
-          });
-          targetEl.appendChild(card);
-        }
-      }
-
-      function renderClipWindowBody(targetEl){
-        if(!targetEl) return;
-        const clips = collectClipEntries();
-        if(clips.length === 0){
-          targetEl.innerHTML = "No people/object/video clips in local storage yet.";
-          return;
-        }
-        targetEl.innerHTML = "";
-        for(const item of clips){
-          const card = document.createElement("div");
-          card.className = "clip-card";
-          const typeLabel = item.type.charAt(0).toUpperCase() + item.type.slice(1);
-          const clipInfo = getEventClipInfo(item.evt) || { url: item.clipUrl, mimeType: item.evt?.clipMimeType || null };
-          card.innerHTML = `
-            <div class="small"><b>${escapeHtml(typeLabel)}</b> • ${escapeHtml(item.label)}</div>
-            <div class="small">${escapeHtml(item.evt.status || "Detected")} • ${fmtTime(item.evt.time)}</div>
-            <video controls preload="metadata" playsinline></video>
-            <div class="clip-card-actions"><button type="button" class="ghost mini">⛶ Full Video</button></div>
-          `;
-          const videoEl = card.querySelector("video");
-          const previewUrl = getEventPreview(item.evt);
-          if(previewUrl) videoEl.poster = previewUrl;
-          applyVideoSource(videoEl, clipInfo.url, clipInfo.mimeType);
-          card.querySelector("button")?.addEventListener("click", ()=>openClipVideo(clipInfo.url, `${typeLabel}: ${item.label}`, clipInfo.mimeType));
-          targetEl.appendChild(card);
-        }
-      }
-
-      function renderClipWindows(){
-        renderClipWindowBody(trackedClipWindowBody);
-        renderClipWindowBody(logClipWindowBody);
-      }
-
       /***********************
        * UI wiring
        ***********************/
@@ -2401,19 +2152,6 @@
           }
         }
       });
-
-      if(toggleClipWindowTracked){
-        toggleClipWindowTracked.addEventListener("change", (e)=>{
-          setClipWindowVisibility(!!e.target.checked);
-          saveSettings();
-        });
-      }
-      if(toggleClipWindowLogs){
-        toggleClipWindowLogs.addEventListener("change", (e)=>{
-          setClipWindowVisibility(!!e.target.checked);
-          saveSettings();
-        });
-      }
 
       el("chkRecognition").addEventListener("change", async (e)=>{
         recognitionMode = !!e.target.checked;
@@ -3655,17 +3393,8 @@
       function startClipRecorder(slotIdx, stream){
         const state = camStates.get(slotIdx);
         if(!state || !stream || typeof MediaRecorder === "undefined") return;
-        const mimeCandidates = [
-          "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
-          "video/mp4",
-          "video/webm;codecs=vp9,opus",
-          "video/webm;codecs=vp8,opus",
-          "video/webm;codecs=vp9",
-          "video/webm;codecs=vp8",
-          "video/webm"
-        ];
+        const mimeCandidates = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
         const mimeType = mimeCandidates.find(m => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || "";
-        addCvLog(`Camera ${slotIdx} clip recorder type: ${mimeType || "browser-default"}`, "info");
         try{
           const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
           recorder.ondataavailable = (event)=>{
@@ -3986,7 +3715,7 @@
         }
 
         // 5) Track people + log movement (known only)
-        updatePeopleTracks(state, people, ts, v);
+        updatePeopleTracks(state, people, ts, v.videoWidth || 1, v.videoHeight || 1);
 
         // 6) Track objects + log
         updateTracksFromDetections(state, nonPersons, people, ts, v);
@@ -4176,7 +3905,7 @@
             if(moved && canLogMove){
               prev.lastLogAt = ts;
               recordPersonEvent(name, "Moved", person.box, person.score, state.camIdx);
-            }else if(!moved && canLogMove){
+            }else if(!movedMajor && (ts - prev.lastLogAt) >= IDLE_LOG_COOLDOWN_MS){
               prev.lastLogAt = ts;
               recordPersonEvent(name, "Idle", person.box, person.score, state.camIdx);
             }
@@ -4481,9 +4210,36 @@
         }
       }
 
-      function refreshClipViews(){
-        renderClipWindows();
-        renderClipWindow();
+      function updateCameraLiveLogFromDemo(camIdx, draw){
+        if(camIdx == null || Number.isNaN(camIdx) || !draw) return;
+        const itemEl = el(`camLogItem_${camIdx}`);
+        const itemXyzEl = el(`camLogItemXYZ_${camIdx}`);
+        const personEl = el(`camLogPerson_${camIdx}`);
+        const personXyzEl = el(`camLogPersonXYZ_${camIdx}`);
+        if(!itemEl || !personEl) return;
+
+        const boxes = draw.boxes || [];
+        const bestItem = pickLargest(boxes.filter(b=>b.type === "object"), (b)=>b);
+        const bestPerson = pickLargest(boxes.filter(b=>b.type === "person"), (b)=>b);
+
+        if(bestItem){
+          itemEl.textContent = getDisplayName(bestItem.cls || "—");
+          if(itemXyzEl) itemXyzEl.textContent = formatXYZ(bestItem);
+        }else{
+          itemEl.textContent = "—";
+          if(itemXyzEl) itemXyzEl.textContent = "—";
+        }
+
+        if(bestPerson){
+          personEl.textContent = bestPerson.personName || "Unknown";
+          if(personXyzEl) personXyzEl.textContent = formatXYZ(bestPerson);
+        }else if(bestItem && bestItem.personName){
+          personEl.textContent = bestItem.personName;
+          if(personXyzEl) personXyzEl.textContent = "—";
+        }else{
+          personEl.textContent = "No one";
+          if(personXyzEl) personXyzEl.textContent = "—";
+        }
       }
 
       function refreshCameraLogs(){
@@ -4492,7 +4248,7 @@
           resetCameraLog(i);
         }
 
-        for(const [label, events] of Object.entries(objectMemory || {})){
+        for(const [label, events] of Object.entries(objectMemory)){
           for(const evt of (events || [])){
             if(!evt || evt.cam == null) continue;
             const idx = evt.cam;
@@ -4526,7 +4282,7 @@
           clipId: null,
           clipDataUrl: null,
           clipMimeType: null,
-          sourceLabel: opts.sourceLabel || null,
+          sourceLabel: opts.sourceLabel || null
         };
 
         if(!objectMemory[label]) objectMemory[label] = [];
@@ -4542,7 +4298,7 @@
               setSelectedDetails(Object.assign({}, selectedLog, { evt, clipDataUrl }));
             }
             renderLogTable();
-            refreshClipViews();
+            renderClipWindow();
           });
         }
 
@@ -4551,8 +4307,8 @@
         renderTracked();
         updateObjectDropdown();
         updateCameraLog(cam, label, evt);
+        renderClipWindow();
         evaluateTunedAlertForObject(label, evt);
-        refreshClipViews();
       }
 
       function recordPersonEvent(personName, status, box, score=null, cam=null, opts={}){
@@ -4569,15 +4325,13 @@
           clipId: null,
           clipDataUrl: null,
           clipMimeType: null,
-          objectLabel: opts.objectLabel || null,
-          held_duration: opts.held_duration ?? null,
         };
 
         if(!peopleMovementMemory[personName]) peopleMovementMemory[personName] = [];
         peopleMovementMemory[personName].push(evt);
         evaluateTunedAlertFromPerson(personName, evt);
 
-        if(cam != null && ["Live","Seen","Moved","Idle"].includes(status)){
+        if(cam != null && (status === "Live" || status === "Seen" || status === "Moved" || status === "Idle")){
           queueMotionClip(cam, ({ clipId, clipDataUrl, clipMimeType })=>{
             evt.clipId = clipId;
             evt.clipDataUrl = clipDataUrl;
@@ -4587,7 +4341,7 @@
             }
             renderLogTable();
             renderTracked();
-            refreshClipViews();
+            renderClipWindow();
           });
         }
 
@@ -4596,7 +4350,7 @@
           renderLogTable();
         }
         renderTracked();
-        refreshClipViews();
+        renderClipWindow();
       }
 
       /***********************
@@ -4788,7 +4542,7 @@
        * Logs: minimized/expand buttons
        ***********************/
       function setLogViewMode(mode, persist=true){
-        logViewMode = (mode === "people" || mode === "videos") ? mode : "objects";
+        logViewMode = (mode === "people") ? "people" : "objects";
         if(persist){
           settings.logViewMode = logViewMode;
           saveSettings();
@@ -4801,31 +4555,23 @@
         if(logHeaderPrimary) logHeaderPrimary.textContent = logViewMode === "people" ? "Person" : "Object";
         if(logHeaderSecondary) logHeaderSecondary.textContent = logViewMode === "people" ? "Object" : "Person";
         if(logSubtitle){
-          logSubtitle.textContent = logViewMode === "videos"
-            ? "Local secure video clips (people, objects, and vehicles)"
-            : logViewMode === "people"
+          logSubtitle.textContent = logViewMode === "people"
             ? "Time • Person • Event • Object • Held Duration • Details"
             : "Time • Object • Event • Person • Held Duration • Details";
         }
         if(logTitle){
-          logTitle.innerHTML = logViewMode === "videos"
-            ? '<span aria-hidden="true">🎞️</span> Secure Video Logs'
-            : logViewMode === "people"
+          logTitle.innerHTML = logViewMode === "people"
             ? '<span aria-hidden="true">🧾</span> People Interaction Logs'
             : '<span aria-hidden="true">🧾</span> Object Interaction Logs';
         }
         if(mobileLogTrackedBtn){
           mobileLogTrackedBtn.textContent = logViewMode === "people"
             ? "Tracked People"
-            : logViewMode === "videos"
-            ? "Video Tiles"
             : "Tracked Objects";
         }
         if(mobileLogLogsBtn){
           mobileLogLogsBtn.textContent = logViewMode === "people"
             ? "People Logs"
-            : logViewMode === "videos"
-            ? "Video Logs"
             : "Interaction Logs";
         }
         if(mobileLogClipsBtn){
@@ -4834,29 +4580,20 @@
             : "Vehicle Clips";
         }
         if(trackedSubtitle){
-          trackedSubtitle.textContent = logViewMode === "videos"
-            ? "Video clips from local secure storage"
-            : logViewMode === "people"
+          trackedSubtitle.textContent = logViewMode === "people"
             ? "People seen in logs (click to load history)"
             : "Objects seen in logs (click to load history)";
         }
         if(trackedSearch){
-          trackedSearch.placeholder = logViewMode === "videos"
-            ? "Search videos by label or event..."
-            : logViewMode === "people"
+          trackedSearch.placeholder = logViewMode === "people"
             ? "Search tracked people..."
             : "Search tracked objects...";
         }
         if(logSearch){
-          logSearch.placeholder = logViewMode === "videos"
-            ? "Search video logs (label, event...)"
-            : logViewMode === "people"
+          logSearch.placeholder = logViewMode === "people"
             ? "Search logs (person, object, event…)"
-            : "Search logs (object, person, event...)";
+            : "Search logs (object, person, event…)";
         }
-
-        if(logsTableWrap) logsTableWrap.hidden = logViewMode === "videos";
-        if(logsVideoTiles) logsVideoTiles.hidden = logViewMode !== "videos";
 
         renderLogTable();
         renderTracked();
@@ -4891,13 +4628,14 @@
           }
         }else{
           for(const [label, events] of Object.entries(objectMemory || {})){
+            if(!isVehicleLabel(label)) continue;
             for(const evt of (events || [])){
               if(!(evt.clipId || evt.clipDataUrl)) continue;
               rows.push({
                 key: label,
                 title: getDisplayName(label),
                 evt,
-                kind: isVehicleLabel(label) ? "vehicle" : "object"
+                kind: "vehicle"
               });
             }
           }
@@ -4943,7 +4681,7 @@
       }
 
       function appendLogRow(label, evt){
-        if(logViewMode === "people" || logViewMode === "videos" || logSearch.value.trim()){
+        if(logViewMode === "people" || logSearch.value.trim()){
           renderLogTable();
           return;
         }
@@ -5017,11 +4755,6 @@
       }
 
       function renderLogTable(){
-        if(logViewMode === "videos"){
-          logBody.innerHTML = "";
-          renderVideoTiles(logsVideoTiles);
-          return;
-        }
         const q = logSearch ? logSearch.value.trim().toLowerCase() : "";
         const sortMode = logSort ? logSort.value : "newest";
         const rows = [];
@@ -5200,11 +4933,6 @@
         if(!trackedList) return;
         const query = (trackedSearch && trackedSearch.value || "").trim().toLowerCase();
         const sortMode = trackedSort ? trackedSort.value : "alpha";
-        if(logViewMode === "videos"){
-          renderVideoTiles(trackedList);
-          renderClipWindows();
-          return;
-        }
         if(logViewMode === "people"){
           const peopleMemory = buildPersonMemory();
           let people = Object.keys(peopleMemory);
@@ -5237,7 +4965,6 @@
           trackedList.innerHTML = "";
           if(peopleMeta.length === 0){
             trackedList.innerHTML = `<div class="item"><span class="small">No tracked people yet.</span></div>`;
-            renderClipWindows();
             return;
           }
 
@@ -5274,7 +5001,6 @@
             });
             trackedList.appendChild(div);
           }
-          renderClipWindows();
           return;
         }
 
@@ -5315,7 +5041,6 @@
         trackedList.innerHTML = "";
         if(trackedMeta.length === 0){
           trackedList.innerHTML = `<div class="item"><span class="small">No tracked objects yet.</span></div>`;
-          renderClipWindows();
           return;
         }
 
@@ -5351,7 +5076,6 @@
           });
           trackedList.appendChild(div);
         }
-        renderClipWindows();
       }
 
       /***********************
@@ -5855,8 +5579,6 @@
       renderUnknownFace();
       applyModeBadges();
       setRecUI(recognitionMode);
-      setClipWindowVisibility(settings.showClipWindow !== false);
-      renderClipWindows();
 
       // If user starts in Live + Recognition, preload models
       (async ()=>{
