@@ -3509,6 +3509,7 @@
           fps: 0,
           clipChunks: [],
           clipRecorder: null,
+          clipFlushTimer: null,
           clipRequests: [],
           clipLastTriggerAt: 0,
         };
@@ -3520,6 +3521,16 @@
         const mimeType = pickClipMimeType();
         try{
           const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+          recorder.onerror = (event)=>{
+            const msg = event?.error?.message || "unknown recorder error";
+            addCvLog(`Clip recorder error on Camera ${slotIdx}: ${msg}`, "warn");
+          };
+          recorder.onstop = ()=>{
+            if(state.clipFlushTimer){
+              clearInterval(state.clipFlushTimer);
+              state.clipFlushTimer = null;
+            }
+          };
           recorder.ondataavailable = (event)=>{
             if(!event.data || !event.data.size) return;
             const ts = Date.now();
@@ -3529,6 +3540,10 @@
             processClipRequests(state, ts, event.data.type || recorder.mimeType || mimeType || "video/webm");
           };
           recorder.start(CLIP_TIMESLICE_MS);
+          state.clipFlushTimer = setInterval(()=>{
+            if(!state.clipRecorder || state.clipRecorder.state !== "recording") return;
+            try{ state.clipRecorder.requestData(); }catch(_e){}
+          }, CLIP_TIMESLICE_MS);
           state.clipRecorder = recorder;
         }catch(err){
           addCvLog(`Clip recorder unavailable on Camera ${slotIdx}: ${(err && err.message) || err}`, "warn");
@@ -3537,6 +3552,10 @@
 
       function stopClipRecorder(state){
         if(!state || !state.clipRecorder) return;
+        if(state.clipFlushTimer){
+          clearInterval(state.clipFlushTimer);
+          state.clipFlushTimer = null;
+        }
         try{ state.clipRecorder.stop(); }catch(_e){}
         state.clipRecorder = null;
         state.clipChunks = [];
