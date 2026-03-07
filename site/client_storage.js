@@ -420,8 +420,9 @@ async function handleSaveLogs() {
 
     const result = await response.json();
     const savedImages = Number(result.saved_images || 0);
-    setStorageFeedback(`Logs uploaded (${result.count || logs.length}). Saved ${savedImages} image(s).`, 'good');
-    alert(`Logs uploaded successfully. Saved ${savedImages} image(s).`);
+    const savedClips = Number(result.saved_clips || 0);
+    setStorageFeedback(`Logs uploaded (${result.count || logs.length}). Saved ${savedImages} image(s), ${savedClips} clip(s).`, 'good');
+    alert(`Logs uploaded successfully. Saved ${savedImages} image(s), ${savedClips} clip(s).`);
   } catch (error) {
     setStorageFeedback(`Log upload failed: ${error.message}`, 'warn');
     alert(`Log upload failed: ${error.message}`);

@@ -58,6 +58,7 @@ SERVE_ROOTS = [root.resolve() for root in SERVE_ROOTS]
 MAX_UPLOAD_BYTES = int(
     os.getenv("MAX_UPLOAD_BYTES", os.getenv("MAX_IMAGE_SIZE_BYTES", str(2 * 1024 * 1024)))
 )
+MAX_LOG_CLIP_BYTES = int(os.getenv("MAX_LOG_CLIP_BYTES", str(12 * 1024 * 1024)))
 ALLOWED_MIME = {"image/jpeg", "image/png", "image/webp"}
 
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
@@ -356,11 +357,11 @@ def b64_decode_bytes(data: str) -> bytes:
     return base64.b64decode(data.encode("utf-8"))
 
 
-def decode_data_url_image(data_url: str) -> tuple[bytes, str]:
+def decode_data_url_media(data_url: str) -> tuple[bytes, str, str]:
     if not data_url or not isinstance(data_url, str):
         raise ValueError("No data URL provided")
     if not data_url.startswith("data:"):
-        raise ValueError("Unsupported image payload")
+        raise ValueError("Unsupported media payload")
     header, _, encoded = data_url.partition(",")
     if not header or not encoded or ";base64" not in header:
         raise ValueError("Malformed data URL")
@@ -370,36 +371,63 @@ def decode_data_url_image(data_url: str) -> tuple[bytes, str]:
         "image/jpg": "jpg",
         "image/png": "png",
         "image/webp": "webp",
+        "video/webm": "webm",
+        "video/mp4": "mp4",
+        "video/ogg": "ogv",
+        "video/quicktime": "mov",
     }.get(mime_type)
     if not ext:
-        raise ValueError(f"Unsupported image mime type: {mime_type}")
-    return base64.b64decode(encoded), ext
+        raise ValueError(f"Unsupported media mime type: {mime_type}")
+    return base64.b64decode(encoded), ext, mime_type
 
 
-def persist_log_image(entry: dict, date_key: str) -> Optional[str]:
+def persist_log_media(entry: dict, date_key: str) -> tuple[Optional[str], Optional[str]]:
     image_value = None
     for key in ("imgDataUrl", "image", "image_data_url", "snapshot"):
         value = entry.get(key)
         if isinstance(value, str) and value.startswith("data:image/"):
             image_value = value
             break
-    if not image_value:
-        return None
 
-    image_bytes, ext = decode_data_url_image(image_value)
-    if len(image_bytes) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="Log image exceeds size limit.")
+    clip_value = None
+    for key in ("clipDataUrl", "clip_data_url", "clip"):
+        value = entry.get(key)
+        if isinstance(value, str) and value.startswith("data:video/"):
+            clip_value = value
+            break
 
     date_dir = LOG_IMAGES_DIR / date_key
     date_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"{int(time.time() * 1000)}-{uuid4().hex[:8]}.{ext}"
-    image_path = date_dir / filename
-    image_path.write_bytes(image_bytes)
-    try:
-        image_path.chmod(0o600)
-    except PermissionError:
-        pass
-    return str(image_path.relative_to(DATA_DIR))
+
+    image_rel_path: Optional[str] = None
+    if image_value:
+        image_bytes, image_ext, _ = decode_data_url_media(image_value)
+        if len(image_bytes) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="Log image exceeds size limit.")
+        image_name = f"{int(time.time() * 1000)}-{uuid4().hex[:8]}.{image_ext}"
+        image_path = date_dir / image_name
+        image_path.write_bytes(image_bytes)
+        try:
+            image_path.chmod(0o600)
+        except PermissionError:
+            pass
+        image_rel_path = str(image_path.relative_to(DATA_DIR))
+
+    clip_rel_path: Optional[str] = None
+    if clip_value:
+        clip_bytes, clip_ext, _ = decode_data_url_media(clip_value)
+        if len(clip_bytes) > MAX_LOG_CLIP_BYTES:
+            raise HTTPException(status_code=413, detail="Log clip exceeds size limit.")
+        clip_name = f"{int(time.time() * 1000)}-{uuid4().hex[:8]}.{clip_ext}"
+        clip_path = date_dir / clip_name
+        clip_path.write_bytes(clip_bytes)
+        try:
+            clip_path.chmod(0o600)
+        except PermissionError:
+            pass
+        clip_rel_path = str(clip_path.relative_to(DATA_DIR))
+
+    return image_rel_path, clip_rel_path
 
 # -------------------------------------------------------------------------
 # Auth & validation helpers
@@ -1258,20 +1286,25 @@ async def add_logs(payload: LogsPayload, request: Request):
     date_key = datetime.utcnow().strftime("%Y-%m-%d")
     log_path = LOGS_DIR / f"{date_key}.jsonl"
     saved_images = 0
+    saved_clips = 0
     with log_path.open("a", encoding="utf-8") as handle:
         for entry in payload.logs:
             normalized = dict(entry)
             normalized["source_device_id"] = payload.source_device_id
             normalized["captured_at"] = payload.captured_at or datetime.utcnow().isoformat()
             try:
-                image_path = persist_log_image(normalized, date_key)
+                image_path, clip_path = persist_log_media(normalized, date_key)
             except ValueError as exc:
-                logger.warning("Skipping invalid log image payload: %s", exc)
+                logger.warning("Skipping invalid log media payload: %s", exc)
                 image_path = None
+                clip_path = None
             if image_path:
                 normalized["image_path"] = image_path
                 saved_images += 1
-            for field in ("imgDataUrl", "image", "image_data_url", "snapshot"):
+            if clip_path:
+                normalized["clip_path"] = clip_path
+                saved_clips += 1
+            for field in ("imgDataUrl", "image", "image_data_url", "snapshot", "clipDataUrl", "clip_data_url", "clip", "clipBase64", "clip_base64"):
                 if field in normalized:
                     normalized.pop(field, None)
             handle.write(json.dumps(normalized) + "\n")
@@ -1279,8 +1312,25 @@ async def add_logs(payload: LogsPayload, request: Request):
         "ok": True,
         "count": len(payload.logs),
         "saved_images": saved_images,
+        "saved_clips": saved_clips,
         "path": str(log_path.relative_to(DATA_DIR)),
     }
+
+
+@app.get("/api/logs/media/{media_path:path}")
+async def get_log_media(media_path: str, request: Request):
+    if not ALLOW_PUBLIC_INGEST:
+        require_admin(request)
+    safe_relative = Path(media_path)
+    candidate = (DATA_DIR / safe_relative).resolve()
+    try:
+        candidate.relative_to(LOG_IMAGES_DIR)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Log media not found.")
+    if not candidate.exists() or not candidate.is_file():
+        raise HTTPException(status_code=404, detail="Log media not found.")
+    media_type, _ = mimetypes.guess_type(str(candidate))
+    return FileResponse(str(candidate), media_type=media_type)
 
 @app.get("/healthz")
 async def healthz():
