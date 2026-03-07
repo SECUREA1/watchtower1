@@ -1929,14 +1929,30 @@
       function getEventClip(evt){
         if(!evt) return null;
         if(evt.clipDataUrl) return evt.clipDataUrl;
-        if(evt.clipId && motionClips[evt.clipId]) return motionClips[evt.clipId].dataUrl || null;
+        if(evt.clipBase64){
+          const mime = getEventClipMimeType(evt);
+          return `data:${mime};base64,${evt.clipBase64}`;
+        }
+        if(evt.clipId && motionClips[evt.clipId]){
+          const clip = motionClips[evt.clipId];
+          if(clip.dataUrl) return clip.dataUrl;
+          if(clip.base64){
+            const mime = (clip.mimeType && String(clip.mimeType).trim()) || "video/webm";
+            return `data:${mime};base64,${clip.base64}`;
+          }
+        }
         return null;
       }
 
       function getEventClipMimeType(evt){
         if(!evt) return "video/webm";
+        const clipUrl = evt.clipDataUrl
+          || (evt.clipId && motionClips[evt.clipId] ? motionClips[evt.clipId].dataUrl : "")
+          || "";
+        const fromDataUrl = parseMimeFromDataUrl(clipUrl);
         const raw = evt.clipMimeType
           || (evt.clipId && motionClips[evt.clipId] ? motionClips[evt.clipId].mimeType : "")
+          || fromDataUrl
           || "";
         const mime = String(raw).trim().toLowerCase();
         if(!mime) return "video/webm";
@@ -1944,6 +1960,14 @@
         const base = mime.split(";", 1)[0].trim();
         if(isMimePlayable(base)) return base;
         return "video/webm";
+      }
+
+      function parseMimeFromDataUrl(dataUrl){
+        const raw = String(dataUrl || "").trim();
+        if(!raw.startsWith("data:")) return "";
+        const meta = raw.slice(5).split(",", 1)[0] || "";
+        const mime = meta.split(";", 1)[0].trim();
+        return mime || "";
       }
 
       function isMimePlayable(mime){
@@ -3492,8 +3516,17 @@
           const chunks = state.clipChunks.filter(ch => ch && ch.ts >= startAt && ch.ts <= endAt);
           if(!chunks.length) continue;
           const blob = new Blob(chunks.map(ch => ch.blob), { type: mimeType || "video/webm" });
+          let base64 = null;
           let dataUrl = null;
-          try{ dataUrl = await blobToDataURL(blob); }catch(_err){ dataUrl = null; }
+          try{
+            const buffer = await blob.arrayBuffer();
+            base64 = arrayBufferToBase64(buffer);
+            const safeMime = (blob.type && String(blob.type).trim()) || mimeType || "video/webm";
+            dataUrl = `data:${safeMime};base64,${base64}`;
+          }catch(_err){
+            base64 = null;
+            dataUrl = null;
+          }
           if(!dataUrl) continue;
           const clipId = `clip_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
           motionClips[clipId] = {
@@ -3501,11 +3534,17 @@
             cam: state.camIdx,
             createdAt: Date.now(),
             mimeType: blob.type || mimeType || "video/webm",
+            base64,
             dataUrl,
           };
           trimMotionClips(state.camIdx);
           if(typeof req.attachToEvent === "function"){
-            req.attachToEvent({ clipId, clipDataUrl: dataUrl, clipMimeType: motionClips[clipId].mimeType });
+            req.attachToEvent({
+              clipId,
+              clipDataUrl: dataUrl,
+              clipBase64: base64,
+              clipMimeType: motionClips[clipId].mimeType
+            });
           }
           scheduleSaveAll();
         }
@@ -4328,6 +4367,7 @@
           imgDataUrl: opts.imgDataUrl || null,
           clipId: null,
           clipDataUrl: null,
+          clipBase64: null,
           clipMimeType: null,
           sourceLabel: opts.sourceLabel || null
         };
@@ -4337,9 +4377,10 @@
         trackedObjects.add(label);
 
         if(cam != null && isVehicleLabel(label)){
-          queueMotionClip(cam, ({ clipId, clipDataUrl, clipMimeType })=>{
+          queueMotionClip(cam, ({ clipId, clipDataUrl, clipBase64, clipMimeType })=>{
             evt.clipId = clipId;
             evt.clipDataUrl = clipDataUrl;
+            evt.clipBase64 = clipBase64 || null;
             evt.clipMimeType = clipMimeType;
             if(selectedLog && selectedLog.evt === evt){
               setSelectedDetails(Object.assign({}, selectedLog, { evt, clipDataUrl }));
@@ -4371,6 +4412,7 @@
           imgDataUrl: opts.imgDataUrl || null,
           clipId: null,
           clipDataUrl: null,
+          clipBase64: null,
           clipMimeType: null,
         };
 
@@ -4379,9 +4421,10 @@
         evaluateTunedAlertFromPerson(personName, evt);
 
         if(cam != null && (status === "Live" || status === "Seen" || status === "Moved" || status === "Idle")){
-          queueMotionClip(cam, ({ clipId, clipDataUrl, clipMimeType })=>{
+          queueMotionClip(cam, ({ clipId, clipDataUrl, clipBase64, clipMimeType })=>{
             evt.clipId = clipId;
             evt.clipDataUrl = clipDataUrl;
+            evt.clipBase64 = clipBase64 || null;
             evt.clipMimeType = clipMimeType;
             if(selectedLog && selectedLog.evt === evt){
               setSelectedDetails(Object.assign({}, selectedLog, { evt, clipDataUrl }));
@@ -5515,13 +5558,14 @@
         ctx.closePath();
       }
 
-      function blobToDataURL(blob){
-        return new Promise((resolve, reject)=>{
-          const reader = new FileReader();
-          reader.onload = ()=>resolve(reader.result);
-          reader.onerror = ()=>reject(reader.error || new Error("FileReader failed"));
-          reader.readAsDataURL(blob);
-        });
+      function arrayBufferToBase64(buffer){
+        const bytes = new Uint8Array(buffer);
+        const chunk = 0x8000;
+        let binary = "";
+        for(let i=0;i<bytes.length;i+=chunk){
+          binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+        }
+        return btoa(binary);
       }
 
       function escapeHtml(s){
