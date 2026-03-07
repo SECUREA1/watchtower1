@@ -197,8 +197,6 @@
        - QR image via https://api.qrserver.com so QR always shows on desktop
     */
 
-    const SPACES_STORAGE_KEY = 'watchtower.spaces.v2';
-
     let SPACES = [
       {
         id: genId(),
@@ -260,32 +258,6 @@
     let currentModalIndex = null;
     let editIndex = null;
 
-    function getVideoLabel(space){
-      return (space.videoLabel || '').trim() || 'Unknown Face';
-    }
-
-    function getVideoDescription(space){
-      return (space.videoDescription || '').trim() || 'No description provided';
-    }
-
-    function saveSpaces(){
-      try { localStorage.setItem(SPACES_STORAGE_KEY, JSON.stringify(SPACES)); }
-      catch(err){ console.warn('Could not persist spaces', err); }
-    }
-
-    function loadSpaces(){
-      try {
-        const raw = localStorage.getItem(SPACES_STORAGE_KEY);
-        if(!raw) return;
-        const parsed = JSON.parse(raw);
-        if(Array.isArray(parsed) && parsed.length){
-          SPACES = parsed;
-        }
-      } catch(err){
-        console.warn('Could not load saved spaces', err);
-      }
-    }
-
     function renderSpaces(){
       spacesGrid.innerHTML = '';
       SPACES.forEach((s, idx) => {
@@ -299,10 +271,6 @@
           ${thumbHtml}
           <div class="space-title">${escapeHtml(s.title)}</div>
           <div class="space-desc">${escapeHtml(s.description)}</div>
-          <div class="space-desc">Video label: <b style="color:#f5c65a">${escapeHtml(getVideoLabel(s))}</b></div>
-          <div class="space-desc">Video note: ${escapeHtml(getVideoDescription(s))}</div>
-          <div class="space-desc">Captured: ${escapeHtml(s.videoCapturedAt || '—')}</div>
-          <div class="space-desc">Video type: ${escapeHtml(s.videoMimeType || '—')}</div>
           <div class="meta-row">
             <div class="pill">${capitalize(s.category)}</div>
             <div class="pill">${s.securityLevel}</div>
@@ -341,7 +309,7 @@
       modalInfo.textContent = `Last updated: ${sp.lastUpdated}`;
       modalDevices.innerHTML = `Devices: ${escapeHtml(sp.devices.join(', '))}`;
 
-      modelWrap.innerHTML = getSpaceLiveSceneHTML({ video: sp.video, videoMimeType: sp.videoMimeType, glb: sp.glb, audio: sp.audio, image: sp.thumb });
+      modelWrap.innerHTML = getSpaceLiveSceneHTML({ video: sp.video, glb: sp.glb, audio: sp.audio, image: sp.thumb });
 
       arMessage.textContent = '';
       qrCodeBox.innerHTML = '';
@@ -396,11 +364,10 @@
     modalClose.onclick = closeModal;
     modalBG.onclick = closeModal;
 
-    function getSpaceLiveSceneHTML({ video, videoMimeType, glb, audio, image }){
+    function getSpaceLiveSceneHTML({ video, glb, audio, image }){
       let bg = '';
       if (video) {
-        const sourceType = videoMimeType ? ` type="${escapeHtml(videoMimeType)}"` : '';
-        bg = `<video autoplay muted loop playsinline style="position:absolute;width:100%;height:100%;object-fit:cover;z-index:1;pointer-events:none;"><source src="${escapeHtml(video)}"${sourceType}></video>`;
+        bg = `<video src="${escapeHtml(video)}" autoplay muted loop playsinline style="position:absolute;width:100%;height:100%;object-fit:cover;z-index:1;pointer-events:none;"></video>`;
       } else if (image) {
         bg = `<img src="${escapeHtml(image)}" style="position:absolute;width:100%;height:100%;object-fit:cover;z-index:1;pointer-events:none;" />`;
       }
@@ -429,47 +396,6 @@
       }).join('');
     }
 
-    function fileToDataURL(file){
-      return new Promise((resolve, reject)=>{
-        const reader = new FileReader();
-        reader.onload = ()=>resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-    }
-
-    function getVideoSnapshotDataUrl(file){
-      return new Promise((resolve)=>{
-        const videoEl = document.createElement('video');
-        videoEl.muted = true;
-        videoEl.preload = 'metadata';
-        videoEl.playsInline = true;
-        const blobUrl = URL.createObjectURL(file);
-        videoEl.src = blobUrl;
-
-        const finish = (snapshot)=>{
-          URL.revokeObjectURL(blobUrl);
-          resolve(snapshot);
-        };
-
-        videoEl.addEventListener('loadeddata', ()=>{
-          try {
-            const canvas = document.createElement('canvas');
-            canvas.width = videoEl.videoWidth || 640;
-            canvas.height = videoEl.videoHeight || 360;
-            const g = canvas.getContext('2d');
-            g.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-            finish(canvas.toDataURL('image/jpeg', 0.82));
-          } catch(err){
-            console.warn('Failed to build snapshot', err);
-            finish('');
-          }
-        }, { once: true });
-
-        videoEl.addEventListener('error', ()=>finish(''), { once: true });
-      });
-    }
-
     function updateSpacePreview(){
       const videoFile = spaceVideo.files[0];
       const glbFile = spaceGLB.files[0];
@@ -477,7 +403,7 @@
       const videoUrl = videoFile ? URL.createObjectURL(videoFile) : null;
       const glbUrl = glbFile ? URL.createObjectURL(glbFile) : null;
       const imgUrl = imgFile ? URL.createObjectURL(imgFile) : null;
-      spacePreview.innerHTML = getSpaceLiveSceneHTML({ video: videoUrl, videoMimeType: videoFile?.type || '', glb: glbUrl, audio: null, image: imgUrl });
+      spacePreview.innerHTML = getSpaceLiveSceneHTML({ video: videoUrl, glb: glbUrl, audio: null, image: imgUrl });
       setTimeout(()=> {
         const mv = spacePreview.querySelector('model-viewer');
         if(mv) try{ mv.updateFraming && mv.updateFraming(); }catch(e){}
@@ -502,7 +428,7 @@
       renderAssetShelf();
     }
 
-    async function addSpace(){
+    function addSpace(){
       const title = spaceTitle.value.trim();
       if(!title){ uploadStatus.textContent = "Please enter a title."; return; }
       const desc = spaceDesc.value.trim();
@@ -516,13 +442,9 @@
       if(!imgFile && !glbFile && !vidFile){ uploadStatus.textContent = "Please upload a thumbnail or a model/video."; return; }
       uploadStatus.textContent = "Adding space (demo)...";
 
-      const thumb = imgFile ? await fileToDataURL(imgFile) : (vidFile ? await getVideoSnapshotDataUrl(vidFile) : "https://dummyimage.com/224x126/241309/f5c65a.png&text=Watchtower+Space");
-      const glbUrl = glbFile ? await fileToDataURL(glbFile) : "";
-      const videoUrl = vidFile ? await fileToDataURL(vidFile) : "";
-      const videoMimeType = vidFile?.type || '';
-      if(videoMimeType){
-        console.info('[spaces] supported video type:', videoMimeType);
-      }
+      const thumb = imgFile ? URL.createObjectURL(imgFile) : (vidFile ? URL.createObjectURL(vidFile) : "https://dummyimage.com/224x126/241309/f5c65a.png&text=Watchtower+Space");
+      const glbUrl = glbFile ? URL.createObjectURL(glbFile) : "";
+      const videoUrl = vidFile ? URL.createObjectURL(vidFile) : "";
 
       setTimeout(()=> {
         SPACES.unshift({
@@ -536,20 +458,15 @@
           thumb,
           glb: glbUrl,
           video: videoUrl,
-          audio: "",
-          videoMimeType,
-          videoCapturedAt: new Date().toLocaleString(),
-          videoLabel: 'Unknown Face',
-          videoDescription: desc || 'No description provided'
+          audio: ""
         });
-        saveSpaces();
         renderSpaces();
         uploadStatus.textContent = "✅ Space profile added (demo).";
         resetForm();
       }, 700);
     }
 
-    async function saveEdits(){
+    function saveEdits(){
       if (editIndex === null) return;
       const sp = SPACES[editIndex];
       sp.title = spaceTitle.value.trim() || sp.title;
@@ -562,20 +479,10 @@
       const newGLB = spaceGLB.files[0];
       const newImg = spaceImage.files[0];
       const newVideo = spaceVideo.files[0];
-      if(newImg) sp.thumb = await fileToDataURL(newImg);
-      if(newGLB) sp.glb = await fileToDataURL(newGLB);
-      if(newVideo){
-        sp.video = await fileToDataURL(newVideo);
-        sp.videoMimeType = newVideo.type || sp.videoMimeType || '';
-        sp.videoCapturedAt = new Date().toLocaleString();
-        if(!sp.thumb || sp.thumb.startsWith('blob:')){
-          sp.thumb = await getVideoSnapshotDataUrl(newVideo);
-        }
-      }
-      sp.videoLabel = getVideoLabel(sp);
-      sp.videoDescription = getVideoDescription(sp);
+      if(newImg) sp.thumb = URL.createObjectURL(newImg);
+      if(newGLB) sp.glb = URL.createObjectURL(newGLB);
+      if(newVideo) sp.video = URL.createObjectURL(newVideo);
 
-      saveSpaces();
       renderSpaces();
       uploadStatus.textContent = "✅ Changes saved (demo).";
       uploadSpaceBtn.textContent = "Add Space";
@@ -591,17 +498,17 @@
       spaceCategory.value = sp.category;
       spaceDevices.value = sp.devices.join(', ');
       spaceLevel.value = sp.securityLevel;
-      spacePreview.innerHTML = getSpaceLiveSceneHTML({video: sp.video, videoMimeType: sp.videoMimeType, glb: sp.glb, audio: sp.audio, image: sp.thumb});
+      spacePreview.innerHTML = getSpaceLiveSceneHTML({video: sp.video, glb: sp.glb, audio: sp.audio, image: sp.thumb});
       uploadStatus.textContent = "Editing mode — save changes to update the profile.";
       uploadSpaceBtn.textContent = "Save Changes";
       renderAssetShelf();
     }
 
-    uploadSpaceBtn.onclick = async function(){
+    uploadSpaceBtn.onclick = function(){
       if (editIndex !== null) {
-        await saveEdits();
+        saveEdits();
       } else {
-        await addSpace();
+        addSpace();
       }
     };
 
@@ -610,7 +517,6 @@
     function escapeHtml(unsafe){ if(!unsafe) return ''; return String(unsafe).replace(/[&<"'>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
 
     document.addEventListener('DOMContentLoaded', () => {
-      loadSpaces();
       renderSpaces();
       renderAssetShelf();
       setTimeout(()=> {
