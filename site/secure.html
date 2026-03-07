@@ -1432,6 +1432,7 @@
                   <button id="btnSelectedSaveLabel" class="good" type="button">✅ Save Label</button>
                   <button id="btnSelectedReject" class="danger" type="button">✖ Reject</button>
                   <button id="btnSelectedRecall" type="button">📌 Recall Location</button>
+                  <button id="btnSelectedDownloadClip" type="button">⬇ Save Video</button>
                   <button id="btnSelectedNewObject" class="ghost" type="button">🆕 Save as Object</button>
                   <button id="btnSelectedSaveExisting" class="ghost" type="button">🔁 Save as Existing</button>
                   <button id="btnSelectedCopy" class="ghost" type="button">📋 Copy</button>
@@ -1954,6 +1955,7 @@
       const btnSelectedSaveLabel = el("btnSelectedSaveLabel");
       const btnSelectedReject = el("btnSelectedReject");
       const btnSelectedRecall = el("btnSelectedRecall");
+      const btnSelectedDownloadClip = el("btnSelectedDownloadClip");
       const btnSelectedNewObject = el("btnSelectedNewObject");
       const btnSelectedSaveExisting = el("btnSelectedSaveExisting");
       const btnSelectedCopy = el("btnSelectedCopy");
@@ -2099,6 +2101,64 @@
           }).finally(()=>clipLoadInflight.delete(cacheKey)));
         }
         return null;
+      }
+
+      async function downloadEventClip(evt, fallbackLabel="event"){
+        if(!evt) return false;
+
+        const ts = evt.time || evt.createdAt || Date.now();
+        const stamp = new Date(ts).toISOString().replace(/[:.]/g, "-");
+        const safeLabel = String(fallbackLabel || "event")
+          .toLowerCase()
+          .replace(/[^a-z0-9_-]+/g, "-")
+          .replace(/^-+|-+$/g, "") || "event";
+        const mime = getEventClipMimeType(evt);
+        const ext = mime.includes("mp4") ? "mp4" : "webm";
+        const filename = `watchtower_clip_${safeLabel}_${stamp}.${ext}`;
+
+        if(evt.clipDataUrl || evt.clipBase64){
+          const rawSource = evt.clipDataUrl || `data:${mime};base64,${evt.clipBase64}`;
+          const directBlob = dataUrlToBlob(rawSource);
+          if(directBlob && directBlob.size){
+            const url = URL.createObjectURL(directBlob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(()=>{ try{ URL.revokeObjectURL(url); }catch(_err){} }, 1500);
+            return true;
+          }
+          downloadDataURL(rawSource, filename);
+          return true;
+        }
+
+        if(evt.clipId && motionClips[evt.clipId]){
+          const clipMeta = motionClips[evt.clipId];
+          const saved = await idbGetClipBody(clipMeta.idxbKey || clipMeta.id);
+          if(saved && saved.blob instanceof Blob && saved.blob.size){
+            const url = URL.createObjectURL(saved.blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(()=>{ try{ URL.revokeObjectURL(url); }catch(_err){} }, 1500);
+            return true;
+          }
+          if(saved && saved.dataUrl){
+            downloadDataURL(saved.dataUrl, filename);
+            return true;
+          }
+          if(saved && saved.base64){
+            downloadDataURL(`data:${saved.mimeType || mime};base64,${saved.base64}`, filename);
+            return true;
+          }
+        }
+
+        return false;
       }
 
       function getPlayableClipUrl(rawSource, key=""){
@@ -2936,6 +2996,20 @@
           objectSelect.value = selectedLog.label;
           historyBox.value = formatHistory(selectedLog.label);
           toast("Recall loaded for selected object.");
+        });
+      }
+
+      if(btnSelectedDownloadClip){
+        btnSelectedDownloadClip.addEventListener("click", async ()=>{
+          if(!selectedLog || selectedLog.type === "unknown" || !selectedLog.evt){
+            toast("Select a log item with video first.");
+            return;
+          }
+          const ok = await downloadEventClip(
+            selectedLog.evt,
+            selectedLog.label || selectedLog.evt.objectLabel || selectedLog.type || "event"
+          );
+          toast(ok ? "Clip download started." : "Clip is still loading. Try again in a moment.");
         });
       }
 
@@ -5082,7 +5156,18 @@
           video.src = clipUrl;
           video.load();
           ensureClipPoster(video, clipUrl, getEventPreview(row.evt) || "");
+
+          const saveBtn = document.createElement("button");
+          saveBtn.type = "button";
+          saveBtn.className = "ghost mini";
+          saveBtn.textContent = "⬇ Save Clip";
+          saveBtn.addEventListener("click", async ()=>{
+            const ok = await downloadEventClip(row.evt, row.title || row.key || row.kind || "event");
+            toast(ok ? "Clip download started." : "Clip is still loading. Try again in a moment.");
+          });
+
           div.appendChild(video);
+          div.appendChild(saveBtn);
           clipsList.appendChild(div);
         }
       }
