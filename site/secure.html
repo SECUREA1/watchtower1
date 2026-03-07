@@ -1628,6 +1628,7 @@
       let camBindings = loadJSON(LS_KEYS.camBindings, {});
       let motionClips = loadJSON(LS_KEYS.motionClips, {});
       if(!motionClips || typeof motionClips !== "object") motionClips = {};
+      motionClips = sanitizeMotionClipMetaMap(motionClips);
       let trackedObjects = new Set(Object.keys(objectMemory));
 
       const tunedAlertDefaults = {
@@ -1693,9 +1694,13 @@
       const CLIP_TIMESLICE_MS = 250;
       const CLIP_MAX_PER_CAMERA = 24;
       const CLIP_EVENT_COOLDOWN_MS = 8000;
+      const CLIP_DB_NAME = "watchtowerSecureClips";
+      const CLIP_DB_STORE = "clips";
       const IDLE_SCREEN_FRACTION = 0.20;
       const IDLE_LOG_COOLDOWN_MS = 2400;
       const lastEventByLabel = new Map();
+      let clipDbPromise = null;
+      const clipLoadInflight = new Map();
 
       // Global track id (persists)
       let globalTrackId = Number(localStorage.getItem(LS_KEYS.trackCounter) || "1");
@@ -1732,6 +1737,131 @@
           _saveTimer = null;
           saveAll();
         }, 300);
+      }
+
+      function openClipDb(){
+        if(typeof indexedDB === "undefined") return Promise.resolve(null);
+        if(clipDbPromise) return clipDbPromise;
+        clipDbPromise = new Promise((resolve)=>{
+          try{
+            const req = indexedDB.open(CLIP_DB_NAME, 1);
+            req.onupgradeneeded = ()=>{
+              const db = req.result;
+              if(!db.objectStoreNames.contains(CLIP_DB_STORE)){
+                db.createObjectStore(CLIP_DB_STORE, { keyPath:"id" });
+              }
+            };
+            req.onsuccess = ()=>resolve(req.result || null);
+            req.onerror = ()=>{
+              console.warn("[clips] IndexedDB open failed", req.error);
+              resolve(null);
+            };
+          }catch(err){
+            console.warn("[clips] IndexedDB unavailable", err);
+            resolve(null);
+          }
+        });
+        return clipDbPromise;
+      }
+
+      async function idbPutClipBody(record){
+        const db = await openClipDb();
+        if(!db || !record || !record.id) return false;
+        return new Promise((resolve)=>{
+          try{
+            const tx = db.transaction(CLIP_DB_STORE, "readwrite");
+            tx.objectStore(CLIP_DB_STORE).put(record);
+            tx.oncomplete = ()=>resolve(true);
+            tx.onerror = ()=>{
+              console.warn("[clips] IndexedDB save failed", tx.error);
+              resolve(false);
+            };
+          }catch(err){
+            console.warn("[clips] IndexedDB save threw", err);
+            resolve(false);
+          }
+        });
+      }
+
+      async function idbGetClipBody(id){
+        const db = await openClipDb();
+        if(!db || !id) return null;
+        return new Promise((resolve)=>{
+          try{
+            const tx = db.transaction(CLIP_DB_STORE, "readonly");
+            const req = tx.objectStore(CLIP_DB_STORE).get(id);
+            req.onsuccess = ()=>resolve(req.result || null);
+            req.onerror = ()=>resolve(null);
+          }catch(_err){
+            resolve(null);
+          }
+        });
+      }
+
+      async function idbDeleteClipBody(id){
+        const db = await openClipDb();
+        if(!db || !id) return;
+        try{
+          await new Promise((resolve)=>{
+            const tx = db.transaction(CLIP_DB_STORE, "readwrite");
+            tx.objectStore(CLIP_DB_STORE).delete(id);
+            tx.oncomplete = ()=>resolve(true);
+            tx.onerror = ()=>resolve(false);
+          });
+        }catch(_err){ /* no-op */ }
+      }
+
+      async function idbClearClipBodies(){
+        const db = await openClipDb();
+        if(!db) return;
+        try{
+          await new Promise((resolve)=>{
+            const tx = db.transaction(CLIP_DB_STORE, "readwrite");
+            tx.objectStore(CLIP_DB_STORE).clear();
+            tx.oncomplete = ()=>resolve(true);
+            tx.onerror = ()=>resolve(false);
+          });
+        }catch(_err){ /* no-op */ }
+      }
+
+      function sanitizeMotionClipMetaMap(clips){
+        const clean = {};
+        for(const [id, item] of Object.entries(clips || {})){
+          if(!item || typeof item !== "object") continue;
+          const clipId = item.id || id;
+          clean[clipId] = {
+            id: clipId,
+            cam: item.cam,
+            createdAt: item.createdAt || Date.now(),
+            mimeType: item.mimeType || "video/webm",
+            idxbKey: item.idxbKey || clipId,
+          };
+        }
+        return clean;
+      }
+
+      async function migrateLegacyClipPayloads(){
+        const entries = Object.values(motionClips || {});
+        let changed = false;
+        for(const clip of entries){
+          if(!clip || !clip.id) continue;
+          const idxbKey = clip.idxbKey || clip.id;
+          const rawDataUrl = clip.dataUrl || (clip.base64 ? `data:${clip.mimeType || "video/webm"};base64,${clip.base64}` : "");
+          if(rawDataUrl){
+            const blob = dataUrlToBlob(rawDataUrl);
+            if(blob && blob.size){
+              await idbPutClipBody({ id: idxbKey, clipId: clip.id, createdAt: clip.createdAt || Date.now(), mimeType: clip.mimeType || blob.type || "video/webm", blob });
+            }
+            changed = true;
+          }
+          if(clip.dataUrl || clip.base64){
+            delete clip.dataUrl;
+            delete clip.base64;
+            changed = true;
+          }
+          clip.idxbKey = idxbKey;
+        }
+        if(changed) scheduleSaveAll();
       }
 
       /***********************
@@ -1866,6 +1996,7 @@
       setLogViewMode(logViewMode, false);
       setClipViewMode(clipViewMode, false);
       refreshAll();
+      migrateLegacyClipPayloads().catch((err)=>console.warn("[clips] legacy migration failed", err));
 
       // Try device list (labels may be blank until permission)
       ensureDevicesDiscoveredOnLoad();
@@ -1936,35 +2067,64 @@
 
       function getEventClip(evt){
         if(!evt) return null;
-        if(evt.clipDataUrl) return getPlayableClipUrl(evt.clipDataUrl, evt.clipId || "");
-        if(evt.clipBase64){
-          const mime = getEventClipMimeType(evt);
-          return getPlayableClipUrl(`data:${mime};base64,${evt.clipBase64}`, evt.clipId || "");
-        }
-        if(evt.clipId && motionClips[evt.clipId]){
-          const clip = motionClips[evt.clipId];
-          if(clip.dataUrl) return getPlayableClipUrl(clip.dataUrl, evt.clipId);
-          if(clip.base64){
-            const mime = (clip.mimeType && String(clip.mimeType).trim()) || "video/webm";
-            return getPlayableClipUrl(`data:${mime};base64,${clip.base64}`, evt.clipId);
-          }
+        const directUrl = evt.clipDataUrl || (evt.clipBase64 ? `data:${getEventClipMimeType(evt)};base64,${evt.clipBase64}` : "");
+        if(directUrl) return getPlayableClipUrl(directUrl, evt.clipId || evt.id || "");
+        if(!evt.clipId || !motionClips[evt.clipId]) return null;
+        const clip = motionClips[evt.clipId];
+        const cacheKey = evt.clipId;
+        if(clipPlaybackUrls.has(cacheKey)) return clipPlaybackUrls.get(cacheKey);
+        if(!clipLoadInflight.has(cacheKey)){
+          clipLoadInflight.set(cacheKey, (async ()=>{
+            const saved = await idbGetClipBody(clip.idxbKey || clip.id);
+            if(!saved) return null;
+            let playable = null;
+            if(saved.blob instanceof Blob){
+              playable = getPlayableClipUrl(saved.blob, cacheKey);
+            }else if(saved.dataUrl){
+              playable = getPlayableClipUrl(saved.dataUrl, cacheKey);
+            }else if(saved.base64){
+              const mime = saved.mimeType || clip.mimeType || "video/webm";
+              playable = getPlayableClipUrl(`data:${mime};base64,${saved.base64}`, cacheKey);
+            }
+            if(playable){
+              if(selectedLog && selectedLog.evt === evt){
+                setSelectedDetails(Object.assign({}, selectedLog, { evt }));
+              }
+              renderClipWindow();
+            }
+            return playable;
+          })().catch((err)=>{
+            console.warn("[clips] failed to load event clip", err);
+            return null;
+          }).finally(()=>clipLoadInflight.delete(cacheKey)));
         }
         return null;
       }
 
-      function getPlayableClipUrl(rawUrl, key=""){
-        const source = String(rawUrl || "").trim();
+      function getPlayableClipUrl(rawSource, key=""){
+        if(!rawSource) return null;
+        const cacheKey = key || String(rawSource || "").slice(0, 240);
+        if(clipPlaybackUrls.has(cacheKey)) return clipPlaybackUrls.get(cacheKey);
+
+        if(rawSource instanceof Blob){
+          if(!rawSource.size) return null;
+          const objectUrl = URL.createObjectURL(rawSource);
+          clipPlaybackUrls.set(cacheKey, objectUrl);
+          return objectUrl;
+        }
+
+        const source = String(rawSource || "").trim();
         if(!source) return null;
         if(!source.startsWith("data:")) return source;
-        const cacheKey = key || source;
-        if(clipPlaybackUrls.has(cacheKey)) return clipPlaybackUrls.get(cacheKey);
+
         try{
           const blob = dataUrlToBlob(source);
           if(!blob || !blob.size) return source;
           const objectUrl = URL.createObjectURL(blob);
           clipPlaybackUrls.set(cacheKey, objectUrl);
           return objectUrl;
-        }catch(_err){
+        }catch(err){
+          console.warn("[clips] failed to create playable URL", err);
           return source;
         }
       }
@@ -1987,9 +2147,7 @@
 
       function getEventClipMimeType(evt){
         if(!evt) return "video/webm";
-        const clipUrl = evt.clipDataUrl
-          || (evt.clipId && motionClips[evt.clipId] ? motionClips[evt.clipId].dataUrl : "")
-          || "";
+        const clipUrl = evt.clipDataUrl || "";
         const fromDataUrl = parseMimeFromDataUrl(clipUrl);
         const raw = evt.clipMimeType
           || (evt.clipId && motionClips[evt.clipId] ? motionClips[evt.clipId].mimeType : "")
@@ -2064,20 +2222,24 @@
       function pickClipMimeType(){
         if(typeof MediaRecorder === "undefined") return "";
         const candidates = [
-          // Prefer broadly playable encodings first (Firefox + Chromium).
           "video/webm;codecs=vp8,opus",
           "video/webm;codecs=vp9,opus",
           "video/webm;codecs=vp8",
           "video/webm;codecs=vp9",
           "video/webm",
-          // Last resort for engines that only offer MP4 recording.
           "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
           "video/mp4"
         ];
         for(const mime of candidates){
-          if(!MediaRecorder.isTypeSupported || !MediaRecorder.isTypeSupported(mime)) continue;
-          if(!isMimePlayable(mime) && !isMimePlayable(mime.split(";", 1)[0])) continue;
-          return mime;
+          try{
+            const supported = (typeof MediaRecorder.isTypeSupported !== "function") || MediaRecorder.isTypeSupported(mime);
+            if(!supported) continue;
+            const base = mime.split(";", 1)[0].trim();
+            if(!isMimePlayable(mime) && !isMimePlayable(base)) continue;
+            return mime;
+          }catch(_err){
+            // keep scanning candidates
+          }
         }
         return "";
       }
@@ -2165,13 +2327,14 @@
           if(selectedPreviewImg) selectedPreviewImg.src = hasImage ? payload.imgDataUrl : "";
           if(selectedPreviewVideo){
             if(hasVideo){
-              selectedPreviewVideo.innerHTML = "";
+              selectedPreviewVideo.pause();
+              selectedPreviewVideo.removeAttribute("src");
+              selectedPreviewVideo.load();
               selectedPreviewVideo.src = clipUrl;
               selectedPreviewVideo.load();
               ensureClipPoster(selectedPreviewVideo, clipUrl, payload.imgDataUrl || "");
             }else{
               selectedPreviewVideo.pause();
-              selectedPreviewVideo.innerHTML = "";
               selectedPreviewVideo.removeAttribute("src");
               selectedPreviewVideo.load();
               selectedPreviewVideo.removeAttribute("poster");
@@ -2547,6 +2710,7 @@
         unknownFacesQueue = [];
         motionClips = {};
         trackedObjects = new Set();
+        idbClearClipBodies().catch(()=>{});
         lastEventByLabel.clear();
 
         // reset track counter
@@ -3548,20 +3712,44 @@
       function startClipRecorder(slotIdx, stream){
         const state = camStates.get(slotIdx);
         if(!state || !stream || typeof MediaRecorder === "undefined") return;
-        const mimeType = pickClipMimeType();
+        const pickedMimeType = pickClipMimeType();
+        let recorder = null;
         try{
-          const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-          recorder.ondataavailable = (event)=>{
-            if(!event.data || !event.data.size) return;
+          recorder = new MediaRecorder(stream, pickedMimeType ? { mimeType: pickedMimeType } : undefined);
+        }catch(err){
+          console.warn(`[clips] MediaRecorder init failed on Camera ${slotIdx} with explicit mime`, err);
+          try{
+            recorder = new MediaRecorder(stream);
+          }catch(fallbackErr){
+            console.warn(`[clips] MediaRecorder init fallback failed on Camera ${slotIdx}`, fallbackErr);
+            addCvLog(`Clip recorder unavailable on Camera ${slotIdx}: ${(fallbackErr && fallbackErr.message) || fallbackErr}`, "warn");
+            return;
+          }
+        }
+
+        recorder.ondataavailable = (event)=>{
+          try{
+            if(!event || !event.data || !event.data.size) return;
             const ts = Date.now();
-            state.clipChunks.push({ ts, blob: event.data });
-            const minTs = ts - CLIP_PRE_MS - 800;
-            state.clipChunks = state.clipChunks.filter(ch => ch && ch.ts >= minTs);
-            processClipRequests(state, ts, event.data.type || recorder.mimeType || mimeType || "video/webm");
-          };
+            state.clipChunks.push({ ts, blob: event.data, mimeType: event.data.type || recorder.mimeType || pickedMimeType || "video/webm" });
+            const minTs = ts - CLIP_PRE_MS - CLIP_POST_MS - (CLIP_TIMESLICE_MS * 4);
+            state.clipChunks = state.clipChunks.filter(ch => ch && ch.ts >= minTs && ch.blob && ch.blob.size);
+            processClipRequests(state, ts, event.data.type || recorder.mimeType || pickedMimeType || "video/webm").catch((err)=>{
+              console.warn("[clips] processClipRequests failed", err);
+            });
+          }catch(err){
+            console.warn("[clips] recorder chunk handling failed", err);
+          }
+        };
+        recorder.onerror = (event)=>{
+          console.warn(`[clips] recorder error on Camera ${slotIdx}`, event?.error || event);
+        };
+
+        try{
           recorder.start(CLIP_TIMESLICE_MS);
           state.clipRecorder = recorder;
         }catch(err){
+          console.warn(`[clips] recorder start failed on Camera ${slotIdx}`, err);
           addCvLog(`Clip recorder unavailable on Camera ${slotIdx}: ${(err && err.message) || err}`, "warn");
         }
       }
@@ -3576,7 +3764,10 @@
 
       function queueMotionClip(camIdx, attachToEvent){
         const state = camStates.get(camIdx);
-        if(!state || !state.clipRecorder || state.clipRecorder.state !== "recording") return;
+        if(!state || !state.clipRecorder || state.clipRecorder.state !== "recording"){
+          console.warn("[clips] queue skipped because recorder is not active", { camIdx });
+          return;
+        }
         const now = Date.now();
         if((now - (state.clipLastTriggerAt || 0)) < CLIP_EVENT_COOLDOWN_MS) return;
         state.clipLastTriggerAt = now;
@@ -3596,37 +3787,49 @@
         for(const req of ready){
           const startAt = req.requestAt - CLIP_PRE_MS;
           const endAt = req.requestAt + CLIP_POST_MS;
-          const chunks = state.clipChunks.filter(ch => ch && ch.ts >= startAt && ch.ts <= endAt);
-          if(!chunks.length) continue;
-          const blob = new Blob(chunks.map(ch => ch.blob), { type: mimeType || "video/webm" });
-          let base64 = null;
-          let dataUrl = null;
-          try{
-            const buffer = await blob.arrayBuffer();
-            base64 = arrayBufferToBase64(buffer);
-            const safeMime = (blob.type && String(blob.type).trim()) || mimeType || "video/webm";
-            dataUrl = `data:${safeMime};base64,${base64}`;
-          }catch(_err){
-            base64 = null;
-            dataUrl = null;
+          const chunks = state.clipChunks.filter(ch => ch && ch.ts >= startAt && ch.ts <= endAt && ch.blob && ch.blob.size);
+          if(!chunks.length){
+            console.warn("[clips] no chunks available for event window", { cam: state.camIdx, startAt, endAt });
+            continue;
           }
-          if(!dataUrl) continue;
+          const inferredMime = chunks.find(ch => ch.mimeType)?.mimeType || mimeType || "video/webm";
+          const blob = new Blob(chunks.map(ch => ch.blob), { type: inferredMime });
+          if(!blob.size){
+            console.warn("[clips] empty blob generated for event", { cam: state.camIdx });
+            continue;
+          }
+
           const clipId = `clip_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+          const idxbKey = clipId;
+          const clipMimeType = (blob.type && String(blob.type).trim()) || inferredMime || "video/webm";
+          const saved = await idbPutClipBody({
+            id: idxbKey,
+            clipId,
+            cam: state.camIdx,
+            createdAt: Date.now(),
+            mimeType: clipMimeType,
+            blob,
+          });
+          if(!saved){
+            console.warn("[clips] failed to persist clip in IndexedDB", { cam: state.camIdx, clipId });
+            continue;
+          }
+
           motionClips[clipId] = {
             id: clipId,
             cam: state.camIdx,
             createdAt: Date.now(),
-            mimeType: blob.type || mimeType || "video/webm",
-            base64,
-            dataUrl,
+            mimeType: clipMimeType,
+            idxbKey,
           };
           trimMotionClips(state.camIdx);
           if(typeof req.attachToEvent === "function"){
             req.attachToEvent({
               clipId,
-              clipDataUrl: dataUrl,
-              clipBase64: base64,
-              clipMimeType: motionClips[clipId].mimeType
+              clipDataUrl: null,
+              clipBase64: null,
+              clipMimeType,
+              clipIdxbKey: idxbKey,
             });
           }
           scheduleSaveAll();
@@ -3637,8 +3840,12 @@
         const items = Object.values(motionClips || {}).filter(item => item && item.cam === camIdx);
         if(items.length <= CLIP_MAX_PER_CAMERA) return;
         items.sort((a,b)=> (a.createdAt || 0) - (b.createdAt || 0));
-        for(const item of items.slice(0, items.length - CLIP_MAX_PER_CAMERA)){
-          if(item && item.id) delete motionClips[item.id];
+        const stale = items.slice(0, items.length - CLIP_MAX_PER_CAMERA);
+        for(const item of stale){
+          if(!item || !item.id) continue;
+          delete motionClips[item.id];
+          clipPlaybackUrls.delete(item.id);
+          idbDeleteClipBody(item.idxbKey || item.id).catch(()=>{});
         }
       }
 
@@ -4453,6 +4660,7 @@
           clipDataUrl: null,
           clipBase64: null,
           clipMimeType: null,
+          clipIdxbKey: null,
           sourceLabel: opts.sourceLabel || null
         };
 
@@ -4461,13 +4669,14 @@
         trackedObjects.add(label);
 
         if(cam != null && isVehicleLabel(label)){
-          queueMotionClip(cam, ({ clipId, clipDataUrl, clipBase64, clipMimeType })=>{
+          queueMotionClip(cam, ({ clipId, clipDataUrl, clipBase64, clipMimeType, clipIdxbKey })=>{
             evt.clipId = clipId;
             evt.clipDataUrl = clipDataUrl;
             evt.clipBase64 = clipBase64 || null;
             evt.clipMimeType = clipMimeType;
+            evt.clipIdxbKey = clipIdxbKey || clipId;
             if(selectedLog && selectedLog.evt === evt){
-              setSelectedDetails(Object.assign({}, selectedLog, { evt, clipDataUrl }));
+              setSelectedDetails(Object.assign({}, selectedLog, { evt }));
             }
             renderLogTable();
             renderClipWindow();
@@ -4498,20 +4707,22 @@
           clipDataUrl: null,
           clipBase64: null,
           clipMimeType: null,
+          clipIdxbKey: null,
         };
 
         if(!peopleMovementMemory[personName]) peopleMovementMemory[personName] = [];
         peopleMovementMemory[personName].push(evt);
         evaluateTunedAlertFromPerson(personName, evt);
 
-        if(cam != null && (status === "Live" || status === "Seen" || status === "Moved" || status === "Idle")){
-          queueMotionClip(cam, ({ clipId, clipDataUrl, clipBase64, clipMimeType })=>{
+        if(cam != null){
+          queueMotionClip(cam, ({ clipId, clipDataUrl, clipBase64, clipMimeType, clipIdxbKey })=>{
             evt.clipId = clipId;
             evt.clipDataUrl = clipDataUrl;
             evt.clipBase64 = clipBase64 || null;
             evt.clipMimeType = clipMimeType;
+            evt.clipIdxbKey = clipIdxbKey || clipId;
             if(selectedLog && selectedLog.evt === evt){
-              setSelectedDetails(Object.assign({}, selectedLog, { evt, clipDataUrl }));
+              setSelectedDetails(Object.assign({}, selectedLog, { evt }));
             }
             renderLogTable();
             renderTracked();
@@ -5527,6 +5738,21 @@
         renderUnknownFace();
       }
 
+      function sanitizeEventClipRefs(){
+        const scrub = (evt)=>{
+          if(!evt || typeof evt !== "object") return;
+          if(evt.clipBase64) evt.clipBase64 = null;
+          const dataUrl = String(evt.clipDataUrl || "");
+          if(dataUrl.startsWith("data:")) evt.clipDataUrl = null;
+        };
+        for(const events of Object.values(objectMemory || {})){
+          for(const evt of (events || [])) scrub(evt);
+        }
+        for(const events of Object.values(peopleMovementMemory || {})){
+          for(const evt of (events || [])) scrub(evt);
+        }
+      }
+
       /***********************
        * Refresh + Persistence
        ***********************/
@@ -5540,6 +5766,8 @@
       }
 
       function saveAll(){
+        sanitizeEventClipRefs();
+        motionClips = sanitizeMotionClipMetaMap(motionClips);
         saveJSON(LS_KEYS.objectMemory, objectMemory);
         saveJSON(LS_KEYS.peopleMemory, peopleMovementMemory);
         saveJSON(LS_KEYS.customLabels, customLabels);
