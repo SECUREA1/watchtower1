@@ -2145,6 +2145,23 @@
         return new Blob([bytes], { type: mime });
       }
 
+      function blobToDataUrl(blob){
+        return new Promise((resolve)=>{
+          try{
+            if(!(blob instanceof Blob) || !blob.size){
+              resolve(null);
+              return;
+            }
+            const reader = new FileReader();
+            reader.onload = ()=>resolve(typeof reader.result === "string" ? reader.result : null);
+            reader.onerror = ()=>resolve(null);
+            reader.readAsDataURL(blob);
+          }catch(_err){
+            resolve(null);
+          }
+        });
+      }
+
       function getEventClipMimeType(evt){
         if(!evt) return "video/webm";
         const clipUrl = evt.clipDataUrl || "";
@@ -3766,6 +3783,7 @@
         const state = camStates.get(camIdx);
         if(!state || !state.clipRecorder || state.clipRecorder.state !== "recording"){
           console.warn("[clips] queue skipped because recorder is not active", { camIdx });
+          addCvLog(`Camera ${camIdx} clip capture skipped: recorder is not active.`, "warn");
           return;
         }
         const now = Date.now();
@@ -3810,28 +3828,39 @@
             mimeType: clipMimeType,
             blob,
           });
+          let clipDataUrl = null;
+          let persistedToIndexedDb = saved;
           if(!saved){
             console.warn("[clips] failed to persist clip in IndexedDB", { cam: state.camIdx, clipId });
-            continue;
+            clipDataUrl = await blobToDataUrl(blob);
+            if(!clipDataUrl){
+              addCvLog(`Camera ${state.camIdx} clip capture failed: could not store clip data.`, "warn");
+              continue;
+            }
+            persistedToIndexedDb = false;
+            addCvLog(`Camera ${state.camIdx} clip stored inline (IndexedDB unavailable).`, "warn");
           }
 
-          motionClips[clipId] = {
-            id: clipId,
-            cam: state.camIdx,
-            createdAt: Date.now(),
-            mimeType: clipMimeType,
-            idxbKey,
-          };
-          trimMotionClips(state.camIdx);
+          if(persistedToIndexedDb){
+            motionClips[clipId] = {
+              id: clipId,
+              cam: state.camIdx,
+              createdAt: Date.now(),
+              mimeType: clipMimeType,
+              idxbKey,
+            };
+            trimMotionClips(state.camIdx);
+          }
           if(typeof req.attachToEvent === "function"){
             req.attachToEvent({
-              clipId,
-              clipDataUrl: null,
+              clipId: persistedToIndexedDb ? clipId : null,
+              clipDataUrl,
               clipBase64: null,
               clipMimeType,
-              clipIdxbKey: idxbKey,
+              clipIdxbKey: persistedToIndexedDb ? idxbKey : null,
             });
           }
+          addCvLog(`Camera ${state.camIdx} 4s motion clip captured.`, "good");
           scheduleSaveAll();
         }
       }
@@ -5743,7 +5772,9 @@
           if(!evt || typeof evt !== "object") return;
           if(evt.clipBase64) evt.clipBase64 = null;
           const dataUrl = String(evt.clipDataUrl || "");
-          if(dataUrl.startsWith("data:")) evt.clipDataUrl = null;
+          if(dataUrl.startsWith("data:") && evt.clipId){
+            evt.clipDataUrl = null;
+          }
         };
         for(const events of Object.values(objectMemory || {})){
           for(const evt of (events || [])) scrub(evt);
