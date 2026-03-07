@@ -1670,6 +1670,52 @@
       if(!motionClips || typeof motionClips !== "object") motionClips = {};
       let trackedObjects = new Set(Object.keys(objectMemory));
 
+      function inferClipMimeType(dataUrl){
+        if(typeof dataUrl !== "string") return "video/webm";
+        const m = /^data:([^;,]+)[;,]/i.exec(dataUrl);
+        return (m && m[1]) ? m[1] : "video/webm";
+      }
+
+      function ensureClipStored(evt){
+        if(!evt) return null;
+        if(evt.clipId && motionClips[evt.clipId]?.dataUrl){
+          evt.clipDataUrl = null;
+          return evt.clipId;
+        }
+        if(typeof evt.clipDataUrl !== "string" || !evt.clipDataUrl.startsWith("data:video")) return null;
+        const clipId = `clip_${evt.time || Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+        motionClips[clipId] = {
+          id: clipId,
+          cam: evt.cam ?? null,
+          createdAt: evt.time || Date.now(),
+          mimeType: evt.clipMimeType || inferClipMimeType(evt.clipDataUrl),
+          dataUrl: evt.clipDataUrl,
+        };
+        evt.clipId = clipId;
+        evt.clipMimeType = motionClips[clipId].mimeType;
+        evt.clipDataUrl = null;
+        return clipId;
+      }
+
+      function normalizeClipReferences(){
+        const validClipIds = new Set(Object.keys(motionClips || {}));
+        const pruneRefs = (evt)=>{
+          if(!evt) return;
+          const storedClipId = ensureClipStored(evt);
+          if(storedClipId) validClipIds.add(storedClipId);
+          if(evt.clipId && !validClipIds.has(evt.clipId)) evt.clipId = null;
+        };
+
+        for(const events of Object.values(objectMemory || {})){
+          for(const evt of (events || [])) pruneRefs(evt);
+        }
+        for(const events of Object.values(peopleMovementMemory || {})){
+          for(const evt of (events || [])) pruneRefs(evt);
+        }
+      }
+
+      normalizeClipReferences();
+
       const tunedAlertDefaults = {
         enabled: false,
         targetType: "person",
@@ -4418,7 +4464,86 @@
           if(personXyzEl) personXyzEl.textContent = "—";
         }else{
           personEl.textContent = "No one";
-          if(personXyzEl) personXyzEl.textContent = "—";0
+          if(personXyzEl) personXyzEl.textContent = "—";
+        }
+      }
+
+      function refreshClipViews(){
+        renderClipWindows();
+        renderClipWindow();
+      }
+
+      function refreshCameraLogs(){
+        camLatestLog = Array.from({ length: MAX_CAM_UI }, () => null);
+        for(let i=0;i<MAX_CAM_UI;i++){
+          resetCameraLog(i);
+        }
+
+        for(const [label, events] of Object.entries(objectMemory || {})){
+          for(const evt of (events || [])){
+            if(!evt || evt.cam == null) continue;
+            const idx = evt.cam;
+            if(idx < 0 || idx >= MAX_CAM_UI) continue;
+            const prev = camLatestLog[idx];
+            if(!prev || (evt.time || 0) > (prev.evt?.time || 0)){
+              camLatestLog[idx] = { label, evt };
+            }
+          }
+        }
+
+        for(let i=0;i<MAX_CAM_UI;i++){
+          const entry = camLatestLog[i];
+          if(entry){
+            updateCameraLog(i, entry.label, entry.evt);
+          }
+        }
+      }
+
+      function recordEvent(label, status, box, person=null, held_duration=null, score=null, cam=null, opts={}){
+        const evt = {
+          id: `evt_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+          time: Date.now(),
+          box,
+          status,
+          person,
+          held_duration,
+          score,
+          cam,
+          imgDataUrl: opts.imgDataUrl || null,
+          clipId: null,
+          clipDataUrl: null,
+          clipMimeType: null,
+          sourceLabel: opts.sourceLabel || null,
+        };
+
+        if(!objectMemory[label]) objectMemory[label] = [];
+        objectMemory[label].push(evt);
+        trackedObjects.add(label);
+
+        if(cam != null && isVehicleLabel(label)){
+          queueMotionClip(cam, ({ clipId, clipDataUrl, clipMimeType })=>{
+            evt.clipId = clipId;
+            evt.clipDataUrl = clipDataUrl;
+            evt.clipMimeType = clipMimeType;
+            if(selectedLog && selectedLog.evt === evt){
+              setSelectedDetails(Object.assign({}, selectedLog, { evt, clipDataUrl }));
+            }
+            renderLogTable();
+            refreshClipViews();
+          });
+        }
+
+        scheduleSaveAll();
+        appendLogRow(label, evt);
+        renderTracked();
+        updateObjectDropdown();
+        updateCameraLog(cam, label, evt);
+        evaluateTunedAlertForObject(label, evt);
+        refreshClipViews();
+      }
+
+      function recordPersonEvent(personName, status, box, score=null, cam=null, opts={}){
+        if(!personName) return;
         const evt = {
           id: `pevt_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
           time: Date.now(),
@@ -4431,13 +4556,15 @@
           clipId: null,
           clipDataUrl: null,
           clipMimeType: null,
+          objectLabel: opts.objectLabel || null,
+          held_duration: opts.held_duration ?? null,
         };
 
         if(!peopleMovementMemory[personName]) peopleMovementMemory[personName] = [];
         peopleMovementMemory[personName].push(evt);
         evaluateTunedAlertFromPerson(personName, evt);
 
-        if(cam != null && (status === "Live" || status === "Seen" || status === "Moved" || status === "Idle")){
+        if(cam != null && ["Live","Seen","Moved","Idle"].includes(status)){
           queueMotionClip(cam, ({ clipId, clipDataUrl, clipMimeType })=>{
             evt.clipId = clipId;
             evt.clipDataUrl = clipDataUrl;
@@ -4447,7 +4574,7 @@
             }
             renderLogTable();
             renderTracked();
-            renderClipWindow();
+            refreshClipViews();
           });
         }
 
@@ -4456,7 +4583,7 @@
           renderLogTable();
         }
         renderTracked();
-        renderClipWindow();
+        refreshClipViews();
       }
 
       /***********************
