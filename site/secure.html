@@ -1668,6 +1668,7 @@
       let camBindings = loadJSON(LS_KEYS.camBindings, {});
       let motionClips = loadJSON(LS_KEYS.motionClips, {});
       if(!motionClips || typeof motionClips !== "object") motionClips = {};
+      const motionClipUrlCache = new Map();
       let trackedObjects = new Set(Object.keys(objectMemory));
 
       const tunedAlertDefaults = {
@@ -1977,8 +1978,21 @@
       function getEventClip(evt){
         if(!evt) return null;
         if(evt.clipDataUrl) return evt.clipDataUrl;
-        if(evt.clipId && motionClips[evt.clipId]) return motionClips[evt.clipId].dataUrl || null;
-        return null;
+        if(!evt.clipId || !motionClips[evt.clipId]) return null;
+        return getMotionClipPlaybackUrl(motionClips[evt.clipId]);
+      }
+
+      function getMotionClipPlaybackUrl(clip){
+        if(!clip) return null;
+        if(clip.dataUrl) return clip.dataUrl;
+        const clipId = clip.id || null;
+        if(!clip.base64 || !clip.mimeType) return null;
+        if(clipId && motionClipUrlCache.has(clipId)) return motionClipUrlCache.get(clipId);
+        const blob = base64ToBlob(clip.base64, clip.mimeType);
+        if(!blob) return null;
+        const url = URL.createObjectURL(blob);
+        if(clipId) motionClipUrlCache.set(clipId, url);
+        return url;
       }
 
       function setSelectedDetails(payload){
@@ -2187,7 +2201,7 @@
         if(logClipWindow) logClipWindow.hidden = !show;
       }
 
-      function collectClipEntries(){
+      function collectAllClipEntries(){
         const clips = [];
         for(const [personName, events] of Object.entries(peopleMovementMemory || {})){
           for(const evt of (events || [])){
@@ -2228,7 +2242,7 @@
 
       function renderVideoTiles(targetEl){
         if(!targetEl) return;
-        const clips = collectClipEntries();
+        const clips = collectAllClipEntries();
         targetEl.innerHTML = "";
         if(clips.length === 0){
           targetEl.innerHTML = `<div class="item"><span class="small">No video clips in local storage yet.</span></div>`;
@@ -2262,7 +2276,7 @@
 
       function renderClipWindowBody(targetEl){
         if(!targetEl) return;
-        const clips = collectClipEntries();
+        const clips = collectAllClipEntries();
         if(clips.length === 0){
           targetEl.innerHTML = "No people/object/video clips in local storage yet.";
           return;
@@ -2538,6 +2552,13 @@
         shutdownCamerasOnClose("page closed");
       });
 
+      window.addEventListener("beforeunload", ()=>{
+        for(const url of motionClipUrlCache.values()){
+          try{ URL.revokeObjectURL(url); }catch(_err){}
+        }
+        motionClipUrlCache.clear();
+      });
+
       el("btnExport").addEventListener("click", ()=>{
         const payload = {
           exportedAt: new Date().toISOString(),
@@ -2561,6 +2582,10 @@
         customLabels = {};
         knownFaces = {};
         unknownFacesQueue = [];
+        for(const url of motionClipUrlCache.values()){
+          try{ URL.revokeObjectURL(url); }catch(_err){}
+        }
+        motionClipUrlCache.clear();
         motionClips = {};
         trackedObjects = new Set();
         lastEventByLabel.clear();
@@ -3616,20 +3641,20 @@
           const chunks = state.clipChunks.filter(ch => ch && ch.ts >= startAt && ch.ts <= endAt);
           if(!chunks.length) continue;
           const blob = new Blob(chunks.map(ch => ch.blob), { type: mimeType || "video/webm" });
-          let dataUrl = null;
-          try{ dataUrl = await blobToDataURL(blob); }catch(_err){ dataUrl = null; }
-          if(!dataUrl) continue;
+          let base64 = null;
+          try{ base64 = await blobToBase64Payload(blob); }catch(_err){ base64 = null; }
+          if(!base64) continue;
           const clipId = `clip_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
           motionClips[clipId] = {
             id: clipId,
             cam: state.camIdx,
             createdAt: Date.now(),
             mimeType: blob.type || mimeType || "video/webm",
-            dataUrl,
+            base64,
           };
           trimMotionClips(state.camIdx);
           if(typeof req.attachToEvent === "function"){
-            req.attachToEvent({ clipId, clipDataUrl: dataUrl, clipMimeType: motionClips[clipId].mimeType });
+            req.attachToEvent({ clipId, clipMimeType: motionClips[clipId].mimeType });
           }
           scheduleSaveAll();
         }
@@ -3640,7 +3665,13 @@
         if(items.length <= CLIP_MAX_PER_CAMERA) return;
         items.sort((a,b)=> (a.createdAt || 0) - (b.createdAt || 0));
         for(const item of items.slice(0, items.length - CLIP_MAX_PER_CAMERA)){
-          if(item && item.id) delete motionClips[item.id];
+          if(item && item.id){
+            if(motionClipUrlCache.has(item.id)){
+              URL.revokeObjectURL(motionClipUrlCache.get(item.id));
+              motionClipUrlCache.delete(item.id);
+            }
+            delete motionClips[item.id];
+          }
         }
       }
 
@@ -4397,12 +4428,12 @@
         evaluateTunedAlertFromPerson(personName, evt);
 
         if(cam != null && (status === "Live" || status === "Seen" || status === "Moved" || status === "Idle")){
-          queueMotionClip(cam, ({ clipId, clipDataUrl, clipMimeType })=>{
+          queueMotionClip(cam, ({ clipId, clipMimeType })=>{
             evt.clipId = clipId;
-            evt.clipDataUrl = clipDataUrl;
+            evt.clipDataUrl = null;
             evt.clipMimeType = clipMimeType;
             if(selectedLog && selectedLog.evt === evt){
-              setSelectedDetails(Object.assign({}, selectedLog, { evt, clipDataUrl }));
+              setSelectedDetails(Object.assign({}, selectedLog, { evt }));
             }
             renderLogTable();
             renderTracked();
@@ -4694,7 +4725,7 @@
         renderClipWindow();
       }
 
-      function collectClipEntries(){
+      function collectPanelClipEntries(){
         const rows = [];
         if(clipViewMode === "people"){
           for(const [personName, events] of Object.entries(peopleMovementMemory || {})){
@@ -4728,7 +4759,7 @@
 
       function renderClipWindow(){
         if(!clipsList) return;
-        const rows = collectClipEntries();
+        const rows = collectPanelClipEntries();
         clipsList.innerHTML = "";
         if(rows.length === 0){
           clipsList.innerHTML = `<div class="item"><span class="small">No ${clipViewMode === "people" ? "person" : "vehicle"} clips yet.</span></div>`;
@@ -5567,6 +5598,26 @@
           reader.onerror = ()=>reject(reader.error || new Error("FileReader failed"));
           reader.readAsDataURL(blob);
         });
+      }
+
+      async function blobToBase64Payload(blob){
+        const dataUrl = await blobToDataURL(blob);
+        const raw = String(dataUrl || "");
+        const commaIdx = raw.indexOf(",");
+        if(commaIdx < 0) return null;
+        return raw.slice(commaIdx + 1);
+      }
+
+      function base64ToBlob(base64, mimeType){
+        if(!base64) return null;
+        try{
+          const bin = atob(base64);
+          const bytes = new Uint8Array(bin.length);
+          for(let i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+          return new Blob([bytes], { type: mimeType || "video/webm" });
+        }catch(_err){
+          return null;
+        }
       }
 
       function escapeHtml(s){
