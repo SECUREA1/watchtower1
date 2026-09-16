@@ -45,6 +45,15 @@ server {
         return 200 '{"ok": true}';
     }
 
+    # The static deployment has no camera capture process. Return a valid empty
+    # inventory instead of letting the SPA fallback serve index.html to fetch().
+    # Hardware/API deployments override this route with the FastAPI service.
+    location = /api/cameras {
+        default_type application/json;
+        add_header Cache-Control "no-store";
+        return 200 '{"ok":true,"cameras":[],"mode":"static"}';
+    }
+
     # Proxy websocket (signaling) - assumes a local backend (adjust as needed)
     # If you run your signaling server on another hostname/port, change proxy_pass accordingly.
     # Example: proxy_pass http://127.0.0.1:3000;

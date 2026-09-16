@@ -101,6 +101,9 @@
     const chatInputEl = document.getElementById('chat-input');
     const displayNameEl = document.getElementById('display-name');
     let chatSocket = null;
+    let chatReconnectTimer = null;
+    let chatReconnectAttempts = 0;
+    let chatStatusLine = null;
     let activeName = `guest-${Math.floor(Math.random() * 900 + 100)}`;
 
     function addChatLine(message, isSystem = false) {
@@ -109,15 +112,33 @@
       line.textContent = message;
       chatLogEl.appendChild(line);
       chatLogEl.scrollTop = chatLogEl.scrollHeight;
+      return line;
+    }
+
+    function setChatStatus(message) {
+      if (!chatStatusLine) chatStatusLine = addChatLine(message, true);
+      else chatStatusLine.textContent = message;
+    }
+
+    function setChatEnabled(enabled) {
+      chatInputEl.disabled = !enabled;
+      document.querySelector('#chat-form button').disabled = !enabled;
     }
 
     function connectChat() {
       if (chatSocket && [WebSocket.OPEN, WebSocket.CONNECTING].includes(chatSocket.readyState)) return;
       const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
       chatSocket = new WebSocket(`${protocol}://${location.host}/ws/multi-camera?name=${encodeURIComponent(activeName)}`);
-      chatSocket.addEventListener('open', () => addChatLine('Connected to multi-camera chat.', true));
+      setChatStatus(chatReconnectAttempts ? 'Reconnecting to ops chat…' : 'Connecting to ops chat…');
+      chatSocket.addEventListener('open', () => {
+        chatReconnectAttempts = 0;
+        setChatEnabled(true);
+        setChatStatus('Connected to multi-camera chat.');
+      });
       chatSocket.addEventListener('message', event => {
-        const payload = JSON.parse(event.data || '{}');
+        let payload;
+        try { payload = JSON.parse(event.data || '{}'); }
+        catch { return; }
         if (payload.type === 'presence') {
           const users = Array.isArray(payload.users) ? payload.users : [];
           presenceCountEl.textContent = `${payload.count || users.length} online`;
@@ -128,9 +149,18 @@
       });
       chatSocket.addEventListener('close', () => {
         if (feedSection.classList.contains('hidden')) return;
-        addChatLine('Chat disconnected. Reconnecting…', true);
-        setTimeout(connectChat, 1200);
+        setChatEnabled(false);
+        chatReconnectAttempts += 1;
+        if (chatReconnectAttempts > 5) {
+          setChatStatus('Ops chat is unavailable on this server. Camera monitoring is still available.');
+          return;
+        }
+        const delay = Math.min(1000 * (2 ** (chatReconnectAttempts - 1)), 10000);
+        setChatStatus(`Chat disconnected. Reconnecting in ${Math.round(delay / 1000)}s…`);
+        clearTimeout(chatReconnectTimer);
+        chatReconnectTimer = setTimeout(connectChat, delay);
       });
+      chatSocket.addEventListener('error', () => chatSocket.close());
     }
 
     function showFeed(mode = 'member') {
@@ -170,14 +200,20 @@
 
     async function loadCameras() {
       try {
-        const response = await fetch('/api/cameras');
+        const response = await fetch('/api/cameras', {headers:{Accept:'application/json'}, cache:'no-store'});
+        const contentType = response.headers.get('content-type') || '';
+        if (!response.ok) throw new Error(`Device service returned ${response.status}.`);
+        if (!contentType.toLowerCase().includes('application/json')) {
+          throw new Error('Camera service is not available on this server.');
+        }
         const data = await response.json();
         gridEl.replaceChildren();
         if (!data.ok) throw new Error(data.error || 'Unable to load devices.');
-        if (!data.cameras.length) {
-          const empty = document.createElement('div'); empty.className = 'camera-card meta'; empty.textContent = 'No cameras are connected yet.'; gridEl.appendChild(empty); return;
+        const cameras = Array.isArray(data.cameras) ? data.cameras : [];
+        if (!cameras.length) {
+          const empty = document.createElement('div'); empty.className = 'camera-card meta'; empty.textContent = data.mode === 'static' ? 'Camera service is not configured for this deployment.' : 'No cameras are connected yet.'; gridEl.appendChild(empty); return;
         }
-        data.cameras.forEach(camera => gridEl.appendChild(createCameraCard(camera)));
+        cameras.forEach(camera => gridEl.appendChild(createCameraCard(camera)));
       } catch (error) {
         const message = document.createElement('div'); message.className = 'camera-card error'; message.textContent = error.message; gridEl.replaceChildren(message);
       }
@@ -186,6 +222,8 @@
     document.getElementById('guest-enter').addEventListener('click', () => showFeed('guest'));
     document.getElementById('switch-user').addEventListener('click', () => {
       sessionStorage.removeItem(AUTH_KEY);
+      clearTimeout(chatReconnectTimer);
+      chatReconnectAttempts = 0;
       chatSocket?.close(); chatSocket = null;
       feedSection.classList.add('hidden'); authSection.classList.remove('hidden');
     });
